@@ -51,7 +51,7 @@ public class CommonController extends BaseController {
 
 		HashMap<String, Object> dummyData = new LinkedHashMap<>();
 		dummyData.put("userId", "testUser");
-		dummyData.put("userName", "테스트사용자");
+		dummyData.put("userName", "This is User");
 		dummyData.put("compId", "teamagent");
 		dummyData.put("role", "ADMIN");
 		resultMap.put("sampleData", dummyData);
