@@ -6,7 +6,7 @@
       "name": "Attach to Tomcat (JPDA)",
       "request": "attach",
       "hostName": "localhost",
-      "port": 8000
+      "port": 8001
     }
   ]
 }

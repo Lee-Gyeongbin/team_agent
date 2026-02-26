@@ -14,7 +14,6 @@ import org.springframework.web.context.support.WebApplicationContextUtils;
 import javax.servlet.http.HttpSessionListener;
 import java.sql.SQLException;
 
-@Configuration
 public class CustomSessionListener implements HttpSessionListener{
 
 	protected Logger logger = LoggerFactory.getLogger(this.getClass());

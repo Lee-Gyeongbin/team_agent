@@ -13,9 +13,16 @@
 		<context:include-filter expression="org.springframework.stereotype.Controller" type="annotation"/>
 		<context:include-filter expression="org.springframework.stereotype.Service" type="annotation"/>
 		<context:include-filter expression="org.springframework.stereotype.Repository" type="annotation"/>
+		<context:exclude-filter type="regex" expression="kr\.teamagent\.common\.security\..*"/>
+		<context:exclude-filter type="regex" expression="kr\.teamagent\.common\.secure\..*"/>
+		<context:exclude-filter type="regex" expression="kr\.teamagent\.common\.interceptor\..*"/>
+		<context:exclude-filter type="regex" expression="kr\.teamagent\.common\.web\.LoginLogoutController"/>
+		<context:exclude-filter type="regex" expression="egovframework\.com\.sec\..*"/>
+		<context:exclude-filter type="regex" expression="egovframework\.com\.uat\..*"/>
+		<context:exclude-filter type="regex" expression="egovframework\.com\.sym\.log\..*"/>
 	</context:component-scan>
 
-	<mvc:annotation-driven validator="validator"/>
+	<mvc:annotation-driven/>
 
 	<bean id="imageRenderer" class="egovframework.com.cmm.ImagePaginationRenderer"/>
 
@@ -59,7 +66,7 @@
 	</bean>
 
 	<bean id="localeResolver" class="org.springframework.web.servlet.i18n.SessionLocaleResolver">
-		<property name="processDefaultLocale" value="ko"/>
+		<property name="defaultLocale" value="ko"/>
 	</bean>
 
 	<bean class="org.springframework.web.servlet.handler.SimpleMappingExceptionResolver">
@@ -80,39 +87,6 @@
 			<aop:before method="getInfoController" pointcut="execution(* *..*Controller.*(..))"/>
 		</aop:aspect>
 	</aop:config>
-
-	<mvc:interceptors>
-		<mvc:interceptor>
-			<mvc:mapping path="/**/*.do"/>
-			<bean id="localeChangeInterceptor" class="kr.teamagent.common.interceptor.CustomLocaleChangeInterceptor">
-				<property name="paramName" value="lang"/>
-			</bean>
-		</mvc:interceptor>
-		<mvc:interceptor>
-			<mvc:mapping path="/**/*.do"/>
-			<bean id="refererInterceptor" class="kr.teamagent.common.interceptor.RefererInterceptor" >
-				<property name="permittedAntPathURL">
-					<set>
-						<value>/</value>
-						<value>/adm.login.do</value>
-						<value>/login.do</value>
-						<value>/logout.do</value>
-						<value>/error/*.do</value>
-					</set>
-				</property>
-			</bean>
-		</mvc:interceptor>
-		<mvc:interceptor>
-			<mvc:mapping path="/**/*.do"/>
-			<bean id="otpInterceptor" class="kr.teamagent.common.interceptor.OtpInterceptor" >
-				<property name="otpCheckAntPathURL">
-					<set>
-						<value>/main.do</value>
-					</set>
-				</property>
-			</bean>
-		</mvc:interceptor>
-	</mvc:interceptors>
 
 	<mvc:resources mapping="/js/**" location="/js/" />
 	<mvc:resources mapping="/css/**" location="/css/" />

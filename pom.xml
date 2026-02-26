@@ -340,7 +340,7 @@
 					</container>
 					<configuration>
 						<properties>
-							<cargo.servlet.port>8080</cargo.servlet.port>
+							<cargo.servlet.port>8081</cargo.servlet.port>
 							<cargo.tomcat.uriencoding>UTF-8</cargo.tomcat.uriencoding>
 						</properties>
 					</configuration>

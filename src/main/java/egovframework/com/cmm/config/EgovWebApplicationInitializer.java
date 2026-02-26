@@ -1,16 +1,12 @@
 package egovframework.com.cmm.config;
 
 import egovframework.com.cmm.filter.HTMLTagFilter;
-import egovframework.com.cmm.service.EgovProperties;
-import egovframework.com.sec.security.filter.EgovSpringSecurityLogoutFilter;
-import kr.teamagent.common.CustomSessionListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.WebApplicationInitializer;
 import org.springframework.web.context.ContextLoaderListener;
 import org.springframework.web.context.request.RequestContextListener;
 import org.springframework.web.context.support.XmlWebApplicationContext;
-import org.springframework.web.filter.DelegatingFilterProxy;
 import org.springframework.web.multipart.support.MultipartFilter;
 import org.springframework.web.servlet.DispatcherServlet;
 
@@ -60,19 +56,6 @@ public class EgovWebApplicationInitializer implements WebApplicationInitializer 
 		htmlTagFilter.addMappingForUrlPatterns(null, false, "*.do");
 
 		servletContext.addListener(new RequestContextListener());
-		servletContext.addListener(new CustomSessionListener());
-
-		if("security".equals(EgovProperties.getProperty("Globals.Auth").trim())) {
-
-			FilterRegistration.Dynamic springSecurityFilterChain = servletContext.addFilter("springSecurityFilterChain", new DelegatingFilterProxy());
-			springSecurityFilterChain.addMappingForUrlPatterns(null, false, "*");
-
-			servletContext.addListener(new org.springframework.security.web.session.HttpSessionEventPublisher());
-
-			FilterRegistration.Dynamic egovSpringSecurityLogoutFilter = servletContext.addFilter("egovSpringSecurityLogoutFilter", new EgovSpringSecurityLogoutFilter());
-			egovSpringSecurityLogoutFilter.addMappingForUrlPatterns(null, false, "/logout.do");
-
-		}
 
 		LOGGER.debug("EgovWebApplicationInitializer END");
 	}

@@ -2,6 +2,7 @@ package kr.teamagent.common.secure.service;
 
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.security.InvalidAlgorithmParameterException;
@@ -43,20 +44,25 @@ public class CryptoKeyHolder {
 	}
 
 	private Properties getProp(String path,String option) {
+		if(StringUtils.isEmpty(path)) {
+			return null;
+		}
 		Properties prop = new Properties();
 		if(StringUtils.equals(option, "classpath")) {
-			try(Reader reader = new InputStreamReader(getClass().getResourceAsStream(path) )){
-				prop = new Properties();
+			InputStream is = getClass().getResourceAsStream(path);
+			if(is == null) {
+				return null;
+			}
+			try(Reader reader = new InputStreamReader(is)){
 				prop.load(reader);
 			}catch(IOException ioe) {
-				//System.out.println("error!!!!");
+				return null;
 			}
 		}else {
 			try(FileReader reader = new FileReader(path)){
-				prop = new Properties();
 				prop.load(reader);
 			}catch(IOException ioe) {
-				//System.out.println("error!!!!");
+				return null;
 			}
 		}
 

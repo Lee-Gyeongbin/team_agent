@@ -3,10 +3,13 @@
 <html>
 <head>
 	<meta charset="UTF-8">
-	<title>Team Agent - OTP Login</title>
+	<title>Team Agent - Main</title>
 </head>
 <body>
-	<h1>Team Agent - OTP 로그인 페이지</h1>
+	<h1>Team Agent - 메인 페이지</h1>
 	<p>서버 정상 기동 확인용 테스트 페이지입니다.</p>
+	<ul>
+		<li><a href="health.do">서버 상태 확인 (JSON)</a></li>
+	</ul>
 </body>
 </html>

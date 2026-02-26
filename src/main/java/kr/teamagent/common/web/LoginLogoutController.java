@@ -96,7 +96,6 @@ public class LoginLogoutController extends BaseController {
 
 	@RequestMapping("/")
 	public String login() throws Exception {
-		// login 페이지로 갔을 때 세션 초기화
 		SessionUtil.logoutUser();
 		return "redirect:/login.do";
 	}

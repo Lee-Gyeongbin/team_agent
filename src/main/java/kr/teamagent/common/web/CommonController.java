@@ -1,9 +1,12 @@
 package kr.teamagent.common.web;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 
+import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.sql.DataSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,16 +15,48 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.servlet.ModelAndView;
 
-import kr.teamagent.common.util.SessionUtil;
-
 @Controller
 public class CommonController extends BaseController {
 
 	private final Logger log = LoggerFactory.getLogger(this.getClass());
 
+	@Resource(name="dataSource")
+	private DataSource dataSource;
+
 	@RequestMapping("/main.do")
 	public String main(Model model, HttpServletRequest request) throws Exception {
 		return "/common/main";
+	}
+
+	@RequestMapping("/login.do")
+	public String login(Model model) throws Exception {
+		return "/common/login";
+	}
+
+	@RequestMapping("/health.do")
+	public ModelAndView health() throws Exception {
+		HashMap<String, Object> resultMap = new LinkedHashMap<>();
+		resultMap.put("status", "UP");
+		resultMap.put("application", "Team Agent Backend");
+
+		String dbStatus = "DOWN";
+		try (java.sql.Connection conn = dataSource.getConnection()) {
+			if (conn.isValid(3)) {
+				dbStatus = "UP";
+			}
+		} catch (Exception e) {
+			dbStatus = "DOWN - " + e.getMessage();
+		}
+		resultMap.put("database", dbStatus);
+
+		HashMap<String, Object> dummyData = new LinkedHashMap<>();
+		dummyData.put("userId", "testUser");
+		dummyData.put("userName", "테스트사용자");
+		dummyData.put("compId", "teamagent");
+		dummyData.put("role", "ADMIN");
+		resultMap.put("sampleData", dummyData);
+
+		return new ModelAndView("jsonView", resultMap);
 	}
 
 	@RequestMapping("/error/accessDenied.do")
