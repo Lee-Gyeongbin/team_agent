@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true" scanPeriod="5 minutes">
+	<appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<charset>UTF-8</charset>
+			<pattern>%d{yy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+		</encoder>
+	</appender>
+	<appender name="consoleForSql" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<charset>UTF-8</charset>
+			<pattern>%d{yy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36}%n%msg%n</pattern>
+		</encoder>
+	</appender>
+	<appender name="consoleForSpring" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<charset>UTF-8</charset>
+			<pattern>org.spring %d{yy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36}%n%msg%n</pattern>
+		</encoder>
+	</appender>
+
+	<logger name="egovframework" additivity="false">
+		<level value="DEBUG"/>
+		<appender-ref ref="console"/>
+	</logger>
+
+	<logger name="kr.ispark" additivity="false">
+		<level value="DEBUG"/>
+		<appender-ref ref="console"/>
+	</logger>
+
+	<logger name="org.springframework" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="consoleForSpring"/>
+	</logger>
+
+	<logger name="kr.ispark.common.security.CustomSecurityMetadataSource" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="console"/>
+	</logger>
+	<logger name="kr.ispark.common.aspect.CompIdAspect" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="console"/>
+	</logger>
+	<logger name="kr.ispark.common.aspect.DbInfoAspect" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="console"/>
+	</logger>
+	<logger name="kr.ispark.common.aspect.WebFilterAspect" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="console"/>
+	</logger>
+	<!--
+	<logger name="kr.ispark.common.aspect.CtrlAspect" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="console"/>
+	</logger>
+	-->
+	<logger name="java.sql" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="consoleForSql"/>
+	</logger>
+	<logger name="com.test.dao" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="consoleForSql"/>
+	</logger>
+
+	<logger name="jdbc.sqltiming" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="consoleForSql"/>
+	</logger>
+
+	<logger name="org.mysql.jdbc" level="DEBUG" additivity="false">
+		<appender-ref ref="console"/>
+	</logger>
+
+	<logger name="org.mybatis.spring" >
+		<level value="ERROR"/>
+		<appender-ref ref="console"/>
+	</logger>
+
+	<logger name="org.springframework.beans" >
+		<level value="ERROR"/>
+		<appender-ref ref="console"/>
+	</logger>
+
+	<logger name="org.springframework.web" >
+		<level value="ERROR"/>
+		<appender-ref ref="console"/>
+	</logger>
+
+	<logger name="org.springframework.aop" >
+		<level value="ERROR"/>
+		<appender-ref ref="console"/>
+	</logger>
+
+	<logger name="kr.ispark.common.BscJacksonMapper" >
+		<level value="ERROR"/>
+		<appender-ref ref="console"/>
+	</logger>
+
+
+	<!--
+	<logger name="com.zaxxer.hikari" level="TRACE" />
+	<logger name="com.zaxxer.hikari.HikariConfig" level="DEBUG"/>
+	<logger name="org.redisson" additivity="true" value="INFO">
+	-->
+
+	<root level="ERROR">
+		<appender-ref ref="console"/>
+	</root>
+</configuration>

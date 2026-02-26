@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://xmlns.jcp.org/xml/ns/javaee" xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee http://xmlns.jcp.org/xml/ns/javaee/web-app_3_1.xsd" id="WebApp_ID" version="3.1">
+  <welcome-file-list>
+    <welcome-file>index.jsp</welcome-file>
+  </welcome-file-list>
+  <login-config>
+    <auth-method>BASIC</auth-method>
+  </login-config>
+  <session-config>
+    <session-timeout>30</session-timeout>
+  </session-config>
+  <error-page>
+    <error-code>403</error-code>
+    <location>/error/403.do</location>
+  </error-page>
+  <error-page>
+    <error-code>404</error-code>
+    <location>/error/404.do</location>
+  </error-page>
+  <error-page>
+    <error-code>500</error-code>
+    <location>/error/500.do</location>
+  </error-page>
+  <error-page>
+    <exception-type>java.lang.Throwable</exception-type>
+    <location>/error/throwable.do</location>
+  </error-page>
+  <security-constraint>
+      <web-resource-collection>
+              <web-resource-name>Restricted methods</web-resource-name>
+                  <url-pattern>/*</url-pattern>
+                  <http-method>OPTIONS</http-method>
+                  <http-method>TRACE</http-method>
+                  <http-method>COPY</http-method>
+                  <http-method>PATCH</http-method>
+              </web-resource-collection>
+      <auth-constraint />
+  </security-constraint>
+</web-app>

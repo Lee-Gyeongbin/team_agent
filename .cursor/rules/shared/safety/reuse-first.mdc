@@ -1,0 +1,25 @@
+---
+description: 새 코드 전 기존 패턴 검색·확장 우선, 없을 때만 신규 작성.
+alwaysApply: true
+---
+
+# INTENT (의도)
+
+새 코드 작성 전 기존 구현·패턴을 검색하고, 있으면 확장·재사용하고, 없을 때만 새로 작성하며, 패턴이 없을 때는 이를 명시한 뒤 제안하도록 한다.
+
+# WHY (왜 필요한지)
+
+중복 코드·패턴 난립 방지, 유지보수성 확보를 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+새 기능·모듈·유틸 추가, 리팩터 제안 시 적용한다.
+
+---
+
+# REUSE FIRST (detail)
+
+- Before writing new code, search the codebase for existing implementations or patterns using workspace search (e.g. codebase search, grep, ripgrep).
+- If something exists: extend or reuse it instead of creating a new one.
+- Create new code only when no suitable existing pattern or module exists.
+- If no existing pattern is found, state that clearly before proposing a new implementation.

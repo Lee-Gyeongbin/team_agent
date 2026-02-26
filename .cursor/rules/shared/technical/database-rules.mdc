@@ -1,0 +1,188 @@
+---
+description: MyBatis XML mapper 규칙. namespace, queryId, SQL 스타일, 공통 컬럼, 페이징.
+alwaysApply: false
+globs: ["**/sql/**/*.xml"]
+---
+
+# INTENT (의도)
+
+이 프로젝트의 MyBatis XML mapper 작성 규칙을 정의한다.
+
+# WHY (왜 필요한지)
+
+namespace·queryId 명명과 SQL 스타일을 일관되게 유지하기 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+`src/main/resources/sql/mysql/` 하위 XML 파일을 작성·수정할 때 적용한다.
+
+---
+
+# DATABASE RULES
+
+## 1. 파일 위치 및 네이밍
+
+```
+src/main/resources/sql/mysql/{도메인}/{기능}/{EntityName}_mysql_SQL.xml
+```
+
+예시:
+- `sql/mysql/UserAuthGrp_mysql_SQL.xml`
+- `sql/mysql/system/LoginAccessLog_mysql_SQL.xml`
+- `sql/mysql/statsinfo/register/Apilink_mysql_SQL.xml`
+
+파일명: `{PascalCase엔티티명}_mysql_SQL.xml`
+
+## 2. mapper namespace 규칙
+
+```xml
+<mapper namespace="domain.module.entityName">
+```
+
+예시:
+- `namespace="system.menu.userAuthGrp"`
+- `namespace="common"`
+- `namespace="statsinfo.register.apilink"`
+
+DAO에서 호출할 때: `selectList("system.menu.userAuthGrp.selectList", vo)`
+
+## 3. XML 파일 구조
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="domain.module.entity">
+
+    <select id="selectList" parameterType="xxxxxVO" resultType="xxxxxVO">
+        /*  설명  namespace.selectList  */
+        SELECT ...
+    </select>
+
+</mapper>
+```
+
+## 4. queryId 명명 규칙
+
+| 용도 | queryId |
+|---|---|
+| 목록 조회 | `selectList` |
+| 상세 조회 | `selectDetail` |
+| 건수 조회 | `selectListCount` |
+| 등록 | `insertData` |
+| 수정 | `updateData` |
+| 삭제 | `deleteData` |
+| 정렬 저장 | `updateSortOrder` |
+| 로그 등록 | `insertLog` |
+
+## 5. SQL 주석 형식
+
+각 쿼리 첫 줄에 아래 형식으로 주석을 단다.
+
+```sql
+/*  한글 설명  namespace.queryId  */
+```
+
+예시:
+```xml
+<select id="selectList" parameterType="userAuthGrpVO" resultType="userAuthGrpVO">
+    /*  사용자권한그룹설정 조회  userAuthGrp.selectList  */
+    SELECT ...
+</select>
+```
+
+## 6. SQL 스타일
+
+- 컬럼명·예약어: `UPPER_SNAKE_CASE` (예: `COMP_ID`, `USER_NM`, `SELECT`, `FROM`, `WHERE`)
+- 테이블 alias: 대문자 알파벳 (`A`, `B`, `C` 또는 의미 있는 약어)
+- 들여쓰기: 탭 사용
+- `SELECT` 컬럼 나열: 한 줄에 여러 개, 탭으로 정렬
+
+```xml
+<select id="selectList" parameterType="xxxxxVO" resultType="xxxxxVO">
+    /*  목록 조회  namespace.selectList  */
+    SELECT  A.COMP_ID,    A.USER_ID,    A.USER_NM,
+            A.DEPT_ID,    B.DEPT_NM,    A.SORT_ORDER
+    FROM    COM_USERINFO A
+    LEFT JOIN COM_DEPTINFO B
+        ON  A.COMP_ID = B.COMP_ID
+        AND A.DEPT_ID = B.DEPT_ID
+    WHERE   A.COMP_ID = #{compId}
+    ORDER BY A.SORT_ORDER
+</select>
+```
+
+## 7. 동적 조건 패턴
+
+`WHERE 1=1` + `<if>` 조합을 사용한다.
+
+```xml
+WHERE   A.COMP_ID = #{compId}
+    AND 1=1
+<if test='findUserNm != null and findUserNm != ""'>
+    AND UPPER(A.USER_NM) LIKE CONCAT_WS('', '%', UPPER(#{findUserNm}), '%')
+</if>
+<if test='findDeptId != null and findDeptId != ""'>
+    AND A.DEPT_ID = #{findDeptId}
+</if>
+```
+
+- `<if test='...'>`: 조건에서 따옴표는 홑따옴표.
+- 문자열 null/empty 동시 체크: `field != null and field != ""`
+- LIKE 검색: `CONCAT_WS('', '%', #{value}, '%')` 또는 `CONCAT('%', #{value}, '%')`.
+- `<![CDATA[< ]]>`, `<![CDATA[> ]]>`: `<`, `>` 비교 연산자는 CDATA로 감싼다.
+
+## 8. 공통 audit 컬럼
+
+| 컬럼명 | 용도 |
+|---|---|
+| `CREATE_DT` | 등록일시 (`NOW()` 또는 `SYSDATE()`) |
+| `MODIFY_DT` | 수정일시 |
+| `COMP_ID` | 회사 ID (항상 `'cmb'` 또는 `#{compId}`) |
+
+INSERT 시 기본 패턴:
+```xml
+<insert id="insertData" parameterType="xxxxxVO">
+    /*  등록  namespace.insertData  */
+    INSERT INTO TABLE_NM (
+           COMP_ID,    USER_ID,    DATA_NM,
+           CREATE_DT
+    ) VALUES (
+           #{compId},  #{userId},  #{dataNm},
+           NOW()
+    )
+</insert>
+```
+
+## 9. 페이징
+
+공통 페이징 fragment를 `common.selectList`에서 `<include>`로 사용한다.
+
+```xml
+<select id="selectList" parameterType="xxxxxVO" resultType="xxxxxVO">
+    /*  목록 조회 (페이징)  namespace.selectList  */
+    <include refid="common.pagingHeader"/>
+
+    SELECT  A.COL1, A.COL2
+    FROM    TABLE_NM A
+    WHERE   A.COMP_ID = #{compId}
+    ORDER BY A.SORT_ORDER
+
+    <include refid="common.pagingFooter"/>
+</select>
+```
+
+- `startRow` / `endRow`는 `CommonVO`의 `getStartRow()` / `getEndRow()`로 자동 계산된다.
+
+## 10. parameterType / resultType alias
+
+- VO alias: 클래스 단순명의 camelCase 첫 글자 소문자 (예: `userAuthGrpVO`, `commonVO`)
+- alias 매핑은 MyBatis config(`mybatis-config.xml`)에 등록되어 있어야 한다.
+- Map 파라미터: `parameterType="egovMap"` 또는 `parameterType="hashmap"`.
+
+## 11. MySQL 전용 함수 사용
+
+- `IFNULL(expr, default)` — NULL 처리
+- `CONCAT_WS(sep, ...)` — 문자열 연결
+- `NOW()` — 현재 일시
+- `WITH RECURSIVE` — 재귀 CTE (부서 트리 등)
+- `IF(조건, true값, false값)` — 조건부 값

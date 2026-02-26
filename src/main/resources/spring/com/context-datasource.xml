@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans
+	xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:util="http://www.springframework.org/schema/util"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.0.xsd
+	 						http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-4.0.xsd">
+
+	<alias name="dataSource" alias="egov.dataSource" />
+
+	<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close">
+		<property name="driverClassName" value="${Globals.mysql.DriverClassName}"/>
+		<property name="url" value="${Globals.mysql.Url}" />
+		<property name="username" value="${Globals.mysql.UserName}"/>
+		<property name="password" value="${Globals.mysql.Password}"/>
+		<property name="initialSize" value="10"/>
+		<property name="maxActive" value="50"/>
+		<property name="maxIdle" value="10"/>
+		<property name="minIdle" value="10"/>
+	    <property name="validationQuery" value="SELECT 1"/>
+	    <property name="testOnBorrow" value="true"/>
+	    <property name="testWhileIdle" value="true"/>
+	    <property name="timeBetweenEvictionRunsMillis" value="60000"/>
+	    <property name="minEvictableIdleTimeMillis" value="300000"/>
+	</bean>
+
+</beans>

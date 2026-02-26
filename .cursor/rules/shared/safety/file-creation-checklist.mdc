@@ -1,0 +1,122 @@
+---
+description: 새 파일(JSP/Controller/Service/DAO/XML) 생성 시 체크리스트. 누락 방지용.
+alwaysApply: false
+---
+
+# INTENT (의도)
+
+새 화면·기능 파일 생성 시 빠뜨리기 쉬운 연관 작업을 체크리스트로 제공한다.
+
+# WHY (왜 필요한지)
+
+JSP·Controller·ServiceImpl·DAO·XML·설정 파일은 세트로 움직이므로 누락 방지가 필요하다.
+
+# SCOPE (언제 적용되는지)
+
+새 기능(화면, API, DB 쿼리)을 추가할 때 참고한다.
+
+---
+
+# FILE CREATION CHECKLIST
+
+## 새 화면 기능 추가 시 생성·등록해야 하는 파일 목록
+
+### 프론트엔드
+
+- [ ] `src/main/webapp/WEB-INF/jsp/{도메인}/{기능}/{기능명}List.jsp` — 목록 화면
+- [ ] (필요 시) `component/`, `modal/` 하위에 분리 컴포넌트 JSP
+
+### 백엔드
+
+- [ ] `kr.ispark.{도메인}.{기능}.web.{기능명}Controller.java` — `BaseController` extends
+- [ ] `kr.ispark.{도메인}.{기능}.service.impl.{기능명}ServiceImpl.java` — `EgovAbstractServiceImpl` extends
+- [ ] `kr.ispark.{도메인}.{기능}.service.impl.{기능명}DAO.java` — `EgovComAbstractDAO` extends
+- [ ] `kr.ispark.{도메인}.{기능}.service.{기능명}VO.java` — `CommonVO` extends
+
+### DB
+
+- [ ] `src/main/resources/sql/mysql/{도메인}/{기능명}_mysql_SQL.xml`
+
+---
+
+## 각 파일 생성 후 추가로 확인해야 할 것
+
+### VO alias 등록
+
+새 VO 생성 시 MyBatis alias 설정 파일에 등록되어 있는지 확인한다.
+
+```
+src/main/resources/sql/config/mybatis-config.xml
+```
+
+```xml
+<typeAlias type="kr.ispark.domain.feature.service.XxxVO" alias="xxxVO"/>
+```
+
+### 메뉴·URL 권한 등록
+
+새 URL이 권한 체크 대상이라면 메뉴 관리(또는 URL 허용 목록)에 등록이 필요할 수 있다.
+스프링 시큐리티 설정 또는 메뉴 DB 테이블 확인.
+
+### 타일즈(Tiles) 레이아웃
+
+`searchVO.getLayout()` 반환값이 `main` / `popup` / `simple` / `monitor` 중 하나여야 한다.
+새 layout이 필요한 경우 Tiles 설정 파일에 추가해야 한다.
+
+### SQL XML mapper 등록
+
+새 XML 파일 생성 후 MyBatis 설정에 mapper로 등록되어 있는지 확인한다.
+
+```
+src/main/resources/sql/config/mybatis-config.xml  (또는 Spring 설정의 mapperLocations)
+```
+
+와일드카드 패턴으로 자동 스캔되는 경우 별도 등록 불필요.
+
+---
+
+## 레이어별 최소 코드 구조
+
+### Controller 최소 구조
+```java
+@Controller
+public class XxxController extends BaseController {
+    @Autowired XxxServiceImpl xxxService;
+
+    @RequestMapping(value = "/domain/sub/xxxList.do")
+    public String xxxList(@ModelAttribute("searchVO") XxxVO searchVO, Model model) throws Exception {
+        return "/domain/sub/xxxList." + searchVO.getLayout();
+    }
+}
+```
+
+### ServiceImpl 최소 구조
+```java
+@Service
+public class XxxServiceImpl extends EgovAbstractServiceImpl {
+    @Resource private XxxDAO xxxDAO;
+}
+```
+
+### DAO 최소 구조
+```java
+@Repository
+public class XxxDAO extends EgovComAbstractDAO {
+}
+```
+
+### VO 최소 구조
+```java
+@Setter @Getter
+public class XxxVO extends CommonVO {
+    private static final long serialVersionUID = 1L;
+}
+```
+
+### XML mapper 최소 구조
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="domain.feature.xxx">
+</mapper>
+```

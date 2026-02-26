@@ -1,0 +1,48 @@
+{
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.compile.nullAnalysis.mode": "automatic",
+
+  "java.project.resourceFilters": ["test"],
+  "problems.exclude": { "**/src/test/**": true },
+  "files.associations": {
+    "**/*.jsp": "jsp"
+  },
+  "editor.tokenColorCustomizations": {
+    "textMateRules": [
+      { "scope": "entity.name.tag", "settings": { "foreground": "#E06C75" } },
+      { "scope": "entity.name.tag.custom", "settings": { "foreground": "#E06C75" } },
+      { "scope": "entity.other.attribute-name", "settings": { "foreground": "#61AFEF" } },
+      { "scope": "string.quoted.double", "settings": { "foreground": "#98C379" } },
+      { "scope": "string.quoted.single", "settings": { "foreground": "#98C379" } },
+      { "scope": "comment.block", "settings": { "foreground": "#5C6370" } },
+      { "scope": "comment.block.html", "settings": { "foreground": "#5C6370" } },
+      { "scope": "comment.line", "settings": { "foreground": "#5C6370" } },
+      { "scope": "meta.tag.directive.jsp", "settings": { "foreground": "#C678DD" } },
+      { "scope": "keyword.directive.jsp", "settings": { "foreground": "#D19A66" } },
+      { "scope": "variable.other.el", "settings": { "foreground": "#E5C07B" } },
+      { "scope": "keyword.control", "settings": { "foreground": "#C678DD" } },
+      { "scope": "storage.type", "settings": { "foreground": "#C678DD" } },
+      { "scope": "entity.name.function", "settings": { "foreground": "#61AFEF" } },
+      { "scope": "support.function", "settings": { "foreground": "#61AFEF" } },
+      { "scope": "support.class", "settings": { "foreground": "#C678DD" } },
+      { "scope": "constant.numeric", "settings": { "foreground": "#D19A66" } },
+      { "scope": "comment.line.double-slash", "settings": { "foreground": "#5C6370" } },
+      { "scope": "variable.other.object.property", "settings": { "foreground": "#D19A66" } },
+      { "scope": "meta.object-literal.key", "settings": { "foreground": "#E5C07B" } }
+    ]
+  },
+  "git.ignoreLimitWarning": true,
+  "prettier.documentSelectors": ["**/*.jsp"],
+  "[jsp]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  }
+}

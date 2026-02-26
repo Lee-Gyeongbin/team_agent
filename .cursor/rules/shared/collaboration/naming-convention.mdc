@@ -1,0 +1,22 @@
+---
+description: 팀 네이밍·명명 규칙.
+alwaysApply: false
+---
+
+# INTENT (의도)
+
+팀의 네이밍·명명 규칙을 정의할 자리이다.
+
+# WHY (왜 필요한지)
+
+변수·파일·API 등 이름 일관성 유지를 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+코드·API·파일 이름 제안 시 적용한다.
+
+---
+
+# NAMING CONVENTION
+
+Add team naming and naming conventions (variables, files, APIs, etc.) here. 내용을 채우면 frontmatter의 `alwaysApply`를 `true`로 바꾸거나, `globs`로 적용 대상을 제한하세요.

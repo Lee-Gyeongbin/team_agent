@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE configuration PUBLIC "-//mybatis.org//DTD Config 3.0//EN" "http://mybatis.org/dtd/mybatis-3-config.dtd">
+<configuration>
+    <properties>
+    </properties>
+    <settings>
+        <setting name="mapUnderscoreToCamelCase" value="true"/>
+        <setting name="jdbcTypeForNull" value="NULL"/>
+        <setting name="callSettersOnNulls" value="true"/>
+    </settings>
+
+    <typeAliases>
+        <typeAlias alias="CommonCipherTypeHandler"           type="kr.teamagent.common.secure.service.CommonCipherTypeHandler"/>
+        <typeAlias alias="commonVO"                          type="kr.teamagent.common.CommonVO"/>
+        <typeAlias alias="egovMap"                           type="egovframework.rte.psl.dataaccess.util.EgovMap"/>
+        <typeAlias alias="loginLogVO"                        type="egovframework.com.sym.log.clg.service.LoginLog"/>
+        <typeAlias alias="codeVO"                            type="kr.teamagent.common.util.service.CodeVO"/>
+        <typeAlias alias="menuVO"                            type="kr.teamagent.common.system.service.MenuVO"/>
+        <typeAlias alias="userVO"                            type="kr.teamagent.common.security.service.UserVO"/>
+        <typeAlias alias="accessLoginVO"                     type="kr.teamagent.common.security.service.AccessLoginVO"/>
+        <typeAlias alias="langVO"                            type="kr.teamagent.common.system.service.LangVO"/>
+    </typeAliases>
+
+    <typeHandlers>
+        <typeHandler handler="kr.teamagent.common.secure.service.CommonCipherTypeHandler"/>
+    </typeHandlers>
+
+</configuration>

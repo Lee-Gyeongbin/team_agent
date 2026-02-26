@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="common">
+
+    <select id="selectDbList" resultType="commonVO">
+        /* DB 목록 조회 common.selectDbList */
+        SELECT
+            A.COMP_ID AS PARAM_COMP_ID,
+            A.DB_ID AS DB_ID,
+            B.COMP_NM
+        FROM COM_COMP_DBINFO A
+            LEFT JOIN COM_COMPINFO B
+                ON A.COMP_ID = B.COMP_ID
+        WHERE B.USE_YN != 'N'
+        ORDER BY B.COMP_NM
+    </select>
+
+    <select id="selectDbId" parameterType="egovMap" resultType="String">
+        /* DB ID 조회 common.selectDbId */
+        SELECT DB_ID FROM COM_COMP_DBINFO WHERE COMP_ID = #{compId}
+    </select>
+
+    <select id="selectAdminPageAccessIpList" resultType="String">
+        /* 관리자 접근 IP 목록 조회 common.selectAdminPageAccessIpList */
+        SELECT ALLOW_IP
+        FROM ${masterDbId}.COM_ACCESS_ACL
+        WHERE USER_ID = 'ADMIN_PAGE'
+    </select>
+
+    <select id="selectUserStrAreaList" parameterType="userVO" resultType="String">
+        /* 사용자 영역 목록 조회 common.selectUserStrAreaList */
+        SELECT GROUP_CONCAT(STR_AREA_CD SEPARATOR ',') AS STR_AREA_LIST
+        FROM COM_ADMIN
+        WHERE COMP_ID = #{compId}
+        AND USER_ID = #{userId}
+    </select>
+
+</mapper>

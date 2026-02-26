@@ -1,0 +1,22 @@
+---
+description: 개인 생산성·워크플로우 선호.
+alwaysApply: false
+---
+
+# INTENT (의도)
+
+개인 생산성·워크플로우 선호를 정의할 자리이다.
+
+# WHY (왜 필요한지)
+
+제안이 본인 워크플로우에 맞게 나오도록 하기 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+본인 세션에서 작업 방식 관련 제안 시 적용한다.
+
+---
+
+# PRODUCTIVITY
+
+Add your productivity and workflow preferences here. 내용을 채우면 frontmatter의 `alwaysApply`를 `true`로 바꾸거나, `globs`로 적용 대상을 제한하세요.

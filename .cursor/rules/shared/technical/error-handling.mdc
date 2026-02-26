@@ -1,0 +1,135 @@
+---
+description: 프론트/백 에러 처리 패턴. axios 에러, Controller try-catch, 응답 결과 판별.
+alwaysApply: false
+globs: ["**/webapp/**/*.jsp", "**/java/**/*.java"]
+---
+
+# INTENT (의도)
+
+프론트엔드와 백엔드의 에러 처리 패턴을 정의한다.
+
+# WHY (왜 필요한지)
+
+에러 처리 방식이 혼재되는 것을 막고, 사용자에게 일관된 피드백을 제공하기 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+JSP(프론트) 및 Java(백엔드) 파일에서 에러 처리 코드를 작성할 때 적용한다.
+
+---
+
+# ERROR HANDLING RULES
+
+## 1. 프론트엔드 — axios 응답 결과 판별
+
+성공/실패 판별은 `response.data.result` 값으로 한다.
+
+```js
+axios({
+  method: 'post',
+  url: "${context_path}/domain/sub/saveAction.do",
+  data: formData,
+  headers: {
+    '${_csrf.headerName}': '${_csrf.token}',
+    'Content-Type': 'application/x-www-form-urlencoded'
+  }
+}).then(function (response) {
+  $.showMsgBox(response.data.msg);
+  if (response.data.result == AJAX_SUCCESS) {
+    // 성공 시 처리
+    _self.getList();
+  }
+});
+```
+
+- `AJAX_SUCCESS` 상수(`"SUCCESS"`)로 비교한다. `'SUCCESS'` 문자열 직접 비교도 혼용되나, `AJAX_SUCCESS` 사용을 권장한다.
+- 서버가 `msg`를 반환하면 `$.showMsgBox(response.data.msg)`로 표시한다.
+- axios에 `.catch`를 별도로 붙이지 않는 것이 기존 패턴이다 (서버가 try-catch로 에러를 result:FAIL로 내려줌).
+
+## 2. 프론트엔드 — 사용자 확인 후 저장
+
+사용자에게 확인을 받아야 하는 저장·삭제 작업은 `$.showConfirmBox`를 사용한다.
+
+```js
+$.showConfirmBox("<spring:message code="common.save.msg"/>", function () {
+  // 확인 후 실행
+  axios({ ... }).then(function (response) {
+    $.showMsgBox(response.data.msg);
+    if (response.data.result == AJAX_SUCCESS) {
+      _self.getList();
+    }
+  });
+});
+```
+
+## 3. 프론트엔드 — 유효성 검사
+
+저장 전 필수값 체크 시 `$.showMsgBox`로 안내하고 `return false`로 중단한다.
+
+```js
+save: function () {
+  var _self = this;
+  if (!_self.someRequiredField) {
+    $.showMsgBox("<spring:message code="valid.required.msg"/>");
+    return false;
+  }
+  // 저장 진행
+}
+```
+
+## 4. 백엔드 — Controller JSON 응답 에러 처리
+
+JSON을 반환하는 Controller 메서드는 `try-catch`로 감싸고 `result`/`message`를 포함한 Map을 반환한다.
+
+```java
+@RequestMapping(value = "/domain/sub/selectXxx_json.do", method = RequestMethod.GET)
+@ResponseBody
+public Map<String, Object> selectXxx(@ModelAttribute("searchVO") XxxVO searchVO) throws Exception {
+    Map<String, Object> result = new HashMap<>();
+    try {
+        List<XxxVO> list = xxxService.selectList(searchVO);
+        result.put("dataList", list);
+    } catch (Exception e) {
+        result.put("success", false);
+        result.put("message", e.getMessage());
+    }
+    return result;
+}
+```
+
+## 5. 백엔드 — Controller ModelAndView 에러 처리
+
+`ModelAndView`를 반환하는 저장·수정·삭제 메서드는 `BaseController` 헬퍼를 사용한다.
+
+```java
+@RequestMapping(value = "/domain/sub/saveXxx.do")
+public ModelAndView saveXxx(@ModelAttribute("dataVO") XxxVO dataVO) throws Exception {
+    try {
+        int resultCnt = xxxService.saveData(dataVO);
+        return makeJsonDataByResultCnt(resultCnt);   // 0 또는 -1이면 FAIL, 나머지는 SUCCESS
+    } catch (Exception e) {
+        log.error("saveXxx error", e);
+        return makeFailJsonData(e.getMessage());
+    }
+}
+```
+
+- `makeJsonDataByResultCnt(int)`: DB 처리 건수 기반 자동 성공/실패 판단.
+- `makeFailJsonData(String msg)`: 명시적 실패 응답.
+- `makeSuccessJsonData()` / `makeFailJsonData()`: 기본 메시지 사용.
+
+## 6. 백엔드 — 로깅
+
+에러 발생 시 `log.error`에 예외 객체를 함께 전달한다.
+
+```java
+try {
+    // ...
+} catch (Exception e) {
+    log.error("메서드명 에러: {}", e.getMessage(), e);
+    return makeFailJsonData(e.getMessage());
+}
+```
+
+- `log`는 `BaseController`에 `LoggerFactory.getLogger(this.getClass())`로 선언되어 있다.
+- `System.out.println` 디버그 코드는 남기지 않는다.

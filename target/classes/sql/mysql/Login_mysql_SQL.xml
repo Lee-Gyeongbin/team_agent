@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="login">
+    <select id="selectUser" parameterType="java.util.Map" resultType="userVO">
+        /* 로그인용 사용자 조회 login.selectUser */
+        SELECT
+            U.COMP_ID, C.COMP_NM, U.USER_ID, U.USER_NM, U.PASSWD,
+            U.DEPT_ID, DP.DEPT_NM, U.JIKGUB_CD, JG.CODE_NM JIKGUB_NM,
+            U.POS_CD, POS.CODE_NM POS_NM, U.BIRTH_DT, U.JOIN_DT, U.TEL,
+            U.PHONE, U.EMAIL, U.IP_ADDRESS, U.IP_CHK, U.ETC,
+            U.PW_INIT_YN, U.PW_CHANGE_DT, IFNULL(U.MAIN_PGM_ID, 'PGM1913') AS MAIN_PGM_ID, U.USER_STATUS_CD, USR_ST.CODE_NM USER_STATUS_NM,
+            C.COMP_LANG LANG,
+            C.COMP_LANG COMP_LANG,
+            IF(SAI.AI_SAI_USE_YN='Y', 'Y' ,'N')  AS COMP_SAI_USE_YN,
+            IF(SAI.AI_SAI_USE_YN='Y', 'Y' ,'N')  AS AI_SAI_USE_YN,
+            CASE
+            <!-- 패스워드 변경주기를 관리 안하고 있으면 알림 대상 아님 -->
+            WHEN (C.PW_CHANGE_CYCLE IS NULL OR C.PW_CHANGE_CYCLE = '') THEN 'N'
+            <!-- 패스워드 변경일시가 없으면 알림 대상 아님 -->
+            WHEN (IFNULL(U.PW_CHANGE_DT,'')='') THEN 'N'
+            ELSE
+                    CASE WHEN
+                        DATEDIFF(SYSDATE(), U.PW_CHANGE_DT) > C.PW_CHANGE_CYCLE
+                    THEN 'Y'
+                    ELSE 'N'
+            END
+            END AS ALERT_PW_CHANGE_YN,
+            C.PW_CHANGE_CYCLE,
+            D.CONNECTION_ID, D.DB_ID,
+            IF(U.USER_STATUS_CD='001', 'Y' ,'N')	AS  BEING_YN
+        FROM ${dbId}.COM_USERINFO U
+            LEFT JOIN COM_COMPINFO C
+                ON U.COMP_ID = C.COMP_ID
+            LEFT JOIN COM_COMP_DBINFO D
+                ON U.COMP_ID = D.COMP_ID
+            LEFT OUTER JOIN (
+                SELECT
+                    COMP_ID, IF(INSTR(SERVICE_TYPE, '10')=0, 'N', 'Y') AS AI_SAI_USE_YN
+                FROM COM_COMPINFO_DETAIL
+                WHERE COMP_ID = #{compId}
+                AND CURRENT_SEQ='Y'
+            ) SAI ON U.COMP_ID = SAI.COMP_ID
+            LEFT OUTER JOIN COM_DEPTINFO DP
+                ON U.COMP_ID = DP.COMP_ID
+                AND U.DEPT_ID = DP.DEPT_ID
+            LEFT OUTER JOIN COM_CODE JG
+                ON U.COMP_ID = JG.COMP_ID
+                AND JG.CODE_GRP_ID = '537'
+                AND U.JIKGUB_CD = JG.CODE_ID
+            LEFT OUTER JOIN COM_CODE POS
+                ON U.COMP_ID = POS.COMP_ID
+                AND POS.CODE_GRP_ID = '536'
+                AND U.POS_CD = POS.CODE_ID
+            LEFT OUTER JOIN COM_CODE USR_ST
+                ON U.COMP_ID = USR_ST.COMP_ID
+                AND USR_ST.CODE_GRP_ID = '538'
+                AND U.USER_STATUS_CD = USR_ST.CODE_ID
+        WHERE U.COMP_ID = #{compId}
+        AND U.USER_ID = #{userId}
+    </select>
+
+    <select id="selectAdminGubunList" parameterType="java.util.Map" resultType="String">
+        /*사용자 권한 목록 조회login.selectAdminGubunList*/
+        SELECT DISTINCT
+        IF(B.ETC1 IS NOT NULL AND TRIM(B.ETC1) != '',B.ETC1,A.AUTH_GUBUN) AS AUTH_GUBUN
+        FROM ${dbId}.COM_ADMIN A
+        JOIN ${dbId}.V_COM_CODE B
+        ON A.AUTH_GUBUN = B.CODE_ID
+        AND B.CODE_GRP_ID = '018'
+        <!--AND B.LANG = #{lang}-->
+        <!--AND B.DELETE_DT IS NULL-->
+        WHERE A.COMP_ID = #{compId}
+        AND A.USER_ID = #{userId}
+        UNION ALL
+        SELECT '99' FROM DUAL <!-- 일반사용자는 등록된 직원 모두 해당되도록 처리 -->
+    </select>
+
+    <select id="selectLangList" parameterType="java.util.Map"  resultType="langVO">
+        /* 로그인 사용자 회사의 사용언어 목록 조회 login.selectLangList */
+        SELECT
+            A.COMP_ID
+            , A.LANG
+            , B.LANG_NM
+        FROM COM_COMP_LANG A
+        LEFT JOIN COM_LANG B
+            ON A.LANG = B.LANG
+        WHERE A.COMP_ID = #{compId}
+        ORDER BY B.SORT_ORDER
+    </select>
+
+    <select id="selectIsOnlyInsa" parameterType="java.util.Map" resultType="java.lang.String">
+
+        /* 인사평가만 서비스 하는지 여부 데이터 return login.selectIsOnlyInsa */
+        SELECT CASE WHEN LOCATE('03', A.SERVICE_TYPE) = 0 AND LOCATE('04', A.SERVICE_TYPE) > 0 THEN 'Y'
+                    ELSE 'N' END AS IS_ONLY_INSA_YN
+          FROM COM_COMPINFO_DETAIL A
+         WHERE A.COMP_ID = #{compId}
+           AND A.CURRENT_SEQ = 'Y'
+
+    </select>
+
+    <select id="selectUserScDeptList" parameterType="java.util.Map" resultType="egovMap">
+        /* 로그인 사용자의 연도별 성과조직 목록 조회 login.selectUserScDeptList */
+        SELECT M.YEAR, M.SC_DEPT_ID
+        FROM V_ROLE_USER U
+        JOIN ORG_INSA_DEPT_MAPPING M
+        ON U.COMP_ID = M.COMP_ID
+        AND U.DEPT_ID = M.DEPT_ID
+        WHERE U.COMP_ID = #{compId}
+        AND U.USER_ID = #{userId}
+        ORDER BY M.YEAR
+    </select>
+
+    <select id="selectServiceUseYn" parameterType="java.util.Map" resultType="String">
+        /* 서비스 사용여부 조회 login.selectServiceUseYn */
+        SELECT
+            <!--
+            CASE
+                WHEN #{compId}='super' THEN 'Y'
+                WHEN
+                    ( SELECT COUNT(1)
+                        FROM COM_COMPINFO_DETAIL
+                        WHERE COMP_ID = #{compId}
+                        AND CURRENT_SEQ = 'Y'
+                        AND DATE_FORMAT(NOW(), '%Y%m%d') BETWEEN SERVICE_START_DT and SERVICE_END_DT ) = 0 THEN 'N'
+                ELSE USE_YN
+            END
+            주석 처리 2025-09-23
+            테이블 변경으로 사용여부 무조건 'Y'로 대체
+             -->
+            'Y' USE_YN
+        FROM COM_COMPINFO
+        WHERE COMP_ID = #{compId}
+    </select>
+
+    <select id="selectAuthStatusCount" parameterType="java.util.Map" resultType="java.lang.Integer">
+        /* 인증시도 횟수 조회 login.selectAuthStatusCount */
+        SELECT IFNULL(FAIL_COUNT,0) AS CNT FROM COM_ACCESS_AUTH WHERE
+        COMP_ID=#{compId} AND USER_ID = #{userId} AND IN_TYPE = 'password'
+        UNION ALL
+        SELECT 0 AS CNT
+        ORDER BY CNT DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectAuthOtpStatusCount" parameterType="userVO" resultType="java.lang.Integer">
+        /* 인증시도 횟수 조회 login.selectAuthStatusCount */
+        SELECT IFNULL(FAIL_COUNT,0) AS CNT FROM COM_ACCESS_AUTH WHERE
+        COMP_ID=#{compId} AND USER_ID = #{userId} AND IN_TYPE = 'otp'
+        UNION ALL
+        SELECT 0 AS CNT
+        ORDER BY CNT DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertAccessCertificationStatusData"
+        parameterType="accessLoginVO">
+        /* 인증시도 횟수 조회 login.insertAccessCertificationStatusData */
+        INSERT INTO COM_ACCESS_AUTH
+        (COMP_ID, USER_ID, USER_NM, IN_TYPE, LAST_OCCUR_DATETIME, STATUS, FAIL_COUNT)
+        VALUES(#{compId}, #{userId}, #{userNm}, #{inType}, NOW(), #{status},
+        #{failCount})
+    </insert>
+
+    <update id="updateAccessCertificationStatusData"
+        parameterType="accessLoginVO">
+        /* 인증시도 횟수 조회 login.updateAccessCertificationStatusData */
+        UPDATE COM_ACCESS_AUTH
+        SET LAST_OCCUR_DATETIME = NOW(),
+        STATUS = #{status},
+        FAIL_COUNT = #{failCount}
+        WHERE COMP_ID = #{compId}
+        AND USER_ID = #{userId}
+        AND IN_TYPE = #{inType}
+    </update>
+
+    <delete id="deleteAccessCertificationStatusData" parameterType="accessLoginVO">
+        /* 인증시도 횟수 조회 login.deleteAccessCertificationStatusData */
+        DELETE FROM COM_ACCESS_AUTH
+        WHERE COMP_ID = #{compId}
+        AND USER_ID = #{userId}
+        AND IN_TYPE = #{inType}
+    </delete>
+
+    <insert id="insertAccessCertificationLogData"
+        parameterType="accessLoginVO">
+        /* 인증시도 횟수 조회 login.insertAccessCertificationLogData */
+        INSERT INTO COM_ACCESS_CERTIFICATION_LOG
+        (COMP_ID, USER_ID, USER_NM, IN_TYPE, OCCUR_DATETIME, CLIENT_IP, STATUS, OTP_STATUS, IP_STATUS,
+        FAIL_COUNT<!-- , TOKEN -->)
+        VALUES(#{compId}, #{userId}, #{userNm}, #{inType}, NOW(), #{clientIp}, #{status}, #{otpStatus}, #{ipStatus},
+        #{failCount}<!-- , #{token} -->)
+    </insert>
+
+
+
+    <select id="selectOTPAuth" parameterType="userVO" resultType="egovMap">
+        /*	OTP인증정보 조회	login.selectOTPAuth	*/
+        SELECT
+            A.COMP_ID,
+            A.USER_ID,
+            IFNULL(B.OTP_USE_YN,'N') AS OTP_USE_YN,
+            IFNULL(C.OTP_IMG, '') AS OTP_IMG,
+            IFNULL(C.OTP_KEY, '') AS OTP_KEY,
+            IFNULL(C.REQ_DT, '') AS REQ_DT
+        FROM ${dbId}.V_ROLE_USER A
+            LEFT OUTER JOIN COM_COMPINFO B
+                ON A.COMP_ID=B.COMP_ID
+            LEFT OUTER JOIN COM_OTP_AUTH C
+                ON A.COMP_ID=C.COMP_ID
+                AND A.USER_ID=C.USER_ID
+        WHERE 1=1
+        AND A.COMP_ID = #{compId}
+        AND A.USER_ID = #{userId}
+    </select>
+
+    <insert id="insertOTPAuth" parameterType="egovMap">
+        /*	OTP인증정보 등록	login.insertOTPAuth	*/
+        INSERT INTO COM_OTP_AUTH
+            (COMP_ID,	USER_ID,	OTP_IMG,	OTP_KEY)
+        VALUES
+            (#{compId}, #{userId}, #{otpImg}, #{otpKey})
+    </insert>
+
+    <update id="updateOTPReqDt" parameterType="egovMap">
+        /*	OTP인증일시 업데이트	login.updateOTPReqDt	*/
+        UPDATE COM_OTP_AUTH
+        SET REQ_DT=now()
+        WHERE COMP_ID=#{compId}
+        AND USER_ID=#{userId}
+    </update>
+
+
+
+    <!-- type 02 쿼리 -->
+    <select id="selectAvailableTokenYn" parameterType="accessLoginVO" resultType="String">
+        /*	사용 가능한 토큰여부 	login.selectAvailableTokenYn	*/
+        SELECT CASE WHEN COUNT(1)= 0 THEN 'Y' ELSE 'N' END
+        FROM COM_ACCESS_CERTIFICATION_LOG
+        WHERE IN_TYPE = 'jwt'
+        AND COMP_ID = #{compId}
+        AND USER_ID = #{userId}
+        AND TOKEN = #{token}
+    </select>
+
+
+
+    <resultMap id="loginSuccessHandlerData" type="egovMap" >
+        <result property="dummy" column="DUMMY"/>
+        <association column="{compId = COMP_ID, masterDbId = MASTER_DB_ID}" property="serviceYn" javaType="String"  select="selectServiceUseYn"/>
+        <association column="{compId = COMP_ID, masterDbId = MASTER_DB_ID}" property="isOnlyInsa" javaType="String" select="selectIsOnlyInsa"/>
+        <collection column="{compId = COMP_ID, masterDbId = MASTER_DB_ID}" property="langList" javaType="list" ofType="langVO" select="selectLangList"/>
+        <!-- <collection column="{compId = COMP_ID, masterDbId = MASTER_DB_ID, userId = USER_ID}" property="userScDeptList" javaType="list" ofType="egovMap" select="selectUserScDeptList"/> -->
+        <collection column="{compId = COMP_ID, masterDbId = MASTER_DB_ID, templateDbId = TEMPLATE_DB_ID, lang = LANG, userId = USER_ID, menuGbn = MENU_GBN}" property="menuList" javaType="list" ofType="menuVO" select="menu.selectList"/>
+    </resultMap>
+    <select id="selectLoginSuccessHandlerData" parameterType="userVO" resultMap="loginSuccessHandlerData">
+        SELECT
+            1 AS DUMMY,
+            #{compId} AS COMP_ID,
+            #{masterDbId} AS MASTER_DB_ID,
+            #{templateDbId} AS TEMPLATE_DB_ID,
+            #{lang} AS LANG,
+            #{userId} AS USER_ID,
+            #{menuGbn} AS MENU_GBN
+    </select>
+
+
+    <resultMap id="loginProviderData" type="egovMap" >
+        <result property="dummy" column="DUMMY"/>
+        <association column="{compId = COMP_ID, dbId = DB_ID, userId = USER_ID, masterDbId = MASTER_DB_ID" property="userVO" javaType="userVO"  select="selectUser"/>
+        <association column="{compId = COMP_ID, userId = USER_ID, masterDbId = MASTER_DB_ID}" property="authStatusCount" javaType="String"  select="selectAuthStatusCount"/>
+        <collection column="{compId = COMP_ID, dbId = DB_ID, userId = USER_ID}" property="adminGubunList" javaType="list" ofType="String" select="selectAdminGubunList"/>
+    </resultMap>
+    <select id="selectLoginProviderData" parameterType="userVO" resultMap="loginProviderData">
+        /* 로그인용 조회 login.selectLoginProviderData */
+        SELECT
+            1 AS DUMMY,
+            #{compId} AS COMP_ID,
+            #{dbId} AS DB_ID,
+            #{userId} AS USER_ID,
+            #{masterDbId} AS MASTER_DB_ID
+    </select>
+    <select id="selectCustomMenuCnt" parameterType="userVO" resultType="int">
+        /* 고객사별 메뉴 갯수 조회  */
+        SELECT COUNT(*)
+        FROM COM_PGM
+    </select>
+
+    <select id="selectAuth" parameterType="userVO" resultType="String">
+        /* 전체 관리자 확인 여부  login.selectAuth */
+        SELECT AUTH_GUBUN
+        FROM COM_ADMIN
+        WHERE USER_ID = #{userId}
+        AND AUTH_GUBUN = '01'
+    </select>
+
+    <select id="selectIpList" parameterType="userVO" resultType="String">
+        /* 전체 관리자 확인 여부  login.selectIpList */
+        SELECT ALLOW_IP
+        FROM COM_ACCESS_ACL
+        WHERE USER_ID = #{userId}
+    </select>
+
+    <select id="beforePwdList" parameterType="userVO" resultType="String">
+        /* 전체 관리자 확인 여부 login.beforePwdList */
+        SELECT PASSWD
+        FROM COM_USERINFO_PW_CHANGE
+        WHERE USER_ID = #{userId}
+        ORDER BY SEQ DESC
+        LIMIT ${limit}
+    </select>
+
+    <select id="pwCnt" parameterType="userVO" resultType="String">
+        /* 전체 관리자 확인 여부 login.pwCnt */
+        SELECT PW_CNT
+        FROM COM_COMPINFO
+        WHERE COMP_ID = #{compId}
+    </select>
+
+
+</mapper>

@@ -1,0 +1,32 @@
+---
+description: 코드 변경 실행 순서 오케스트레이터. 검색→분석→재사용→스타일→점진적 변경.
+alwaysApply: true
+---
+
+# INTENT (의도)
+
+코드 변경 시 실행 순서를 정의하고, 각 단계의 세부 규칙을 연결하는 오케스트레이터이다. 이 파일은 순서와 참조만 담고, 세부 내용은 각 규칙 파일에 둔다.
+
+# WHY (왜 필요한지)
+
+새 코드 작성 전 검색·분석·재사용 단계가 누락되지 않도록 하기 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+새 코드 작성·구조 제안·기술 선택 논의 시 항상 적용한다.
+
+---
+
+# EXECUTION ORDER (HIGH PRIORITY)
+
+## SEQUENCE
+
+1. **SEARCH** — Use workspace search (codebase search, grep, ripgrep) before writing new code.
+2. **ANALYZE** — Examine existing patterns, style, and dependencies in the area. → Details: `safety/legacy-awareness`
+3. **REUSE** — Extend or reuse existing code if found; create new only when nothing suitable exists. → Details: `safety/reuse-first`
+4. **MATCH STYLE** — Generate code matching the existing project style. → Details: `core/style-mimic`
+5. **INCREMENTAL** — Prefer small, incremental changes over large rewrites. → Details: `safety/no-refactor-without-context`
+
+## DO NOT
+
+- **NEVER** suggest framework migration unless the user asks. → See also: `core/project-context`

@@ -1,0 +1,23 @@
+---
+description: 변경 전 해당 영역 기존 패턴·스타일·의존성 분석.
+alwaysApply: true
+---
+
+# INTENT (의도)
+
+변경/추가 전 해당 영역의 기존 패턴·스타일·의존성을 분석하고, 현재 코드베이스에 맞는 제안만 하도록 한다.
+
+# WHY (왜 필요한지)
+
+기존 동작 깨짐·스타일 불일치·의존성 충돌 방지를 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+기존 파일 수정·기능 추가·리팩터·의존성 변경 시 적용한다.
+
+---
+
+# LEGACY AWARENESS
+
+- Before changing or adding code in an area, analyze existing patterns, style, and dependencies there.
+- Propose changes that fit the current codebase; avoid conflicting with or breaking existing behavior without explicit need.

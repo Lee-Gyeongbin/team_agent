@@ -1,0 +1,53 @@
+---
+description: Force AI to mimic existing project code style, patterns, and conventions.
+alwaysApply: true
+---
+
+# INTENT (의도)
+
+생성하는 코드가 프로젝트의 기존 스타일(네이밍, 폴더 구조, 포맷 등)을 따르도록 한다.
+
+# WHY (왜 필요한지)
+
+프로젝트 일관성 유지, 불필요한 새 패턴 도입 방지를 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+코드 생성·수정 제안 시 적용한다. 사용자가 새 스타일을 요청하면 그에 따른다.
+
+---
+
+# STYLE MIMIC RULE (HIGH PRIORITY)
+
+## PRIMARY PRINCIPLE
+
+Existing project code is the primary reference for style and structure.
+
+## BEFORE GENERATING CODE
+
+- Identify existing code style and structure in the area, then match it.
+- Match structure, naming, formatting, and conventions.
+
+## STYLE MATCHING
+
+Always mimic:
+
+- naming conventions
+- folder structure
+- component patterns
+- API call style
+- error handling style
+- code formatting
+
+## PRIORITY
+
+Project style takes precedence over general best practices.
+
+Do NOT introduce:
+
+- new architectural patterns
+- new naming styles
+- new formatting conventions
+
+unless explicitly requested.
+When unsure about style, ask user instead of guessing.

@@ -1,0 +1,24 @@
+---
+description: 리팩터/구조 변경 시 컨텍스트 확인 후 제안, 점진적 변경 우선.
+alwaysApply: false
+---
+
+# INTENT (의도)
+
+리팩터·구조 변경 제안 전에 해당 파일·호출처·관련 모듈을 확인하고, 점진적 변경을 우선하도록 한다.
+
+# WHY (왜 필요한지)
+
+근거 없는 대규모 리팩터·가정 기반 제안 방지를 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+리팩터·아키텍처/구조 변경 제안 시 적용한다.
+
+---
+
+# NO REFACTOR WITHOUT CONTEXT
+
+- Prefer incremental change over large rewrites.
+- When suggesting refactors or structural changes, first gather context: read the file, call sites, and related modules.
+- Only then propose changes; do not suggest refactors based on assumptions.

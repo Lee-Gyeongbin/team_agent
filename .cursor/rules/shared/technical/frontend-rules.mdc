@@ -1,0 +1,186 @@
+---
+description: 프론트엔드 코딩 규칙. JSP+Vue2 패턴, axios 호출, 공통 컴포넌트, 모달, 응답 처리.
+alwaysApply: false
+globs: ["**/webapp/**/*.jsp", "**/webapp/**/*.js"]
+---
+
+# INTENT (의도)
+
+이 프로젝트의 프론트엔드(JSP + Vue 2) 코딩 규칙을 정의한다.
+
+# WHY (왜 필요한지)
+
+JSP + Vue 2 hybrid 특유의 패턴을 일관되게 유지하기 위함이다.
+
+# SCOPE (언제 적용되는지)
+
+`src/main/webapp/` 하위 JSP·JS 파일을 작성·수정할 때 적용한다.
+
+---
+
+# FRONTEND RULES
+
+## 1. 파일 시작 구조
+
+모든 JSP 파일은 아래 두 줄로 시작한다.
+
+```jsp
+<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+<%@ include file="/WEB-INF/jsp/common/common-taglibs.jsp"%>
+```
+
+## 2. Vue 인스턴스 구조
+
+페이지 단위 Vue 인스턴스는 아래 순서를 따른다.
+
+```js
+new Vue({
+  el: "#appId",           // 반드시 페이지 고유 ID
+  mixins: [cmbMixin],     // 프로젝트 공통 mixin — 항상 포함
+  data: {
+    // 상태 변수
+  },
+  mounted: function () {
+    var _self = this;
+    // 초기화 로직
+  },
+  methods: {
+    methodName: function () {
+      var _self = this;
+      // ...
+    },
+  },
+});
+```
+
+- `var _self = this;` — 메서드 내 클로저에서 컨텍스트 유지용으로 항상 사용한다.
+- Options API만 사용한다. Composition API(`setup`, `ref`, `computed` 등) 사용 금지.
+- `data`는 함수형(`data: function() { return {...}; }`)이 아니라 객체 리터럴로도 쓴다 — 기존 코드 스타일 우선.
+
+## 3. axios 호출 패턴
+
+### GET (기본 조회)
+```js
+var params = _self.getQueryString({ key: value });
+
+axios({
+  url: "${context_path}/domain/sub/action_json.do",
+  data: params
+}).then(function (response) {
+  // response.data 처리
+});
+```
+
+### POST (저장/수정/삭제) — CSRF 토큰 필수
+```js
+axios({
+  method: 'post',
+  url: "${context_path}/domain/sub/saveAction.do",
+  data: formData,                          // URLSearchParams 또는 FormData
+  headers: {
+    '${_csrf.headerName}': '${_csrf.token}',
+    'Content-Type': 'application/x-www-form-urlencoded'
+  }
+}).then(function (response) {
+  $.showMsgBox(response.data.msg);
+  if (response.data.result == AJAX_SUCCESS) {
+    _self.getList();
+  }
+});
+```
+
+- 파라미터 직렬화: `_self.getQueryString({...})` — `cmbMixin`에 정의된 공통 메서드.
+- 배열 파라미터는 `URLSearchParams`의 `append(key, value)` 반복으로 전송.
+- URL 접미사: 화면 이동 `.do`, JSON 응답 `_json.do`.
+- URL 접두사: `${context_path}/`.
+
+## 4. 응답 결과 처리
+
+```js
+// 성공 여부 판별
+if (response.data.result == AJAX_SUCCESS) { ... }   // 권장
+if (response.data.result == 'SUCCESS') { ... }      // 혼용 존재, 동일 의미
+
+// 메시지 표시
+$.showMsgBox(response.data.msg);                    // 알림 다이얼로그
+$.showConfirmBox("확인 메시지", function () {         // 확인 다이얼로그
+  // 확인 후 실행 로직
+});
+```
+
+- `AJAX_SUCCESS` 상수는 전역 선언되어 있다 (`BaseController.AJAX_SUCCESS = "SUCCESS"`).
+
+## 5. 공통 컴포넌트
+
+아래 컴포넌트들은 `common.vue.jsp` 및 `common-cmb.vue.jsp`에 전역 등록되어 있다.
+별도 import 없이 JSP에서 바로 사용 가능하다.
+
+| 컴포넌트 태그 | 용도 |
+|---|---|
+| `<cmb-modal>` | 공통 모달 (size-sm / size-md / size-lg) |
+| `<cmb-tree-item-dept-system>` | 조직 트리 아이템 |
+| `<search-user>` | 사용자 검색 (다중) |
+| `<search-user-single>` | 사용자 검색 (단일) |
+| `<component-layer-attach>` | 첨부파일 |
+| `<component-month-picker>` | 월 선택기 |
+
+## 6. 모달 패턴
+
+```jsp
+<cmb-modal ref="detailModal" v-cloak class="size-lg">
+    <div slot="header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <h2 class="ui-modal__title"><span>모달 제목</span></h2>
+        <button type="button" class="ui-modal__close" @click="$refs.detailModal.close()">
+            <i class="icon icon-close"></i>
+        </button>
+    </div>
+
+    <template slot="body">
+        <!-- 본문 내용 -->
+    </template>
+
+    <template slot="footer">
+        <button type="button" class="ui-button type-secondary size-md" @click="$refs.detailModal.close()">
+            <span><spring:message code="button.close"/></span>
+        </button>
+    </template>
+</cmb-modal>
+```
+
+- 모달 열기: `this.$refs.detailModal.open()`, 닫기: `this.$refs.detailModal.close()`
+- 크기 클래스: `size-sm`, `size-md`, `size-lg`
+
+## 7. Vue 컴포넌트 template 정의
+
+재사용 컴포넌트는 `<script type="text/x-template">` 방식으로 정의한다.
+
+```jsp
+<script type="text/x-template" id="my-template">
+    <div>...</div>
+</script>
+
+<script>
+Vue.component('my-component', {
+    template: '#my-template',
+    props: [...],
+    data: function () { return {...}; },
+    methods: {...}
+});
+</script>
+```
+
+## 8. 다국어 처리
+
+```jsp
+<spring:message code="word.name"/>         <%-- 라벨, 텍스트 --%>
+<spring:eval expression="@globals.getProperty('key')"/>   <%-- 시스템 설정값 --%>
+```
+
+## 9. cmbMixin 제공 공통 메서드
+
+`mixins: [cmbMixin]` 포함 시 아래 메서드를 사용할 수 있다.
+
+- `_self.getQueryString({...})` — 객체를 URLSearchParams로 변환
+- `_self.getDeptList_treeData()` — 부서 트리 데이터 로드 (Promise 반환)
+- `_self.showMessage(msg, type)` — 메시지 표시
+- `deptTreeData`, `employeeList` — 공통 data 속성
