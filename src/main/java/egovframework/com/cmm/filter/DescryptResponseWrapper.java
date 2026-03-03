@@ -16,8 +16,6 @@
 package egovframework.com.cmm.filter;
 
 import lombok.SneakyThrows;
-import org.codehaus.jackson.map.ObjectMapper;
-
 import javax.servlet.ServletOutputStream;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;

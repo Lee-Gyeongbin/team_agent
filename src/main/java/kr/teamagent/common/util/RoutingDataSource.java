@@ -1,7 +1,7 @@
 package kr.teamagent.common.util;
 
 import kr.teamagent.common.secure.service.SecureService;
-import org.apache.commons.dbcp.BasicDataSource;
+import org.apache.commons.dbcp2.BasicDataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource;
@@ -155,7 +155,7 @@ public class RoutingDataSource extends AbstractRoutingDataSource {
                 ds.setUsername(dbUserId);
                 ds.setPassword(dbUserPasswd);
                 ds.setInitialSize(5);
-                ds.setMaxActive(10);
+                ds.setMaxTotal(10);
                 ds.setMaxIdle(5);
                 ds.setMinIdle(2);
                 ds.setValidationQuery("SELECT 1");

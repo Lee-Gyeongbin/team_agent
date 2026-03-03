@@ -9,10 +9,10 @@ import java.util.Set;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.codehaus.jackson.JsonEncoding;
-import org.codehaus.jackson.JsonGenerator;
-import org.codehaus.jackson.map.ObjectMapper;
-import org.codehaus.jackson.map.SerializationConfig;
+import com.fasterxml.jackson.core.JsonEncoding;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.validation.BindingResult;
@@ -126,7 +126,7 @@ public class BscJacksonMapper extends MappingJackson2JsonView {
 
     private void configurePrettyPrint() {
         if (this.prettyPrint != null) {
-            this.objectMapper.configure(SerializationConfig.Feature.INDENT_OUTPUT, this.prettyPrint);
+            this.objectMapper.configure(SerializationFeature.INDENT_OUTPUT, this.prettyPrint);
         }
     }
 
@@ -193,7 +193,7 @@ public class BscJacksonMapper extends MappingJackson2JsonView {
 			HttpServletResponse response) throws Exception {
 		Object value = filterModel(model);
 		JsonGenerator generator =
-				objectMapper.getJsonFactory().createJsonGenerator(response.getOutputStream(), encoding);
+				objectMapper.getFactory().createGenerator(response.getOutputStream(), encoding);
 		if (prefixJson) {
 			generator.writeRaw("{} && ");
 		}
@@ -240,11 +240,11 @@ public class BscJacksonMapper extends MappingJackson2JsonView {
      * @throws IOException if writing failed
      */
     protected void writeContent(OutputStream stream, Object value, String jsonPrefix) throws IOException {
-        JsonGenerator generator = this.objectMapper.getJsonFactory().createJsonGenerator(stream, this.encoding);
+        JsonGenerator generator = this.objectMapper.getFactory().createGenerator(stream, this.encoding);
 
         // A workaround for JsonGenerators not applying serialization features
         // https://github.com/FasterXML/jackson-databind/issues/12
-        if (this.objectMapper.getSerializationConfig().isEnabled(SerializationConfig.Feature.INDENT_OUTPUT)) {
+        if (this.objectMapper.getSerializationConfig().isEnabled(SerializationFeature.INDENT_OUTPUT)) {
             generator.useDefaultPrettyPrinter();
         }
 

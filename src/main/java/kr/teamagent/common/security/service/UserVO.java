@@ -15,7 +15,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-import org.codehaus.jackson.annotate.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.springframework.security.access.ConfigAttribute;
 
 import kr.teamagent.common.CommonVO;

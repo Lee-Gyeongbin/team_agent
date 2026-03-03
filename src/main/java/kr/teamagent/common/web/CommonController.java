@@ -37,7 +37,7 @@ public class CommonController extends BaseController {
 	public ModelAndView health() throws Exception {
 		HashMap<String, Object> resultMap = new LinkedHashMap<>();
 		resultMap.put("status", "UP");
-		resultMap.put("application", "welcome to Team Agent Backend");
+		resultMap.put("application", "Team Agent Backend");
 
 		String dbStatus = "DOWN";
 		try (java.sql.Connection conn = dataSource.getConnection()) {
@@ -50,8 +50,8 @@ public class CommonController extends BaseController {
 		resultMap.put("database", dbStatus);
 
 		HashMap<String, Object> dummyData = new LinkedHashMap<>();
-		dummyData.put("userId", "testUser");
-		dummyData.put("userName", "This is User");
+		dummyData.put("userId", "testUser2");
+		dummyData.put("userName", "This is User!!");
 		dummyData.put("compId", "teamagent");
 		dummyData.put("role", "ADMIN");
 		resultMap.put("sampleData", dummyData);

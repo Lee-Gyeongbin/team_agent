@@ -10,7 +10,7 @@
 **************************************************************************/
 package kr.teamagent.common.system.service;
 
-import org.codehaus.jackson.annotate.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import kr.teamagent.common.CommonVO;
 import lombok.Getter;

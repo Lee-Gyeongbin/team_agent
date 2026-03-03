@@ -137,12 +137,12 @@ public class RefreshableSqlSessionFactoryBean extends SqlSessionFactoryBean impl
 								.longValue();
 
 						if (lastModified != modified) {
-							map.put(resource, new Long(modified));
+							map.put(resource, Long.valueOf(modified));
 							modifiedResources.add(resource.getDescription());
 							retVal = true;
 						}
 					} else {
-						map.put(resource, new Long(modified));
+						map.put(resource, Long.valueOf(modified));
 					}
 				} catch (IOException e) {
 					log.error("caught exception", e);
