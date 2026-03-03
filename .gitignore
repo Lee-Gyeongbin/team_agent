@@ -14,3 +14,6 @@ Thumbs.db
 
 # Local scripts
 teamagent-debugger-tomcat.bat
+
+# JRebel
+src/main/resources/rebel.xml
