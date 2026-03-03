@@ -17,3 +17,4 @@ teamagent-debugger-tomcat.bat
 
 # JRebel
 src/main/resources/rebel.xml
+/.cursor/rules/personal/
