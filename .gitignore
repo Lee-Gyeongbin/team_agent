@@ -11,3 +11,6 @@
 # OS
 Thumbs.db
 .DS_Store
+
+# Local scripts
+teamagent-debugger-tomcat.bat
