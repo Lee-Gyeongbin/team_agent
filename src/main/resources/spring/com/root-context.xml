@@ -24,7 +24,7 @@
 			<list>
 				<value>classpath:/message/message</value>
 				<value>classpath:/message/message-validator-common</value>
-				<value>classpath:/egovframework/rte/fdl/property/messages/properties</value>
+				<value>classpath:/org/egovframe/rte/fdl/property/messages/properties</value>
 			</list>
 		</property>
 	</bean>
@@ -35,7 +35,7 @@
         </property>
     </bean>
 
-	<bean id="leaveaTrace" class="egovframework.rte.fdl.cmmn.trace.LeaveaTrace">
+	<bean id="leaveaTrace" class="org.egovframe.rte.fdl.cmmn.trace.LeaveaTrace">
 		<property name="traceHandlerServices">
 			<list>
 				<ref bean="egov.traceHandlerService" />
@@ -43,7 +43,7 @@
 		</property>
 	</bean>
 
-	<bean id="egov.traceHandlerService" class="egovframework.rte.fdl.cmmn.trace.manager.DefaultTraceHandleManager">
+	<bean id="egov.traceHandlerService" class="org.egovframe.rte.fdl.cmmn.trace.manager.DefaultTraceHandleManager">
 		<property name="reqExpMatcher">
 			<ref bean="egov.antPathMater" />
 		</property>
@@ -60,7 +60,7 @@
 	</bean>
 
 	<bean id="egov.antPathMater" class="org.springframework.util.AntPathMatcher" />
-	<bean id="egov.defaultTraceHandler" class="egovframework.rte.fdl.cmmn.trace.handler.DefaultTraceHandler" />
+	<bean id="egov.defaultTraceHandler" class="org.egovframe.rte.fdl.cmmn.trace.handler.DefaultTraceHandler" />
 
     <bean id="spring.RegularCommonsMultipartResolver" class="org.springframework.web.multipart.commons.CommonsMultipartResolver">
         <property name="maxUploadSize" value="524288000" />

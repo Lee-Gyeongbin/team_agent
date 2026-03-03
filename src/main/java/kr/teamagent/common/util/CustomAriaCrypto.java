@@ -17,11 +17,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Required;
 
-import egovframework.rte.fdl.cryptography.EgovARIACryptoService;
-import egovframework.rte.fdl.cryptography.EgovPasswordEncoder;
-import egovframework.rte.fdl.cryptography.impl.ARIACipher;
-import egovframework.rte.fdl.cryptography.impl.EgovARIACryptoServiceImpl;
-import egovframework.rte.fdl.logging.util.EgovResourceReleaser;
+import org.egovframe.rte.fdl.cryptography.EgovARIACryptoService;
+import org.egovframe.rte.fdl.cryptography.EgovPasswordEncoder;
+import org.egovframe.rte.fdl.cryptography.impl.ARIACipher;
+import org.egovframe.rte.fdl.cryptography.impl.EgovARIACryptoServiceImpl;
+import org.egovframe.rte.fdl.logging.util.EgovResourceReleaser;
 
 import java.math.BigDecimal;
 

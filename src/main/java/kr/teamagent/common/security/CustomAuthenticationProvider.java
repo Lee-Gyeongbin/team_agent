@@ -36,7 +36,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
-import egovframework.rte.psl.dataaccess.util.EgovMap;
+import org.egovframe.rte.psl.dataaccess.util.EgovMap;
 import kr.teamagent.common.security.service.AccessLoginVO;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.security.service.impl.LoginServiceImpl;

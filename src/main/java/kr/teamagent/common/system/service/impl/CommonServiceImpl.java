@@ -1,7 +1,7 @@
 package kr.teamagent.common.system.service.impl;
 
-import egovframework.rte.fdl.cmmn.EgovAbstractServiceImpl;
-import egovframework.rte.psl.dataaccess.util.EgovMap;
+import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.egovframe.rte.psl.dataaccess.util.EgovMap;
 import kr.teamagent.common.CommonVO;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.util.PropertyUtil;

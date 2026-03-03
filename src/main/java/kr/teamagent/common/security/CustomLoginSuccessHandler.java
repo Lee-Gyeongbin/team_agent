@@ -2,7 +2,7 @@ package kr.teamagent.common.security;
 
 import egovframework.com.sym.log.clg.service.EgovLoginLogService;
 import egovframework.com.sym.log.clg.service.LoginLog;
-import egovframework.rte.psl.dataaccess.util.EgovMap;
+import org.egovframe.rte.psl.dataaccess.util.EgovMap;
 import kr.teamagent.common.secure.service.JwtSecureServiceImpl;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.security.service.impl.LoginServiceImpl;

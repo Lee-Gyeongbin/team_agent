@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 
 import egovframework.com.sym.log.clg.service.EgovLoginLogService;
 import egovframework.com.sym.log.clg.service.LoginLog;
-import egovframework.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 
 @Service("EgovLoginLogService")
 public class EgovLoginLogServiceImpl extends EgovAbstractServiceImpl implements

@@ -2,7 +2,7 @@ package kr.teamagent.common.util;
 
 import org.springframework.beans.factory.annotation.Required;
 
-import egovframework.rte.fdl.cryptography.EgovPasswordEncoder;
+import org.egovframe.rte.fdl.cryptography.EgovPasswordEncoder;
 
 public class CustomPasswordEncoder extends EgovPasswordEncoder{
 

@@ -1,6 +1,6 @@
 package kr.teamagent.common.secure.service;
 
-import egovframework.rte.fdl.cryptography.EgovCryptoService;
+import org.egovframe.rte.fdl.cryptography.EgovCryptoService;
 import kr.teamagent.common.util.CommonUtil;
 import org.apache.commons.codec.binary.Base64;
 import org.slf4j.Logger;
