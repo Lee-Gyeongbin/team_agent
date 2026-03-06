@@ -26,7 +26,7 @@ public interface ChatbotService {
      */
     void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception;
 
-    ChatbotVO selectAiDailyUsage(ChatbotVO chatbotVO) throws Exception;
+    ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception;
 
     Map<String, Object> saveSatisYn(ChatbotVO chatbotVO) throws Exception;
 }

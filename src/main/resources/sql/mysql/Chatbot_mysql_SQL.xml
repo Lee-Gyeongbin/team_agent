@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ai.chatbot.stat">
+
+    <insert id="insertChatRoom" parameterType="kr.teamagent.chat.service.ChatbotVO"
+        useGeneratedKeys="true" keyProperty="roomId">
+        /* CHAT 대화방 등록 ai.chatbot.stat.insertChatRoom */
+        INSERT INTO TB_CHAT_ROOM
+        (ROOM_TITLE, CREATE_USER_ID, CREATE_DT)
+        VALUES (#{roomTitle}, #{userId}, NOW())
+    </insert>
+
+</mapper>

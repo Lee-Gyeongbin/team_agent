@@ -152,9 +152,9 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
      */
     private void handleQuestion(WebSocketSession session, JSONObject messageObj) {
         try {
-            String query = (String) messageObj.get("query");
-            String threadId = (String) messageObj.get("threadId");
-            String svcTy = (String) messageObj.get("svcTy");
+            String query = toStr(messageObj.get("query"));
+            String threadId = toStr(messageObj.get("threadId"));
+            String svcTy = toStr(messageObj.get("svcTy"));
             
             if (query == null || query.isEmpty()) {
                 sendMessage(session, createMessage("error", "질문 내용이 없습니다.", null));
@@ -289,6 +289,13 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
         }
     }
     
+    /**
+     * JSON 값(Long 등)을 String으로 안전 변환
+     */
+    private static String toStr(Object o) {
+        return o != null ? String.valueOf(o) : null;
+    }
+
     /**
      * 메시지 JSON 생성
      */

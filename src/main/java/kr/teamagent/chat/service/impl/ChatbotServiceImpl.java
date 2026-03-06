@@ -76,13 +76,10 @@ public class ChatbotServiceImpl implements ChatbotService {
     }
 
     @Override
-    public ChatbotVO selectAiDailyUsage(ChatbotVO chatbotVO) throws Exception {
-        // 일일 사용량 체크
-        String usageDate = LocalDate.now(ZoneId.of("Asia/Seoul")).format(DateTimeFormatter.BASIC_ISO_DATE);
-        chatbotVO.setUsageDate(usageDate);
-        chatbotVO.setSvcTy(chatbotVO.getSvcTy());
-        ChatbotVO result = chatbotDAO.selectAiDailyUsage(chatbotVO);
-        return result;
+    public ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception {
+        // TODO: TB_CHAT_ROOM 테이블 생성 후 insertChatRoom 호출로 교체
+        chatbotVO.setRoomId(1L);
+        return chatbotVO;
     }
 
     /**
@@ -391,10 +388,6 @@ public class ChatbotServiceImpl implements ChatbotService {
         usageVO.setUserId(userId);
         chatbotDAO.insertAiDailyUsage(usageVO);
 
-        // insert 후 사용량 체크
-        ChatbotVO aiDailyUsage = this.selectAiDailyUsage(usageVO);
-        String usageChk = aiDailyUsage.getUsageChk();
-        
     }
 
 }

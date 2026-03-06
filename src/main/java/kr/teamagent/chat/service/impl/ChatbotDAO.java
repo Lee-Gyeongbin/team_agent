@@ -9,6 +9,10 @@ import kr.teamagent.chat.service.ChatbotVO;
 
 @Repository
 public class ChatbotDAO extends EgovComAbstractDAO {
+    public int insertChatRoom(ChatbotVO chatbotVO) throws Exception{
+        return insert("ai.chatbot.stat.insertChatRoom",chatbotVO);
+    }
+
     public ChatbotVO selectAiDailyUsage(ChatbotVO chatbotVO) throws Exception{
         return selectOne("ai.chatbot.stat.selectAiDailyUsage",chatbotVO);
     }

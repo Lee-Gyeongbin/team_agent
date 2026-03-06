@@ -36,12 +36,12 @@ public class ChatbotController extends BaseController {
     @Autowired
     private ChatbotService chatbotService;
 
-    @RequestMapping(value="/ai/chatbot/selectAiDailyUsage.do")
+    @RequestMapping(value="/ai/chatbot/createChatRoom.do")
     @ResponseBody
-    public ModelAndView selectAiDailyUsage(ChatbotVO searchVO)throws Exception {
+    public ModelAndView createChatRoom(ChatbotVO searchVO)throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         searchVO.setUserId(SessionUtil.getUserId());
-        resultMap.put("data", chatbotService.selectAiDailyUsage(searchVO));
+        resultMap.put("data", chatbotService.createChatRoom(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 

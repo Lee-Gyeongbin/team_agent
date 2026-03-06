@@ -8,6 +8,8 @@ import lombok.Setter;
 @Setter
 public class ChatbotVO extends CommonVO {
 
+    private Long roomId;
+    private String roomTitle;
     /* AI 챗봇 질문/응답 로그 */
     private Long logId;
     // AI 서비스 타입
