@@ -4,17 +4,8 @@
 
 	<bean id="egov.lobHandler" class="org.springframework.jdbc.support.lob.DefaultLobHandler" lazy-init="true" />
 
-	<bean id="routerDataSource" class="kr.teamagent.common.util.RoutingDataSource">
-	 <property name="targetDataSources">
-	   <map key-type="kr.teamagent.common.util.DataSourceType">
-	     <entry key="MASTER" value-ref="egov.dataSource"/>
-	   </map>
-	 </property>
-	 <property name="defaultTargetDataSource" ref="egov.dataSource"/>
-	</bean>
-
 	<bean id="egov.sqlSession" class="kr.teamagent.common.util.RefreshableSqlSessionFactoryBean">
-		<property name="dataSource" ref="routerDataSource"/>
+		<property name="dataSource" ref="egov.dataSource"/>
 		<property name="interval" value="30000"/>
 		<property name="configLocation" value="classpath:/sql/config/mybatis-config.xml"/>
 		<property name="mapperLocations">

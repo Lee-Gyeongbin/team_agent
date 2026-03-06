@@ -12,13 +12,11 @@ import java.net.URL;
 import java.net.UnknownHostException;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.List;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +33,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
-
 import org.egovframe.rte.psl.dataaccess.util.EgovMap;
 import kr.teamagent.common.security.service.AccessLoginVO;
 import kr.teamagent.common.security.service.UserVO;
@@ -50,9 +47,6 @@ import kr.teamagent.common.util.SessionUtil;
 @Component
 public class CustomAuthenticationProvider implements AuthenticationProvider {
     public final Logger log = LoggerFactory.getLogger(this.getClass());
-
-    // IP 체크여부 체크
-    private final String IP_CHK_TRUE = "001";
 
     @Autowired
     LoginServiceImpl loginService;
@@ -74,43 +68,23 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
             String compId = request.getParameter("compId");
             String userId = CommonUtil.nullToBlank(request.getParameter("userId"));
             String password = CommonUtil.nullToBlank(request.getParameter("password"));
-            String authToken = CommonUtil.nullToBlank(request.getParameter("ssoId")); //nice ssoId
-            String baseUrl = CommonUtil.nullToBlank(request.getParameter("baseUrl")); //Tocken url
+            String authToken = CommonUtil.nullToBlank(request.getParameter("ssoId"));
+            String baseUrl = CommonUtil.nullToBlank(request.getParameter("baseUrl"));
             log.info("=====> ssoId: " + authToken+ ", baseUrl: " + baseUrl);
-            String accessLoginInType = "password"; // loginType sso/password
-            String accessStatus = "S"; // accessType 공통코드-523:  S:성공, F:실패, L:실패/잠금
-
+            String accessLoginInType = "password";
+            String accessStatus = "S";
 
             String userType = String.valueOf(SessionUtil.getAttribute("userType"));
             String masterDbId = null;
 
             boolean isFormLogin = CommonUtil.isEmpty(authToken) ? true : false;
-//			log.debug("isFormLogin : " + isFormLogin);
 
-            //전체관리자 IP확인 후 팅겨 낸다.
-
-
-            UserVO tmpVO = new UserVO();
-            tmpVO.setUserId(userId);
-            String auth = loginService.selectAuth(tmpVO);
-
-            //System.out.println("==============================");
-            //System.out.println(auth);
-            //System.out.println(!CommonUtil.isEmpty(auth));
-
-//            if(!CommonUtil.isEmpty(auth)) {
-//                java.net.InetAddress myPC   =   java.net.InetAddress.getLocalHost();
-//                //System.out.println("==============================");
-//                //System.out.println(myPC);
-//                String allowIp = loginService.selectIpList(tmpVO);
-//                //System.out.println("==============================");
-//                //System.out.println(allowIp);
-//                if(!allowIp.equals(myPC.getHostAddress()) && !CommonUtil.isEmpty(allowIp) && !allowIp.equals("*")) {
-//                    //System.out.println("==============================");
-//                    SessionUtil.setAttribute("accessError", "accessAdminDenied");
-//                    return null;
-//                }
-//            }
+            /*
+             * [주석처리] selectAuth - COM_ADMIN 테이블 조회
+             * UserVO tmpVO = new UserVO();
+             * tmpVO.setUserId(userId);
+             * String auth = loginService.selectAuth(tmpVO);
+             */
 
             //SSO 로그인
             if (!isFormLogin) {
@@ -119,7 +93,6 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
                 HttpURLConnection con = null;
                 int responseCode =0;
                 try {
-                    // 콜백 데이터(xml)에서 sabun을 base64 암호화하지 않는 것으로 확인. jsp에서 토큰정보를 가져오지 않음.
                     StringBuilder content = new StringBuilder();
 
                     URL url = new URL(baseUrl);
@@ -142,7 +115,6 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
                         content.append(inputLine);
                     }
 
-                    // XML 데이터를 파싱하여 <sabun> 값을 추출
                     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
                     DocumentBuilder builder = factory.newDocumentBuilder();
                     InputSource is = new InputSource(new StringReader(content.toString()));
@@ -150,7 +122,7 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
                     NodeList nodeList = document.getElementsByTagName("sabun");
 
                     userId = nodeList.item(0).getTextContent();
-                    if(userId.startsWith("01")) {// 회사코드 제거
+                    if(userId.startsWith("01")) {
                         userId = userId.substring(2);
                     }
 
@@ -185,6 +157,7 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
                     log.info("=====> sso responseCode: " + responseCode);
                 }
             }
+
             UserVO userVO = new UserVO();
             userVO.setUserId(userId);
             userVO.setIp(CommonUtil.getUserIP(request));
@@ -208,120 +181,49 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
              */
             SessionUtil.setAttribute("compId", null);
             SessionUtil.setAttribute("connectionId", null);
-            //-----------로그인 실패 횟수 체크-----------//
             SessionUtil.setAttribute("accessError", null);
             SessionUtil.setAttribute("accessErrorCnt", null);
             EgovMap loginProviderData = loginService.selectLoginProviderData(userVO);
-            int authStatusCount = Integer.valueOf(String.valueOf(loginProviderData.get("authStatusCount")));
-            if(authStatusCount >= Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"))) {
-                SessionUtil.setAttribute("accessError", "accessDenied");
 
-                return null;
-            }
+            /*
+             * [주석처리] 인증 시도 횟수 - COM_ACCESS_AUTH 테이블 없음
+             * int authStatusCount = Integer.valueOf(String.valueOf(loginProviderData.get("authStatusCount")));
+             * if(authStatusCount >= Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"))) {
+             *     SessionUtil.setAttribute("accessError", "accessDenied");
+             *     return null;
+             * }
+             */
+
             UserVO user = (UserVO)loginProviderData.get("userVO");
             if(user == null){
                 SessionUtil.setAttribute("accessError", "noUser");
                 return null;
             }
 
-            if(!"Y".equals(user.getBeingYn())) {
+            if(!"Y".equals(user.getUseYn())) {
                 SessionUtil.setAttribute("accessError", "inActiveUser");
                 return null;
             }
-            //로그인
             if(isFormLogin) {
-                /*
-                 * 일반 로그인
-                 * 1. 계정이 존재하고 비밀번호가 맞으면 로그인 처리
-                 */
-                if(!passwordEncoder.matches(password, user.getPasswd())){
-                    //비밀번호 인증실패 프로세스
-                    ++authStatusCount;
-                    if(String.valueOf(authStatusCount).equals(PropertyUtil.getProperty("auth.accessCount"))) {
-                        SessionUtil.setAttribute("accessError", "accessDenied");
-                        accessStatus = "L";
-                    }else {
-                        SessionUtil.setAttribute("accessError", "passwordFail");
-                        SessionUtil.setAttribute("accessErrorCnt", authStatusCount);
-                        accessStatus = "F";
-                    }
-
-                    /*if(CommonUtil.isProdServer()){*/
-                        AccessLoginVO accessLoginVO = new AccessLoginVO();
-                        accessLoginVO.setCompId(compId);
-                        accessLoginVO.setUserId(userId);
-                        accessLoginVO.setInType(accessLoginInType);
-                        accessLoginVO.setClientIp(CommonUtil.getUserIP(request));
-                        accessLoginVO.setStatus(accessStatus);
-                        accessLoginVO.setFailCount(String.valueOf(authStatusCount));
-                        loginService.insertAccessCertificationFailData(accessLoginVO);
-                    /*}*/
+                if(!passwordEncoder.matches(password, user.getPassword())){
+                    SessionUtil.setAttribute("accessError", "passwordFail");
+                    /*
+                     * [주석처리] 실패 기록 - COM_ACCESS_AUTH 테이블 없음
+                     * AccessLoginVO accessLoginVO = new AccessLoginVO();
+                     * accessLoginVO.setCompId(compId);
+                     * accessLoginVO.setUserId(userId);
+                     * accessLoginVO.setInType(accessLoginInType);
+                     * accessLoginVO.setClientIp(CommonUtil.getUserIP(request));
+                     * accessLoginVO.setStatus(accessStatus);
+                     * accessLoginVO.setFailCount(String.valueOf(authStatusCount));
+                     * loginService.insertAccessCertificationFailData(accessLoginVO);
+                     */
                     return null;
                 }
             }else{
                 user.setAuthMethod("token");
-                // 메인화면 진입 시 로그인 init 여부 확인
-//				SessionUtil.setAttribute("loginInitChk", "N");
             }
 
-            // 사용자 IP 체크여부 검사
-            if ( StringUtils.isNotEmpty(user.getIpChk()) && IP_CHK_TRUE.equals(user.getIpChk()) ) {
-                String clientIp = CommonUtil.getUserIP(request);
-                String userRegisteredIp = user.getIpAddress();
-                
-                // 원래 코드 (서버 IP와 사용자 등록 IP 비교)
-                // java.net.InetAddress myPC   =   java.net.InetAddress.getLocalHost();
-                // if( StringUtils.isEmpty(user.getIpAddress()) || !myPC.getHostAddress().equals(user.getIpAddress()) ) {
-                
-                if( StringUtils.isEmpty(userRegisteredIp) || StringUtils.isEmpty(clientIp) ) {
-                    SessionUtil.setAttribute("accessError", "ipChkFail");
-                    return null;
-                }
-                
-                // "/" 구분자로 여러 IP를 받을 수 있도록 처리
-                // 등록된 IP 목록을 "/" 구분자로 분리하여 각 IP와 비교
-                String[] registeredIpList = userRegisteredIp.split("/");
-                boolean ipMatch = false;
-                
-                for(String registeredIp : registeredIpList) {
-                    String trimmedIp = registeredIp.trim();
-                    if(StringUtils.isNotEmpty(trimmedIp) && clientIp.equals(trimmedIp)) {
-                        ipMatch = true;
-                        break;
-                    }
-                }
-
-				AccessLoginVO accessLoginVO = new AccessLoginVO();
-				
-                if(!ipMatch) {
-                    SessionUtil.setAttribute("accessError", "ipChkFail");
-//                    accessStatus = "F";
-                    
-                    // IP 체크 실패 등록
-					accessLoginVO.setCompId(compId);
-					accessLoginVO.setUserId(userId);
-					accessLoginVO.setInType(accessLoginInType);
-					accessLoginVO.setClientIp(CommonUtil.getUserIP(request));
-					accessLoginVO.setStatus(accessStatus);
-					accessLoginVO.setIpStatus("F");
-					loginService.insertAccessCertificationSuccessData(accessLoginVO);
-					
-                    return null;
-                } else {
-                    SessionUtil.setAttribute("ipChkValue", "S");
-                }
-            } else {
-                SessionUtil.setAttribute("ipChkValue", "E");
-            }
-
-
-            /*
-             * 해당 고객사의 데이터소스가 있는 확인
-             */
-            /*int dataSourceResult = routingDataSource.checkDataSource(user.getConnectionId());
-            if (dataSourceResult==-1){
-                return null;
-            }*/
             // 메인화면 진입 시 로그인 init 여부 확인
             SessionUtil.setAttribute("loginInitChk", "Y");
 
@@ -330,13 +232,14 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
             //SessionUtil.setAttribute("userId", CommonUtil.nullToBlank(user.getUserId()));
             //SessionUtil.setAttribute("connectionId", CommonUtil.nullToBlank(user.getConnectionId()));
 
-            // 권한 목록
-            List<String> adminGubunList = (List<String>)loginProviderData.get("adminGubunList");
-            user.setAdminGubunList(adminGubunList);
+            /*
+             * [주석처리] 권한 목록 - COM_ADMIN, V_COM_CODE 테이블 조회
+             * List<String> adminGubunList = (List<String>)loginProviderData.get("adminGubunList");
+             * user.setAdminGubunList(adminGubunList);
+             * for(String admingubun : adminGubunList) { grantedAuthList.add(new SimpleGrantedAuthority(admingubun)); }
+             */
             ArrayList<GrantedAuthority> grantedAuthList = new ArrayList<GrantedAuthority>();
-            for(String admingubun : adminGubunList) {
-                grantedAuthList.add(new SimpleGrantedAuthority(admingubun));
-            }
+            grantedAuthList.add(new SimpleGrantedAuthority("ROLE_USER"));
 
 //            /* 비밀번호 인증성공 프로세스*/
 //            AccessLoginVO accessLoginVO = new AccessLoginVO();

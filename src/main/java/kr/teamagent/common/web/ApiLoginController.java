@@ -63,15 +63,17 @@ public class ApiLoginController {
 
             EgovMap loginProviderData = sqlSession.selectOne("login.selectLoginProviderData", paramVO);
 
-            int authStatusCount = Integer.parseInt(String.valueOf(loginProviderData.get("authStatusCount")));
-            int maxAccessCount = Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"));
-
-            if (authStatusCount >= maxAccessCount) {
-                result.put("success", false);
-                result.put("errorType", "accessDenied");
-                result.put("message", "로그인 시도 횟수를 초과하였습니다. 관리자에게 문의하세요.");
-                return ResponseEntity.ok(result);
-            }
+            /*
+             * [주석처리] 인증 시도 횟수 - COM_ACCESS_AUTH 테이블 없음
+             * int authStatusCount = Integer.parseInt(String.valueOf(loginProviderData.get("authStatusCount")));
+             * int maxAccessCount = Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"));
+             * if (authStatusCount >= maxAccessCount) {
+             *     result.put("success", false);
+             *     result.put("errorType", "accessDenied");
+             *     result.put("message", "로그인 시도 횟수를 초과하였습니다. 관리자에게 문의하세요.");
+             *     return ResponseEntity.ok(result);
+             * }
+             */
 
             UserVO user = (UserVO) loginProviderData.get("userVO");
             if (user == null) {
@@ -81,14 +83,14 @@ public class ApiLoginController {
                 return ResponseEntity.ok(result);
             }
 
-            if (!"Y".equals(user.getBeingYn())) {
+            if (!"Y".equals(user.getUseYn())) {
                 result.put("success", false);
                 result.put("errorType", "inActiveUser");
                 result.put("message", "비활성화된 사용자입니다.");
                 return ResponseEntity.ok(result);
             }
 
-            if (!passwordEncoder.matches(password, user.getPasswd())) {
+            if (!passwordEncoder.matches(password, user.getPassword())) {
                 result.put("success", false);
                 result.put("errorType", "passwordFail");
                 result.put("message", "비밀번호가 올바르지 않습니다.");
@@ -96,28 +98,21 @@ public class ApiLoginController {
             }
 
             HttpSession session = request.getSession(true);
-            session.setAttribute("compId", CommonUtil.nullToBlank(user.getCompId()));
             session.setAttribute("userId", CommonUtil.nullToBlank(user.getUserId()));
-            session.setAttribute("uniqueUserId", CommonUtil.nullToBlank(user.getCompId()) + "-" + CommonUtil.nullToBlank(user.getUserId()));
-            session.setAttribute("connectionId", CommonUtil.nullToBlank(user.getConnectionId()));
-            session.setAttribute("compDbId", CommonUtil.nullToBlank(user.getDbId()));
             session.setAttribute("masterDbId", CommonUtil.nullToBlank(PropertyUtil.getProperty("Globals.Master.db")));
             session.setAttribute("loginVO", user);
 
             Map<String, Object> userData = new HashMap<>();
             userData.put("userId", user.getUserId());
-            userData.put("userNm", user.getUserNm());
-            userData.put("compId", user.getCompId());
-            userData.put("deptId", user.getDeptId());
-            userData.put("deptNm", user.getDeptNm());
+            userData.put("userName", user.getUserName());
             userData.put("email", user.getEmail());
-            userData.put("jikgubNm", user.getJikgubNm());
-            userData.put("posNm", user.getPosNm());
+            userData.put("orgId", user.getOrgId());
+            userData.put("phone", user.getPhone());
 
             result.put("success", true);
             result.put("user", userData);
 
-            log.info("Login success: userId={}, compId={}", user.getUserId(), user.getCompId());
+            log.info("Login success: userId={}", user.getUserId());
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
@@ -159,13 +154,10 @@ public class ApiLoginController {
         UserVO user = (UserVO) session.getAttribute("loginVO");
         Map<String, Object> userData = new HashMap<>();
         userData.put("userId", user.getUserId());
-        userData.put("userNm", user.getUserNm());
-        userData.put("compId", user.getCompId());
-        userData.put("deptId", user.getDeptId());
-        userData.put("deptNm", user.getDeptNm());
+        userData.put("userName", user.getUserName());
         userData.put("email", user.getEmail());
-        userData.put("jikgubNm", user.getJikgubNm());
-        userData.put("posNm", user.getPosNm());
+        userData.put("orgId", user.getOrgId());
+        userData.put("phone", user.getPhone());
 
         result.put("success", true);
         result.put("user", userData);

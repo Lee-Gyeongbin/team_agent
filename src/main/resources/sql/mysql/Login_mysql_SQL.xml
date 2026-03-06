@@ -4,59 +4,26 @@
     <select id="selectUser" parameterType="java.util.Map" resultType="userVO">
         /* 로그인용 사용자 조회 login.selectUser */
         SELECT
-            U.COMP_ID, C.COMP_NM, U.USER_ID, U.USER_NM, U.PASSWD,
-            U.DEPT_ID, DP.DEPT_NM, U.JIKGUB_CD, JG.CODE_NM JIKGUB_NM,
-            U.POS_CD, POS.CODE_NM POS_NM, U.BIRTH_DT, U.JOIN_DT, U.TEL,
-            U.PHONE, U.EMAIL, U.IP_ADDRESS, U.IP_CHK, U.ETC,
-            U.PW_INIT_YN, U.PW_CHANGE_DT, IFNULL(U.MAIN_PGM_ID, 'PGM1913') AS MAIN_PGM_ID, U.USER_STATUS_CD, USR_ST.CODE_NM USER_STATUS_NM,
-            C.COMP_LANG LANG,
-            C.COMP_LANG COMP_LANG,
-            IF(SAI.AI_SAI_USE_YN='Y', 'Y' ,'N')  AS COMP_SAI_USE_YN,
-            IF(SAI.AI_SAI_USE_YN='Y', 'Y' ,'N')  AS AI_SAI_USE_YN,
-            CASE
-            <!-- 패스워드 변경주기를 관리 안하고 있으면 알림 대상 아님 -->
-            WHEN (C.PW_CHANGE_CYCLE IS NULL OR C.PW_CHANGE_CYCLE = '') THEN 'N'
-            <!-- 패스워드 변경일시가 없으면 알림 대상 아님 -->
-            WHEN (IFNULL(U.PW_CHANGE_DT,'')='') THEN 'N'
-            ELSE
-                    CASE WHEN
-                        DATEDIFF(SYSDATE(), U.PW_CHANGE_DT) > C.PW_CHANGE_CYCLE
-                    THEN 'Y'
-                    ELSE 'N'
-            END
-            END AS ALERT_PW_CHANGE_YN,
-            C.PW_CHANGE_CYCLE,
-            D.CONNECTION_ID, D.DB_ID,
-            IF(U.USER_STATUS_CD='001', 'Y' ,'N')	AS  BEING_YN
-        FROM ${dbId}.COM_USERINFO U
-            LEFT JOIN COM_COMPINFO C
-                ON U.COMP_ID = C.COMP_ID
-            LEFT JOIN COM_COMP_DBINFO D
-                ON U.COMP_ID = D.COMP_ID
-            LEFT OUTER JOIN (
-                SELECT
-                    COMP_ID, IF(INSTR(SERVICE_TYPE, '10')=0, 'N', 'Y') AS AI_SAI_USE_YN
-                FROM COM_COMPINFO_DETAIL
-                WHERE COMP_ID = #{compId}
-                AND CURRENT_SEQ='Y'
-            ) SAI ON U.COMP_ID = SAI.COMP_ID
-            LEFT OUTER JOIN COM_DEPTINFO DP
-                ON U.COMP_ID = DP.COMP_ID
-                AND U.DEPT_ID = DP.DEPT_ID
-            LEFT OUTER JOIN COM_CODE JG
-                ON U.COMP_ID = JG.COMP_ID
-                AND JG.CODE_GRP_ID = '537'
-                AND U.JIKGUB_CD = JG.CODE_ID
-            LEFT OUTER JOIN COM_CODE POS
-                ON U.COMP_ID = POS.COMP_ID
-                AND POS.CODE_GRP_ID = '536'
-                AND U.POS_CD = POS.CODE_ID
-            LEFT OUTER JOIN COM_CODE USR_ST
-                ON U.COMP_ID = USR_ST.COMP_ID
-                AND USR_ST.CODE_GRP_ID = '538'
-                AND U.USER_STATUS_CD = USR_ST.CODE_ID
-        WHERE U.COMP_ID = #{compId}
-        AND U.USER_ID = #{userId}
+            U.USER_ID,
+            U.USER_NAME,
+            U.EMAIL,
+            U.PASSWORD,
+            U.PHONE,
+            U.ORG_ID,
+            U.USE_YN,
+            U.LAST_LOGIN_AT,
+            U.PWD_CHANGED_AT,
+            U.LOGIN_FAIL_CNT,
+            U.TWO_FACTOR_YN,
+            U.CREATED_AT,
+            U.UPDATED_AT,
+            U.CREATED_BY,
+            U.UPDATED_BY,
+            O.ORG_ID,
+            O.ORG_NAME
+        FROM ${dbId}.TB_USER U
+            LEFT OUTER JOIN ${dbId}.TB_ORGANIZATION O ON U.ORG_ID = O.ORG_ID
+        WHERE U.USER_ID = #{userId}
     </select>
 
     <select id="selectAdminGubunList" parameterType="java.util.Map" resultType="String">
@@ -268,8 +235,12 @@
     <resultMap id="loginProviderData" type="egovMap" >
         <result property="dummy" column="DUMMY"/>
         <association column="{compId = COMP_ID, dbId = DB_ID, userId = USER_ID, masterDbId = MASTER_DB_ID" property="userVO" javaType="userVO"  select="selectUser"/>
+        <!-- [주석처리] COM_ACCESS_AUTH 테이블 없음
         <association column="{compId = COMP_ID, userId = USER_ID, masterDbId = MASTER_DB_ID}" property="authStatusCount" javaType="String"  select="selectAuthStatusCount"/>
+        -->
+        <!-- [주석처리] COM_ADMIN, V_COM_CODE 테이블 없음
         <collection column="{compId = COMP_ID, dbId = DB_ID, userId = USER_ID}" property="adminGubunList" javaType="list" ofType="String" select="selectAdminGubunList"/>
+        -->
     </resultMap>
     <select id="selectLoginProviderData" parameterType="userVO" resultMap="loginProviderData">
         /* 로그인용 조회 login.selectLoginProviderData */
