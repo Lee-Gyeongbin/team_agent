@@ -34,29 +34,34 @@
 		<appender-ref ref="console"/>
 	</logger>
 
+	<logger name="kr.teamagent" additivity="false">
+		<level value="INFO"/>
+		<appender-ref ref="console"/>
+	</logger>
+
 	<logger name="org.springframework" additivity="false">
 		<level value="INFO"/>
 		<appender-ref ref="consoleForSpring"/>
 	</logger>
 
-	<logger name="kr.ispark.common.security.CustomSecurityMetadataSource" additivity="false">
+	<logger name="kr.teamagent.common.security.CustomSecurityMetadataSource" additivity="false">
 		<level value="INFO"/>
 		<appender-ref ref="console"/>
 	</logger>
-	<logger name="kr.ispark.common.aspect.CompIdAspect" additivity="false">
+	<logger name="kr.teamagent.common.aspect.CompIdAspect" additivity="false">
 		<level value="INFO"/>
 		<appender-ref ref="console"/>
 	</logger>
-	<logger name="kr.ispark.common.aspect.DbInfoAspect" additivity="false">
+	<logger name="kr.teamagent.common.aspect.DbInfoAspect" additivity="false">
 		<level value="INFO"/>
 		<appender-ref ref="console"/>
 	</logger>
-	<logger name="kr.ispark.common.aspect.WebFilterAspect" additivity="false">
+	<logger name="kr.teamagent.common.aspect.WebFilterAspect" additivity="false">
 		<level value="INFO"/>
 		<appender-ref ref="console"/>
 	</logger>
 	<!--
-	<logger name="kr.ispark.common.aspect.CtrlAspect" additivity="false">
+	<logger name="kr.teamagent.common.aspect.CtrlAspect" additivity="false">
 		<level value="INFO"/>
 		<appender-ref ref="console"/>
 	</logger>
@@ -99,7 +104,7 @@
 		<appender-ref ref="console"/>
 	</logger>
 
-	<logger name="kr.ispark.common.BscJacksonMapper" >
+	<logger name="kr.teamagent.common.BscJacksonMapper" >
 		<level value="ERROR"/>
 		<appender-ref ref="console"/>
 	</logger>

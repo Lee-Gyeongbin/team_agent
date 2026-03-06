@@ -4,10 +4,12 @@
 	xmlns:mvc="http://www.springframework.org/schema/mvc"
 	xmlns:context="http://www.springframework.org/schema/context"
 	xmlns:aop="http://www.springframework.org/schema/aop"
+	xmlns:websocket="http://www.springframework.org/schema/websocket"
 	xsi:schemaLocation="http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc-4.0.xsd
 		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.0.xsd
 		http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-4.0.xsd
-		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.0.xsd">
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.0.xsd
+		http://www.springframework.org/schema/websocket https://www.springframework.org/schema/websocket/spring-websocket.xsd">
 
 	<context:component-scan base-package="egovframework, kr.teamagent" use-default-filters="false">
 		<context:include-filter expression="org.springframework.stereotype.Controller" type="annotation"/>
@@ -33,6 +35,15 @@
 			</map>
 		</property>
 	</bean>
+
+	<!-- websocket xml 설정 (네이티브 WebSocket, SockJS 미사용) -->
+	<bean id="chatbotWebSocketHandler" class="kr.teamagent.chat.socket.ChatbotWebSocketHandler" autowire="byType"/>
+	<websocket:handlers allowed-origins="https://www.cmberp.co.kr,https://cmberp.co.kr,http://61.78.123.204:8888,http://localhost:8082,http://127.0.0.1:8082,http://localhost:3001,http://127.0.0.1:3001">
+		<websocket:mapping path="/ws/chat" handler="chatbotWebSocketHandler"/>
+		<websocket:handshake-interceptors>
+			<bean class="org.springframework.web.socket.server.support.HttpSessionHandshakeInterceptor"/>
+		</websocket:handshake-interceptors>
+	</websocket:handlers>
 
 	<bean class="org.springframework.web.servlet.view.BeanNameViewResolver">
 		<property name="order" value="0"/>

@@ -28,6 +28,7 @@ import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.web.BaseController;
 
 @Controller
+@RequestMapping("/api")
 public class ChatbotController extends BaseController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatbotController.class);
@@ -35,7 +36,7 @@ public class ChatbotController extends BaseController {
     @Autowired
     private ChatbotService chatbotService;
 
-    @RequestMapping(value="/ai/chatbot/stat/selectAiDailyUsage.do")
+    @RequestMapping(value="/ai/chatbot/selectAiDailyUsage.do")
     @ResponseBody
     public ModelAndView selectAiDailyUsage(ChatbotVO searchVO)throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
@@ -57,7 +58,7 @@ public class ChatbotController extends BaseController {
      * @param response
      * @throws Exception
      */
-    @RequestMapping(value = "/ai/chatbot/manual/fileView.do")
+    @RequestMapping(value = "/ai/chatbot/fileView.do")
     @ResponseBody
     public void manualFileView(ChatbotVO dataVO, HttpServletResponse response) throws Exception {
         String filePath = dataVO.getFilePath();
@@ -125,7 +126,7 @@ public class ChatbotController extends BaseController {
         }
     }
 
-    @RequestMapping("/ai/chatbot/stat/saveSatisYn.do")
+    @RequestMapping("/ai/chatbot/saveSatisYn.do")
     public @ResponseBody Map<String, Object> saveSatisYn(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
 

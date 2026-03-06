@@ -42,20 +42,6 @@ public class ChatbotServiceImpl implements ChatbotService {
     @Override
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
-        // 일일 사용량 체크
-        ChatbotVO chatbotVO = new ChatbotVO();
-        String usageDate = LocalDate.now(ZoneId.of("Asia/Seoul")).format(DateTimeFormatter.BASIC_ISO_DATE);
-        chatbotVO.setUsageDate(usageDate);
-        chatbotVO.setUserId(userId);
-        chatbotVO.setSvcTy(svcTy);
-        ChatbotVO result = chatbotDAO.selectAiDailyUsage(chatbotVO);
-        
-        // 사용량 체크 -> result가 null이거나 USAGE_CHK가 'N'이면 사용 불가
-        if (result == null || !"Y".equals(result.getUsageChk())) {
-            callback.onError("일일 사용량을 모두 소진하였습니다.");
-            return;
-        }
-
         String apiUrl = this.getApiUrl(svcTy);
         
         if (CommonUtil.isEmpty(apiUrl)) {
