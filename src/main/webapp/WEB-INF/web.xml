@@ -29,7 +29,6 @@
       <web-resource-collection>
               <web-resource-name>Restricted methods</web-resource-name>
                   <url-pattern>/*</url-pattern>
-                  <http-method>OPTIONS</http-method>
                   <http-method>TRACE</http-method>
                   <http-method>COPY</http-method>
                   <http-method>PATCH</http-method>

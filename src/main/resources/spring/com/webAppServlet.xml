@@ -26,6 +26,29 @@
 
 	<mvc:annotation-driven/>
 
+	<mvc:cors>
+		<mvc:mapping path="/api/**"
+			allowed-origins="http://localhost:3001,http://127.0.0.1:3001,https://www.cmberp.co.kr,https://cmberp.co.kr"
+			allowed-methods="GET,POST,PUT,DELETE,OPTIONS"
+			allowed-headers="Content-Type,X-Requested-From,Authorization"
+			allow-credentials="true"
+			max-age="3600"/>
+	</mvc:cors>
+
+	<mvc:interceptors>
+		<mvc:interceptor>
+			<mvc:mapping path="/api/**"/>
+			<bean class="kr.teamagent.common.interceptor.ApiSessionInterceptor">
+				<property name="excludePatterns">
+					<set>
+						<value>/api/login.do</value>
+						<value>/api/logout.do</value>
+					</set>
+				</property>
+			</bean>
+		</mvc:interceptor>
+	</mvc:interceptors>
+
 	<bean id="imageRenderer" class="egovframework.com.cmm.ImagePaginationRenderer"/>
 
 	<bean id="paginationManager" class="org.egovframe.rte.ptl.mvc.tags.ui.pagination.DefaultPaginationManager">
