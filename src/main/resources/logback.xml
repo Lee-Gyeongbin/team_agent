@@ -86,7 +86,8 @@
 
 	<!-- MyBatis mapper: 실행되는 SQL 로그 (namespace="login") -->
 	<logger name="login" additivity="false">
-		<level value="OFF"/>
+		<level value="DEBUG"/>
+		<appender-ref ref="consoleForSql"/>
 	</logger>
 
 	<logger name="org.mysql.jdbc" level="DEBUG" additivity="false">
