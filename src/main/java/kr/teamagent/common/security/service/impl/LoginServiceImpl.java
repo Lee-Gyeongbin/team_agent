@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.egovframe.rte.psl.dataaccess.util.EgovMap;
+import kr.teamagent.common.exception.DuplicateUserIdException;
 import kr.teamagent.common.security.service.AccessLoginVO;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.CommonServiceImpl;
@@ -112,6 +113,23 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
 
 	public int lockUser(UserVO vo) throws Exception {
 		return loginDAO.lockUser(vo);
+	}
+
+	/**
+	 * 회원가입 - 신규 사용자 등록
+	 * @param user UserVO (userId, userNm, passwd(암호화됨), email, phone, orgId, compId, dbId, masterDbId 필수)
+	 * @throws DuplicateUserIdException 이미 존재하는 userId인 경우
+	 * @throws Exception
+	 */
+	public void signupUser(UserVO user) throws Exception {
+		UserVO existing = loginDAO.selectUser(user);
+		if (existing != null) {
+			throw new DuplicateUserIdException("이미 존재하는 아이디입니다.");
+		}
+		int rows = loginDAO.insertUser(user);
+		if (rows != 1) {
+			throw new Exception("회원가입 처리에 실패했습니다.");
+		}
 	}
 
 

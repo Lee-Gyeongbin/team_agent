@@ -127,6 +127,41 @@
         WHERE USER_ID = #{userId}
     </update>
 
+    <insert id="insertUser" parameterType="userVO">
+        /* 회원가입 사용자 등록 login.insertUser */
+        INSERT INTO ${dbId}.TB_USER (
+            USER_ID
+            , USER_NM
+            , EMAIL
+            , PASSWD
+            , PHONE
+            , ORG_ID
+            , USE_YN
+            , LOGIN_FAIL_CNT
+            , TWO_FA_YN
+            , ACCT_STATUS
+            , CREATE_DT
+            , MODIFY_DT
+            , CRTR_ID
+            , MDFR_ID
+        ) VALUES (
+            #{userId}
+            , #{userNm}
+            , #{email}
+            , #{passwd}
+            , #{phone}
+            , #{orgId}
+            , 'Y'
+            , 0
+            , 'N'
+            , 'ACTIVE'
+            , NOW()
+            , NULL
+            , #{userId}
+            , NULL
+        )
+    </insert>
+
     <insert id="insertAuditLogin" parameterType="accessLoginVO">
         /* 감사 로그인 로그 등록 login.insertAuditLogin */
         INSERT INTO ${dbId}.TB_AUDIT_LOGIN (

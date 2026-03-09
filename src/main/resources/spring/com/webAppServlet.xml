@@ -43,6 +43,7 @@
 					<set>
 						<value>/api/login.do</value>
 						<value>/api/logout.do</value>
+						<value>/api/signup.do</value>
 					</set>
 				</property>
 			</bean>

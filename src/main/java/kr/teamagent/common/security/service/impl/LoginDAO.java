@@ -76,6 +76,16 @@ public class LoginDAO extends EgovComAbstractDAO {
 		return insert("login.insertAuditLogin", vo);
 	}
 
+	/**
+	 * 회원가입 사용자 등록
+	 * @param vo UserVO
+	 * @return insert 결과 행 수
+	 * @throws Exception
+	 */
+	public int insertUser(UserVO vo) throws Exception {
+		return insert("login.insertUser", vo);
+	}
+
 
 	/**
 	 * OTP인증정보 조회

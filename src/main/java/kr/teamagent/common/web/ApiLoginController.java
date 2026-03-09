@@ -68,18 +68,6 @@ public class ApiLoginController {
 
             EgovMap loginProviderData = sqlSession.selectOne("login.selectLoginProviderData", paramVO);
 
-            /*
-             * [주석처리] 인증 시도 횟수 - COM_ACCESS_AUTH 테이블 없음
-             * int authStatusCount = Integer.parseInt(String.valueOf(loginProviderData.get("authStatusCount")));
-             * int maxAccessCount = Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"));
-             * if (authStatusCount >= maxAccessCount) {
-             *     result.put("success", false);
-             *     result.put("errorType", "accessDenied");
-             *     result.put("message", "로그인 시도 횟수를 초과하였습니다. 관리자에게 문의하세요.");
-             *     return ResponseEntity.ok(result);
-             * }
-             */
-
             UserVO user = (UserVO) loginProviderData.get("userVO");
             if (user == null) {
                 result.put("success", false);
