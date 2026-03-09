@@ -67,12 +67,19 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
             HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
             String compId = request.getParameter("compId");
             String userId = CommonUtil.nullToBlank(request.getParameter("userId"));
+            if (CommonUtil.isEmpty(userId)) {
+                userId = CommonUtil.nullToBlank(request.getParameter("username"));
+            }
+            if (CommonUtil.isEmpty(userId)) {
+                userId = CommonUtil.nullToBlank(request.getParameter("id"));
+            }
+            if (CommonUtil.isEmpty(userId) && authentication != null && authentication.getName() != null) {
+                userId = authentication.getName();
+            }
             String password = CommonUtil.nullToBlank(request.getParameter("password"));
             String authToken = CommonUtil.nullToBlank(request.getParameter("ssoId"));
             String baseUrl = CommonUtil.nullToBlank(request.getParameter("baseUrl"));
             log.info("=====> ssoId: " + authToken+ ", baseUrl: " + baseUrl);
-            String accessLoginInType = "password";
-            String accessStatus = "S";
 
             String userType = String.valueOf(SessionUtil.getAttribute("userType"));
             String masterDbId = null;
@@ -88,7 +95,6 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
 
             //SSO 로그인
             if (!isFormLogin) {
-                accessLoginInType = "sso";
                 BufferedReader in = null;
                 HttpURLConnection con = null;
                 int responseCode =0;
@@ -185,39 +191,42 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
             SessionUtil.setAttribute("accessErrorCnt", null);
             EgovMap loginProviderData = loginService.selectLoginProviderData(userVO);
 
-            /*
-             * [주석처리] 인증 시도 횟수 - COM_ACCESS_AUTH 테이블 없음
-             * int authStatusCount = Integer.valueOf(String.valueOf(loginProviderData.get("authStatusCount")));
-             * if(authStatusCount >= Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"))) {
-             *     SessionUtil.setAttribute("accessError", "accessDenied");
-             *     return null;
-             * }
-             */
-
             UserVO user = (UserVO)loginProviderData.get("userVO");
             if(user == null){
                 SessionUtil.setAttribute("accessError", "noUser");
                 return null;
             }
+            user.setDbId(userVO.getDbId());
 
             if(!"Y".equals(user.getUseYn())) {
                 SessionUtil.setAttribute("accessError", "inActiveUser");
                 return null;
             }
+
+            if("LOCKED".equals(user.getAcctStatus())) {
+                SessionUtil.setAttribute("accessError", "accountLocked");
+                return null;
+            }
             if(isFormLogin) {
                 if(!passwordEncoder.matches(password, user.getPasswd())){
                     SessionUtil.setAttribute("accessError", "passwordFail");
-                    /*
-                     * [주석처리] 실패 기록 - COM_ACCESS_AUTH 테이블 없음
-                     * AccessLoginVO accessLoginVO = new AccessLoginVO();
-                     * accessLoginVO.setCompId(compId);
-                     * accessLoginVO.setUserId(userId);
-                     * accessLoginVO.setInType(accessLoginInType);
-                     * accessLoginVO.setClientIp(CommonUtil.getUserIP(request));
-                     * accessLoginVO.setStatus(accessStatus);
-                     * accessLoginVO.setFailCount(String.valueOf(authStatusCount));
-                     * loginService.insertAccessCertificationFailData(accessLoginVO);
-                     */
+
+                    AccessLoginVO auditVO = new AccessLoginVO();
+                    auditVO.setUserId(userId);
+                    auditVO.setLoginTp("LOGIN");
+                    auditVO.setAccessTp("WEB");
+                    auditVO.setIpAddr(CommonUtil.getUserIP(request));
+                    auditVO.setUserAgent(request.getHeader("User-Agent"));
+                    auditVO.setResult("FAIL");
+                    auditVO.setFailRson("PASSWORD_MISMATCH");
+                    auditVO.setFailCnt(user.getLoginFailCnt() + 1);
+                    loginService.recordLoginFail(userVO, auditVO);
+
+                    int maxAccessCount = Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"));
+                    if(user.getLoginFailCnt() + 1 >= maxAccessCount) {
+                        loginService.lockUser(userVO);
+                    }
+
                     return null;
                 }
             }else{
@@ -241,15 +250,15 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
             ArrayList<GrantedAuthority> grantedAuthList = new ArrayList<GrantedAuthority>();
             grantedAuthList.add(new SimpleGrantedAuthority("ROLE_USER"));
 
-//            /* 비밀번호 인증성공 프로세스*/
-//            AccessLoginVO accessLoginVO = new AccessLoginVO();
-//            accessLoginVO.setCompId(compId);
-//            accessLoginVO.setUserId(userId);
-//            accessLoginVO.setInType(accessLoginInType);
-//            accessLoginVO.setClientIp(CommonUtil.getUserIP(request));
-//            accessLoginVO.setStatus(accessStatus);
-//            accessLoginVO.setFailCount("0");
-//            loginService.insertAccessCertificationSuccessData(accessLoginVO);
+            AccessLoginVO auditVO = new AccessLoginVO();
+            auditVO.setUserId(userId);
+            auditVO.setLoginTp(isFormLogin ? "LOGIN" : "SSO");
+            auditVO.setAccessTp("WEB");
+            auditVO.setIpAddr(CommonUtil.getUserIP(request));
+            auditVO.setUserAgent(request.getHeader("User-Agent"));
+            auditVO.setResult("SUCCESS");
+            auditVO.setFailCnt(0);
+            loginService.recordLoginSuccess(userVO, auditVO);
 
             return new UsernamePasswordAuthenticationToken(user, user.getUserId(), grantedAuthList);
         } catch (SQLException sqe) {

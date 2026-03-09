@@ -18,7 +18,6 @@ import org.egovframe.rte.psl.dataaccess.util.EgovMap;
 import kr.teamagent.common.security.service.AccessLoginVO;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.CommonServiceImpl;
-import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.SessionUtil;
 
 @Service
@@ -28,9 +27,6 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
 
 	@Autowired
 	CommonServiceImpl commonServiceImpl;
-
-    @Autowired
-    LoginServiceImpl loginService;
 
 	// 사용자 조회
 	public UserVO selectUser(UserVO vo) throws Exception {
@@ -94,26 +90,28 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
 		return loginDAO.selectAuthOtpStatusCount(vo);
 	}*/
 
-	public int insertAccessCertificationFailData(AccessLoginVO vo) throws Exception {
+	public int recordLoginFail(UserVO userVO, AccessLoginVO auditVO) throws Exception {
 		int resultCnt = 0;
-		int count = Integer.parseInt(CommonUtil.nvl(vo.getFailCount(),"0"));
-
-		if(count == 1) {
-			resultCnt += loginDAO.insertAccessCertificationStatusData(vo);
-		}else {
-			resultCnt += loginDAO.updateAccessCertificationStatusData(vo);
-		}
-
-		resultCnt += loginDAO.insertAccessCertificationLogData(vo);
-
-		return  resultCnt;
+		resultCnt += loginDAO.updateLoginFailCnt(userVO);
+		auditVO.setDbId(userVO.getDbId());
+		resultCnt += loginDAO.insertAuditLogin(auditVO);
+		return resultCnt;
 	}
 
-	public int insertAccessCertificationSuccessData(AccessLoginVO vo) throws Exception {
+	public int recordLoginSuccess(UserVO userVO, AccessLoginVO auditVO) throws Exception {
 		int resultCnt = 0;
-		resultCnt += loginDAO.deleteAccessCertificationStatusData(vo);
-		resultCnt += loginDAO.insertAccessCertificationLogData(vo);
-		return  resultCnt;
+		resultCnt += loginDAO.resetLoginFailCnt(userVO);
+		auditVO.setDbId(userVO.getDbId());
+		resultCnt += loginDAO.insertAuditLogin(auditVO);
+		return resultCnt;
+	}
+
+	public int selectLoginFailCnt(UserVO vo) throws Exception {
+		return loginDAO.selectLoginFailCnt(vo);
+	}
+
+	public int lockUser(UserVO vo) throws Exception {
+		return loginDAO.lockUser(vo);
 	}
 
 
@@ -193,41 +191,28 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
     }
     
 
-	/**
-	 * 로그인이력 최근 로그인성공 항목을 조회하여 OTP 인증상태, Ip Check 상태 업데이트
-	 * @param	UserVO vo
-	 * @return	int
-	 * @throws	Exception
-	 */
-    public int insertAccessCertificationOtpData(UserVO vo, String loginStatus, String status) throws Exception {
-		AccessLoginVO accessLoginVO = new AccessLoginVO();
-		accessLoginVO.setCompId(vo.getCompId());
-		accessLoginVO.setUserId(vo.getUserId());
-		accessLoginVO.setInType("password");					// loginType sso/password;
-		accessLoginVO.setClientIp(vo.getIp());
-		accessLoginVO.setStatus(loginStatus);
-		accessLoginVO.setOtpStatus(status);
-		accessLoginVO.setFailCount("0");
-		accessLoginVO.setIpStatus(SessionUtil.getAttribute("ipChkValue").toString());
-		return loginService.insertAccessCertificationSuccessData(accessLoginVO);
+	public int recordOtpResult(UserVO vo, String result, String otpStatus) throws Exception {
+		AccessLoginVO auditVO = new AccessLoginVO();
+		auditVO.setUserId(vo.getUserId());
+		auditVO.setLoginTp("LOGIN");
+		auditVO.setIpAddr(vo.getIp());
+		auditVO.setResult(result);
+		auditVO.setOtpStatus(otpStatus);
+		auditVO.setFailCnt(0);
+		auditVO.setIpStatus(SessionUtil.getAttribute("ipChkValue").toString());
+		return recordLoginSuccess(vo, auditVO);
     }
-	/**
-	 * 로그인이력 최근 로그인성공 항목을 조회하여 OTP 인증상태, Ip Check 상태 업데이트
-	 * @param	UserVO vo
-	 * @return	int
-	 * @throws	Exception
-	 */
-    public int insertAccessCertificationOtpData(UserVO vo, String loginStatus, String status, int failCount) throws Exception {
-		AccessLoginVO accessLoginVO = new AccessLoginVO();
-		accessLoginVO.setCompId(vo.getCompId());
-		accessLoginVO.setUserId(vo.getUserId());
-		accessLoginVO.setInType("password");					// loginType sso/password;
-		accessLoginVO.setClientIp(vo.getIp());
-		accessLoginVO.setStatus(loginStatus);
-		accessLoginVO.setOtpStatus(status);
-    	accessLoginVO.setFailCount(failCount + "");
-		accessLoginVO.setIpStatus(SessionUtil.getAttribute("ipChkValue").toString());
-		return loginService.insertAccessCertificationSuccessData(accessLoginVO);
+
+	public int recordOtpResult(UserVO vo, String result, String otpStatus, int failCnt) throws Exception {
+		AccessLoginVO auditVO = new AccessLoginVO();
+		auditVO.setUserId(vo.getUserId());
+		auditVO.setLoginTp("LOGIN");
+		auditVO.setIpAddr(vo.getIp());
+		auditVO.setResult(result);
+		auditVO.setOtpStatus(otpStatus);
+		auditVO.setFailCnt(failCnt);
+		auditVO.setIpStatus(SessionUtil.getAttribute("ipChkValue").toString());
+		return recordLoginSuccess(vo, auditVO);
     }
 
 }

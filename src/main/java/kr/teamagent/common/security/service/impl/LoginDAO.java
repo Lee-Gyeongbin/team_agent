@@ -56,34 +56,24 @@ public class LoginDAO extends EgovComAbstractDAO {
 		return selectOne("login.selectServiceUseYn", vo);
 	}
 
-	/**
-	 * 인증시도 횟수 조회
-	 * @param	UserVO vo
-	 * @return	String
-	 * @throws	Exception
-	 */
-	public int selectAuthStatusCount(UserVO vo) throws Exception {
-		return selectOne("login.selectAuthStatusCount", vo);
+	public int selectLoginFailCnt(UserVO vo) throws Exception {
+		return selectOne("login.selectLoginFailCnt", vo);
 	}
 
-	public int selectAuthOtpStatusCount(UserVO vo) throws Exception {
-		return selectOne("login.selectAuthOtpStatusCount", vo);
+	public int updateLoginFailCnt(UserVO vo) throws Exception {
+		return update("login.updateLoginFailCnt", vo);
 	}
 
-	public int insertAccessCertificationStatusData(AccessLoginVO vo) throws Exception {
-		return insert("login.insertAccessCertificationStatusData", vo);
+	public int lockUser(UserVO vo) throws Exception {
+		return update("login.lockUser", vo);
 	}
 
-	public int updateAccessCertificationStatusData(AccessLoginVO vo) throws Exception {
-		return update("login.updateAccessCertificationStatusData", vo);
+	public int resetLoginFailCnt(UserVO vo) throws Exception {
+		return update("login.resetLoginFailCnt", vo);
 	}
 
-	public int deleteAccessCertificationStatusData(AccessLoginVO vo) throws Exception {
-		return delete("login.deleteAccessCertificationStatusData", vo);
-	}
-
-	public int insertAccessCertificationLogData(AccessLoginVO vo) throws Exception {
-		return delete("login.insertAccessCertificationLogData", vo);
+	public int insertAuditLogin(AccessLoginVO vo) throws Exception {
+		return insert("login.insertAuditLogin", vo);
 	}
 
 

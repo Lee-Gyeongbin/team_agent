@@ -20,7 +20,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import org.egovframe.rte.psl.dataaccess.util.EgovMap;
+import kr.teamagent.common.security.service.AccessLoginVO;
 import kr.teamagent.common.security.service.UserVO;
+import kr.teamagent.common.security.service.impl.LoginServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
 
@@ -34,6 +36,9 @@ public class ApiLoginController {
     @Autowired
     @Qualifier("egov.sqlSessionTemplate")
     private SqlSessionTemplate sqlSession;
+
+    @Autowired
+    private LoginServiceImpl loginService;
 
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
 
@@ -82,6 +87,7 @@ public class ApiLoginController {
                 result.put("message", "존재하지 않는 사용자입니다.");
                 return ResponseEntity.ok(result);
             }
+            user.setDbId(paramVO.getDbId());
 
             if (!"Y".equals(user.getUseYn())) {
                 result.put("success", false);
@@ -90,11 +96,52 @@ public class ApiLoginController {
                 return ResponseEntity.ok(result);
             }
 
+            if ("LOCKED".equals(user.getAcctStatus())) {
+                result.put("success", false);
+                result.put("errorType", "accountLocked");
+                result.put("message", "계정이 잠겼습니다. 관리자에게 문의하세요.");
+                return ResponseEntity.ok(result);
+            }
+
             if (!passwordEncoder.matches(password, user.getPasswd())) {
+                paramVO.setIp(CommonUtil.getUserIP(request));
+                AccessLoginVO auditVO = new AccessLoginVO();
+                auditVO.setUserId(userId);
+                auditVO.setLoginTp("LOGIN");
+                auditVO.setAccessTp("API");
+                auditVO.setIpAddr(CommonUtil.getUserIP(request));
+                auditVO.setUserAgent(request.getHeader("User-Agent"));
+                auditVO.setResult("FAIL");
+                auditVO.setFailRson("PASSWORD_MISMATCH");
+                auditVO.setFailCnt(user.getLoginFailCnt() + 1);
+                try {
+                    loginService.recordLoginFail(paramVO, auditVO);
+                    int maxAccessCount = Integer.parseInt(PropertyUtil.getProperty("auth.accessCount"));
+                    if (user.getLoginFailCnt() + 1 >= maxAccessCount) {
+                        loginService.lockUser(paramVO);
+                    }
+                } catch (Exception ex) {
+                    log.error("recordLoginFail error", ex);
+                }
                 result.put("success", false);
                 result.put("errorType", "passwordFail");
                 result.put("message", "비밀번호가 올바르지 않습니다.");
                 return ResponseEntity.ok(result);
+            }
+
+            paramVO.setIp(CommonUtil.getUserIP(request));
+            AccessLoginVO auditVO = new AccessLoginVO();
+            auditVO.setUserId(userId);
+            auditVO.setLoginTp("LOGIN");
+            auditVO.setAccessTp("API");
+            auditVO.setIpAddr(CommonUtil.getUserIP(request));
+            auditVO.setUserAgent(request.getHeader("User-Agent"));
+            auditVO.setResult("SUCCESS");
+            auditVO.setFailCnt(0);
+            try {
+                loginService.recordLoginSuccess(paramVO, auditVO);
+            } catch (Exception ex) {
+                log.error("recordLoginSuccess error", ex);
             }
 
             HttpSession session = request.getSession(true);

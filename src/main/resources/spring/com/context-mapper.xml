@@ -21,4 +21,8 @@
 	</bean>
 	<alias name="egov.sqlSession" alias="sqlSession"/>
 
+	<!-- kr.teamagent.common.security exclude로 인해 수동 등록 -->
+	<bean id="loginDAO" class="kr.teamagent.common.security.service.impl.LoginDAO"/>
+	<bean id="loginServiceImpl" class="kr.teamagent.common.security.service.impl.LoginServiceImpl"/>
+
 </beans>

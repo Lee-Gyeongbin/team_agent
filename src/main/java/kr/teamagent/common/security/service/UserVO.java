@@ -39,6 +39,9 @@ public class UserVO extends CommonVO {
     private String pwdChgDt;
     private int loginFailCnt;
     private String twoFaYn;
+    private String accTp;
+    private String acctStatus;
+    private String lockDt;
     private String createDt;
     private String modifyDt;
     private String crtrId;

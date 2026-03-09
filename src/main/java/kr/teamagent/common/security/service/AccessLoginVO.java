@@ -7,17 +7,18 @@ import lombok.Setter;
 @Setter
 public class AccessLoginVO {
 
-	private String compId;
+	private String dbId;
+	private Long logId;
 	private String userId;
-	private String userNm;
-	private String inType;
-	private String occurDatetime;
-	private String clientIp;
-	private String status;
-	private String failCount;
+	private String loginTp;
+	private String accessTp;
+	private String ipAddr;
+	private String userAgent;
+	private String result;
+	private String failRson;
+	private int failCnt;
 	private String token;
-
-	private String seq;
 	private String otpStatus;
 	private String ipStatus;
+	private String createDt;
 }
