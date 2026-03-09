@@ -205,7 +205,7 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
                 return null;
             }
             if(isFormLogin) {
-                if(!passwordEncoder.matches(password, user.getPassword())){
+                if(!passwordEncoder.matches(password, user.getPasswd())){
                     SessionUtil.setAttribute("accessError", "passwordFail");
                     /*
                      * [주석처리] 실패 기록 - COM_ACCESS_AUTH 테이블 없음

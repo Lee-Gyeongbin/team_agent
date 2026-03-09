@@ -5,24 +5,24 @@
         /* 로그인용 사용자 조회 login.selectUser */
         SELECT
             U.USER_ID,
-            U.USER_NAME,
+            U.USER_NM,
             U.EMAIL,
-            U.PASSWORD,
+            U.PASSWD,
             U.PHONE,
             U.ORG_ID,
             U.USE_YN,
-            U.LAST_LOGIN_AT,
-            U.PWD_CHANGED_AT,
+            U.LAST_LOGIN_DT,
+            U.PWD_CHG_DT,
             U.LOGIN_FAIL_CNT,
-            U.TWO_FACTOR_YN,
-            U.CREATED_AT,
-            U.UPDATED_AT,
-            U.CREATED_BY,
-            U.UPDATED_BY,
+            U.TWO_FA_YN,
+            U.CREATE_DT,
+            U.MODIFY_DT,
+            U.CRTR_ID,
+            U.MDFR_ID,
             O.ORG_ID,
-            O.ORG_NAME
+            O.ORG_NM
         FROM ${dbId}.TB_USER U
-            LEFT OUTER JOIN ${dbId}.TB_ORGANIZATION O ON U.ORG_ID = O.ORG_ID
+            LEFT OUTER JOIN ${dbId}.TB_ORG O ON U.ORG_ID = O.ORG_ID
         WHERE U.USER_ID = #{userId}
     </select>
 

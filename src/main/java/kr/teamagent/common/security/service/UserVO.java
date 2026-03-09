@@ -29,21 +29,21 @@ public class UserVO extends CommonVO {
     private static final long serialVersionUID = 6985078694123877792L;
 
     private String userId;
-    private String userName;
+    private String userNm;
     private String email;
-    private String password;
+    private String passwd;
     private String phone;
     private String orgId;
     private String useYn;
-    private String lastLoginAt;
-    private String pwdChangedAt;
+    private String lastLoginDt;
+    private String pwdChgDt;
     private int loginFailCnt;
-    private String twoFactorYn;
-    private String createdAt;
-    private String updatedAt;
-    private String createdBy;
-    private String updatedBy;
-    private String orgName;
+    private String twoFaYn;
+    private String createDt;
+    private String modifyDt;
+    private String crtrId;
+    private String mdfrId;
+    private String orgNm;
 
     private String profileImgBase64;
     private String profileImg;

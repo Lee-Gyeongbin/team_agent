@@ -90,7 +90,7 @@ public class ApiLoginController {
                 return ResponseEntity.ok(result);
             }
 
-            if (!passwordEncoder.matches(password, user.getPassword())) {
+            if (!passwordEncoder.matches(password, user.getPasswd())) {
                 result.put("success", false);
                 result.put("errorType", "passwordFail");
                 result.put("message", "비밀번호가 올바르지 않습니다.");
@@ -104,9 +104,10 @@ public class ApiLoginController {
 
             Map<String, Object> userData = new HashMap<>();
             userData.put("userId", user.getUserId());
-            userData.put("userName", user.getUserName());
+            userData.put("userNm", user.getUserNm());
             userData.put("email", user.getEmail());
             userData.put("orgId", user.getOrgId());
+            userData.put("orgNm", user.getOrgNm());
             userData.put("phone", user.getPhone());
 
             result.put("success", true);
@@ -154,7 +155,7 @@ public class ApiLoginController {
         UserVO user = (UserVO) session.getAttribute("loginVO");
         Map<String, Object> userData = new HashMap<>();
         userData.put("userId", user.getUserId());
-        userData.put("userName", user.getUserName());
+        userData.put("userName", user.getUserNm());
         userData.put("email", user.getEmail());
         userData.put("orgId", user.getOrgId());
         userData.put("phone", user.getPhone());

@@ -67,16 +67,27 @@
 	</logger>
 	-->
 	<logger name="java.sql" additivity="false">
-		<level value="INFO"/>
+		<level value="DEBUG"/>
 		<appender-ref ref="consoleForSql"/>
 	</logger>
 	<logger name="com.test.dao" additivity="false">
-		<level value="INFO"/>
+		<level value="DEBUG"/>
 		<appender-ref ref="consoleForSql"/>
 	</logger>
 
+	<!-- log4jdbc: 쿼리 로그 (DriverSpy 사용 시) -->
+	<logger name="jdbc.sqlonly" additivity="false">
+		<level value="DEBUG"/>
+		<appender-ref ref="consoleForSql"/>
+	</logger>
 	<logger name="jdbc.sqltiming" additivity="false">
-		<level value="INFO"/>
+		<level value="DEBUG"/>
+		<appender-ref ref="consoleForSql"/>
+	</logger>
+
+	<!-- MyBatis mapper: 실행되는 SQL 로그 -->
+	<logger name="login" additivity="false">
+		<level value="DEBUG"/>
 		<appender-ref ref="consoleForSql"/>
 	</logger>
 
