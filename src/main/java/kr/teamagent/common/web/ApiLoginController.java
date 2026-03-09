@@ -27,7 +27,7 @@ import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/")
 @SuppressWarnings("deprecation")
 public class ApiLoginController {
 
@@ -202,9 +202,10 @@ public class ApiLoginController {
         UserVO user = (UserVO) session.getAttribute("loginVO");
         Map<String, Object> userData = new HashMap<>();
         userData.put("userId", user.getUserId());
-        userData.put("userName", user.getUserNm());
+        userData.put("userNm", user.getUserNm());
         userData.put("email", user.getEmail());
         userData.put("orgId", user.getOrgId());
+        userData.put("orgNm", user.getOrgNm());
         userData.put("phone", user.getPhone());
 
         result.put("success", true);
