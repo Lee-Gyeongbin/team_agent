@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{yy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36}%n%msg%n"/>
+            <Charset>UTF-8</Charset>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <!-- log4jdbc가 log4j2 사용 시: sqltiming만 (sqlonly 중복 제거) -->
+        <Logger name="jdbc.sqlonly" level="off" additivity="false"/>
+        <Logger name="jdbc.sqltiming" level="info" additivity="false">
+            <AppenderRef ref="Console"/>
+        </Logger>
+        <Root level="error">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

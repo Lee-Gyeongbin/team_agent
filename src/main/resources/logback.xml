@@ -75,20 +75,18 @@
 		<appender-ref ref="consoleForSql"/>
 	</logger>
 
-	<!-- log4jdbc: 쿼리 로그 (DriverSpy 사용 시) -->
+	<!-- log4jdbc: sqltiming만 사용 (sqlonly 중복 제거) -->
 	<logger name="jdbc.sqlonly" additivity="false">
-		<level value="DEBUG"/>
-		<appender-ref ref="consoleForSql"/>
+		<level value="OFF"/>
 	</logger>
 	<logger name="jdbc.sqltiming" additivity="false">
 		<level value="DEBUG"/>
 		<appender-ref ref="consoleForSql"/>
 	</logger>
 
-	<!-- MyBatis mapper: 실행되는 SQL 로그 -->
+	<!-- MyBatis mapper: 실행되는 SQL 로그 (namespace="login") -->
 	<logger name="login" additivity="false">
-		<level value="DEBUG"/>
-		<appender-ref ref="consoleForSql"/>
+		<level value="OFF"/>
 	</logger>
 
 	<logger name="org.mysql.jdbc" level="DEBUG" additivity="false">
