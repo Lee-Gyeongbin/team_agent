@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="loginhistory">
+
+    <!-- 로그인 히스토리 목록 조회 -->
+    <select id="selectLoginHistoryList" parameterType="loginHistoryVO" resultType="loginHistoryVO">
+        /* 로그인 히스토리 목록 조회 loginhistory.selectLoginHistoryList */
+        SELECT
+            A.USER_ID,
+            A.IP_ADDR,
+            A.USER_AGENT,
+            A.RESULT,
+            A.FAIL_RSON,
+            DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM ${dbId}.TB_AUDIT_LOGIN A
+        WHERE 1 = 1
+        ORDER BY A.CREATE_DT DESC
+        LIMIT #{firstIndex}, #{recordCountPerPage}
+    </select>
+
+
+</mapper>
