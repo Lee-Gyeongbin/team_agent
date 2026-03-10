@@ -8,6 +8,30 @@ import lombok.Setter;
 @Setter
 public class ChatbotVO extends CommonVO {
 
+    // LLM 모델 정보(TB_LLM_MDL)
+    // 모델 ID
+    private String modelId;
+    private String label;
+    private String value;
+    // 모델 이름
+    private String modelName;
+    // 제공자 ID
+    private String providerId;
+    // 버전
+    private String version;
+    // 입력 비용
+    private String inputCost;
+    // 출력 비용
+    private String outputCost;
+    // 사용 여부
+    private String useYn;
+    // 설명
+    private String description;
+    // 정렬 순서
+    private String sortOrder;
+    // 수정 일시
+    private String modifyDt;
+
     private Long roomId;
     private String roomTitle;
     /* AI 챗봇 질문/응답 로그 */

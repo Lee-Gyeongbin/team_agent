@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
@@ -18,7 +19,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.WebSocketSession;
 
-import kr.teamagent.chat.service.ChatbotService;
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.socket.ChatbotWebSocketHandler;
 import kr.teamagent.common.util.CommonUtil;
@@ -32,14 +32,23 @@ import okhttp3.RequestBody;
  * 각 서비스 타입별 AI API 호출 및 스트리밍 처리
  */
 @Service
-public class ChatbotServiceImpl implements ChatbotService {
+public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
 
     @Autowired
     ChatbotDAO chatbotDAO;
 
-    @Override
+    /**
+     * 모델 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectModelList(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectModelList(searchVO);
+    }
+
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
@@ -75,7 +84,6 @@ public class ChatbotServiceImpl implements ChatbotService {
         return apiUrl;
     }
 
-    @Override
     public ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception {
         // TODO: TB_CHAT_ROOM 테이블 생성 후 insertChatRoom 호출로 교체
         chatbotVO.setRoomId(1L);
@@ -88,7 +96,6 @@ public class ChatbotServiceImpl implements ChatbotService {
      * @return
      * @throws Exception
      */
-    @Override
     public Map<String, Object> saveSatisYn(ChatbotVO chatbotVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
 

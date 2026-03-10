@@ -9,12 +9,23 @@ import kr.teamagent.chat.service.ChatbotVO;
 
 @Repository
 public class ChatbotDAO extends EgovComAbstractDAO {
+
+    /**
+     * 모델 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectModelList(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectModelList", searchVO);
+    }
+
     public int insertChatRoom(ChatbotVO chatbotVO) throws Exception{
-        return insert("ai.chatbot.stat.insertChatRoom",chatbotVO);
+        return insert("ai.chatbot.insertChatRoom",chatbotVO);
     }
 
     public ChatbotVO selectAiDailyUsage(ChatbotVO chatbotVO) throws Exception{
-        return selectOne("ai.chatbot.stat.selectAiDailyUsage",chatbotVO);
+        return selectOne("ai.chatbot.selectAiDailyUsage",chatbotVO);
     }
 
     /**
@@ -24,7 +35,7 @@ public class ChatbotDAO extends EgovComAbstractDAO {
      * @throws Exception
      */
     public int insertAiLog(ChatbotVO dataVO)throws Exception {
-        return insert("ai.chatbot.stat.insertAiLog", dataVO);
+        return insert("ai.chatbot.insertAiLog", dataVO);
     }
 
     /**
@@ -34,7 +45,7 @@ public class ChatbotDAO extends EgovComAbstractDAO {
      * @throws Exception
      */
     public int insertAiDailyUsage(ChatbotVO dataVO)throws Exception {
-        return insert("ai.chatbot.stat.insertAiDailyUsage", dataVO);
+        return insert("ai.chatbot.insertAiDailyUsage", dataVO);
     }
 
     /**
@@ -44,7 +55,7 @@ public class ChatbotDAO extends EgovComAbstractDAO {
      * @throws Exception
      */
     public List<ChatbotVO> selectRegnCdList(ChatbotVO searchVO)throws Exception {
-        return selectList("ai.chatbot.stat.selectRegnCdList", searchVO);
+        return selectList("ai.chatbot.selectRegnCdList", searchVO);
     }
 
     /**
@@ -54,7 +65,7 @@ public class ChatbotDAO extends EgovComAbstractDAO {
      * @throws Exception
      */
     public ChatbotVO selectAuthFlag(ChatbotVO searchVO)throws Exception {
-        return selectOne("ai.chatbot.stat.selectAuthFlag", searchVO);
+        return selectOne("ai.chatbot.selectAuthFlag", searchVO);
     }
 
     /**
@@ -64,6 +75,6 @@ public class ChatbotDAO extends EgovComAbstractDAO {
      * @throws Exception
      */
     public int saveSatisYn(ChatbotVO dataVO)throws Exception {
-        return update("ai.chatbot.stat.updateSatisYn", dataVO);
+        return update("ai.chatbot.updateSatisYn", dataVO);
     }
 }

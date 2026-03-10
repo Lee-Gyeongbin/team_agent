@@ -9,7 +9,6 @@ import java.util.concurrent.Executors;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
-import org.springframework.web.socket.TextMessage;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -19,10 +18,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import kr.teamagent.chat.service.ChatbotService;
+import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
 import kr.teamagent.common.security.service.UserVO;
 
 /**
@@ -38,7 +38,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
     private static final ConcurrentHashMap<String, WebSocketSession> sessionMap = new ConcurrentHashMap<>();
     
     @Autowired(required = false)
-    private ChatbotService chatbotService;
+    private ChatbotServiceImpl chatbotService;
     
     // 스트리밍 응답 처리를 위한 스레드 풀
     private ExecutorService executorService;

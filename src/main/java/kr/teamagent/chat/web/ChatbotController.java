@@ -21,8 +21,8 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
 import egovframework.com.cmm.util.EgovResourceCloseHelper;
-import kr.teamagent.chat.service.ChatbotService;
 import kr.teamagent.chat.service.ChatbotVO;
+import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.web.BaseController;
@@ -34,7 +34,22 @@ public class ChatbotController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(ChatbotController.class);
 
     @Autowired
-    private ChatbotService chatbotService;
+    private ChatbotServiceImpl chatbotService;
+
+    /**
+     * 모델 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value="/ai/chatbot/selectModelList.do")
+    @ResponseBody
+    public ModelAndView selectModelList(ChatbotVO searchVO)throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+
+        resultMap.put("modelList", chatbotService.selectModelList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 
     @RequestMapping(value="/ai/chatbot/createChatRoom.do")
     @ResponseBody

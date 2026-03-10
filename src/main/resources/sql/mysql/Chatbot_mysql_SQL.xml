@@ -1,10 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="ai.chatbot.stat">
+<mapper namespace="ai.chatbot">
 
-    <insert id="insertChatRoom" parameterType="kr.teamagent.chat.service.ChatbotVO"
+
+    <select id="selectModelList" resultType="chatbotVO">
+        /* 모델 목록 조회 ai.chatbot.selectModelList */
+        SELECT
+            A.MODEL_ID          AS VALUE
+            , A.MODEL_NAME      AS LABEL
+            , A.PROVIDER_ID
+            , A.VERSION
+            , A.INPUT_COST
+            , A.OUTPUT_COST
+            , A.USE_YN
+            , A.DESCRIPTION
+            , A.SORT_ORDER
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM
+            TB_LLM_MDL A
+        ORDER BY A.SORT_ORDER 
+    </select>
+
+    <insert id="insertChatRoom" parameterType="chatbotVO"
         useGeneratedKeys="true" keyProperty="roomId">
-        /* CHAT 대화방 등록 ai.chatbot.stat.insertChatRoom */
+        /* CHAT 대화방 등록 ai.chatbot.insertChatRoom */
         INSERT INTO TB_CHAT_ROOM
         (ROOM_TITLE, CREATE_USER_ID, CREATE_DT)
         VALUES (#{roomTitle}, #{userId}, NOW())

@@ -1,18 +1,19 @@
 package kr.teamagent.common;
 
+import java.sql.SQLException;
+
+import javax.servlet.http.HttpSessionListener;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.context.support.WebApplicationContextUtils;
+
 import egovframework.com.sym.log.clg.service.EgovLoginLogService;
 import egovframework.com.sym.log.clg.service.LoginLog;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.CommonServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.web.context.WebApplicationContext;
-import org.springframework.web.context.support.WebApplicationContextUtils;
-
-import javax.servlet.http.HttpSessionListener;
-import java.sql.SQLException;
 
 public class CustomSessionListener implements HttpSessionListener{
 
