@@ -203,7 +203,7 @@ public class CustomAuthenticationProvider implements AuthenticationProvider {
                 return null;
             }
 
-            if("LOCKED".equals(user.getAcctStatus())) {
+            if("003".equals(user.getAcctStatusCd())) {
                 SessionUtil.setAttribute("accessError", "accountLocked");
                 return null;
             }

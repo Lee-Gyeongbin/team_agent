@@ -16,7 +16,7 @@
             U.LOGIN_FAIL_CNT,
             U.TWO_FA_YN,
             U.ACC_TP,
-            U.ACCT_STATUS,
+            U.ACCT_STATUS_CD,
             U.LOCK_DT,
             U.CREATE_DT,
             U.MODIFY_DT,
@@ -111,7 +111,7 @@
         /* 계정 잠금 처리 login.lockUser */
         UPDATE ${dbId}.TB_USER
         SET
-            ACCT_STATUS = 'LOCKED',
+            ACCT_STATUS_CD = '003',
             LOCK_DT = NOW()
         WHERE USER_ID = #{userId}
     </update>
@@ -121,7 +121,7 @@
         UPDATE ${dbId}.TB_USER
         SET
             LOGIN_FAIL_CNT = 0,
-            ACCT_STATUS = 'ACTIVE',
+            ACCT_STATUS_CD = '001',
             LOCK_DT = NULL,
             LAST_LOGIN_DT = NOW()
         WHERE USER_ID = #{userId}
@@ -139,7 +139,7 @@
             , USE_YN
             , LOGIN_FAIL_CNT
             , TWO_FA_YN
-            , ACCT_STATUS
+            , ACCT_STATUS_CD
             , CREATE_DT
             , MODIFY_DT
             , CRTR_ID
@@ -154,7 +154,7 @@
             , 'Y'
             , 0
             , 'N'
-            , 'ACTIVE'
+            , '001'
             , NOW()
             , NULL
             , #{userId}

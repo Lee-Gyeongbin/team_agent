@@ -84,7 +84,7 @@ public class ApiLoginController {
                 return ResponseEntity.ok(result);
             }
 
-            if ("LOCKED".equals(user.getAcctStatus())) {
+            if ("003".equals(user.getAcctStatusCd())) {
                 result.put("success", false);
                 result.put("errorType", "accountLocked");
                 result.put("message", "계정이 잠겼습니다. 관리자에게 문의하세요.");
