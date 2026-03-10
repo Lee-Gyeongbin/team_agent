@@ -49,6 +49,26 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return chatbotDAO.selectModelList(searchVO);
     }
 
+    /**
+     * RAG 데이터 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectRagDsList(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectRagDsList(searchVO);
+    }
+    
+    /**
+     * 데이터마트 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectDmList(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectDmList(searchVO);
+    }
+
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
