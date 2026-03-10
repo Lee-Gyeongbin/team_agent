@@ -28,4 +28,38 @@ public class CodesServiceImpl extends EgovAbstractServiceImpl {
         return codesDAO.selectGroupList(searchVO);
     }
 
+    /**
+     * 코드 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<CodesVO> selectCodeList(CodesVO searchVO) throws Exception {
+        return codesDAO.selectCodeList(searchVO);
+    }
+
+    /**
+     * 코드 그룹 등록/수정
+     * @param codesVO
+     * @return
+     * @throws Exception
+     */
+    public CodesVO saveGroup(CodesVO codesVO) throws Exception {
+        codesDAO.insertGroup(codesVO);
+        return codesVO;
+    }
+
+    /**
+     * 코드 등록/수정
+     * @param codesVO
+     * @return
+     * @throws Exception
+     */
+    public CodesVO saveCode(CodesVO codesVO) throws Exception {
+        Integer maxSortOrd = codesDAO.selectMaxSortOrd(codesVO);
+        codesVO.setSortOrd((maxSortOrd != null ? maxSortOrd : 0) + 1);
+        codesDAO.insertCode(codesVO);
+        return codesVO;
+    }
+
 }

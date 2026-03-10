@@ -16,4 +16,11 @@ public class CodesVO {
     private String useYn;
     private String createDt;
 
+    /**
+     * 코드 ID [TB_CODE]
+     */
+    private String codeId;
+    private String codeNm;
+    private Integer sortOrd;
+
 }

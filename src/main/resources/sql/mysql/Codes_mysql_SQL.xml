@@ -16,7 +16,79 @@
         <if test="useYn != null and useYn != ''">
             AND USE_YN = #{useYn}
         </if>
-        ORDER BY CODE_GRP_ID
+        ORDER BY CREATE_DT DESC
     </select>
+
+    <select id="selectCodeList" resultType="codesVO">
+        /* 코드 목록 조회 codes.selectCodeList */
+        SELECT
+            CODE_GRP_ID
+            , CODE_ID
+            , CODE_NM
+            , SORT_ORD
+            , USE_YN
+            , DESCRIPTION
+        FROM TB_CODE
+        WHERE 1=1
+        <if test="codeGrpId != null and codeGrpId != ''">
+            AND CODE_GRP_ID = #{codeGrpId}
+        </if>
+        <if test="useYn != null and useYn != ''">
+            AND USE_YN = #{useYn}
+        </if>
+        ORDER BY CODE_GRP_ID, SORT_ORD, CODE_ID
+    </select>
+
+    <select id="selectMaxSortOrd" resultType="java.lang.Integer">
+        /* 코드 그룹 내 최대 정렬순서 조회 codes.selectMaxSortOrd */
+        SELECT IFNULL(MAX(SORT_ORD), 0)
+        FROM TB_CODE
+        WHERE CODE_GRP_ID = #{codeGrpId}
+    </select>
+
+    <insert id="insertGroup" parameterType="codesVO">
+        /* 코드 그룹 등록/수정 codes.insertGroup */
+        INSERT INTO TB_CODE_GRP (
+            CODE_GRP_ID
+            , CODE_GRP_NM
+            , DESCRIPTION
+            , USE_YN
+            , CREATE_DT
+        ) VALUES (
+            #{codeGrpId}
+            , #{codeGrpNm}
+            , #{description}
+            , #{useYn, jdbcType=VARCHAR}
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            CODE_GRP_NM = VALUES(CODE_GRP_NM)
+            , DESCRIPTION = VALUES(DESCRIPTION)
+            , USE_YN = VALUES(USE_YN)
+    </insert>
+
+    <insert id="insertCode" parameterType="codesVO">
+        /* 코드 등록/수정 codes.insertCode */
+        INSERT INTO TB_CODE (
+            CODE_GRP_ID
+            , CODE_ID
+            , CODE_NM
+            , SORT_ORD
+            , USE_YN
+            , DESCRIPTION
+        ) VALUES (
+            #{codeGrpId}
+            , #{codeId}
+            , #{codeNm}
+            , #{sortOrd, jdbcType=INTEGER}
+            , #{useYn, jdbcType=VARCHAR}
+            , #{description}
+        )
+        ON DUPLICATE KEY UPDATE
+            CODE_NM = VALUES(CODE_NM)
+            , SORT_ORD = VALUES(SORT_ORD)
+            , USE_YN = VALUES(USE_YN)
+            , DESCRIPTION = VALUES(DESCRIPTION)
+    </insert>
 
 </mapper>
