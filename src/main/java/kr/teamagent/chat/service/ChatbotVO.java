@@ -8,6 +8,17 @@ import lombok.Setter;
 @Setter
 public class ChatbotVO extends CommonVO {
 
+    // CHAT 대화방 정보(TB_CHAT_ROOM)
+    // 대화방 ID
+    private Long roomId;
+    // 대화방 제목
+    private String roomTitle;
+    // 사용자 ID
+    private String userId;
+    // 마지막 채팅 일시
+    private String lastChatDt;
+    private String content;
+
     // LLM 모델 정보(TB_LLM_MDL)
     // 모델 ID
     private String modelId;
@@ -32,25 +43,33 @@ public class ChatbotVO extends CommonVO {
     // 수정 일시
     private String modifyDt;
 
-    private Long roomId;
-    private String roomTitle;
     /* AI 챗봇 질문/응답 로그 */
     private Long logId;
     // AI 서비스 타입
     private String svcTy;
     private String svcTyNm;
+    // 참조 타겟 ID (RAG DATASET_ID, SQL DATAMART_ID 등)
+    private String refId;
     // 질문 내용
     private String qContent;
     // 응답 내용
     private String rContent;
+    // 입력 토큰 수
+    private int inTokens;
+    // 출력 토큰 수
+    private int outTokens;
     // 만족 여부 (Y/N)
     private String satisYn;
     // 파일 경로
     private String filePath;
-    // 페이지
-    private int page;
+    // 페이지 번호
+    private int pageNo;
+    // 관련 페이지 번호
+    private String relatedPageNo;
     // 변환쿼리
     private String ttsq;
+    // 재질문 횟수
+    private int reaskCnt;
 
     /* AI 서비스 사용자별 일일 사용량 */
     // 사용 일자 (YYYYMMDD)

@@ -43,6 +43,10 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return insert("ai.chatbot.insertChatRoom",chatbotVO);
     }
 
+    public int insertChatLog(ChatbotVO chatbotVO) throws Exception{
+        return insert("ai.chatbot.insertChatLog", chatbotVO);
+    }
+
     public ChatbotVO selectAiDailyUsage(ChatbotVO chatbotVO) throws Exception{
         return selectOne("ai.chatbot.selectAiDailyUsage",chatbotVO);
     }

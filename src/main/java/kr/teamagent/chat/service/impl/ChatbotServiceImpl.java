@@ -104,10 +104,24 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return apiUrl;
     }
 
+    /**
+     * CHAT 대화방 등록
+     * @param chatbotVO
+     * @return
+     * @throws Exception
+     */
     public ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception {
-        // TODO: TB_CHAT_ROOM 테이블 생성 후 insertChatRoom 호출로 교체
-        chatbotVO.setRoomId(1L);
-        return chatbotVO;
+        chatbotVO.setRoomTitle(chatbotVO.getContent());
+        int result = chatbotDAO.insertChatRoom(chatbotVO);
+
+        if(result > 0){
+            chatbotVO.setRoomId(chatbotVO.getRoomId());
+            int logResult = chatbotDAO.insertChatLog(chatbotVO);
+            if(logResult > 0){
+                return chatbotVO;
+            }
+        }
+        return result > 0 ? chatbotVO : null;
     }
 
     /**

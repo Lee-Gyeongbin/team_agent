@@ -81,7 +81,7 @@ public class ChatbotController extends BaseController {
 
     @RequestMapping(value="/ai/chatbot/createChatRoom.do")
     @ResponseBody
-    public ModelAndView createChatRoom(ChatbotVO searchVO)throws Exception {
+    public ModelAndView createChatRoom(@RequestBody ChatbotVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         searchVO.setUserId(SessionUtil.getUserId());
         resultMap.put("data", chatbotService.createChatRoom(searchVO));

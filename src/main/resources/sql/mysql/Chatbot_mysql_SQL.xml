@@ -87,8 +87,48 @@
         useGeneratedKeys="true" keyProperty="roomId">
         /* CHAT 대화방 등록 ai.chatbot.insertChatRoom */
         INSERT INTO TB_CHAT_ROOM
-        (ROOM_TITLE, CREATE_USER_ID, CREATE_DT)
-        VALUES (#{roomTitle}, #{userId}, NOW())
+        (ROOM_TITLE, CREATE_USER_ID, CREATE_DT, LAST_CHAT_DT)
+        VALUES (#{roomTitle}, #{userId}, NOW(), NOW())
+    </insert>
+
+    <insert id="insertChatLog" parameterType="chatbotVO">
+        /* CHAT 대화방 로그 등록 ai.chatbot.insertChatLog */
+        INSERT INTO TB_CHAT_LOG
+        (
+            ROOM_ID,
+            SVC_TY,
+            REF_ID,
+            MODEL_ID,
+            Q_CONTENT,
+            R_CONTENT,
+            IN_TOKENS,
+            OUT_TOKENS,
+            SATIS_YN,
+            PAGE_NO,
+            RELATED_PAGE_NO,
+            TTSQ,
+            REASK_CNT,
+            CREATE_USER_ID,
+            CREATE_DT
+        )
+        VALUES
+        (
+            #{roomId},
+            #{svcTy},
+            #{refId},
+            #{modelId},
+            #{qContent},
+            #{rContent},
+            #{inTokens},
+            #{outTokens},
+            #{satisYn},
+            #{pageNo},
+            #{relatedPageNo},
+            #{ttsq},
+            #{reaskCnt},
+            #{userId},
+            #{createDt}
+        )
     </insert>
 
 </mapper>
