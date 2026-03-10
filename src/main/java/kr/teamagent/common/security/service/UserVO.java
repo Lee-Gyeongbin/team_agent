@@ -67,6 +67,12 @@ public class UserVO extends CommonVO {
     private String loginFlag;
     private String ip;
 
+    private String dbId;
+    private String compId;
+    private String masterDbId;
+    private String targetDbId;
+    private String lang;
+
     private List<String> adminGubunList;
     private String connectionId;
     private String retireViewYn;
