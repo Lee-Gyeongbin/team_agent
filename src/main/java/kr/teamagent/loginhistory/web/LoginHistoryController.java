@@ -14,7 +14,7 @@ import kr.teamagent.loginhistory.service.LoginHistoryVO;
 import kr.teamagent.loginhistory.service.impl.LoginHistoryServiceImpl;
 
 @Controller
-@RequestMapping("/api")
+@RequestMapping("/")
 public class LoginHistoryController extends BaseController {
 
     @Autowired
