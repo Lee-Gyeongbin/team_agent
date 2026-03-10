@@ -28,7 +28,7 @@ import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.web.BaseController;
 
 @Controller
-@RequestMapping("/api")
+@RequestMapping("/")
 public class ChatbotController extends BaseController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatbotController.class);
@@ -48,6 +48,34 @@ public class ChatbotController extends BaseController {
         HashMap<String, Object> resultMap = new HashMap<>();
 
         resultMap.put("modelList", chatbotService.selectModelList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * RAG 데이터 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value="/ai/chatbot/selectRagDsList.do")
+    @ResponseBody
+    public ModelAndView selectRagDsList(ChatbotVO searchVO)throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("subOptionList", chatbotService.selectRagDsList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터마트 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value="/ai/chatbot/selectDmList.do")
+    @ResponseBody
+    public ModelAndView selectDmList(ChatbotVO searchVO)throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("subOptionList", chatbotService.selectDmList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 

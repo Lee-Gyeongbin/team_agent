@@ -22,6 +22,67 @@
         ORDER BY A.SORT_ORDER 
     </select>
 
+    <select id="selectRagDsList" resultType="chatbotVO">
+        /* RAG 데이터 목록 조회 ai.chatbot.selectRagDsList */
+        SELECT
+            A.DATASET_ID                AS VALUE
+            , A.DS_NM                   AS LABEL
+            , A.DESCRIPTION
+            , A.VERSION
+            , A.ICON_TEXT
+            , A.ICON_COLOR
+            , A.DATASET_BUILD_STATUS_CD
+            , A.EMBED_MODEL
+            , A.VECTOR_DB
+            , A.CHUNK_ALGO
+            , A.CHUNK_SIZE
+            , A.CHUNK_OVERLAP
+            , A.MIN_CHUNK_SZ
+            , A.HDR_INCL
+            , A.EMBED_NORM
+            , A.POOL_STRAT
+            , A.DIM_REDUC
+            , A.CHUNK_CNT
+            , A.DOC_CNT
+            , A.URL_CNT
+            , A.SRCH_QUAL
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM
+            TB_RAG_DS A
+        WHERE 1=1 
+            AND A.DATASET_BUILD_STATUS_CD = 'ACTIVE'
+    </select>
+
+    <select id="selectDmList" resultType="chatbotVO">
+        /* 데이터마트 조회 ai.chatbot.selectDmList */
+        SELECT
+            A.DATAMART_ID       AS VALUE
+            , A.DM_NM           AS LABEL
+            , A.DESCRIPTION
+            , A.USE_YN
+            , A.DSPL_ORD
+            , A.DB_TYPE
+            , A.DB_VERSION
+            , A.HOST
+            , A.PORT
+            , A.DB_NM
+            , A.USERNAME
+            , A.PWD_ENC
+            , A.SCH_NM
+            , A.CONN_OPT
+            , A.READONLY_YN
+            , A.IP_WLIST_YN
+            , A.SSL_YN
+            , A.TBL_CNT
+            , A.LAST_VERIFY_DT
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM
+            TB_DM A
+        ORDER BY DSPL_ORD 
+    </select>
+
     <insert id="insertChatRoom" parameterType="chatbotVO"
         useGeneratedKeys="true" keyProperty="roomId">
         /* CHAT 대화방 등록 ai.chatbot.insertChatRoom */

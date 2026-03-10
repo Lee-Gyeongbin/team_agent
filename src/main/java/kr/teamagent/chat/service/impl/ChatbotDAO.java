@@ -20,6 +20,25 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return selectList("ai.chatbot.selectModelList", searchVO);
     }
 
+    /**
+     * RAG 데이터 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectRagDsList(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectRagDsList", searchVO);
+    }
+
+    /**
+     * 데이터마트 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectDmList(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectDmList", searchVO);
+    }
     public int insertChatRoom(ChatbotVO chatbotVO) throws Exception{
         return insert("ai.chatbot.insertChatRoom",chatbotVO);
     }
