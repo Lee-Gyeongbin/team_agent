@@ -40,7 +40,7 @@ public class UserVO extends CommonVO {
     private int loginFailCnt;
     private String twoFaYn;
     private String accTp;
-    private String acctStatus;
+    private String acctStatusCd;  /* 001:ACTIVE, 002:INACTIVE, 003:LOCKED */
     private String lockDt;
     private String createDt;
     private String modifyDt;
