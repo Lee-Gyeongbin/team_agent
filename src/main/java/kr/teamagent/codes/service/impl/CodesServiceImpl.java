@@ -2,12 +2,12 @@ package kr.teamagent.codes.service.impl;
 
 import java.util.List;
 
+
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
 import kr.teamagent.codes.service.CodesVO;
 
 @Service
@@ -60,6 +60,17 @@ public class CodesServiceImpl extends EgovAbstractServiceImpl {
         codesVO.setSortOrd((maxSortOrd != null ? maxSortOrd : 0) + 1);
         codesDAO.insertCode(codesVO);
         return codesVO;
+    }
+
+    /**
+     * 코드 정렬순서 일괄 수정
+     * @param codeGrpId 코드 그룹 ID
+     * @param items codeId, sortOrder 목록
+     * @return 수정된 행 수
+     * @throws Exception
+     */
+    public int updateSortOrder(CodesVO codesVO) throws Exception {
+        return codesDAO.updateSortOrder(codesVO);
     }
 
 }

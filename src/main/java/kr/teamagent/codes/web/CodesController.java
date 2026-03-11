@@ -1,6 +1,7 @@
 package kr.teamagent.codes.web;
 
 import java.util.HashMap;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +12,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
-
 import kr.teamagent.codes.service.CodesVO;
 import kr.teamagent.codes.service.impl.CodesServiceImpl;
 import kr.teamagent.common.web.BaseController;
@@ -62,10 +62,19 @@ public class CodesController extends BaseController {
      */
     @RequestMapping(value = "/saveGroup.do")
     @ResponseBody
-    public ModelAndView saveGroup(@RequestBody CodesVO searchVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", codesService.saveGroup(searchVO));
-        return new ModelAndView("jsonView", resultMap);
+    public Map<String, Object> saveGroup(@RequestBody CodesVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            resultMap.put("data", codesService.saveGroup(searchVO));
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
     }
 
     /**
@@ -76,10 +85,42 @@ public class CodesController extends BaseController {
      */
     @RequestMapping(value = "/saveCode.do")
     @ResponseBody
-    public ModelAndView saveCode(@RequestBody CodesVO searchVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", codesService.saveCode(searchVO));
-        return new ModelAndView("jsonView", resultMap);
+    public Map<String, Object> saveCode(@RequestBody CodesVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            resultMap.put("data", codesService.saveCode(searchVO));
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * 코드 정렬순서 일괄 수정
+     * @param codesVO { codeGrpId, items: [{ codeId, sortOrder }] }
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/updateSortOrder.do", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> updateSortOrder(@RequestBody CodesVO codesVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            resultMap.put("data", codesService.updateSortOrder(codesVO));
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
     }
 
 }

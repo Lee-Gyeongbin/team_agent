@@ -1,6 +1,8 @@
 package kr.teamagent.codes.service.impl;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Repository;
 
@@ -58,6 +60,17 @@ public class CodesDAO extends EgovComAbstractDAO {
      */
     public int insertCode(CodesVO codesVO) throws Exception {
         return insert("codes.insertCode", codesVO);
+    }
+
+    /**
+     * 코드 정렬순서 일괄 수정
+     * @param codeGrpId 코드 그룹 ID
+     * @param items codeId, sortOrder 목록
+     * @return
+     * @throws Exception
+     */
+    public int updateSortOrder(CodesVO codesVO) throws Exception {
+        return update("codes.updateSortOrder", codesVO);
     }
 
 }

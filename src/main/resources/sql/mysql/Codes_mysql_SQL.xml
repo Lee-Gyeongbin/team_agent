@@ -86,9 +86,23 @@
         )
         ON DUPLICATE KEY UPDATE
             CODE_NM = VALUES(CODE_NM)
-            , SORT_ORD = VALUES(SORT_ORD)
             , USE_YN = VALUES(USE_YN)
             , DESCRIPTION = VALUES(DESCRIPTION)
     </insert>
+
+    <update id="updateSortOrder">
+        /* 코드 정렬순서 일괄 수정 codes.updateSortOrder */
+        UPDATE TB_CODE
+        SET SORT_ORD = CASE CODE_ID
+        <foreach collection="items" item="item">
+            WHEN #{item.codeId} THEN #{item.sortOrd}
+        </foreach>
+        END
+        WHERE CODE_GRP_ID = #{codeGrpId}
+        AND CODE_ID IN
+        <foreach collection="items" item="item" open="(" separator="," close=")">
+            #{item.codeId}
+        </foreach>
+    </update>
 
 </mapper>
