@@ -46,6 +46,7 @@
                 , M.PARN_MENU_ID
                 , M.MENU_LEVEL
                 , M.MENU_PATH
+                , M.IS_LEAF
                 , M.SRC_PATH
                 , M.ICON
                 , M.SORT_ORD
@@ -66,6 +67,7 @@
                 , C.PARN_MENU_ID
                 , C.MENU_LEVEL
                 , C.MENU_PATH
+                , C.IS_LEAF
                 , C.SRC_PATH
                 , C.ICON
                 , C.SORT_ORD
@@ -85,6 +87,7 @@
             , PARN_MENU_ID
             , MENU_LEVEL
             , MENU_PATH
+            , IS_LEAF
             , SRC_PATH
             , ICON
             , SORT_ORD
