@@ -20,4 +20,14 @@ public class LibraryDAO extends EgovComAbstractDAO {
         return selectList("library.selectCategoryList", searchVO);
     }
 
+    /**
+     * 카드 목록 조회
+     * @param searchVO userId 필수 (세션에서 설정됨)
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO> selectCardList(LibraryVO searchVO) throws Exception {
+        return selectList("library.selectCardList", searchVO);
+    }
+
 }

@@ -15,4 +15,19 @@ public class LibraryVO {
     private Integer sortOrd;
     private String createDt;
 
+    /** 지식 카드 [TB_KNOW_CARD] */
+    private String cardId;
+    private String logId;
+    private String svcTy;
+    private String title;
+    private String tags;
+    private String pinYn;
+    private String archiveYn;
+    private String srcDocs;
+    private String sqlCode;
+    private String chartCfg;
+    private String qryRslt;
+    private String useYn;
+    private String modifyDt;
+
 }

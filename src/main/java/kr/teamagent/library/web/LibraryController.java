@@ -36,4 +36,18 @@ public class LibraryController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 카드 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/cardList.do")
+    @ResponseBody
+    public ModelAndView cardList(LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", libraryService.selectCardList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

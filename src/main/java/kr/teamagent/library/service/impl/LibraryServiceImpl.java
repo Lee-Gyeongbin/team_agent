@@ -32,4 +32,19 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         return libraryDAO.selectCategoryList(searchVO);
     }
 
+    /**
+     * 카드 목록 조회 (세션 userId 자동 설정)
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO> selectCardList(LibraryVO searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId != null) {
+            searchVO.setUserId(userId);
+        }
+        searchVO.setArchiveYn("N");
+        return libraryDAO.selectCardList(searchVO);
+    }
+
 }

@@ -20,4 +20,42 @@
         ORDER BY SORT_ORD, CREATE_DT DESC
     </select>
 
+    <select id="selectCardList" resultType="libraryVO">
+        /* 카드 목록 조회 library.selectCardList */
+        SELECT
+            CARD_ID
+            , USER_ID
+            , CATEGORY_ID
+            , LOG_ID
+            , SVC_TY
+            , TITLE
+            , TAGS
+            , PIN_YN
+            , ARCHIVE_YN
+            , SORT_ORD
+            , SRC_DOCS
+            , SQL_CODE
+            , CHART_CFG
+            , QRY_RSLT
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        FROM
+            TB_KNOW_CARD
+        WHERE 1=1
+        <if test="userId != null and userId != ''">
+            AND USER_ID = #{userId}
+        </if>
+        <if test="categoryId != null and categoryId != ''">
+            AND CATEGORY_ID = #{categoryId}
+        </if>
+        <if test="useYn != null and useYn != ''">
+            AND USE_YN = #{useYn}
+        </if>
+        <if test="archiveYn != null and archiveYn != ''">
+            AND ARCHIVE_YN = #{archiveYn}
+        </if>
+        ORDER BY SORT_ORD, CREATE_DT DESC
+    </select>
+
 </mapper>
