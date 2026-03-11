@@ -90,4 +90,12 @@ public class ChatbotVO extends CommonVO {
 
     // 관리자 유무 체크
     private String authFlag;
+
+    // 채팅 답변별 참조 문서 및 페이지 상세(TB_CHAT_REF)
+    // 문서 고유 ID 
+    private String docId;
+    // 메인 페이지 번호
+    private String mainPageNo;
+    // 관련 페이지 번호
+    private String relatedPages;
 }

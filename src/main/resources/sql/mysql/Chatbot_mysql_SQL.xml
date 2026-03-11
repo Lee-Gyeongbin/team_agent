@@ -91,21 +91,18 @@
         VALUES (#{roomTitle}, #{userId}, NOW(), NOW())
     </insert>
 
-    <insert id="insertChatLog" parameterType="chatbotVO">
+    <insert id="insertChatLog" parameterType="chatbotVO" useGeneratedKeys="true" keyProperty="logId">
         /* CHAT 대화방 로그 등록 ai.chatbot.insertChatLog */
         INSERT INTO TB_CHAT_LOG
         (
             ROOM_ID,
             SVC_TY,
             REF_ID,
-            MODEL_ID,
             Q_CONTENT,
             R_CONTENT,
             IN_TOKENS,
             OUT_TOKENS,
             SATIS_YN,
-            PAGE_NO,
-            RELATED_PAGE_NO,
             TTSQ,
             REASK_CNT,
             CREATE_USER_ID,
@@ -116,18 +113,35 @@
             #{roomId},
             #{svcTy},
             #{refId},
-            #{modelId},
             #{qContent},
             #{rContent},
             #{inTokens},
             #{outTokens},
             #{satisYn},
-            #{pageNo},
-            #{relatedPageNo},
             #{ttsq},
             #{reaskCnt},
             #{userId},
-            #{createDt}
+            NOW()
+        )
+    </insert>
+
+    <insert id="insertChatRef" parameterType="chatbotVO">
+        /* CHAT 대화방 참조 등록 ai.chatbot.insertChatRef */
+        INSERT INTO TB_CHAT_REF
+        (
+            LOG_ID,
+            DOC_ID,
+            MAIN_PAGE_NO,
+            RELATED_PAGES,
+            CREATE_DT
+        )
+        VALUES
+        (
+            #{logId},
+            #{docId},
+            #{mainPageNo},
+            #{relatedPages},
+            NOW()
         )
     </insert>
 

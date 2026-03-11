@@ -1,9 +1,6 @@
 package kr.teamagent.chat.service.impl;
 
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -69,7 +66,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return chatbotDAO.selectDmList(searchVO);
     }
 
-    public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+    public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
         
@@ -78,7 +75,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return;
         }
 
-        callAiApiStreamingWebSocket(session, apiUrl, query, threadId, userId, svcTy, callback);
+        callAiApiStreamingWebSocket(session, apiUrl, query, threadId, userId, svcTy, refId, callback);
     }
 
     /**
@@ -113,14 +110,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception {
         chatbotVO.setRoomTitle(chatbotVO.getContent());
         int result = chatbotDAO.insertChatRoom(chatbotVO);
-
-        if(result > 0){
-            chatbotVO.setRoomId(chatbotVO.getRoomId());
-            int logResult = chatbotDAO.insertChatLog(chatbotVO);
-            if(logResult > 0){
-                return chatbotVO;
-            }
-        }
         return result > 0 ? chatbotVO : null;
     }
 
@@ -149,7 +138,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * WebSocket 방식으로 실제 AI API를 호출하고 스트리밍 응답을 처리
      */
-    private void callAiApiStreamingWebSocket(WebSocketSession session, String apiUrl, String query, String threadId, String userId, String svcTy, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+    private void callAiApiStreamingWebSocket(WebSocketSession session, String apiUrl, String query, String threadId, String userId, String svcTy, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
         // 요청 파라미터 구성 (JSON body)
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
@@ -174,9 +163,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
             }else if(svcTy.equals("M")){
                 // 관리자 권한 조회
-                ChatbotVO authFlag = chatbotDAO.selectAuthFlag(chatbotVO);
+                // ChatbotVO authFlag = chatbotDAO.selectAuthFlag(chatbotVO);
                 // 관리자 권한
-                params.put("auth_flag", authFlag.getAuthFlag());
+                params.put("auth_flag", "Y");
             }
         }
 
@@ -266,7 +255,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                          * - 스트리밍 종료 시 callback.onComplete()
                          를 호출한다.
                          */
-                        processStreamingResponseWebSocket(responseBody, query, svcTy, userId, threadId, callback);
+                        processStreamingResponseWebSocket(responseBody, query, svcTy, refId, userId, threadId, callback);
                     } catch (Exception e) {
                         logger.error("스트리밍 응답 처리 중 오류: {}", e.getMessage(), e);
                         callback.onError("스트리밍 처리 오류: " + e.getMessage());
@@ -285,7 +274,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * SSE 형식: event: answer_delta, data: {"text": "..."}
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
-    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String userId, String threadId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
+    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String refId, String userId, String threadId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
 
         // 작은 버퍼 크기로 실시간 스트리밍 보장
         java.io.BufferedReader reader = new java.io.BufferedReader(
@@ -296,7 +285,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String responseThreadId = threadId;
         String currentEvent = null;
         boolean isCompleteCalled = false; // complete 메시지 중복 전송 방지 플래그
-        
+        // done 이벤트에서 세팅, finally/콜백에서 사용
+        String responseFilePath = "";
+        String mainPageNo = "";
+        List<Integer> relatedPageNos = new ArrayList<>();
+        String docId = "";
+        String errorCode = "None"; // 기본값
+        int inputTokens = 0;
+        int outputTokens = 0;
+        String savedLogId = "";
+        String tableData = "";
+
         try {
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
@@ -322,67 +321,64 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
                         
                         // answer_delta 이벤트 처리
-                        if ("answer_delta".equals(currentEvent)) {
-                            String text = (String) data.get("text");
-                            if (text != null && !text.isEmpty()) {
-                                accumulatedContent.append(text);
+                        // M API는 event 라인 없이 text만 내려오는 경우가 있어 fallback 처리
+                        String chunkText = extractChunkText(data);
+                        if ("answer_delta".equals(currentEvent) || (CommonUtil.isEmpty(currentEvent) && CommonUtil.isNotEmpty(chunkText))) {
+                            if (CommonUtil.isNotEmpty(chunkText)) {
+                                accumulatedContent.append(chunkText);
                                 // 콜백을 통해 청크 즉시 전송 (한 글자씩 실시간 전송)
-                                callback.onChunk(text, accumulatedContent.toString());
+                                callback.onChunk(chunkText, accumulatedContent.toString());
                             }
                         }
                         // done 이벤트 처리
-                        else if ("done".equals(currentEvent)) {
+                        else if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
                             String answer = (String) data.get("answer");
                             if (answer != null && !answer.isEmpty()) {
+                                // answer_delta 없이 done에 최종 answer만 오는 경우, chunk를 1회 전송해 UI 일관성 유지
+                                if (accumulatedContent.length() == 0) {
+                                    callback.onChunk(answer, answer);
+                                }
                                 accumulatedContent = new StringBuilder(answer);
                             }
-
-                            String logId = "";
-                            Object logChatIdObj = data.get("log_chat_id");
-                            if(logChatIdObj != null){
-                                logId = String.valueOf(logChatIdObj);
-                            }
-
+                            inputTokens = parseTokenCount(data.get("input_tokens"));
+                            outputTokens = parseTokenCount(data.get("output_tokens"));
                             // 차트를 위한 통계 값
-                            String tableData = "";
-                            Object tableDataObj = data.get("table_data");
-                            if(tableDataObj != null){
-                                tableData = String.valueOf(tableDataObj);
-                            }
+                            // Object tableDataObj = data.get("table_data");
+                            // if(tableDataObj != null){
+                            //     tableData = String.valueOf(tableDataObj);
+                            // }
 
-                            String filePath = "";
-                            String page = "";
-                            List<Integer> viewPage = new ArrayList<>();
-
-                            if(CommonUtil.isNotEmpty((String) data.get("file_path"))){
-                                filePath = (String) data.get("file_path");
+                            String filePathFromApi = CommonUtil.isNotEmpty((String) data.get("file_path")) ? (String) data.get("file_path") : "";
+                            if (CommonUtil.isNotEmpty(filePathFromApi)) {
+                                if (filePathFromApi.contains("제조정보")) {
+                                    responseFilePath = "/CAT_MFG_001/제조정보.pdf";
+                                    docId = "DOC_MFG_002";
+                                } else {
+                                    responseFilePath = "/CAT_MFG_001/금형 및 Burr_수치넘침 검출 방안.pdf";
+                                    docId = "CAT_MFG_001";
+                                }
                             }
-                            if(CommonUtil.isNotEmpty((String) data.get("page"))){
-                                page = (String) data.get("page");
+                            if (CommonUtil.isNotEmpty((String) data.get("page"))) {
+                                mainPageNo = (String) data.get("page");
                             }
                             // view_page: AI API에서 관련 페이지 배열로 전달 (예: [3, 7, 15])
+                            relatedPageNos.clear();
                             Object viewPageObj = data.get("view_page");
                             if (viewPageObj instanceof JSONArray) {
                                 JSONArray arr = (JSONArray) viewPageObj;
                                 for (Object o : arr) {
                                     if (o instanceof Number) {
-                                        viewPage.add(((Number) o).intValue());
+                                        relatedPageNos.add(((Number) o).intValue());
                                     } else if (o instanceof String) {
                                         try {
-                                            viewPage.add(Integer.parseInt((String) o));
+                                            relatedPageNos.add(Integer.parseInt((String) o));
                                         } catch (NumberFormatException ignored) {}
                                     }
                                 }
                             }
 
-                            // 정상 응답인 경우에만 사용량 증가
-                            String errorCode = (String) data.get("errorCode");
-                            if(errorCode.equals("None")){
-                                this.doInsertAiLog(query, answer, svcTy, filePath, page, userId);
-                            }
-
                             // 최종 완료 콜백 (생성된 logId 전달)
-                            callback.onComplete(accumulatedContent.toString(), filePath, page, viewPage, responseThreadId != null ? responseThreadId : "", logId, tableData);
+                            callback.onComplete(accumulatedContent.toString(), filePathFromApi, mainPageNo, relatedPageNos, responseThreadId != null ? responseThreadId : "", savedLogId, tableData);
                             isCompleteCalled = true; // done 이벤트에서 onComplete 호출 시 플래그를 true로 설정
                             break;
                         }
@@ -392,19 +388,67 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 }
             }
             
-            // 스트림이 정상적으로 종료되지 않은 경우
-            // 루프 종료 후 isCompleteCalled가 false일 때만 onComplete 호출
-            if (!isCompleteCalled && accumulatedContent.length() > 0) {
-                String finalThreadId = responseThreadId != null && !responseThreadId.isEmpty() 
-                        ? responseThreadId 
-                        : "thread-" + System.currentTimeMillis();
-                
-                callback.onComplete(accumulatedContent.toString(), "", "", new ArrayList<>(), finalThreadId, null, null);
-            }
-            
+        } catch (Exception e) {
+            logger.error("스트림 읽기 중 오류 발생 (클라이언트 연결 끊김 등): {}", e.getMessage());
+            // 에러가 나더라도 finally 블록으로 넘어가서 저장하게 됩니다!
         } finally {
+            // 정상 종료든 비정상 종료든 DB 저장은 여기서 무조건 실행!
+            if (accumulatedContent.length() > 0 && "None".equals(errorCode)) {
+                try {
+                    this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId);
+                } catch (Exception e) {
+                    logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
+                }
+            }
+
+            // 콜백 완료 처리 (웹소켓 클라이언트에게 끝났다고 알려줌)
+            if (!isCompleteCalled && accumulatedContent.length() > 0) {
+                String fallbackThreadId = responseThreadId != null ? responseThreadId : "thread-" + System.currentTimeMillis();
+                callback.onComplete(accumulatedContent.toString(), "", "", new ArrayList<>(), fallbackThreadId, null, null);
+            }
+
             reader.close();
             responseBody.close();
+        }
+    }
+
+    /**
+     * 다양한 SSE payload 포맷(text/chunk/content)을 단일 chunk 텍스트로 정규화
+     */
+    private String extractChunkText(JSONObject data) {
+        if (data == null) {
+            return "";
+        }
+        Object textObj = data.get("text");
+        if (textObj instanceof String && CommonUtil.isNotEmpty((String) textObj)) {
+            return (String) textObj;
+        }
+        Object chunkObj = data.get("chunk");
+        if (chunkObj instanceof String && CommonUtil.isNotEmpty((String) chunkObj)) {
+            return (String) chunkObj;
+        }
+        Object contentObj = data.get("content");
+        if (contentObj instanceof String && CommonUtil.isNotEmpty((String) contentObj)) {
+            return (String) contentObj;
+        }
+        return "";
+    }
+
+    /**
+     * 토큰 수(Number/String)를 안전하게 int로 변환
+     */
+    private int parseTokenCount(Object tokenObj) {
+        if (tokenObj == null) {
+            return 0;
+        }
+        if (tokenObj instanceof Number) {
+            return ((Number) tokenObj).intValue();
+        }
+        try {
+            String tokenText = String.valueOf(tokenObj);
+            return CommonUtil.isNotEmpty(tokenText) ? Integer.parseInt(tokenText) : 0;
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 
@@ -419,16 +463,29 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @return 생성된 logId
      * @throws Exception
      */
-    private void doInsertAiLog(String query, String answer, String svcTy, String filePath, String page, String userId) throws Exception {
+    private void doInsertAiLog(String responseThreadId, String query, String answer, int inputTokens, int outputTokens, String svcTy, String refId, String docId, String filePath, String page, List<Integer> viewPage, String userId) throws Exception {
 
-        // 일일 사용량 insert/update
-        ChatbotVO usageVO = new ChatbotVO();
-        String usageDate = LocalDate.now(ZoneId.of("Asia/Seoul")).format(DateTimeFormatter.BASIC_ISO_DATE);
-        usageVO.setUsageDate(usageDate);
-        usageVO.setSvcTy(svcTy);
-        usageVO.setUserId(userId);
-        chatbotDAO.insertAiDailyUsage(usageVO);
-
+        // 챗봇 로그 insert
+        ChatbotVO chatbotVO = new ChatbotVO();
+        chatbotVO.setRoomId(Long.parseLong(responseThreadId));
+        chatbotVO.setSvcTy(svcTy);
+        chatbotVO.setRefId(refId);
+        chatbotVO.setQContent(query);
+        chatbotVO.setInTokens(inputTokens);
+        chatbotVO.setOutTokens(outputTokens);
+        chatbotVO.setRContent(answer);
+        chatbotVO.setUserId(userId);
+        chatbotDAO.insertChatLog(chatbotVO);
+        
+        if(svcTy.equals("M")){
+            // 채팅 답변별 참조 문서 및 페이지 상세(TB_CHAT_REF) insert
+            ChatbotVO chatbotRefVO = new ChatbotVO();
+            chatbotRefVO.setLogId(chatbotVO.getLogId());
+            chatbotRefVO.setDocId(docId);
+            chatbotRefVO.setMainPageNo(page);
+            chatbotRefVO.setRelatedPages(viewPage.toString());
+            chatbotDAO.insertChatRef(chatbotRefVO);
+        }
     }
 
 }

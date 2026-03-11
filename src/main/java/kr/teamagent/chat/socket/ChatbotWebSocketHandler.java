@@ -155,6 +155,11 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             String query = toStr(messageObj.get("query"));
             String threadId = toStr(messageObj.get("threadId"));
             String svcTy = toStr(messageObj.get("svcTy"));
+            String refId = toStr(messageObj.get("refId"));
+            if (refId == null || refId.isEmpty()) {
+                sendMessage(session, createMessage("error", "참조 문서 ID가 지정되지 않았습니다.", null));
+                return;
+            }
             
             if (query == null || query.isEmpty()) {
                 sendMessage(session, createMessage("error", "질문 내용이 없습니다.", null));
@@ -169,8 +174,8 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             // 사용자 ID 가져오기
             String userId = (String) session.getAttributes().get("userId");
             
-            logger.info("질문 수신: query={}, threadId={}, svcTy={}, userId={}", 
-                    query, threadId, svcTy, userId);
+            logger.info("질문 수신: query={}, threadId={}, svcTy={}, refId={}, userId={}", 
+                    query, threadId, svcTy, refId, userId);
             
             // 질문 수신 확인 메시지 전송
             sendMessage(session, createMessage("question_received", "질문을 받았습니다.", null));
@@ -197,7 +202,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             getExecutorService().execute(() -> {
                 try {
                     // 해당 작업을 execute가 스레드 풀에 던져서 실행하게 함.(스레드가 다 차 있을 경우엔 큐에 대기)
-                    streamResponse(session, query, threadId, userId, svcTy);
+                    streamResponse(session, query, threadId, userId, svcTy, refId);
                 } catch (Exception e) {
                     logger.error("스트리밍 응답 처리 중 오류", e);
                     sendMessage(session, createMessage("error", "응답 처리 중 오류가 발생했습니다.", null));
@@ -213,7 +218,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
     /**
      * 스트리밍 응답 처리
      */
-    private void streamResponse(WebSocketSession session, String query, String threadId, String userId, String svcTy) throws Exception {
+    private void streamResponse(WebSocketSession session, String query, String threadId, String userId, String svcTy, String refId) throws Exception {
 
         /**
          * 스트리밍 응답 처리를 위한 콜백 인터페이스
@@ -273,7 +278,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
         };
         
         // ChatbotService를 통해 스트리밍 응답 받기
-        chatbotService.streamAiResponseWebSocket(session, query, threadId, userId, svcTy, callback);
+        chatbotService.streamAiResponseWebSocket(session, query, threadId, userId, svcTy, refId, callback);
     }
     
     /**
