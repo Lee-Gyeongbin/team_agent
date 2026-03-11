@@ -145,4 +145,53 @@
         )
     </insert>
 
+    <select id="selectChatLogList" resultType="chatbotVO">
+        /* CHAT 대화방 로그 목록 조회 ai.chatbot.selectChatLogList */
+        SELECT
+            A.LOG_ID
+            , A.ROOM_ID
+            , A.SVC_TY
+            , A.REF_ID
+            , A.Q_CONTENT
+            , A.R_CONTENT
+            , A.IN_TOKENS
+            , A.OUT_TOKENS
+            , A.SATIS_YN
+            , A.TTSQ
+            , A.REASK_CNT
+            , A.CREATE_USER_ID
+            , A.CREATE_DT
+            , B.DOC_ID 
+            , CASE
+                WHEN A.SVC_TY = 'M' AND B.DOC_ID IS NOT NULL THEN 'Y'
+                ELSE 'N'
+                END AS DOC_EXIST
+        FROM
+            TB_CHAT_LOG A
+        LEFT OUTER JOIN TB_CHAT_REF B
+	        ON B.LOG_ID = A.LOG_ID 
+        WHERE 1=1
+            AND A.ROOM_ID = #{roomId}
+        ORDER BY A.CREATE_DT DESC
+    </select>
+
+    <select id="selectChatDocList" resultType="chatbotVO">
+        /* CHAT 대화방 참조 문서 목록 조회 ai.chatbot.selectChatDocList */
+        SELECT
+            A.LOG_ID
+            , A.DOC_ID
+            , A.MAIN_PAGE_NO
+            , A.RELATED_PAGES
+            , A.CREATE_DT
+            , B.DOC_TITLE 
+            , B.FILE_PATH 
+            , B.FILE_NAME 
+        FROM
+            TB_CHAT_REF A
+        LEFT OUTER JOIN TB_DOC B
+            ON B.DOC_ID = A.DOC_ID 
+            AND B.USE_YN = 'Y'
+        WHERE 1=1 
+            AND A.LOG_ID = #{logId}
+    </select>
 </mapper>

@@ -39,10 +39,16 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public List<ChatbotVO> selectDmList(ChatbotVO searchVO) throws Exception {
         return selectList("ai.chatbot.selectDmList", searchVO);
     }
+    public List<ChatbotVO> selectChatDocList(ChatbotVO searchVO) throws Exception{
+        return selectList("ai.chatbot.selectChatDocList", searchVO);
+    }
     public int insertChatRoom(ChatbotVO chatbotVO) throws Exception{
         return insert("ai.chatbot.insertChatRoom",chatbotVO);
     }
 
+    public List<ChatbotVO> selectChatLogList(ChatbotVO searchVO) throws Exception{
+        return selectList("ai.chatbot.selectChatLogList", searchVO);
+    }
     public int insertChatLog(ChatbotVO chatbotVO) throws Exception{
         return insert("ai.chatbot.insertChatLog", chatbotVO);
     }

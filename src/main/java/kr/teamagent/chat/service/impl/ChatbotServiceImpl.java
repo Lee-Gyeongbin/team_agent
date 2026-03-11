@@ -66,6 +66,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return chatbotDAO.selectDmList(searchVO);
     }
 
+    public List<ChatbotVO> selectChatDocList(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectChatDocList(searchVO);
+    }
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
@@ -111,6 +114,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setRoomTitle(chatbotVO.getContent());
         int result = chatbotDAO.insertChatRoom(chatbotVO);
         return result > 0 ? chatbotVO : null;
+    }
+    public List<ChatbotVO> selectChatLogList(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectChatLogList(searchVO);
     }
 
     /**
@@ -378,7 +384,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             }
 
                             // 최종 완료 콜백 (생성된 logId 전달)
-                            callback.onComplete(accumulatedContent.toString(), filePathFromApi, mainPageNo, relatedPageNos, responseThreadId != null ? responseThreadId : "", savedLogId, tableData);
+                            callback.onComplete(accumulatedContent.toString(), responseFilePath, mainPageNo, relatedPageNos, responseThreadId != null ? responseThreadId : "", savedLogId, tableData);
                             isCompleteCalled = true; // done 이벤트에서 onComplete 호출 시 플래그를 true로 설정
                             break;
                         }

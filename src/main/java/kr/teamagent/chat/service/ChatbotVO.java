@@ -18,6 +18,8 @@ public class ChatbotVO extends CommonVO {
     // 마지막 채팅 일시
     private String lastChatDt;
     private String content;
+    // 참조 문서 존재 여부
+    private String docExist;
 
     // LLM 모델 정보(TB_LLM_MDL)
     // 모델 ID

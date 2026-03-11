@@ -88,7 +88,21 @@ public class ChatbotController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
-
+    @RequestMapping(value = "/ai/chatbot/selectChatLogList.do")
+    @ResponseBody
+    public ModelAndView selectChatLogList(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", chatbotService.selectChatLogList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+    
+    @RequestMapping(value = "/ai/chatbot/selectChatDocList.do")
+    @ResponseBody
+    public ModelAndView selectChatDocList(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", chatbotService.selectChatDocList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 
     /**
      * 챗봇 매뉴얼 PDF 파일 조회
