@@ -21,6 +21,7 @@
         <typeAlias alias="chatbotVO"                         type="kr.teamagent.chat.service.ChatbotVO"/>
         <typeAlias alias="loginHistoryVO"                    type="kr.teamagent.loginhistory.service.LoginHistoryVO"/>
         <typeAlias alias="codesVO"                           type="kr.teamagent.codes.service.CodesVO"/>
+        <typeAlias alias="libraryVO"                         type="kr.teamagent.library.service.LibraryVO"/>
     </typeAliases>
 
     <typeHandlers>
