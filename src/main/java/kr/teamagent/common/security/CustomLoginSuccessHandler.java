@@ -7,10 +7,7 @@ import kr.teamagent.common.secure.service.JwtSecureServiceImpl;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.security.service.impl.LoginServiceImpl;
 import kr.teamagent.common.security.service.impl.OtpServiceImpl;
-import kr.teamagent.common.system.service.LangVO;
-import kr.teamagent.common.system.service.MenuVO;
 import kr.teamagent.common.system.service.impl.CommonServiceImpl;
-import kr.teamagent.common.system.service.impl.MenuServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.DataSourceType;
 import kr.teamagent.common.util.PropertyUtil;
@@ -21,8 +18,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.i18n.LocaleContextHolder;
-import org.springframework.security.access.ConfigAttribute;
-import org.springframework.security.access.SecurityConfig;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -46,16 +41,12 @@ import javax.servlet.http.HttpSession;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class CustomLoginSuccessHandler implements AuthenticationSuccessHandler {
 	private static final Logger log = LoggerFactory.getLogger(CustomLoginSuccessHandler.class);
 
 	@Autowired
 	private LoginServiceImpl loginService;
-
-	@Autowired
-	private MenuServiceImpl menuService;
 
 	@Autowired
 	private CommonServiceImpl commonService;
@@ -128,15 +119,6 @@ public class CustomLoginSuccessHandler implements AuthenticationSuccessHandler {
 				SessionUtil.setAttribute("compIconYn", "N");
 			}
 
-			int menuCustomCnt = loginService.selectCustomMenuCnt(userVO);
-
-			/*if(menuCustomCnt == 0) {
-				userVO.setMenuGbn("Y");
-			}else {
-				userVO.setMenuGbn("N");
-			}*/
-			userVO.setMenuGbn("Y");
-
 			EgovMap loginSuccessHandlerData = loginService.selectLoginSuccessHandlerData(userVO);
 
 			// 서비스 사용여부 조회
@@ -159,80 +141,7 @@ public class CustomLoginSuccessHandler implements AuthenticationSuccessHandler {
 			SessionUtil.setAttribute("lang", "ko");
 			userVO.setIp(CommonUtil.getUserIP(request));
 
-			// 뎁스별 세션 메뉴
-			List<MenuVO> menuList = (List<MenuVO>)loginSuccessHandlerData.get("menuList");
-
-			//사용자권한메뉴
-			menuList = getUserMenuList(menuList);
-			HashMap<String, MenuVO> menuMap = new HashMap<>();
-			if (CommonUtil.isNotEmpty(menuList)) {
-				//최초메뉴(링크가 있는 첫번째 메뉴)
-				String initPgmId = menuList.stream().filter(e->{
-					return CommonUtil.isNotEmpty(e.getUrl());
-				}).findFirst().get().getPgmId();
-
-				String mainPgmNm = "";
-				for (MenuVO menu : menuList) {
-					String pgmId = menu.getPgmId();
-					String mainPgmId = userVO.getMainPgmId();
-					if (CommonUtil.nullToBlank(mainPgmId).equals(pgmId)) {
-						initPgmId = mainPgmId;
-						mainPgmNm = menu.getPgmNm();
-					}
-					menuMap.put(pgmId, menu);
-				}
-				userVO.setMainPgmNm(mainPgmNm);
-				userVO.setInitPgmId(initPgmId);
-				userVO.setInitPgmUrl(menuMap.get(initPgmId).getUrl());
-			}
-			SessionUtil.setAttribute("menuList", menuList);
-			SessionUtil.setAttribute("menuMap", menuMap);
 			SessionUtil.setAttribute("loginVO", userVO);
-
-			// 언어목록 조회
-			//List<LangVO> langList = (List<LangVO>)loginSuccessHandlerData.get("langList");
-			//SessionUtil.setAttribute("langList", langList);
-
-			// 사용자의 연도별 성과조직 목록
-//			if(!"super".equals(userVO.getCompId())){
-//				List<EgovMap> userScDeptList = (List<EgovMap>)loginSuccessHandlerData.get("userScDeptList");
-//				EgovMap userScDeptMap = new EgovMap();
-//				for(EgovMap scDept : userScDeptList) {
-//					userScDeptMap.put(scDept.get("year"), scDept.get("scDeptId"));
-//				}
-//				SessionUtil.setAttribute("userScDeptMap", userScDeptMap);
-//			}
-
-			// 접근권한 map 생성
-			if(userVO.getAdminGubunList() != null) {
-				List<ConfigAttribute> configList = new LinkedList<ConfigAttribute>();
-				for(String adminGubun : userVO.getAdminGubunList()) {
-					configList.add(new SecurityConfig(adminGubun));
-				}
-				LinkedHashMap<String, Collection<ConfigAttribute>> requestMap = new LinkedHashMap<String, Collection<ConfigAttribute>>();
-				for(MenuVO menuVO : menuList) {
-					if(CommonUtil.isEmpty(menuVO.getUrlPattern())) continue;
-					requestMap.put(menuVO.getUrlPattern(), configList);
-				}
-
-				/**
-				 * 인사평가기본>등급척도 관리 권한이 있으면
-				 * 인사평가기본의 모든 탭메뉴에 대해서 권한이 있음.
-				 */
-				if (requestMap.containsKey("/hre/conf/hreConfMng/insaEvalGradeMng/*.do")){
-					ArrayList<String> hreConfBaseUrlPatternList = new ArrayList<>();
-					hreConfBaseUrlPatternList.add("/hre/conf/hreConfMng/insaEvalGradeMng/*.do");
-					hreConfBaseUrlPatternList.add("/hre/conf/hreConfMng/insaEvalItemMng/*.do");
-					hreConfBaseUrlPatternList.add("/hre/conf/hreConfMng/insaEvalDistMng/*.do");
-					hreConfBaseUrlPatternList.add("/hre/conf/hreConfMng/cmptItemMng/*.do");
-					hreConfBaseUrlPatternList.add("/hre/conf/insaCmptDict/*.do");
-					for(String hreConfBaseUrlPattern : hreConfBaseUrlPatternList){
-						requestMap.put(hreConfBaseUrlPattern, configList);
-					}
-				}
-
-				userVO.setRequestMap(requestMap);
-			}
 
 			// 검색조건 쿠키 초기화
 			Cookie[] cookies = request.getCookies();
@@ -428,36 +337,4 @@ public class CustomLoginSuccessHandler implements AuthenticationSuccessHandler {
 	}
 
 
-	public static List<MenuVO> getUserMenuList(List<MenuVO> menuListRaw) throws Exception {
-		List<MenuVO> menuLvList = new ArrayList<MenuVO>();
-		List<MenuVO> menuList = new ArrayList<>();
-		try {
-			//Full path 내가 포함이 되는 메뉴가 하나 라도 있어야 함.
-			if(CommonUtil.isNotEmpty(menuListRaw)) {
-
-				List<MenuVO> finalMenuList = menuListRaw;
-				menuList = menuListRaw.stream().filter(e -> {
-					//고객사 미사용 처리 되지 않은 메뉴 중에서 하위가 있는 메뉴만..
-					int validLeafMenuCnt = finalMenuList.stream()
-							.filter(m -> ("Y".equals(m.getIsLeaf()) && "N".equals(m.getExceptYn()) && CommonUtil.nullToBlank(m.getFullPgmId()).indexOf(e.getPgmId()) != -1))
-							.collect(Collectors.toList())
-							.size();
-					return (validLeafMenuCnt > 0);
-				}).collect(Collectors.toList());
-			}
-
-			//고객사 메뉴 메뉴 권한 관리 에서 사용중 인것 만 가져옴.
-			List<String> exceptMenuIdList = menuList.stream().filter(e-> "Y".equals(e.getExceptYn())).map(e->e.getPgmId()).collect(Collectors.toList());
-			if(CommonUtil.isNotEmpty(menuList)) {
-				menuList.stream().filter(e->{
-					return !exceptMenuIdList.stream().anyMatch(exceptPgmId -> CommonUtil.nullToBlank(e.getFullPgmId()).indexOf(exceptPgmId)!=-1);
-				}).forEach(e->{
-					menuLvList.add(e);
-				});
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-		return menuLvList;
-	}
 }

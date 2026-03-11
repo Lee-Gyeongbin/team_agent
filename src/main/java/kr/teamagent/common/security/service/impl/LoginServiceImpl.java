@@ -185,9 +185,6 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
 		return  loginDAO.selectLoginSuccessHandlerData(vo);
 	}
 
-    public int selectCustomMenuCnt(UserVO userVO) throws Exception {
-		return loginDAO.selectCustomMenuCnt(userVO);
-    }
     public String selectAuth(UserVO userVO) throws Exception {
     	return loginDAO.selectAuth(userVO);
     }

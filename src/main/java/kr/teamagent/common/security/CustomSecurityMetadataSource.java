@@ -85,9 +85,13 @@ public class CustomSecurityMetadataSource implements FilterInvocationSecurityMet
 		//권한 체크가 필요한 URL
 		if (doCheckAfterAuth) {
 			// 로그인 사용자의 URL별 권한 목록을 가져와서 비교
+			// (메뉴 기반 권한 제거됨 - TB_MENU 신규 메뉴 시스템 전환 시 재구현)
 			UserVO userVO = SessionUtil.getUserVO();
-			if (userVO == null || userVO.getRequestMap() == null || userVO.getRequestMap().isEmpty()) {
+			if (userVO == null) {
 				return accessDenied();
+			}
+			if (userVO.getRequestMap() == null || userVO.getRequestMap().isEmpty()) {
+				return null; // requestMap 없음: 인증된 사용자 허용 (신규 메뉴 시스템 전환 전)
 			}
 
 			// 요청 URL과 일치하는 권한을 검색

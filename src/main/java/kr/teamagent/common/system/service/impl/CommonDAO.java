@@ -34,4 +34,9 @@ public class CommonDAO extends EgovComAbstractDAO {
 		map.put("masterDbId", masterDbId);
 		return (List<CommonVO>) list("common.selectDbList", map);
 	}
+
+	@SuppressWarnings("unchecked")
+	public List<EgovMap> selectMenuTreeList() throws Exception {
+		return (List<EgovMap>) list("common.selectMenuTreeList", null);
+	}
 }

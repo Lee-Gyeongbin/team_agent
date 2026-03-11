@@ -129,9 +129,6 @@ public class LoginDAO extends EgovComAbstractDAO {
 		return selectOne("login.selectLoginSuccessHandlerData", vo);
 	}
 
-    public int selectCustomMenuCnt(UserVO userVO) throws Exception {
-		return selectOne("login.selectCustomMenuCnt", userVO);
-    }
     public String selectAuth(UserVO userVO) throws Exception {
     	return selectOne("login.selectAuth", userVO);
     }

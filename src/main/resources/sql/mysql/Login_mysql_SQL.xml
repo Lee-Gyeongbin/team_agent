@@ -249,19 +249,13 @@
         <association column="{compId = COMP_ID, masterDbId = MASTER_DB_ID}" property="serviceYn" javaType="String" select="selectServiceUseYn"/>
         <association column="{compId = COMP_ID, masterDbId = MASTER_DB_ID}" property="isOnlyInsa" javaType="String" select="selectIsOnlyInsa"/>
         <collection column="{compId = COMP_ID, masterDbId = MASTER_DB_ID}" property="langList" javaType="list" ofType="langVO" select="selectLangList"/>
-        <!-- <collection column="{compId = COMP_ID, masterDbId = MASTER_DB_ID, userId = USER_ID}" property="userScDeptList" javaType="list" ofType="egovMap" select="selectUserScDeptList"/> -->
-        <collection column="{compId = COMP_ID, masterDbId = MASTER_DB_ID, templateDbId = TEMPLATE_DB_ID, lang = LANG, userId = USER_ID, menuGbn = MENU_GBN}" property="menuList" javaType="list" ofType="menuVO" select="menu.selectList"/>
     </resultMap>
     <select id="selectLoginSuccessHandlerData" parameterType="userVO" resultMap="loginSuccessHandlerData">
         /* 로그인 성공 핸들러 데이터 조회 login.selectLoginSuccessHandlerData */
         SELECT
             1 AS DUMMY,
             #{compId} AS COMP_ID,
-            #{masterDbId} AS MASTER_DB_ID,
-            #{templateDbId} AS TEMPLATE_DB_ID,
-            #{lang} AS LANG,
-            #{userId} AS USER_ID,
-            #{menuGbn} AS MENU_GBN
+            #{masterDbId} AS MASTER_DB_ID
     </select>
 
 
@@ -283,12 +277,6 @@
             #{dbId} AS DB_ID,
             #{userId} AS USER_ID,
             #{masterDbId} AS MASTER_DB_ID
-    </select>
-
-    <select id="selectCustomMenuCnt" parameterType="userVO" resultType="int">
-        /* 고객사별 메뉴 갯수 조회 login.selectCustomMenuCnt */
-        SELECT COUNT(*)
-        FROM COM_PGM
     </select>
 
     <select id="selectAuth" parameterType="userVO" resultType="String">

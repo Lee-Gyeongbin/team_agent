@@ -4,6 +4,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 
 import javax.annotation.Resource;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.sql.DataSource;
@@ -22,6 +24,9 @@ public class CommonController extends BaseController {
 
 	@Resource(name="dataSource")
 	private DataSource dataSource;
+
+	@Autowired
+	private kr.teamagent.common.system.service.impl.CommonServiceImpl commonService;
 
 	@RequestMapping("/main.do")
 	public String main(Model model, HttpServletRequest request) throws Exception {
@@ -93,6 +98,18 @@ public class CommonController extends BaseController {
 	public ModelAndView refreshSession(Model model, HttpServletRequest request, HttpServletResponse response) throws Exception {
 		HashMap<String, Object> resultMap = new HashMap<>();
 		resultMap.put("success", true);
+		return new ModelAndView("jsonView", resultMap);
+	}
+
+	/**
+	 * 메뉴 목록 조회
+	 * @return
+	 * @throws Exception
+	 */
+	@RequestMapping("/menuList.do")
+	public ModelAndView menuList() throws Exception {
+		HashMap<String, Object> resultMap = new LinkedHashMap<>();
+		resultMap.put("list", commonService.selectMenuTreeList());
 		return new ModelAndView("jsonView", resultMap);
 	}
 }

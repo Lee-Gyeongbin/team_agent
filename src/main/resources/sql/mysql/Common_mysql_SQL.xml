@@ -36,4 +36,62 @@
         AND USER_ID = #{userId}
     </select>
 
+    <!-- TB_MENU 메뉴 트리 목록 조회 (재귀 CTE) -->
+    <select id="selectMenuTreeList" resultType="egovMap">
+        /* 메뉴 트리 목록 조회 common.selectMenuTreeList */
+        WITH RECURSIVE MENU_TREE AS (
+            SELECT
+                  M.MENU_ID
+                , M.MENU_NAME
+                , M.PARN_MENU_ID
+                , M.MENU_LEVEL
+                , M.MENU_PATH
+                , M.SRC_PATH
+                , M.ICON
+                , M.SORT_ORD
+                , M.USE_YN
+                , M.DESCRIPTION
+                , M.CREATE_DT
+                , M.MODIFY_DT
+                , CAST(LPAD(M.SORT_ORD,5,'0') AS CHAR(200)) AS SORT_PATH
+            FROM TB_MENU M
+            WHERE M.PARN_MENU_ID IS NULL
+              AND M.USE_YN = 'Y'
+
+            UNION ALL
+
+            SELECT
+                  C.MENU_ID
+                , C.MENU_NAME
+                , C.PARN_MENU_ID
+                , C.MENU_LEVEL
+                , C.MENU_PATH
+                , C.SRC_PATH
+                , C.ICON
+                , C.SORT_ORD
+                , C.USE_YN
+                , C.DESCRIPTION
+                , C.CREATE_DT
+                , C.MODIFY_DT
+                , CONCAT(P.SORT_PATH,'/',LPAD(C.SORT_ORD,5,'0')) AS SORT_PATH
+            FROM TB_MENU C
+            JOIN MENU_TREE P
+              ON C.PARN_MENU_ID = P.MENU_ID
+            WHERE C.USE_YN = 'Y'
+        )
+        SELECT
+              MENU_ID
+            , MENU_NAME
+            , PARN_MENU_ID
+            , MENU_LEVEL
+            , MENU_PATH
+            , SRC_PATH
+            , ICON
+            , SORT_ORD
+            , USE_YN
+            , DESCRIPTION
+        FROM MENU_TREE
+        ORDER BY SORT_PATH
+    </select>
+
 </mapper>

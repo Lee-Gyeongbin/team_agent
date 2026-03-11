@@ -35,4 +35,8 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	public List<CommonVO> selectDbList() throws Exception {
 		return commonDAO.selectDbList(PropertyUtil.getProperty("Globals.Master.db"));
 	}
+
+	public List<EgovMap> selectMenuTreeList() throws Exception {
+		return commonDAO.selectMenuTreeList();
+	}
 }
