@@ -84,6 +84,13 @@ public class ApiLoginController {
                 return ResponseEntity.ok(result);
             }
 
+            if ("002".equals(user.getAcctStatusCd())) {
+                result.put("success", false);
+                result.put("errorType", "accountInactive");
+                result.put("message", "비활성화된 계정입니다. 관리자에게 문의하세요.");
+                return ResponseEntity.ok(result);
+            }
+
             if ("003".equals(user.getAcctStatusCd())) {
                 result.put("success", false);
                 result.put("errorType", "accountLocked");
