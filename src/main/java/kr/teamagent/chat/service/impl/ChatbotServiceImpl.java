@@ -343,12 +343,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         // done 이벤트 처리
                         else if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
                             String answer = (String) data.get("answer");
+                            logger.info("done 이벤트 처리 - answer: {}", answer);
                             if (answer != null && !answer.isEmpty()) {
                                 // answer_delta 없이 done에 최종 answer만 오는 경우, chunk를 1회 전송해 UI 일관성 유지
                                 if (accumulatedContent.length() == 0) {
                                     callback.onChunk(answer, answer);
                                 }
                                 accumulatedContent = new StringBuilder(answer);
+                                logger.info("done 이벤트 처리 - answer: {}, accumulatedContent: {}", answer, accumulatedContent.toString());
                             }
                             inputTokens = parseTokenCount(data.get("input_tokens"));
                             outputTokens = parseTokenCount(data.get("output_tokens"));
