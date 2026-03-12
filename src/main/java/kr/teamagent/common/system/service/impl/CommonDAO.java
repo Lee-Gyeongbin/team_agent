@@ -39,4 +39,17 @@ public class CommonDAO extends EgovComAbstractDAO {
 	public List<EgovMap> selectMenuTreeList() throws Exception {
 		return (List<EgovMap>) list("common.selectMenuTreeList", null);
 	}
+
+	/**
+	 * 테이블 마지막 ID 조회
+	 * @param tableName 테이블명 (예: TB_KNOW_CAT)
+	 * @param idColumn ID 컬럼명 (예: CATEGORY_ID)
+	 * @return
+	 */
+	public String selectMaxId(String tableName, String idColumn) throws Exception {
+		Map<String, String> param = new HashMap<>();
+		param.put("tableName", tableName);
+		param.put("idColumn", idColumn);
+		return (String) selectOne("common.selectMaxId", param);
+	}
 }

@@ -79,4 +79,19 @@ public class LibraryController extends BaseController {
         return makeSuccessJsonData();
     }
 
+    /**
+     * 카테고리 등록/수정
+     * @param searchVO { category: { categoryId, categoryNm, color, sortOrd } } 또는 { categoryId, categoryNm, color, sortOrd }
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/saveCategory.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView saveCategory(@RequestBody LibraryVO searchVO) throws Exception {
+        if (searchVO != null) {
+            libraryService.saveCategory(searchVO);
+        }
+        return makeSuccessJsonData();
+    }
+
 }

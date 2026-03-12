@@ -9,7 +9,6 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.spec.RSAPublicKeySpec;
 import java.util.List;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.crypto.Cipher;
@@ -304,5 +303,32 @@ public class CommonUtil {
 	    }
 
 	    return domain.toString();
+	}
+
+	/**
+	 * 테이블 키 생성 (업무명 2자리 + 숫자 6자리 = 총 8자리)
+	 * @param businessPrefix 업무명 대문자 영어 2자리 (예: KC)
+	 * @param lastId 해당 테이블의 마지막 ID (예: KC000001). null/empty면 000001부터 시작
+	 * @return 8자리 키 (예: KC000002)
+	 */
+	public static String generateTableKey(String businessPrefix, String lastId) {
+		String prefix = nullToBlank(businessPrefix).toUpperCase();
+		if (prefix.length() > 2) {
+			prefix = prefix.substring(0, 2);
+		} else if (prefix.length() < 2) {
+			prefix = String.format("%-2s", prefix).replace(' ', '0');
+		}
+
+		int nextNum = 1;
+		if (isNotEmpty(lastId) && lastId.length() >= 2) {
+			try {
+				String numPart = lastId.substring(Math.max(0, lastId.length() - 6));
+				nextNum = Integer.parseInt(numPart) + 1;
+			} catch (NumberFormatException e) {
+				logger.debug("generateTableKey lastId 파싱 실패, 1부터 시작: {}", lastId);
+			}
+		}
+
+		return prefix + String.format("%06d", nextNum);
 	}
 }

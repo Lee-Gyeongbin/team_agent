@@ -97,4 +97,10 @@
         ORDER BY SORT_PATH
     </select>
 
+    <select id="selectMaxId" resultType="java.lang.String">
+        /* 테이블 마지막 ID 조회 common.selectMaxId */
+        SELECT MAX(${idColumn})
+        FROM ${tableName}
+    </select>
+
 </mapper>

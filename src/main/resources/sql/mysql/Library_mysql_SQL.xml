@@ -97,4 +97,33 @@
         WHERE CARD_ID = #{cardId}
     </update>
 
+    <insert id="insertCategory">
+        /* 카테고리 등록/수정 library.insertCategory */
+        <selectKey keyProperty="sortOrd" order="BEFORE" resultType="int">
+            SELECT CASE WHEN #{sortOrd, jdbcType=INTEGER} IS NULL OR #{sortOrd, jdbcType=INTEGER} = 0
+                THEN (SELECT IFNULL(MAX(SORT_ORD), 0) + 1 FROM TB_KNOW_CAT WHERE USER_ID = #{userId} AND SORT_ORD &gt; 0)
+                ELSE #{sortOrd, jdbcType=INTEGER}
+            END
+        </selectKey>
+        INSERT INTO TB_KNOW_CAT (
+            CATEGORY_ID
+            , USER_ID
+            , CATEGORY_NM
+            , COLOR
+            , SORT_ORD
+            , CREATE_DT
+        ) VALUES (
+            #{categoryId}
+            , #{userId}
+            , #{categoryNm}
+            , #{color}
+            , #{sortOrd, jdbcType=INTEGER}
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            CATEGORY_NM = VALUES(CATEGORY_NM)
+            , COLOR = VALUES(COLOR)
+            , SORT_ORD = VALUES(SORT_ORD)
+    </insert>
+
 </mapper>

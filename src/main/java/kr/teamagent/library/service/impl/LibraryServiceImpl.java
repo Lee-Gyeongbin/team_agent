@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import kr.teamagent.library.service.LibraryVO;
+import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.SessionUtil;
 
 @Service
@@ -17,6 +19,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     LibraryDAO libraryDAO;
+
+    @Autowired
+    KeyGenerate keyGenerate;
 
     /**
      * 카테고리 목록 조회 (세션 userId 자동 설정)
@@ -65,6 +70,23 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      */
     public int updateCardPin(LibraryVO searchVO) throws Exception {
         return libraryDAO.updateCardPin(searchVO);
+    }
+
+    /**
+     * 카테고리 등록/수정
+     * @param searchVO categoryId 비어있으면 자동 생성
+     * @return
+     * @throws Exception
+     */
+    public void saveCategory(LibraryVO searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId != null) {
+            searchVO.setUserId(userId);
+        }
+        if (CommonUtil.isEmpty(searchVO.getCategoryId())) {
+            searchVO.setCategoryId(keyGenerate.generateTableKey("KC", "TB_KNOW_CAT", "CATEGORY_ID"));
+        }
+        libraryDAO.insertCategory(searchVO);
     }
 
 }

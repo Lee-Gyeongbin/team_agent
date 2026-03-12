@@ -1,6 +1,9 @@
 package kr.teamagent.common.util;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import org.springframework.util.Base64Utils;
+import kr.teamagent.common.system.service.impl.CommonDAO;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -15,9 +18,26 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Properties;
 
+@Service
 public class KeyGenerate {
 
     private static SecretKeySpec spec = null;
+
+    @Autowired
+    private CommonDAO commonDAO;
+
+    /**
+     * 테이블 키 생성 (업무명 2자리 + 숫자 6자리 = 총 8자리)
+     * @param businessPrefix 업무명 대문자 영어 2자리 (예: KC)
+     * @param tableName 테이블명 (예: TB_KNOW_CAT)
+     * @param idColumn ID 컬럼명 (예: CATEGORY_ID)
+     * @return 8자리 키 (예: KC000002)
+     */
+    public String generateTableKey(String businessPrefix, String tableName, String idColumn) throws Exception {
+        String lastId = commonDAO.selectMaxId(tableName, idColumn);
+        return CommonUtil.generateTableKey(businessPrefix, lastId);
+    }
+
 
 	public static String getKey() {
 

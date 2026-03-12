@@ -50,4 +50,14 @@ public class LibraryDAO extends EgovComAbstractDAO {
         return update("library.updateCardPin", searchVO);
     }
 
+    /**
+     * 카테고리 등록/수정
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int insertCategory(LibraryVO searchVO) throws Exception {
+        return insert("library.insertCategory", searchVO);
+    }
+
 }
