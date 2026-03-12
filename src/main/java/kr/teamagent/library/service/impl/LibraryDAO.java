@@ -80,4 +80,24 @@ public class LibraryDAO extends EgovComAbstractDAO {
         return update("library.updateCategoryOrder", searchVO);
     }
 
+    /**
+     * 카드 순서·카테고리 일괄 수정
+     * @param searchVO userId(세션), cardOrderItems [{ cardId, categoryId, sortOrd }] 필수
+     * @return
+     * @throws Exception
+     */
+    public int updateCardOrder(LibraryVO searchVO) throws Exception {
+        return update("library.updateCardOrder", searchVO);
+    }
+
+    /**
+     * 카드 이동 (대상 카테고리 맨 뒤에 배치)
+     * @param searchVO cardId, targetCategoryId, userId(세션) 필수
+     * @return
+     * @throws Exception
+     */
+    public int moveCard(LibraryVO searchVO) throws Exception {
+        return update("library.moveCard", searchVO);
+    }
+
 }

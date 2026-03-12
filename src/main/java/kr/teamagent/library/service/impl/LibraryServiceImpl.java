@@ -1,6 +1,7 @@
 package kr.teamagent.library.service.impl;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.slf4j.Logger;
@@ -116,6 +117,43 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         }
         searchVO.setUserId(userId);
         return libraryDAO.updateCategoryOrder(searchVO);
+    }
+
+    /**
+     * 카드 순서·카테고리 일괄 수정 (카테고리 간 이동 포함)
+     * @param searchVO payload [{ categoryId, cards: [{ cardId, order }] }] 필수
+     * @return
+     * @throws Exception
+     */
+    public int updateCardOrder(LibraryVO searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId == null || searchVO.getPayload() == null || searchVO.getPayload().isEmpty()) {
+            return 0;
+        }
+        List<LibraryVO.CardOrderPayload> filtered = searchVO.getPayload().stream()
+                .filter(cat -> cat.getCards() != null && !cat.getCards().isEmpty())
+                .collect(Collectors.toList());
+        if (filtered.isEmpty()) {
+            return 0;
+        }
+        searchVO.setPayload(filtered);
+        searchVO.setUserId(userId);
+        return libraryDAO.updateCardOrder(searchVO);
+    }
+
+    /**
+     * 카드 이동 (대상 카테고리의 max sortOrd + 1로 맨 뒤에 배치)
+     * @param searchVO cardId, targetCategoryId 필수 (userId는 세션에서 설정)
+     * @return
+     * @throws Exception
+     */
+    public int moveCard(LibraryVO searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId == null || searchVO.getCardId() == null || searchVO.getTargetCategoryId() == null) {
+            return 0;
+        }
+        searchVO.setUserId(userId);
+        return libraryDAO.moveCard(searchVO);
     }
 
 }

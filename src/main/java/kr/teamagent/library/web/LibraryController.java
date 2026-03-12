@@ -124,4 +124,34 @@ public class LibraryController extends BaseController {
         return makeSuccessJsonData();
     }
 
+    /**
+     * 카드 순서·카테고리 일괄 수정 (카테고리 간 이동 포함)
+     * @param searchVO { payload: [{ categoryId, cards: [{ cardId, order }] }] }
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/updateCardOrder.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateCardOrder(@RequestBody LibraryVO searchVO) throws Exception {
+        if (searchVO != null && searchVO.getPayload() != null) {
+            libraryService.updateCardOrder(searchVO);
+        }
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 카드 이동 (대상 카테고리 맨 뒤에 배치)
+     * @param searchVO targetCategoryId, cardId 필수
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/moveCard.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView moveCard(@RequestBody LibraryVO searchVO) throws Exception {
+        if (searchVO != null) {
+            libraryService.moveCard(searchVO);
+        }
+        return makeSuccessJsonData();
+    }
+
 }

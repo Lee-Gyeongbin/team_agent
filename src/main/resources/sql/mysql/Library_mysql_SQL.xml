@@ -152,4 +152,48 @@
         </foreach>
     </update>
 
+    <update id="moveCard">
+        /* 카드 이동 library.moveCard */
+        UPDATE TB_KNOW_CARD
+        SET CATEGORY_ID = #{targetCategoryId}
+            , SORT_ORD = (
+                SELECT maxOrd + 1 FROM (
+                    SELECT IFNULL(MAX(T.SORT_ORD), 0) AS maxOrd
+                    FROM TB_KNOW_CARD T
+                    WHERE T.CATEGORY_ID = #{targetCategoryId}
+                      AND T.USER_ID = #{userId}
+                ) AS tmp
+            )
+            , MODIFY_DT = NOW()
+        WHERE CARD_ID = #{cardId}
+          AND USER_ID = #{userId}
+    </update>
+
+    <update id="updateCardOrder">
+        /* 카드 순서·카테고리 일괄 수정 library.updateCardOrder (카테고리 간 이동 포함) */
+        UPDATE TB_KNOW_CARD
+        SET CATEGORY_ID = CASE CARD_ID
+        <foreach collection="payload" item="cat">
+            <foreach collection="cat.cards" item="card">
+                WHEN #{card.cardId} THEN #{cat.categoryId}
+            </foreach>
+        </foreach>
+        END
+        , SORT_ORD = CASE CARD_ID
+        <foreach collection="payload" item="cat">
+            <foreach collection="cat.cards" item="card">
+                WHEN #{card.cardId} THEN #{card.sortOrd, jdbcType=INTEGER}
+            </foreach>
+        </foreach>
+        END
+        , MODIFY_DT = NOW()
+        WHERE USER_ID = #{userId}
+        AND CARD_ID IN
+        <foreach collection="payload" item="cat" open="(" separator="," close=")">
+            <foreach collection="cat.cards" item="card" separator=",">
+                #{card.cardId}
+            </foreach>
+        </foreach>
+    </update>
+
 </mapper>

@@ -19,6 +19,8 @@ public class LibraryVO {
 
     /** 지식 카드 [TB_KNOW_CARD] */
     private String cardId;
+    /** 카드 이동 API용: 이동 대상 카테고리 ID */
+    private String targetCategoryId;
     private String logId;
     private String svcTy;
     private String title;
@@ -56,6 +58,21 @@ public class LibraryVO {
     @Setter
     public static class CategoryOrderItem {
         private String categoryId;
+        private Integer sortOrd;
+    }
+
+    /** 카드 순서 일괄 변경 API용: { payload: [{ categoryId, cards: [{ cardId, order }] }] } */
+    private List<CardOrderPayload> payload;
+    @Getter
+    @Setter
+    public static class CardOrderPayload {
+        private String categoryId;
+        private List<CardOrderItem> cards;
+    }
+    @Getter
+    @Setter
+    public static class CardOrderItem {
+        private String cardId;
         private Integer sortOrd;
     }
 
