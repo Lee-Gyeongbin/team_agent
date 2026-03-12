@@ -337,6 +337,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         if ("answer_delta".equals(currentEvent) || (CommonUtil.isEmpty(currentEvent) && CommonUtil.isNotEmpty(chunkText))) {
                             if (CommonUtil.isNotEmpty(chunkText)) {
                                 accumulatedContent.append(chunkText);
+                                logger.info("answer_delta 이벤트 처리 - chunkText: {}, accumulatedContent: {}", chunkText, accumulatedContent.toString());
                                 // 콜백을 통해 청크 즉시 전송 (한 글자씩 실시간 전송)
                                 callback.onChunk(chunkText, accumulatedContent.toString());
                             }
