@@ -79,6 +79,12 @@ public class ChatbotController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * CHAT 대화방 등록
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
     @RequestMapping(value="/ai/chatbot/createChatRoom.do")
     @ResponseBody
     public ModelAndView createChatRoom(@RequestBody ChatbotVO searchVO) throws Exception {
@@ -88,6 +94,12 @@ public class ChatbotController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * CHAT 대화방 로그 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
     @RequestMapping(value = "/ai/chatbot/selectChatLogList.do")
     @ResponseBody
     public ModelAndView selectChatLogList(ChatbotVO searchVO) throws Exception {
