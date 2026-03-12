@@ -72,6 +72,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
+        logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
         
         if (CommonUtil.isEmpty(apiUrl)) {
             callback.onError("API URL이 설정되지 않았습니다.");
@@ -101,6 +102,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             default:
                 throw new IllegalArgumentException("알 수 없는 서비스 타입: " + svcTy);
         }
+        logger.info("getApiUrl called - svcTy: {}, resolved apiUrl: {}", svcTy, apiUrl);
         return apiUrl;
     }
 
@@ -189,6 +191,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // JSON body 생성
             com.google.gson.Gson gson = new com.google.gson.Gson();
             String jsonBody = gson.toJson(params);
+            logger.info("AI API request ready - url: {}, svcTy: {}, userId: {}, refId: {}, threadId: {}, body: {}",
+                    apiUrl, svcTy, userId, refId, threadId, jsonBody);
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
             
             // Request Builder
