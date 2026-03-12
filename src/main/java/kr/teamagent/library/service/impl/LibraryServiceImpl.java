@@ -47,4 +47,24 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         return libraryDAO.selectCardList(searchVO);
     }
 
+    /**
+     * 카드 상세 조회
+     * @param searchVO cardId 필수
+     * @return
+     * @throws Exception
+     */
+    public LibraryVO selectCardDetail(LibraryVO searchVO) throws Exception {
+        return libraryDAO.selectCardDetail(searchVO);
+    }
+
+    /**
+     * 카드 PIN 여부 업데이트
+     * @param searchVO cardId, pinYn 필수
+     * @return
+     * @throws Exception
+     */
+    public int updateCardPin(LibraryVO searchVO) throws Exception {
+        return libraryDAO.updateCardPin(searchVO);
+    }
+
 }

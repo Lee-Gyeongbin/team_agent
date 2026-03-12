@@ -30,4 +30,9 @@ public class LibraryVO {
     private String useYn;
     private String modifyDt;
 
+    /** TB_CHAT_LOG 조인 필드 */
+    private String qContent;
+    private String rContent;
+    private String ttsq;
+
 }

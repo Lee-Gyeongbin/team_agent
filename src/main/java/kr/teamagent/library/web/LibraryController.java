@@ -6,7 +6,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 import kr.teamagent.library.service.LibraryVO;
@@ -48,6 +50,33 @@ public class LibraryController extends BaseController {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", libraryService.selectCardList(searchVO));
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 카드 상세 조회
+     * @param searchVO cardId 필수
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/cardDetail.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView cardDetail(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", libraryService.selectCardDetail(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 카드 PIN 여부 업데이트
+     * @param searchVO cardId, pinYn 필수
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/updateCardPin.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateCardPin(@RequestBody LibraryVO searchVO) throws Exception {
+        libraryService.updateCardPin(searchVO);
+        return makeSuccessJsonData();
     }
 
 }

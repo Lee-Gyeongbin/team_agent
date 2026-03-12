@@ -58,4 +58,43 @@
         ORDER BY SORT_ORD, CREATE_DT DESC
     </select>
 
+    <select id="selectCardDetail" resultType="libraryVO">
+        /* 카드 상세 조회 library.selectCardDetail */
+        SELECT
+            A.CARD_ID
+            , A.USER_ID
+            , A.CATEGORY_ID
+            , A.LOG_ID
+            , A.SVC_TY
+            , A.TITLE
+            , A.TAGS
+            , A.PIN_YN
+            , A.ARCHIVE_YN
+            , A.SORT_ORD
+            , A.SRC_DOCS
+            , A.SQL_CODE
+            , A.CHART_CFG
+            , A.QRY_RSLT
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+            , B.Q_CONTENT
+            , B.R_CONTENT
+            , B.TTSQ
+        FROM TB_KNOW_CARD A
+        LEFT JOIN TB_CHAT_LOG B
+               ON A.LOG_ID = B.LOG_ID
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+            AND A.CARD_ID = #{cardId}
+    </select>
+
+    <update id="updateCardPin">
+        /* 카드 PIN 여부 업데이트 library.updateCardPin */
+        UPDATE TB_KNOW_CARD
+        SET PIN_YN = #{pinYn}
+            , MODIFY_DT = NOW()
+        WHERE CARD_ID = #{cardId}
+    </update>
+
 </mapper>
