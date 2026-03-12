@@ -78,7 +78,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      * @return
      * @throws Exception
      */
-    public void saveCategory(LibraryVO searchVO) throws Exception {
+    public void saveCategory(LibraryVO.CategoryItem searchVO) throws Exception {
         String userId = SessionUtil.getUserId();
         if (userId != null) {
             searchVO.setUserId(userId);
@@ -87,6 +87,35 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             searchVO.setCategoryId(keyGenerate.generateTableKey("KC", "TB_KNOW_CAT", "CATEGORY_ID"));
         }
         libraryDAO.insertCategory(searchVO);
+    }
+
+    /**
+     * 카테고리 삭제
+     * @param searchVO categoryId 필수 (세션 userId로 본인 카테고리만 삭제)
+     * @return
+     * @throws Exception
+     */
+    public void deleteCategory(LibraryVO.CategoryItem searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId != null) {
+            searchVO.setUserId(userId);
+        }
+        libraryDAO.deleteCategory(searchVO);
+    }
+
+    /**
+     * 카테고리 순서 일괄 수정
+     * @param searchVO items [{ categoryId, sortOrd }] 필수 (세션 userId로 본인 카테고리만 수정)
+     * @return
+     * @throws Exception
+     */
+    public int updateCategoryOrder(LibraryVO searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId == null || searchVO.getItems() == null || searchVO.getItems().isEmpty()) {
+            return 0;
+        }
+        searchVO.setUserId(userId);
+        return libraryDAO.updateCategoryOrder(searchVO);
     }
 
 }

@@ -81,7 +81,7 @@ public class LibraryController extends BaseController {
 
     /**
      * 카테고리 등록/수정
-     * @param searchVO { category: { categoryId, categoryNm, color, sortOrd } } 또는 { categoryId, categoryNm, color, sortOrd }
+     * @param searchVO categoryId, categoryNm, color, sortOrd 등 (LibraryVO 전체)
      * @return
      * @throws Exception
      */
@@ -89,7 +89,37 @@ public class LibraryController extends BaseController {
     @ResponseBody
     public ModelAndView saveCategory(@RequestBody LibraryVO searchVO) throws Exception {
         if (searchVO != null) {
-            libraryService.saveCategory(searchVO);
+            libraryService.saveCategory(searchVO.getCategory());
+        }
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 카테고리 삭제
+     * @param searchVO categoryId 필수 (LibraryVO 전체)
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/deleteCategory.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteCategory(@RequestBody LibraryVO searchVO) throws Exception {
+        if (searchVO != null) {
+            libraryService.deleteCategory(searchVO.getCategory());
+        }
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 카테고리 순서 변경
+     * @param searchVO { items: [{ categoryId, sortOrd }] }
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/updateCategoryOrder.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateCategoryOrder(@RequestBody LibraryVO searchVO) throws Exception {
+        if (searchVO != null && searchVO.getItems() != null) {
+            libraryService.updateCategoryOrder(searchVO);
         }
         return makeSuccessJsonData();
     }

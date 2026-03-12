@@ -52,12 +52,32 @@ public class LibraryDAO extends EgovComAbstractDAO {
 
     /**
      * 카테고리 등록/수정
-     * @param searchVO
+     * @param searchVO categoryId, userId, categoryNm, color, sortOrd
      * @return
      * @throws Exception
      */
-    public int insertCategory(LibraryVO searchVO) throws Exception {
+    public int insertCategory(LibraryVO.CategoryItem searchVO) throws Exception {
         return insert("library.insertCategory", searchVO);
+    }
+
+    /**
+     * 카테고리 삭제
+     * @param searchVO categoryId, userId 필수
+     * @return
+     * @throws Exception
+     */
+    public int deleteCategory(LibraryVO.CategoryItem searchVO) throws Exception {
+        return delete("library.deleteCategory", searchVO);
+    }
+
+    /**
+     * 카테고리 순서 일괄 수정
+     * @param searchVO userId(세션), items [{ categoryId, sortOrd }] 필수
+     * @return
+     * @throws Exception
+     */
+    public int updateCategoryOrder(LibraryVO searchVO) throws Exception {
+        return update("library.updateCategoryOrder", searchVO);
     }
 
 }

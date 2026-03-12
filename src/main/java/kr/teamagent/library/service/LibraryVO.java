@@ -1,24 +1,13 @@
 package kr.teamagent.library.service;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
+
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
 public class LibraryVO {
-
-    /** saveCategory API용: { category: {...} } 래퍼 처리 */
-    @JsonProperty("category")
-    public void setCategoryFromWrapper(LibraryVO category) {
-        if (category != null) {
-            this.categoryId = category.getCategoryId();
-            this.userId = category.getUserId();
-            this.categoryNm = category.getCategoryNm();
-            this.color = category.getColor();
-            this.sortOrd = category.getSortOrd();
-        }
-    }
 
     /** 지식 카테고리 [TB_KNOW_CAT] */
     private String categoryId;
@@ -47,5 +36,27 @@ public class LibraryVO {
     private String qContent;
     private String rContent;
     private String ttsq;
+
+    private CategoryItem category;
+
+    @Getter
+    @Setter
+    public static class CategoryItem {
+        private String categoryId;
+        private String userId;
+        private String categoryNm;
+        private String color;
+        private Integer sortOrd;
+        private String createDt;
+    }
+
+    /** 카테고리 순서 변경 API용: { items: [{ categoryId, sortOrd }] } */
+    private List<CategoryOrderItem> items;
+    @Getter
+    @Setter
+    public static class CategoryOrderItem {
+        private String categoryId;
+        private Integer sortOrd;
+    }
 
 }
