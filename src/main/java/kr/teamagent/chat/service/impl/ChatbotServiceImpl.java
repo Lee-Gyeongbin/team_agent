@@ -305,6 +305,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         int outputTokens = 0;
         String savedLogId = "";
         String tableData = "";
+        boolean hasStreamError = false;
 
         try {
             while ((line = reader.readLine()) != null) {
@@ -402,6 +403,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         } catch (Exception e) {
             logger.error("스트림 읽기 중 오류 발생 (클라이언트 연결 끊김 등): {}", e.getMessage());
             // 에러가 나더라도 finally 블록으로 넘어가서 저장하게 됩니다!
+            hasStreamError = true; // 추가
         } finally {
             // 정상 종료든 비정상 종료든 DB 저장은 여기서 무조건 실행!
             if (accumulatedContent.length() > 0 && "None".equals(errorCode)) {
@@ -413,7 +415,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             }
 
             // 콜백 완료 처리 (웹소켓 클라이언트에게 끝났다고 알려줌)
-            if (!isCompleteCalled && accumulatedContent.length() > 0) {
+            // - 스트리밍 도중 예외가 발생했으면(끊김/전송 문제 등) complete를 보내지 않음
+            if (!hasStreamError && !isCompleteCalled && accumulatedContent.length() > 0) {
                 String fallbackThreadId = responseThreadId != null ? responseThreadId : "thread-" + System.currentTimeMillis();
                 callback.onComplete(
                         accumulatedContent.toString(),
@@ -422,7 +425,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         relatedPageNos,
                         fallbackThreadId,
                         CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
-                        tableData);
+                        tableData
+                );
                 isCompleteCalled = true;
             }
 

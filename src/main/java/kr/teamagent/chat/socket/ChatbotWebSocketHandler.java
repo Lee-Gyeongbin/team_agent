@@ -282,15 +282,23 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
     }
     
     /**
-     * WebSocket으로 메시지 전송
+     * WebSocket으로 메시지 전송 (세션 단위 동기화)
+     * - 여러 스레드(Executor/OkHttp 콜백)에서 동시에 sendMessage 호출될 수 있어
+     *   session 단위로 동기화해 전송 충돌/IOException을 줄입니다.
      */
     private void sendMessage(WebSocketSession session, String message) {
-        if (session != null && session.isOpen()) {
-            try {
-                session.sendMessage(new TextMessage(message));
-            } catch (IOException e) {
-                logger.error("WebSocket 메시지 전송 실패", e);
+        if (session == null) return;
+
+        try {
+            synchronized (session) {
+                if (session.isOpen()) {
+                    session.sendMessage(new TextMessage(message));
+                }
             }
+        } catch (IOException e) {
+            logger.error("WebSocket 메시지 전송 실패", e);
+        } catch (Exception e) {
+            logger.error("WebSocket 메시지 전송 중 예외", e);
         }
     }
     
