@@ -1,0 +1,134 @@
+================================================================================
+                    Team Agent 공통 메소드 정의서
+================================================================================
+작성일: 2025-03-12
+대상: 개발팀 공유용
+목적: 공통 유틸리티/서비스 사용법 및 샘플 소스 위치 안내
+
+================================================================================
+1. generateTableKey - 테이블 키 자동 생성
+================================================================================
+
+■ 개요
+  - 업무명 2자리 + 숫자 6자리 = 총 8자리 키 생성 (예: KC000001, KC000002)
+  - 신규 등록 시 ID가 비어있을 때 자동으로 다음 번호를 부여
+
+■ 사용 방법
+
+  [방법 A] KeyGenerate 서비스 사용 (권장 - DB 연동)
+  - Spring Bean으로 주입 후 호출
+  - 테이블의 MAX(ID)를 조회하여 다음 번호 자동 계산
+
+    @Autowired
+    KeyGenerate keyGenerate;
+
+    // categoryId가 비어있으면 자동 생성
+    if (CommonUtil.isEmpty(searchVO.getCategoryId())) {
+        searchVO.setCategoryId(
+            keyGenerate.generateTableKey("KC", "TB_KNOW_CAT", "CATEGORY_ID")
+        );
+    }
+
+  [방법 B] CommonUtil 정적 메소드 사용 (lastId 직접 전달)
+  - DB 조회 없이 lastId만 있으면 사용 가능
+  - 배치 등에서 이미 lastId를 알고 있을 때
+
+    String lastId = "KC000005";  // 또는 commonDAO.selectMaxId(...) 결과
+    String newKey = CommonUtil.generateTableKey("KC", lastId);
+    // 결과: "KC000006"
+
+■ 파라미터
+
+  KeyGenerate.generateTableKey(businessPrefix, tableName, idColumn)
+    - businessPrefix: 업무명 대문자 2자리 (예: KC=지식카테고리, CD=코드)
+    - tableName:     테이블명 (예: TB_KNOW_CAT)
+    - idColumn:      ID 컬럼명 (예: CATEGORY_ID)
+
+  CommonUtil.generateTableKey(businessPrefix, lastId)
+    - businessPrefix: 업무명 대문자 2자리
+    - lastId:         해당 테이블의 마지막 ID. null/empty면 000001부터 시작
+
+■ 반환값
+  - 8자리 문자열 (예: KC000001, KC000002, ...)
+
+■ 소스 위치
+  - KeyGenerate:   src/main/java/kr/teamagent/common/util/KeyGenerate.java
+  - CommonUtil:    src/main/java/kr/teamagent/common/util/CommonUtil.java
+  - CommonDAO:     src/main/java/kr/teamagent/common/system/service/impl/CommonDAO.java
+  - SQL:           src/main/resources/sql/mysql/Common_mysql_SQL.xml (selectMaxId)
+
+■ 샘플 소스 (실제 사용 예)
+  - LibraryServiceImpl.saveCategory()
+    경로: src/main/java/kr/teamagent/library/service/impl/LibraryServiceImpl.java
+    라인: 85~87
+
+    if (CommonUtil.isEmpty(searchVO.getCategoryId())) {
+        searchVO.setCategoryId(
+            keyGenerate.generateTableKey("KC", "TB_KNOW_CAT", "CATEGORY_ID")
+        );
+    }
+
+■ 주의사항
+  - businessPrefix는 2자리로 통일 (초과 시 앞 2자리만 사용, 부족 시 0 패딩)
+  - 테이블에 PK/UNIQUE 제약이 있어야 중복 방지 가능
+  - 동시 등록 시 race condition 가능성 있음 → 필요 시 트랜잭션/락 검토
+
+================================================================================
+2. SessionUtil - 세션 사용자 ID 조회
+================================================================================
+
+■ 개요
+  - HttpServletRequest 없이 Service/DAO 레이어에서 세션 값 조회
+  - Spring RequestContextHolder 기반 (Controller에서 request 전달 불필요)
+  - 로그인 시 세션에 저장된 userId, compId 등 조회
+
+■ 사용 방법
+
+  [getUserId] 로그인 사용자 ID 조회
+
+    String userId = SessionUtil.getUserId();
+    if (userId != null) {
+        searchVO.setUserId(userId);
+    }
+
+  [getAttribute] 세션 속성 직접 조회 (범용)
+
+    Object value = SessionUtil.getAttribute("userId");
+    String userId = value != null ? (String) value : null;
+
+  [getUserVO] 로그인 유저 VO 전체 조회
+
+    UserVO userVO = SessionUtil.getUserVO();
+    if (userVO != null) {
+        String userId = userVO.getUserId();
+    }
+
+■ 파라미터
+
+  SessionUtil.getUserId()
+    - 파라미터 없음
+
+  SessionUtil.getAttribute(String name)
+    - name: 세션 속성 키 (예: "userId", "compId", "uniqueUserId")
+
+■ 반환값
+  - getUserId():  String (userId) 또는 null (비로그인/세션 없음)
+  - getAttribute(): Object 또는 null
+
+■ 소스 위치
+  - SessionUtil: src/main/java/kr/teamagent/common/util/SessionUtil.java
+
+■ 샘플 소스 (실제 사용 예)
+  - LibraryServiceImpl.saveCategory()
+    경로: src/main/java/kr/teamagent/library/service/impl/LibraryServiceImpl.java
+    라인: 82~84
+
+    String userId = SessionUtil.getUserId();
+    if (userId != null) {
+        searchVO.setUserId(userId);
+    }
+
+■ 주의사항
+  - 비로그인 또는 세션 만료 시 null 반환 → null 체크 필수
+  - Controller가 아닌 Service/DAO에서 호출 가능 (RequestContextHolder 사용)
+  - 관련 메소드: getCompId(), getUniqueUserId(), getUserVO(), getAttribute(name)

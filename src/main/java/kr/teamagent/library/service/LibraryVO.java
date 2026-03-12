@@ -1,5 +1,7 @@
 package kr.teamagent.library.service;
 
+import java.util.List;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -17,6 +19,8 @@ public class LibraryVO {
 
     /** 지식 카드 [TB_KNOW_CARD] */
     private String cardId;
+    /** 카드 이동 API용: 이동 대상 카테고리 ID */
+    private String targetCategoryId;
     private String logId;
     private String svcTy;
     private String title;
@@ -29,5 +33,73 @@ public class LibraryVO {
     private String qryRslt;
     private String useYn;
     private String modifyDt;
+
+    /** TB_CHAT_LOG 조인 필드 */
+    private String qContent;
+    private String rContent;
+    private String ttsq;
+
+    private CategoryItem category;
+
+    /** 카드 수정 API용: { card: { cardId, userId, categoryId, ... } } */
+    private CardItem card;
+
+    @Getter
+    @Setter
+    public static class CategoryItem {
+        private String categoryId;
+        private String userId;
+        private String categoryNm;
+        private String color;
+        private Integer sortOrd;
+        private String createDt;
+    }
+
+    /** 카테고리 순서 변경 API용: { items: [{ categoryId, sortOrd }] } */
+    private List<CategoryOrderItem> items;
+    @Getter
+    @Setter
+    public static class CategoryOrderItem {
+        private String categoryId;
+        private Integer sortOrd;
+    }
+
+    /** 카드 순서 일괄 변경 API용: { payload: [{ categoryId, cards: [{ cardId, order }] }] } */
+    private List<CardOrderPayload> payload;
+    @Getter
+    @Setter
+    public static class CardOrderPayload {
+        private String categoryId;
+        private List<CardOrderItem> cards;
+    }
+    @Getter
+    @Setter
+    public static class CardOrderItem {
+        private String cardId;
+        private Integer sortOrd;
+    }
+
+    /** 카드 수정 API용 [TB_KNOW_CARD] - 기존 카드만 UPDATE */
+    @Getter
+    @Setter
+    public static class CardItem {
+        private String cardId;
+        private String userId;
+        private String categoryId;
+        private String logId;
+        private String svcTy;
+        private String title;
+        private String tags;
+        private String pinYn;
+        private String archiveYn;
+        private Integer sortOrd;
+        private String srcDocs;
+        private String sqlCode;
+        private String chartCfg;
+        private String qryRslt;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
 
 }

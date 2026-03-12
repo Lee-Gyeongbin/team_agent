@@ -72,6 +72,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
+        logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
         
         if (CommonUtil.isEmpty(apiUrl)) {
             callback.onError("API URL이 설정되지 않았습니다.");
@@ -101,6 +102,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             default:
                 throw new IllegalArgumentException("알 수 없는 서비스 타입: " + svcTy);
         }
+        logger.info("getApiUrl called - svcTy: {}, resolved apiUrl: {}", svcTy, apiUrl);
         return apiUrl;
     }
 
@@ -189,6 +191,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // JSON body 생성
             com.google.gson.Gson gson = new com.google.gson.Gson();
             String jsonBody = gson.toJson(params);
+            logger.info("AI API request ready - url: {}, svcTy: {}, userId: {}, refId: {}, threadId: {}, body: {}",
+                    apiUrl, svcTy, userId, refId, threadId, jsonBody);
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
             
             // Request Builder
@@ -301,6 +305,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         int outputTokens = 0;
         String savedLogId = "";
         String tableData = "";
+        boolean hasStreamError = false;
 
         try {
             while ((line = reader.readLine()) != null) {
@@ -339,12 +344,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         // done 이벤트 처리
                         else if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
                             String answer = (String) data.get("answer");
+                            logger.info("done 이벤트 처리 - answer: {}", answer);
                             if (answer != null && !answer.isEmpty()) {
                                 // answer_delta 없이 done에 최종 answer만 오는 경우, chunk를 1회 전송해 UI 일관성 유지
                                 if (accumulatedContent.length() == 0) {
                                     callback.onChunk(answer, answer);
                                 }
                                 accumulatedContent = new StringBuilder(answer);
+                                logger.info("done 이벤트 처리 - answer: {}, accumulatedContent: {}", answer, accumulatedContent.toString());
                             }
                             inputTokens = parseTokenCount(data.get("input_tokens"));
                             outputTokens = parseTokenCount(data.get("output_tokens"));
@@ -383,9 +390,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 }
                             }
 
-                            // 최종 완료 콜백 (생성된 logId 전달)
-                            callback.onComplete(accumulatedContent.toString(), responseFilePath, mainPageNo, relatedPageNos, responseThreadId != null ? responseThreadId : "", savedLogId, tableData);
-                            isCompleteCalled = true; // done 이벤트에서 onComplete 호출 시 플래그를 true로 설정
+                            // done 이벤트에서는 완료 데이터만 확정하고,
+                            // 최종 onComplete는 finally에서 log 저장 후 logId와 함께 1회 호출한다.
                             break;
                         }
                     } catch (Exception e) {
@@ -397,20 +403,31 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         } catch (Exception e) {
             logger.error("스트림 읽기 중 오류 발생 (클라이언트 연결 끊김 등): {}", e.getMessage());
             // 에러가 나더라도 finally 블록으로 넘어가서 저장하게 됩니다!
+            hasStreamError = true; // 추가
         } finally {
             // 정상 종료든 비정상 종료든 DB 저장은 여기서 무조건 실행!
             if (accumulatedContent.length() > 0 && "None".equals(errorCode)) {
                 try {
-                    this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId);
+                    savedLogId = this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId);
                 } catch (Exception e) {
                     logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
                 }
             }
 
             // 콜백 완료 처리 (웹소켓 클라이언트에게 끝났다고 알려줌)
-            if (!isCompleteCalled && accumulatedContent.length() > 0) {
+            // - 스트리밍 도중 예외가 발생했으면(끊김/전송 문제 등) complete를 보내지 않음
+            if (!hasStreamError && !isCompleteCalled && accumulatedContent.length() > 0) {
                 String fallbackThreadId = responseThreadId != null ? responseThreadId : "thread-" + System.currentTimeMillis();
-                callback.onComplete(accumulatedContent.toString(), "", "", new ArrayList<>(), fallbackThreadId, null, null);
+                callback.onComplete(
+                        accumulatedContent.toString(),
+                        responseFilePath,
+                        mainPageNo,
+                        relatedPageNos,
+                        fallbackThreadId,
+                        CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
+                        tableData
+                );
+                isCompleteCalled = true;
             }
 
             reader.close();
@@ -469,7 +486,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @return 생성된 logId
      * @throws Exception
      */
-    private void doInsertAiLog(String responseThreadId, String query, String answer, int inputTokens, int outputTokens, String svcTy, String refId, String docId, String filePath, String page, List<Integer> viewPage, String userId) throws Exception {
+    private String doInsertAiLog(String responseThreadId, String query, String answer, int inputTokens, int outputTokens, String svcTy, String refId, String docId, String filePath, String page, List<Integer> viewPage, String userId) throws Exception {
 
         // 챗봇 로그 insert
         ChatbotVO chatbotVO = new ChatbotVO();
@@ -492,6 +509,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             chatbotRefVO.setRelatedPages(viewPage.toString());
             chatbotDAO.insertChatRef(chatbotRefVO);
         }
+        return chatbotVO.getLogId() != null ? String.valueOf(chatbotVO.getLogId()) : "";
     }
 
 }
