@@ -51,6 +51,16 @@ public class LibraryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 카드 수정 (기존 카드만 UPDATE)
+     * @param card cardId, userId 필수
+     * @return
+     * @throws Exception
+     */
+    public int updateCard(LibraryVO.CardItem card) throws Exception {
+        return update("library.updateCard", card);
+    }
+
+    /**
      * 카테고리 등록/수정
      * @param searchVO categoryId, userId, categoryNm, color, sortOrd
      * @return

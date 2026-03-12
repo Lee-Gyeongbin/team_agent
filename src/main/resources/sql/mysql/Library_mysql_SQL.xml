@@ -100,6 +100,27 @@
         WHERE CARD_ID = #{cardId}
     </update>
 
+    <update id="updateCard">
+        /* 카드 수정 library.updateCard (기존 카드만 UPDATE, 신규 등록 없음) */
+        UPDATE TB_KNOW_CARD
+        SET CATEGORY_ID = #{categoryId}
+            , LOG_ID = #{logId}
+            , SVC_TY = #{svcTy}
+            , TITLE = #{title}
+            , TAGS = #{tags}
+            , PIN_YN = #{pinYn}
+            , ARCHIVE_YN = #{archiveYn}
+            , SORT_ORD = #{sortOrd, jdbcType=INTEGER}
+            , SRC_DOCS = #{srcDocs}
+            , SQL_CODE = #{sqlCode}
+            , CHART_CFG = #{chartCfg}
+            , QRY_RSLT = #{qryRslt}
+            , USE_YN = #{useYn}
+            , MODIFY_DT = NOW()
+        WHERE CARD_ID = #{cardId}
+          AND USER_ID = #{userId}
+    </update>
+
     <insert id="insertCategory" parameterMap="categoryItem">
         /* 카테고리 등록/수정 library.insertCategory */
         <selectKey keyProperty="sortOrd" order="BEFORE" resultType="int">

@@ -41,6 +41,9 @@ public class LibraryVO {
 
     private CategoryItem category;
 
+    /** 카드 수정 API용: { card: { cardId, userId, categoryId, ... } } */
+    private CardItem card;
+
     @Getter
     @Setter
     public static class CategoryItem {
@@ -74,6 +77,29 @@ public class LibraryVO {
     public static class CardOrderItem {
         private String cardId;
         private Integer sortOrd;
+    }
+
+    /** 카드 수정 API용 [TB_KNOW_CARD] - 기존 카드만 UPDATE */
+    @Getter
+    @Setter
+    public static class CardItem {
+        private String cardId;
+        private String userId;
+        private String categoryId;
+        private String logId;
+        private String svcTy;
+        private String title;
+        private String tags;
+        private String pinYn;
+        private String archiveYn;
+        private Integer sortOrd;
+        private String srcDocs;
+        private String sqlCode;
+        private String chartCfg;
+        private String qryRslt;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
     }
 
 }
