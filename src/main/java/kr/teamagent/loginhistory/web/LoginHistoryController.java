@@ -22,7 +22,7 @@ public class LoginHistoryController extends BaseController {
 
     /**
      * 로그인 히스토리 목록 조회
-     * @param searchVO userId, ipAddr, firstIndex, recordCountPerPage, dbId
+     * @param searchVO userId, ipAddr, firstIndex, recordCountPerPage
      * @return jsonView (list)
      */
     @RequestMapping(value = "/login/loginHistory/selectLoginHistoryList.do")
