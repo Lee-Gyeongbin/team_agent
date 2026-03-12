@@ -53,6 +53,20 @@ public class LibraryController extends BaseController {
     }
 
     /**
+     * 보관된 카드 목록 조회 (archiveYn='Y')
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/archiveCardList.do")
+    @ResponseBody
+    public ModelAndView archiveCardList(LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", libraryService.selectArchiveCardList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 카드 상세 조회
      * @param searchVO cardId 필수
      * @return

@@ -35,6 +35,7 @@
             , TAGS
             , PIN_YN
             , ARCHIVE_YN
+            , ARCHIVE_DT
             , SORT_ORD
             , SRC_DOCS
             , SQL_CODE
@@ -73,6 +74,7 @@
             , A.TAGS
             , A.PIN_YN
             , A.ARCHIVE_YN
+            , A.ARCHIVE_DT
             , A.SORT_ORD
             , A.SRC_DOCS
             , A.SQL_CODE
@@ -110,6 +112,14 @@
             , TAGS = #{tags}
             , PIN_YN = #{pinYn}
             , ARCHIVE_YN = #{archiveYn}
+            <if test="archiveYn != null and archiveYn != ''">
+                <if test='archiveYn == "Y"'>
+                    , ARCHIVE_DT = NOW()
+                </if>
+                <if test='archiveYn == "N"'>
+                    , ARCHIVE_DT = NULL
+                </if>
+            </if>
             , SORT_ORD = #{sortOrd, jdbcType=INTEGER}
             , SRC_DOCS = #{srcDocs}
             , SQL_CODE = #{sqlCode}

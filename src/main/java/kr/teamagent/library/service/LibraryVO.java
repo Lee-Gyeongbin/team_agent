@@ -27,6 +27,7 @@ public class LibraryVO {
     private String tags;
     private String pinYn;
     private String archiveYn;
+    private String archiveDt;
     private String srcDocs;
     private String sqlCode;
     private String chartCfg;
@@ -92,6 +93,7 @@ public class LibraryVO {
         private String tags;
         private String pinYn;
         private String archiveYn;
+        private String archiveDt;
         private Integer sortOrd;
         private String srcDocs;
         private String sqlCode;
