@@ -67,6 +67,21 @@ public class LibraryController extends BaseController {
     }
 
     /**
+     * 카드 수정 (기존 카드만 UPDATE, 신규 등록 없음)
+     * @param searchVO { card: { cardId, userId, categoryId, ... } }
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/saveCard.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView saveCard(@RequestBody LibraryVO searchVO) throws Exception {
+        if (searchVO != null && searchVO.getCard() != null) {
+            libraryService.updateCard(searchVO.getCard());
+        }
+        return makeSuccessJsonData();
+    }
+
+    /**
      * 카드 PIN 여부 업데이트
      * @param searchVO cardId, pinYn 필수
      * @return

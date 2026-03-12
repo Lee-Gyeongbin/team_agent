@@ -50,6 +50,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             searchVO.setUserId(userId);
         }
         searchVO.setArchiveYn("N");
+        searchVO.setUseYn("Y");
         return libraryDAO.selectCardList(searchVO);
     }
 
@@ -71,6 +72,20 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      */
     public int updateCardPin(LibraryVO searchVO) throws Exception {
         return libraryDAO.updateCardPin(searchVO);
+    }
+
+    /**
+     * 카드 수정 (기존 카드만 UPDATE, 신규 등록 없음)
+     * @param card cardId, userId 필수 (세션 userId로 본인 카드만 수정)
+     * @return
+     * @throws Exception
+     */
+    public int updateCard(LibraryVO.CardItem card) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId != null) {
+            card.setUserId(userId);
+        }
+        return libraryDAO.updateCard(card);
     }
 
     /**
