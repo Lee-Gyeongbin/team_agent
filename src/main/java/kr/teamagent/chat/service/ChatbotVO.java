@@ -96,6 +96,12 @@ public class ChatbotVO extends CommonVO {
     // 채팅 답변별 참조 문서 및 페이지 상세(TB_CHAT_REF)
     // 문서 고유 ID 
     private String docId;
+    // 문서 제목
+    private String docTitle;
+    // 문서 파일명
+    private String fileName;
+    // 관련 페이지 번호
+    private String relatedPageNos;
     // 메인 페이지 번호
     private String mainPageNo;
     // 관련 페이지 번호

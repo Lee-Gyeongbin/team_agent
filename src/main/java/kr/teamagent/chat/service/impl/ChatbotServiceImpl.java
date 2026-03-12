@@ -383,9 +383,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 }
                             }
 
-                            // 최종 완료 콜백 (생성된 logId 전달)
-                            callback.onComplete(accumulatedContent.toString(), responseFilePath, mainPageNo, relatedPageNos, responseThreadId != null ? responseThreadId : "", savedLogId, tableData);
-                            isCompleteCalled = true; // done 이벤트에서 onComplete 호출 시 플래그를 true로 설정
+                            // done 이벤트에서는 완료 데이터만 확정하고,
+                            // 최종 onComplete는 finally에서 log 저장 후 logId와 함께 1회 호출한다.
                             break;
                         }
                     } catch (Exception e) {
@@ -401,7 +400,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // 정상 종료든 비정상 종료든 DB 저장은 여기서 무조건 실행!
             if (accumulatedContent.length() > 0 && "None".equals(errorCode)) {
                 try {
-                    this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId);
+                    savedLogId = this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId);
                 } catch (Exception e) {
                     logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
                 }
@@ -410,7 +409,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // 콜백 완료 처리 (웹소켓 클라이언트에게 끝났다고 알려줌)
             if (!isCompleteCalled && accumulatedContent.length() > 0) {
                 String fallbackThreadId = responseThreadId != null ? responseThreadId : "thread-" + System.currentTimeMillis();
-                callback.onComplete(accumulatedContent.toString(), "", "", new ArrayList<>(), fallbackThreadId, null, null);
+                callback.onComplete(
+                        accumulatedContent.toString(),
+                        responseFilePath,
+                        mainPageNo,
+                        relatedPageNos,
+                        fallbackThreadId,
+                        CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
+                        tableData);
+                isCompleteCalled = true;
             }
 
             reader.close();
@@ -469,7 +476,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @return 생성된 logId
      * @throws Exception
      */
-    private void doInsertAiLog(String responseThreadId, String query, String answer, int inputTokens, int outputTokens, String svcTy, String refId, String docId, String filePath, String page, List<Integer> viewPage, String userId) throws Exception {
+    private String doInsertAiLog(String responseThreadId, String query, String answer, int inputTokens, int outputTokens, String svcTy, String refId, String docId, String filePath, String page, List<Integer> viewPage, String userId) throws Exception {
 
         // 챗봇 로그 insert
         ChatbotVO chatbotVO = new ChatbotVO();
@@ -492,6 +499,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             chatbotRefVO.setRelatedPages(viewPage.toString());
             chatbotDAO.insertChatRef(chatbotRefVO);
         }
+        return chatbotVO.getLogId() != null ? String.valueOf(chatbotVO.getLogId()) : "";
     }
 
 }
