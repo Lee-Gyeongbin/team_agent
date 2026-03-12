@@ -18,6 +18,7 @@ import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.security.service.impl.LoginServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
+import kr.teamagent.library.service.impl.LibraryServiceImpl;
 
 @RestController
 @RequestMapping("/")
@@ -28,6 +29,9 @@ public class ApiSignupController {
 
     @Autowired
     private LoginServiceImpl loginService;
+
+    @Autowired
+    private LibraryServiceImpl libraryService;
 
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
 
@@ -78,6 +82,12 @@ public class ApiSignupController {
             userVO.setPasswd(passwordEncoder.encode(password));
 
             loginService.signupUser(userVO);
+
+            try {
+                libraryService.insertDefaultCategoryForNewUser(userId);
+            } catch (Exception e) {
+                log.warn("Signup success but default category insert failed: userId={}", userId, e);
+            }
 
             result.put("success", true);
             result.put("userId", userId);

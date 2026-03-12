@@ -89,6 +89,23 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 신규 회원가입 시 디폴트 카테고리 등록 (세션 없이 userId 직접 전달)
+     * @param userId 신규 가입된 사용자 ID
+     * @throws Exception
+     */
+    public void insertDefaultCategoryForNewUser(String userId) throws Exception {
+        if (userId == null || userId.isEmpty()) {
+            return;
+        }
+        LibraryVO.CategoryItem cat = new LibraryVO.CategoryItem();
+        cat.setUserId(userId);
+        cat.setCategoryNm("내 카테고리");
+        cat.setColor(null);
+        cat.setSortOrd(1);
+        saveCategory(cat);
+    }
+
+    /**
      * 카테고리 등록/수정
      * @param searchVO categoryId 비어있으면 자동 생성
      * @return
