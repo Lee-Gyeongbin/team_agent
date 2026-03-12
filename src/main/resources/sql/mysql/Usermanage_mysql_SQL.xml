@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="userManage">
+
+    <select id="selectUserList" parameterType="userManageVO" resultType="userManageVO">
+        /* 사용자 목록 조회 */
+        SELECT
+            U.USER_ID,
+            U.USER_NM,
+            U.EMAIL,
+            U.PASSWD,
+            U.PHONE,
+            U.ORG_ID,
+            U.USE_YN,
+            U.LAST_LOGIN_DT,
+            U.PWD_CHG_DT,
+            U.LOGIN_FAIL_CNT,
+            U.TWO_FA_YN,
+            U.ACC_TP,
+            U.ACCT_STATUS_CD,
+            U.LOCK_DT,
+            U.CREATE_DT,
+            U.MODIFY_DT,
+            U.CRTR_ID,
+            U.MDFR_ID
+        FROM TB_USER U
+        WHERE 1 = 1
+        ORDER BY U.CREATE_DT DESC
+    </select>
+
+<!-- 사용자 정보 수정 -->
+<update id="updateUser" parameterType="userManageVO">
+    /* 사용자 정보 수정 */
+    UPDATE TB_USER
+    SET
+        USER_NM = #{userNm},
+        ORG_ID = #{orgId},
+        EMAIL = #{email},
+        PHONE = #{phone}
+    WHERE USER_ID = #{userId}
+</update>
+
+<!-- 사용자 정보 삭제 (논리 삭제: USE_YN = 'N', ACCT_STATUS_CD = '002') -->
+<update id="deleteUser" parameterType="userManageVO">
+    /* 사용자 정보 논리 삭제 */
+    UPDATE TB_USER
+    SET
+        USE_YN = 'N',
+        ACCT_STATUS_CD = '002'
+    WHERE USER_ID = #{userId}
+</update>
+
+<!-- 사용자 정보 복구 -->
+<update id="restoreUser" parameterType="userManageVO">
+    /* 사용자 정보 복구 */
+    UPDATE TB_USER
+    SET
+        USE_YN = 'Y',
+        ACCT_STATUS_CD = '001'
+    WHERE USER_ID = #{userId}
+</update>
+</mapper>
