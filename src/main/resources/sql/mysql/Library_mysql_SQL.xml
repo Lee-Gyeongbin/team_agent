@@ -91,7 +91,15 @@
                ON A.LOG_ID = B.LOG_ID
         WHERE 1=1
             AND A.USE_YN = 'Y'
-            AND A.CARD_ID = #{cardId}
+            <if test="cardId != null and cardId != ''">
+                AND A.CARD_ID = #{cardId}
+            </if>
+            <if test="userId != null and userId != ''">
+                AND A.USER_ID = #{userId}
+            </if>
+            <if test="archiveYn != null and archiveYn != ''">
+                AND A.ARCHIVE_YN = #{archiveYn}
+            </if>
     </select>
 
     <update id="updateCardPin">
@@ -121,10 +129,6 @@
                 </if>
             </if>
             , SORT_ORD = #{sortOrd, jdbcType=INTEGER}
-            , SRC_DOCS = #{srcDocs}
-            , SQL_CODE = #{sqlCode}
-            , CHART_CFG = #{chartCfg}
-            , QRY_RSLT = #{qryRslt}
             , USE_YN = #{useYn}
             , MODIFY_DT = NOW()
         WHERE CARD_ID = #{cardId}

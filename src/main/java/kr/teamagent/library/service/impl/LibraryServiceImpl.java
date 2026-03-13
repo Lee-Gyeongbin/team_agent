@@ -67,7 +67,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         }
         searchVO.setArchiveYn("Y");
         searchVO.setUseYn("Y");
-        return libraryDAO.selectCardList(searchVO);
+        return libraryDAO.selectArchiveCardList(searchVO);
     }
 
     /**
