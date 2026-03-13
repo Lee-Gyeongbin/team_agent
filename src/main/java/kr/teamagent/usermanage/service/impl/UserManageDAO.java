@@ -59,4 +59,14 @@ public class UserManageDAO extends EgovComAbstractDAO {
     public int restoreUser(UserManageVO userManageVO) throws Exception {
         return update("userManage.restoreUser", userManageVO);
     }
+
+    /**
+     * 사용자 비밀번호 초기화
+     * @param userManageVO
+     * @return 초기화된 행 수
+     * @throws Exception
+     */
+    public int resetPassword(UserManageVO userManageVO) throws Exception {
+        return update("userManage.resetPassword", userManageVO);
+    }
 }

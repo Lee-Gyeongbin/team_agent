@@ -68,4 +68,17 @@
         ACCT_STATUS_CD = '001'
     WHERE USER_ID = #{userId}
 </update>
+
+<update id="resetPassword" parameterType="userManageVO">
+    /* 사용자 비밀번호 초기화 */
+    UPDATE TB_USER
+    SET
+        PASSWD = #{passwd}
+        , PWD_CHG_DT = NOW()
+        , LOGIN_FAIL_CNT = 0
+        , ACCT_STATUS_CD = '001'
+        , LOCK_DT = NULL
+        , USE_YN = 'Y'
+    WHERE USER_ID = #{userId}
+</update>
 </mapper>
