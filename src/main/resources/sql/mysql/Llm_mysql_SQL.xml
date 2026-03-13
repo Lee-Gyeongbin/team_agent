@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="llm">
+
+    <select id="selectLlmList" resultType="llmVO">
+        /* LLM 모델 목록 조회 llm.selectLlmList */
+        SELECT
+            A.MODEL_ID
+            , A.MODEL_NAME
+            , A.PROVIDER_ID
+            , A.VERSION
+            , A.INPUT_COST
+            , A.OUTPUT_COST
+            , A.USE_YN                    AS MODEL_USE_YN
+            , A.DESCRIPTION               AS MODEL_DESCRIPTION
+            , A.SORT_ORDER
+            , A.CREATE_DT                 AS MODEL_CREATE_DT
+            , A.MODIFY_DT                 AS MODEL_MODIFY_DT
+
+            , B.PROVIDER_NAME
+            , B.BASE_URL
+            , B.AUTH_TYPE
+            , B.DESCRIPTION               AS PROVIDER_DESCRIPTION
+            , B.USE_YN                    AS PROVIDER_USE_YN
+            , B.CREATE_DT                 AS PROVIDER_CREATE_DT
+            , B.MODIFY_DT                 AS PROVIDER_MODIFY_DT
+
+            , C.API_URL
+            , 'confidential'              AS API_KEY
+            , C.TMO_SEC
+            , C.RETRY_CNT
+            , C.CUST_HEADERS
+
+            , D.TEMPERATURE
+            , D.TOP_P
+            , D.MAX_TOKENS
+            , D.CTXT_WIN
+            , D.FREQ_PENALTY
+            , D.PRES_PENALTY
+            , D.STREAM_YN
+            , D.FN_CALL_YN
+            , D.VISION_YN
+
+            , E.DAY_REQ_LMT
+            , E.RPM_LIMIT
+            , E.TPM_LIMIT
+            , E.DAY_COST_LMT
+
+            , F.ROLE_ID
+            , F.ALLOWED_YN
+
+        FROM TB_LLM_MDL A
+        LEFT JOIN TB_LLM_PROVIDER B
+               ON B.PROVIDER_ID = A.PROVIDER_ID
+        LEFT JOIN TB_LLM_MDL_API C
+               ON C.MODEL_ID = A.MODEL_ID
+        LEFT JOIN TB_LLM_MDL_PARAM D
+               ON D.MODEL_ID = A.MODEL_ID
+        LEFT JOIN TB_LLM_MDL_LMT E
+               ON E.MODEL_ID = A.MODEL_ID
+        LEFT JOIN TB_LLM_MDL_ACCESS F
+               ON F.MODEL_ID = A.MODEL_ID
+        ORDER BY
+            A.SORT_ORDER ASC
+            , A.MODEL_ID ASC
+    </select>
+
+</mapper>

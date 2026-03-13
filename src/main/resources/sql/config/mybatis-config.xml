@@ -22,6 +22,7 @@
         <typeAlias alias="loginHistoryVO"                    type="kr.teamagent.loginhistory.service.LoginHistoryVO"/>
         <typeAlias alias="codesVO"                           type="kr.teamagent.codes.service.CodesVO"/>
         <typeAlias alias="libraryVO"                         type="kr.teamagent.library.service.LibraryVO"/>
+        <typeAlias alias="llmVO"                             type="kr.teamagent.llm.service.LlmVO"/>
         <typeAlias alias="userManageVO"                      type="kr.teamagent.usermanage.service.UserManageVO"/>
         <typeAlias alias="orgManageVO"                       type="kr.teamagent.orgmanage.service.OrgManageVO"/>
     </typeAliases>
