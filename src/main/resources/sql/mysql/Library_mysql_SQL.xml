@@ -94,12 +94,73 @@
             <if test="cardId != null and cardId != ''">
                 AND A.CARD_ID = #{cardId}
             </if>
-            <if test="userId != null and userId != ''">
-                AND A.USER_ID = #{userId}
-            </if>
-            <if test="archiveYn != null and archiveYn != ''">
-                AND A.ARCHIVE_YN = #{archiveYn}
-            </if>
+    </select>
+
+    <select id="selectArchiveCardList" resultType="libraryVO">
+        /* 보관된 카드 목록 조회 library.selectArchiveCardList */
+        SELECT
+            A.CARD_ID
+            , A.USER_ID
+            , A.CATEGORY_ID
+            , A.LOG_ID
+            , A.SVC_TY
+            , A.TITLE
+            , A.TAGS
+            , A.PIN_YN
+            , A.ARCHIVE_YN
+            , A.ARCHIVE_DT
+            , A.SORT_ORD
+            , A.SRC_DOCS
+            , A.SQL_CODE
+            , A.CHART_CFG
+            , A.QRY_RSLT
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+            , B.Q_CONTENT
+            , B.R_CONTENT
+            , B.TTSQ
+        FROM TB_KNOW_CARD A
+        LEFT JOIN TB_CHAT_LOG B
+               ON A.LOG_ID = B.LOG_ID
+        WHERE 1=1
+            AND A.ARCHIVE_YN = 'Y'
+            AND A.USE_YN = 'Y'
+            AND A.USER_ID = #{userId}
+        ORDER BY A.SORT_ORD, A.CREATE_DT DESC
+    </select>
+
+    <select id="selectTrashCardList" resultType="libraryVO">
+        /* 휴지통 카드 목록 조회 library.selectTrashCardList */
+        SELECT
+            A.CARD_ID
+            , A.USER_ID
+            , A.CATEGORY_ID
+            , A.LOG_ID
+            , A.SVC_TY
+            , A.TITLE
+            , A.TAGS
+            , A.PIN_YN
+            , A.ARCHIVE_YN
+            , A.ARCHIVE_DT
+            , A.SORT_ORD
+            , A.SRC_DOCS
+            , A.SQL_CODE
+            , A.CHART_CFG
+            , A.QRY_RSLT
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+            , B.Q_CONTENT
+            , B.R_CONTENT
+            , B.TTSQ
+        FROM TB_KNOW_CARD A
+        LEFT JOIN TB_CHAT_LOG B
+               ON A.LOG_ID = B.LOG_ID
+        WHERE 1=1
+            AND A.USE_YN = 'N'
+            AND A.USER_ID = #{userId}
+        ORDER BY A.SORT_ORD, A.CREATE_DT DESC
     </select>
 
     <update id="updateCardPin">

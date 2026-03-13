@@ -67,6 +67,20 @@ public class LibraryController extends BaseController {
     }
 
     /**
+     * 휴지통 카드 목록 조회 (useYn='N')
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/trashCardList.do")
+    @ResponseBody
+    public ModelAndView trashCardList(LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", libraryService.selectTrashCardList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 카드 상세 조회
      * @param searchVO cardId 필수
      * @return
