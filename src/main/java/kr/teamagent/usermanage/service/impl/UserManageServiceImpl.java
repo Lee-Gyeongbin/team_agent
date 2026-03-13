@@ -25,9 +25,22 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 수정 시 동일 이메일을 다른 사용자가 사용 중인지 여부
+     * @param userId 이메일을 변경하려는 사용자 ID
+     * @param email 수정하려는 이메일
+     * @return true면 중복
+     */
+    public boolean isDuplicateEmailForUpdate(String userId, String email) throws Exception {
+        UserManageVO vo = new UserManageVO();
+        vo.setUserId(userId);
+        vo.setEmail(email);
+        return userManageDAO.countUserByEmailExcludingUserId(vo) > 0;
+    }
+
+    /**
      * 사용자 정보 수정
      * @param userManageVO
-     * @return 영향받은 행 수
+     * @return 수정된 행 수
      * @throws Exception
      */
     public int updateUser(UserManageVO userManageVO) throws Exception {
@@ -37,7 +50,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 사용자 정보 삭제
      * @param userManageVO
-     * @return 영향받은 행 수
+     * @return 삭제된 행 수
      * @throws Exception
      */
     public int deleteUser(UserManageVO userManageVO) throws Exception {
@@ -47,7 +60,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 사용자 정보 복구
      * @param userManageVO
-     * @return 영향받은 행 수
+     * @return 복구된 행 수
      * @throws Exception
      */
     public int restoreUser(UserManageVO userManageVO) throws Exception {

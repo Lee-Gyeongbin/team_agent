@@ -21,6 +21,16 @@ public class UserManageDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 수정 시 이메일 중복 여부 조회
+     * @param userManageVO userId, email
+     * @return 중복 여부
+     */
+    public int countUserByEmailExcludingUserId(UserManageVO userManageVO) throws Exception {
+        Integer cnt = (Integer) selectOne("userManage.countUserByEmailExcludingUserId", userManageVO);
+        return cnt != null ? cnt : 0;
+    }
+
+    /**
      * 사용자 정보 수정
      * @param userManageVO
      * @return 영향받은 행 수

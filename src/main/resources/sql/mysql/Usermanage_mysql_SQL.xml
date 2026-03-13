@@ -28,6 +28,15 @@
         ORDER BY U.CREATE_DT DESC
     </select>
 
+    <!-- 사용자 수정 시 이메일 중복 여부 조회 -->
+    <select id="countUserByEmailExcludingUserId" parameterType="userManageVO" resultType="int">
+        /* 사용자 수정 시 이메일 중복 여부 조회 */
+        SELECT COUNT(*)
+        FROM TB_USER
+        WHERE EMAIL = #{email}
+          AND USER_ID != #{userId}
+    </select>
+
 <!-- 사용자 정보 수정 -->
 <update id="updateUser" parameterType="userManageVO">
     /* 사용자 정보 수정 */

@@ -47,92 +47,94 @@ public class UserManageController extends BaseController {
     @ResponseBody
     public Map<String, Object> update(@RequestBody UserManageVO userManageVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-
-        String userId = CommonUtil.nullToBlank(userManageVO.getUserId());
-        String userNm = CommonUtil.nullToBlank(userManageVO.getUserNm());
-        String email = CommonUtil.nullToBlank(userManageVO.getEmail());
-        String phone = CommonUtil.nullToBlank(userManageVO.getPhone());
-
-        if (userId.isEmpty()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "userId는 필수입니다.");
-            return resultMap;
-        }
-        if (userNm.isEmpty()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "사용자명은 필수입니다.");
-            return resultMap;
-        }
-        if (email.isEmpty()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "이메일은 필수입니다.");
-            return resultMap;
-        }
-        if (phone.isEmpty()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "연락처는 필수입니다.");
-            return resultMap;
-        }
-
-        // ORG_ID 빈 문자열이면 null로 설정 (FK TB_ORG 참조 오류 방지)
-        String orgId = CommonUtil.nullToBlank(userManageVO.getOrgId());
-        if (orgId.isEmpty()) {
-            userManageVO.setOrgId(null);
-        }
-
         try {
+            String userId = CommonUtil.nullToBlank(userManageVO.getUserId());
+            String userNm = CommonUtil.nullToBlank(userManageVO.getUserNm());
+            String email = CommonUtil.nullToBlank(userManageVO.getEmail());
+            String phone = CommonUtil.nullToBlank(userManageVO.getPhone());
+            if (userId.isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "userId는 필수입니다.");
+                return resultMap;
+            }
+            if (userNm.isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "사용자명은 필수입니다.");
+                return resultMap;
+            }
+            if (email.isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "이메일은 필수입니다.");
+                return resultMap;
+            }
+            if (phone.isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "연락처는 필수입니다.");
+                return resultMap;
+            }
+            if (CommonUtil.nullToBlank(userManageVO.getOrgId()).isEmpty()) userManageVO.setOrgId(null);
+            if (userService.isDuplicateEmailForUpdate(userId, email)) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "이미 가입된 이메일입니다.");
+                return resultMap;
+            }
+
             resultMap.put("successYn", true);
-            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
             resultMap.put("data", userService.updateUser(userManageVO));
         } catch (Exception e) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+            resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
         }
-
         return resultMap;
     }
 
     /**
      * 사용자 정보 삭제
      * @param userManageVO
-     * @return jsonView (result: 영향받은 행 수)
+     * @return Map (successYn, returnMsg, data: 영향받은 행 수)
      * @throws Exception
      */
     @RequestMapping(value = "/deleteUser.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView delete(@RequestBody UserManageVO userManageVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-
-        String userId = CommonUtil.nullToBlank(userManageVO.getUserId());
-        if (userId.isEmpty()) {
+    public Map<String, Object> delete(@RequestBody UserManageVO userManageVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (CommonUtil.nullToBlank(userManageVO.getUserId()).isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "userId는 필수입니다.");
+                return resultMap;
+            }
+            resultMap.put("successYn", true);
+            resultMap.put("data", userService.deleteUser(userManageVO));
+        } catch (Exception e) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "userId는 필수입니다.");
-            return new ModelAndView("jsonView", resultMap);
+            resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
         }
-
-        resultMap.put("result", userService.deleteUser(userManageVO));
-        return new ModelAndView("jsonView", resultMap);
+        return resultMap;
     }
 
     /**
      * 사용자 정보 복구
      * @param userManageVO
-     * @return jsonView (result: 영향받은 행 수)
+     * @return Map (successYn, returnMsg, data: 영향받은 행 수)
      * @throws Exception
      */
     @RequestMapping(value = "/restoreUser.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView restore(@RequestBody UserManageVO userManageVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-
-        String userId = CommonUtil.nullToBlank(userManageVO.getUserId());
-        if (userId.isEmpty()) {
+    public Map<String, Object> restore(@RequestBody UserManageVO userManageVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (CommonUtil.nullToBlank(userManageVO.getUserId()).isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "userId는 필수입니다.");
+                return resultMap;
+            }
+            resultMap.put("successYn", true);
+            resultMap.put("data", userService.restoreUser(userManageVO));
+        } catch (Exception e) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "userId는 필수입니다.");
-            return new ModelAndView("jsonView", resultMap);
+            resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
         }
-
-        resultMap.put("result", userService.restoreUser(userManageVO));
-        return new ModelAndView("jsonView", resultMap);
+        return resultMap;
     }
 }
