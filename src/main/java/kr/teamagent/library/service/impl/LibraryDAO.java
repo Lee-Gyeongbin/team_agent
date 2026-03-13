@@ -37,7 +37,17 @@ public class LibraryDAO extends EgovComAbstractDAO {
      * @throws Exception
      */
     public List<LibraryVO> selectArchiveCardList(LibraryVO searchVO) throws Exception {
-        return selectList("library.selectCardDetail", searchVO);
+        return selectList("library.selectArchiveCardList", searchVO);
+    }
+
+    /**
+     * 휴지통 카드 목록 조회
+     * @param searchVO userId 필수 (세션에서 설정됨)
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO> selectTrashCardList(LibraryVO searchVO) throws Exception {
+        return selectList("library.selectTrashCardList", searchVO);
     }
 
     /**

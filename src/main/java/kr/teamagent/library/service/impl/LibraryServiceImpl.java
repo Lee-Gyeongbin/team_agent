@@ -65,9 +65,21 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         if (userId != null) {
             searchVO.setUserId(userId);
         }
-        searchVO.setArchiveYn("Y");
-        searchVO.setUseYn("Y");
         return libraryDAO.selectArchiveCardList(searchVO);
+    }
+
+    /**
+     * 휴지통 카드 목록 조회 (useYn='N')
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO> selectTrashCardList(LibraryVO searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId != null) {
+            searchVO.setUserId(userId);
+        }
+        return libraryDAO.selectTrashCardList(searchVO);
     }
 
     /**
