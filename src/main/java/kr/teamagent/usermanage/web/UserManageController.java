@@ -23,7 +23,7 @@ import kr.teamagent.usermanage.service.impl.UserManageServiceImpl;
 public class UserManageController extends BaseController {
 
     @Autowired
-    private UserManageServiceImpl userService;
+    private UserManageServiceImpl userManageService;
 
     @SuppressWarnings("deprecation")
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
@@ -38,7 +38,7 @@ public class UserManageController extends BaseController {
     @ResponseBody
     public ModelAndView list(UserManageVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("list", userService.selectUserList(searchVO));
+        resultMap.put("list", userManageService.selectUserList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -78,14 +78,14 @@ public class UserManageController extends BaseController {
                 return resultMap;
             }
             if (CommonUtil.nullToBlank(userManageVO.getOrgId()).isEmpty()) userManageVO.setOrgId(null);
-            if (userService.isDuplicateEmailForUpdate(userId, email)) {
+            if (userManageService.isDuplicateEmailForUpdate(userId, email)) {
                 resultMap.put("successYn", false);
                 resultMap.put("returnMsg", "이미 가입된 이메일입니다.");
                 return resultMap;
             }
 
             resultMap.put("successYn", true);
-            resultMap.put("data", userService.updateUser(userManageVO));
+            resultMap.put("data", userManageService.updateUser(userManageVO));
         } catch (Exception e) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
@@ -110,7 +110,7 @@ public class UserManageController extends BaseController {
                 return resultMap;
             }
             resultMap.put("successYn", true);
-            resultMap.put("data", userService.deleteUser(userManageVO));
+            resultMap.put("data", userManageService.deleteUser(userManageVO));
         } catch (Exception e) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
@@ -135,7 +135,7 @@ public class UserManageController extends BaseController {
                 return resultMap;
             }
             resultMap.put("successYn", true);
-            resultMap.put("data", userService.restoreUser(userManageVO));
+            resultMap.put("data", userManageService.restoreUser(userManageVO));
         } catch (Exception e) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
@@ -164,7 +164,7 @@ public class UserManageController extends BaseController {
             String tempPassword = generateTempPassword(10);
             userManageVO.setPasswd(passwordEncoder.encode(tempPassword));
 
-            int updatedRows = userService.resetPassword(userManageVO);
+            int updatedRows = userManageService.resetPassword(userManageVO);
 
             resultMap.put("successYn", updatedRows > 0);
             if (updatedRows > 0) {
