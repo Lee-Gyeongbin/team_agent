@@ -2,6 +2,8 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="llm">
 
+    <resultMap id="llmProviderMap" type="kr.teamagent.llm.service.LlmVO$LlmProviderVO" autoMapping="true"/>
+
     <select id="selectLlmList" resultType="llmVO">
         /* LLM 모델 목록 조회 llm.selectLlmList */
         SELECT
@@ -11,8 +13,8 @@
             , A.VERSION
             , A.INPUT_COST
             , A.OUTPUT_COST
-            , A.USE_YN                    AS MODEL_USE_YN
-            , A.DESCRIPTION               AS MODEL_DESCRIPTION
+            , A.USE_YN                    
+            , A.DESCRIPTION
             , A.SORT_ORDER
             , A.CREATE_DT                 AS MODEL_CREATE_DT
             , A.MODIFY_DT                 AS MODEL_MODIFY_DT
@@ -26,7 +28,7 @@
             , B.MODIFY_DT                 AS PROVIDER_MODIFY_DT
 
             , C.API_URL
-            , 'confidential'              AS API_KEY
+            , C.API_KEY
             , C.TMO_SEC
             , C.RETRY_CNT
             , C.CUST_HEADERS
@@ -46,7 +48,7 @@
             , E.TPM_LIMIT
             , E.DAY_COST_LMT
 
-            , F.ROLE_ID
+            , F.ROLE_ID_ARR
             , F.ALLOWED_YN
 
         FROM TB_LLM_MDL A
@@ -58,18 +60,170 @@
                ON D.MODEL_ID = A.MODEL_ID
         LEFT JOIN TB_LLM_MDL_LMT E
                ON E.MODEL_ID = A.MODEL_ID
-        LEFT JOIN TB_LLM_MDL_ACCESS F
-               ON F.MODEL_ID = A.MODEL_ID
+        LEFT JOIN (
+		    SELECT
+		        MODEL_ID
+		        , ALLOWED_YN
+		        , GROUP_CONCAT(DISTINCT ROLE_ID ORDER BY ROLE_ID SEPARATOR ',') AS ROLE_ID_ARR
+		    FROM TB_LLM_MDL_ACCESS
+		    GROUP BY MODEL_ID, ALLOWED_YN 
+		) F ON F.MODEL_ID = A.MODEL_ID
         WHERE 1=1
         ORDER BY
             A.SORT_ORDER ASC
             , A.MODEL_ID ASC
     </select>
 
+    <select id="selectMaxSortOrder" resultType="java.lang.Integer">
+        /* LLM 모델 최대 SORT_ORDER 조회 llm.selectMaxSortOrder */
+        SELECT IFNULL(MAX(SORT_ORDER), 0) + 1
+        FROM TB_LLM_MDL
+    </select>
+
+    <insert id="insertModel" parameterType="llmVO">
+        /* LLM 모델 등록/수정 llm.insertModel */
+        INSERT INTO TB_LLM_MDL (
+            MODEL_ID
+            , MODEL_NAME
+            , PROVIDER_ID
+            , VERSION
+            , INPUT_COST
+            , OUTPUT_COST
+            , USE_YN
+            , DESCRIPTION
+            , SORT_ORDER
+            , CREATE_DT
+        ) VALUES (
+            #{modelId}
+            , #{modelName}
+            , #{providerId}
+            , #{version}
+            , #{inputCost, jdbcType=DECIMAL}
+            , #{outputCost, jdbcType=DECIMAL}
+            , #{useYn, jdbcType=VARCHAR}
+            , #{description, jdbcType=VARCHAR}
+            , #{sortOrder, jdbcType=INTEGER}
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            MODEL_NAME = VALUES(MODEL_NAME)
+            , PROVIDER_ID = VALUES(PROVIDER_ID)
+            , VERSION = VALUES(VERSION)
+            , INPUT_COST = VALUES(INPUT_COST)
+            , OUTPUT_COST = VALUES(OUTPUT_COST)
+            , USE_YN = VALUES(USE_YN)
+            , DESCRIPTION = VALUES(DESCRIPTION)
+            , SORT_ORDER = IFNULL(VALUES(SORT_ORDER), SORT_ORDER)
+            , MODIFY_DT = NOW()
+    </insert>
+
+    <insert id="insertModelApi" parameterType="llmVO">
+        /* LLM 모델 API 설정 등록/수정 llm.insertModelApi */
+        INSERT INTO TB_LLM_MDL_API (
+            MODEL_ID
+            , API_URL
+            , API_KEY
+            , TMO_SEC
+            , RETRY_CNT
+            , CUST_HEADERS
+        ) VALUES (
+            #{modelId}
+            , #{apiUrl, jdbcType=VARCHAR}
+            , #{apiKey, jdbcType=VARCHAR}
+            , #{tmoSec, jdbcType=INTEGER}
+            , #{retryCnt, jdbcType=INTEGER}
+            , #{custHeaders, jdbcType=VARCHAR}
+        )
+        ON DUPLICATE KEY UPDATE
+            API_URL = VALUES(API_URL)
+            , API_KEY = VALUES(API_KEY)
+            , TMO_SEC = VALUES(TMO_SEC)
+            , RETRY_CNT = VALUES(RETRY_CNT)
+            , CUST_HEADERS = VALUES(CUST_HEADERS)
+    </insert>
+
+    <insert id="insertModelParam" parameterType="llmVO">
+        /* LLM 모델 파라미터 등록/수정 llm.insertModelParam */
+        INSERT INTO TB_LLM_MDL_PARAM (
+            MODEL_ID
+            , TEMPERATURE
+            , TOP_P
+            , MAX_TOKENS
+            , CTXT_WIN
+            , FREQ_PENALTY
+            , PRES_PENALTY
+            , STREAM_YN
+            , FN_CALL_YN
+            , VISION_YN
+        ) VALUES (
+            #{modelId}
+            , #{temperature, jdbcType=DOUBLE}
+            , #{topP, jdbcType=DOUBLE}
+            , #{maxTokens, jdbcType=INTEGER}
+            , #{ctxtWin, jdbcType=INTEGER}
+            , #{freqPenalty, jdbcType=DOUBLE}
+            , #{presPenalty, jdbcType=DOUBLE}
+            , #{streamYn, jdbcType=VARCHAR}
+            , #{fnCallYn, jdbcType=VARCHAR}
+            , #{visionYn, jdbcType=VARCHAR}
+        )
+        ON DUPLICATE KEY UPDATE
+            TEMPERATURE = VALUES(TEMPERATURE)
+            , TOP_P = VALUES(TOP_P)
+            , MAX_TOKENS = VALUES(MAX_TOKENS)
+            , CTXT_WIN = VALUES(CTXT_WIN)
+            , FREQ_PENALTY = VALUES(FREQ_PENALTY)
+            , PRES_PENALTY = VALUES(PRES_PENALTY)
+            , STREAM_YN = VALUES(STREAM_YN)
+            , FN_CALL_YN = VALUES(FN_CALL_YN)
+            , VISION_YN = VALUES(VISION_YN)
+    </insert>
+
+    <insert id="insertModelLmt" parameterType="llmVO">
+        /* LLM 모델 제한 등록/수정 llm.insertModelLmt */
+        INSERT INTO TB_LLM_MDL_LMT (
+            MODEL_ID
+            , DAY_REQ_LMT
+            , RPM_LIMIT
+            , TPM_LIMIT
+            , DAY_COST_LMT
+        ) VALUES (
+            #{modelId}
+            , #{dayReqLmt, jdbcType=INTEGER}
+            , #{rpmLimit, jdbcType=INTEGER}
+            , #{tpmLimit, jdbcType=INTEGER}
+            , #{dayCostLmt, jdbcType=DECIMAL}
+        )
+        ON DUPLICATE KEY UPDATE
+            DAY_REQ_LMT = VALUES(DAY_REQ_LMT)
+            , RPM_LIMIT = VALUES(RPM_LIMIT)
+            , TPM_LIMIT = VALUES(TPM_LIMIT)
+            , DAY_COST_LMT = VALUES(DAY_COST_LMT)
+    </insert>
+
+    <delete id="deleteModelAccess" parameterType="string">
+        /* LLM 모델 접근권한 삭제 llm.deleteModelAccess */
+        DELETE FROM TB_LLM_MDL_ACCESS
+        WHERE MODEL_ID = #{value}
+    </delete>
+
+    <insert id="insertModelAccess" parameterType="map">
+        /* LLM 모델 접근권한 등록 llm.insertModelAccess */
+        INSERT INTO TB_LLM_MDL_ACCESS (
+            MODEL_ID
+            , ROLE_ID
+            , ALLOWED_YN
+        ) VALUES (
+            #{modelId}
+            , #{roleId}
+            , #{allowedYn, jdbcType=VARCHAR}
+        )
+    </insert>
+
     <update id="updateModelUseYn">
         /* LLM 모델 USE_YN 업데이트 llm.updateModelUseYn */
         UPDATE TB_LLM_MDL
-        SET USE_YN = #{modelUseYn}
+        SET USE_YN = #{useYn}
             , MODIFY_DT = NOW()
         WHERE MODEL_ID = #{modelId}
     </update>
@@ -88,5 +242,16 @@
             #{item.modelId}
         </foreach>
     </update>
+
+    <select id="selectProviderList" resultMap="llmProviderMap">
+        /* LLM Provider 목록 조회 (옵션용) llm.selectProviderList */
+        SELECT
+            PROVIDER_ID
+            , PROVIDER_NAME
+        FROM TB_LLM_PROVIDER
+        WHERE 1=1
+            AND USE_YN = 'Y'
+        ORDER BY PROVIDER_ID
+    </select>
 
 </mapper>

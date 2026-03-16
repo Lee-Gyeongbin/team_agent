@@ -40,8 +40,9 @@ public class LlmController extends BaseController {
     }
 
     /**
-     * LLM 모델 USE_YN 업데이트
-     * @param llmVO modelId, modelUseYn 필수
+     * LLM 모델 등록/수정
+     * modelId가 "auto" 또는 비어있으면 신규 등록, 그 외에는 수정
+     * @param llmVO 모델 전체 정보 (TB_LLM_MDL, TB_LLM_MDL_API, TB_LLM_MDL_PARAM, TB_LLM_MDL_LMT, TB_LLM_MDL_ACCESS)
      * @return { data: LlmVO }
      * @throws Exception
      */
@@ -49,7 +50,7 @@ public class LlmController extends BaseController {
     @ResponseBody
     public ModelAndView save(@RequestBody LlmVO llmVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", llmService.updateModelUseYn(llmVO));
+        resultMap.put("data", llmService.saveLlm(llmVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -66,6 +67,19 @@ public class LlmController extends BaseController {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", null);
         return makeSuccessJsonData(resultMap);
+    }
+
+    /**
+     * LLM Provider 목록 조회 (옵션용)
+     * @return { dataList: LlmProviderVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/provider/list.do")
+    @ResponseBody
+    public ModelAndView providerList() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", llmService.selectProviderList());
+        return new ModelAndView("jsonView", resultMap);
     }
 
 }

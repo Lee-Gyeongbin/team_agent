@@ -16,8 +16,8 @@ public class LlmVO {
     private String version;
     private BigDecimal inputCost;
     private BigDecimal outputCost;
-    private String modelUseYn;
-    private String modelDescription;
+    private String useYn;
+    private String description;
     private Integer sortOrder;
     private String modelCreateDt;
     private String modelModifyDt;
@@ -56,7 +56,15 @@ public class LlmVO {
     private BigDecimal dayCostLmt;
 
     /** TB_LLM_MDL_ACCESS */
-    private String roleId;
+    private String roleIdArr;
     private String allowedYn;
+
+    /** TB_LLM_PROVIDER (Provider 목록 조회용) */
+    @Getter
+    @Setter
+    public static class LlmProviderVO {
+        private String providerId;
+        private String providerName;
+    }
 
 }
