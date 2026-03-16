@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="file">
+
+    <select id="selectFileByDocId" resultType="fileVO">
+        SELECT
+            A.DOC_ID
+            , A.DOC_TITLE
+            , A.CATEGORY_ID
+            , A.AUTHOR
+            , A.SEC_LVL
+            , A.CONTENT
+            , A.FILE_NAME
+            , A.FILE_PATH
+            , A.FILE_SIZE
+            , A.FILE_TYPE
+            , A.KEYWORDS
+            , A.REF_URL
+            , A.USE_YN
+            , A.RAG_USE_CNT
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM
+            TB_DOC A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+            AND A.DOC_ID = #{docId}
+        ORDER BY A.DOC_ID DESC
+    </select>
+</mapper>

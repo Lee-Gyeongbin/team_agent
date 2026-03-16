@@ -1,18 +1,24 @@
 package kr.teamagent.common.web;
 
-import egovframework.com.cmm.EgovMessageSource;
-import kr.teamagent.common.CommonVO;
+import java.util.HashMap;
+import java.util.List;
+
+import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.util.WebUtils;
 
-import javax.annotation.Resource;
-import javax.servlet.http.HttpServletRequest;
-import java.util.HashMap;
-import java.util.List;
+import com.amazonaws.services.s3.AmazonS3;
+
+import egovframework.com.cmm.EgovMessageSource;
+import kr.teamagent.common.CommonVO;
 
 public class BaseController<T> {
 	public final Logger log = LoggerFactory.getLogger(this.getClass());

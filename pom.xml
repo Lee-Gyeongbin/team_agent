@@ -277,6 +277,13 @@
 			<version>3.14.0</version>
 		</dependency>
 
+		<!-- AWS S3 (Presigned URL 등) -->
+		<dependency>
+			<groupId>com.amazonaws</groupId>
+			<artifactId>aws-java-sdk-s3</artifactId>
+			<version>1.12.649</version>
+		</dependency>
+
 		<!-- Test -->
 		<dependency>
 			<groupId>junit</groupId>
