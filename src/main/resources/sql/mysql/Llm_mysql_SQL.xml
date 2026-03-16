@@ -61,10 +61,32 @@
         LEFT JOIN TB_LLM_MDL_ACCESS F
                ON F.MODEL_ID = A.MODEL_ID
         WHERE 1=1
-        	AND A.USE_YN = 'Y'
         ORDER BY
             A.SORT_ORDER ASC
             , A.MODEL_ID ASC
     </select>
+
+    <update id="updateModelUseYn">
+        /* LLM 모델 USE_YN 업데이트 llm.updateModelUseYn */
+        UPDATE TB_LLM_MDL
+        SET USE_YN = #{modelUseYn}
+            , MODIFY_DT = NOW()
+        WHERE MODEL_ID = #{modelId}
+    </update>
+
+    <update id="updateModelOrder">
+        /* LLM 모델 SORT_ORDER 일괄 업데이트 llm.updateModelOrder */
+        UPDATE TB_LLM_MDL
+        SET SORT_ORDER = CASE MODEL_ID
+        <foreach collection="list" item="item">
+            WHEN #{item.modelId} THEN #{item.sortOrder}
+        </foreach>
+        END
+            , MODIFY_DT = NOW()
+        WHERE MODEL_ID IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            #{item.modelId}
+        </foreach>
+    </update>
 
 </mapper>

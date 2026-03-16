@@ -7,7 +7,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
@@ -35,6 +37,35 @@ public class LlmController extends BaseController {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", llmService.selectLlmList());
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * LLM 모델 USE_YN 업데이트
+     * @param llmVO modelId, modelUseYn 필수
+     * @return { data: LlmVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/save.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView save(@RequestBody LlmVO llmVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", llmService.updateModelUseYn(llmVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * LLM 모델 SORT_ORDER 일괄 업데이트
+     * @param orderList [{ modelId, sortOrder }, ...]
+     * @return { data: null }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/order.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView order(@RequestBody List<LlmVO> orderList) throws Exception {
+        llmService.updateModelOrder(orderList);
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", null);
+        return makeSuccessJsonData(resultMap);
     }
 
 }

@@ -27,4 +27,26 @@ public class LlmServiceImpl extends EgovAbstractServiceImpl {
         return llmDAO.selectLlmList();
     }
 
+    /**
+     * LLM 모델 USE_YN 업데이트
+     * @param llmVO modelId, modelUseYn 필수
+     * @return 업데이트된 LlmVO
+     * @throws Exception
+     */
+    public LlmVO updateModelUseYn(LlmVO llmVO) throws Exception {
+        llmDAO.updateModelUseYn(llmVO);
+        return llmVO;
+    }
+
+    /**
+     * LLM 모델 SORT_ORDER 일괄 업데이트
+     * @param orderList [{ modelId, sortOrder }, ...]
+     * @throws Exception
+     */
+    public void updateModelOrder(List<LlmVO> orderList) throws Exception {
+        if (orderList != null && !orderList.isEmpty()) {
+            llmDAO.updateModelOrder(orderList);
+        }
+    }
+
 }
