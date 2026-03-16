@@ -72,10 +72,6 @@ public class LlmServiceImpl extends EgovAbstractServiceImpl {
         return llmVO;
     }
 
-    private boolean isNewModel(String modelId) {
-        return modelId == null || modelId.trim().isEmpty() || "auto".equalsIgnoreCase(modelId.trim());
-    }
-
     /**
      * LLM 모델 USE_YN 업데이트
      * @param llmVO modelId, modelUseYn 필수
