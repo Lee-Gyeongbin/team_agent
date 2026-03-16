@@ -23,6 +23,7 @@
         <typeAlias alias="codesVO"                           type="kr.teamagent.codes.service.CodesVO"/>
         <typeAlias alias="libraryVO"                         type="kr.teamagent.library.service.LibraryVO"/>
         <typeAlias alias="llmVO"                             type="kr.teamagent.llm.service.LlmVO"/>
+        <typeAlias alias="promptVO"                          type="kr.teamagent.prompt.service.PromptVO"/>
         <typeAlias alias="userManageVO"                      type="kr.teamagent.usermanage.service.UserManageVO"/>
         <typeAlias alias="orgManageVO"                       type="kr.teamagent.orgmanage.service.OrgManageVO"/>
         <typeAlias alias="fileVO"                            type="kr.teamagent.common.util.service.FileVO"/>
