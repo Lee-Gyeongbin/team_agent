@@ -70,6 +70,22 @@ public class LlmController extends BaseController {
     }
 
     /**
+     * LLM 모델 삭제
+     * @param llmVO modelId 필수
+     * @return { data: null }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/delete.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView delete(@RequestBody LlmVO llmVO) throws Exception {
+        if (llmVO == null || llmVO.getModelId() == null || llmVO.getModelId().trim().isEmpty()) {
+            return makeFailJsonData("modelId is required");
+        }
+        llmService.deleteLlm(llmVO);
+        return makeSuccessJsonData();
+    }
+
+    /**
      * LLM Provider 목록 조회 (옵션용)
      * @return { dataList: LlmProviderVO[] }
      * @throws Exception

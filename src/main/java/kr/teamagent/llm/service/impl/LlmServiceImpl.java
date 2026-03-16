@@ -53,7 +53,7 @@ public class LlmServiceImpl extends EgovAbstractServiceImpl {
         llmDAO.insertModelParam(llmVO);
         llmDAO.insertModelLmt(llmVO);
 
-        llmDAO.deleteModelAccess(llmVO.getModelId());
+        llmDAO.deleteModelAccess(llmVO);
         if (llmVO.getRoleIdArr() != null && !llmVO.getRoleIdArr().trim().isEmpty()) {
             String allowedYn = llmVO.getAllowedYn() != null ? llmVO.getAllowedYn() : "Y";
             List<String> roleIds = Arrays.stream(llmVO.getRoleIdArr().split(","))
@@ -70,6 +70,21 @@ public class LlmServiceImpl extends EgovAbstractServiceImpl {
         }
 
         return llmVO;
+    }
+
+    /**
+     * LLM 모델 삭제 (자식 테이블 역순 삭제 후 부모 삭제)
+     * TB_LLM_MDL_ACCESS → TB_LLM_MDL_LMT → TB_LLM_MDL_PARAM → TB_LLM_MDL_API → TB_LLM_MDL
+     * @param llmVO modelId 필수
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteLlm(LlmVO llmVO) throws Exception {
+        llmDAO.deleteModelAccess(llmVO);
+        llmDAO.deleteModelLmt(llmVO);
+        llmDAO.deleteModelParam(llmVO);
+        llmDAO.deleteModelApi(llmVO);
+        llmDAO.deleteModel(llmVO);
     }
 
     /**

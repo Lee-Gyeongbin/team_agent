@@ -201,10 +201,34 @@
             , DAY_COST_LMT = VALUES(DAY_COST_LMT)
     </insert>
 
-    <delete id="deleteModelAccess" parameterType="string">
+    <delete id="deleteModelAccess" parameterType="llmVO">
         /* LLM 모델 접근권한 삭제 llm.deleteModelAccess */
         DELETE FROM TB_LLM_MDL_ACCESS
-        WHERE MODEL_ID = #{value}
+        WHERE MODEL_ID = #{modelId}
+    </delete>
+
+    <delete id="deleteModelLmt" parameterType="llmVO">
+        /* LLM 모델 제한 삭제 llm.deleteModelLmt */
+        DELETE FROM TB_LLM_MDL_LMT
+        WHERE MODEL_ID = #{modelId}
+    </delete>
+
+    <delete id="deleteModelParam" parameterType="llmVO">
+        /* LLM 모델 파라미터 삭제 llm.deleteModelParam */
+        DELETE FROM TB_LLM_MDL_PARAM
+        WHERE MODEL_ID = #{modelId}
+    </delete>
+
+    <delete id="deleteModelApi" parameterType="llmVO">
+        /* LLM 모델 API 설정 삭제 llm.deleteModelApi */
+        DELETE FROM TB_LLM_MDL_API
+        WHERE MODEL_ID = #{modelId}
+    </delete>
+
+    <delete id="deleteModel" parameterType="llmVO">
+        /* LLM 모델 삭제 llm.deleteModel */
+        DELETE FROM TB_LLM_MDL
+        WHERE MODEL_ID = #{modelId}
     </delete>
 
     <insert id="insertModelAccess" parameterType="map">

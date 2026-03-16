@@ -67,11 +67,47 @@ public class LlmDAO extends EgovComAbstractDAO {
 
     /**
      * LLM 모델 접근권한 삭제 (TB_LLM_MDL_ACCESS)
-     * @param modelId
+     * @param llmVO modelId 필수
      * @throws Exception
      */
-    public void deleteModelAccess(String modelId) throws Exception {
-        delete("llm.deleteModelAccess", modelId);
+    public void deleteModelAccess(LlmVO llmVO) throws Exception {
+        delete("llm.deleteModelAccess", llmVO);
+    }
+
+    /**
+     * LLM 모델 제한 삭제 (TB_LLM_MDL_LMT)
+     * @param llmVO modelId 필수
+     * @throws Exception
+     */
+    public void deleteModelLmt(LlmVO llmVO) throws Exception {
+        delete("llm.deleteModelLmt", llmVO);
+    }
+
+    /**
+     * LLM 모델 파라미터 삭제 (TB_LLM_MDL_PARAM)
+     * @param llmVO modelId 필수
+     * @throws Exception
+     */
+    public void deleteModelParam(LlmVO llmVO) throws Exception {
+        delete("llm.deleteModelParam", llmVO);
+    }
+
+    /**
+     * LLM 모델 API 설정 삭제 (TB_LLM_MDL_API)
+     * @param llmVO modelId 필수
+     * @throws Exception
+     */
+    public void deleteModelApi(LlmVO llmVO) throws Exception {
+        delete("llm.deleteModelApi", llmVO);
+    }
+
+    /**
+     * LLM 모델 삭제 (TB_LLM_MDL)
+     * @param llmVO modelId 필수
+     * @throws Exception
+     */
+    public void deleteModel(LlmVO llmVO) throws Exception {
+        delete("llm.deleteModel", llmVO);
     }
 
     /**
