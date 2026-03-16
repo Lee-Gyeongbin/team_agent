@@ -60,6 +60,8 @@
                ON E.MODEL_ID = A.MODEL_ID
         LEFT JOIN TB_LLM_MDL_ACCESS F
                ON F.MODEL_ID = A.MODEL_ID
+        WHERE 1=1
+        	AND A.USE_YN = 'Y'
         ORDER BY
             A.SORT_ORDER ASC
             , A.MODEL_ID ASC
