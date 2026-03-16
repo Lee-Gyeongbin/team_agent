@@ -1,6 +1,5 @@
 package kr.teamagent.usermanage.web;
 
-import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -12,8 +11,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
+import org.apache.commons.lang3.RandomStringUtils;
 
+import kr.teamagent.common.exception.DuplicateEmailException;
+import kr.teamagent.common.exception.DuplicateUserIdException;
 import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.usermanage.service.UserManageVO;
 import kr.teamagent.usermanage.service.impl.UserManageServiceImpl;
@@ -42,6 +45,41 @@ public class UserManageController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+
+    /**
+     * 사용자 정보 생성
+     * @param userManageVO
+     * @return Map (successYn, returnMsg, data: 영향받은 행 수)
+     * @throws Exception
+     */
+    @RequestMapping(value = "/insertUser.do", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> insert(@RequestBody UserManageVO userManageVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            String loginUserId = SessionUtil.getUserId();
+            if (loginUserId != null) {
+                userManageVO.setCrtrId(loginUserId);
+            }
+            String tempPassword = generateTempPassword(10);
+            userManageVO.setPasswd(passwordEncoder.encode(tempPassword));
+
+            resultMap.put("successYn", true);
+            resultMap.put("data", userManageService.insertUser(userManageVO));
+            resultMap.put("tempPassword", tempPassword);
+        } catch (DuplicateEmailException e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", e.getMessage());
+        } catch (DuplicateUserIdException e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", e.getMessage());
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
+        }
+        return resultMap;
+    }
+
     /**
      * 사용자 정보 수정
      * @param userManageVO
@@ -53,39 +91,18 @@ public class UserManageController extends BaseController {
     public Map<String, Object> update(@RequestBody UserManageVO userManageVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
         try {
-            String userId = CommonUtil.nullToBlank(userManageVO.getUserId());
-            String userNm = CommonUtil.nullToBlank(userManageVO.getUserNm());
-            String email = CommonUtil.nullToBlank(userManageVO.getEmail());
-            String phone = CommonUtil.nullToBlank(userManageVO.getPhone());
-            if (userId.isEmpty()) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "userId는 필수입니다.");
-                return resultMap;
+            String loginUserId = SessionUtil.getUserId();
+            if (loginUserId != null) {
+                userManageVO.setMdfrId(loginUserId);
             }
-            if (userNm.isEmpty()) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "사용자명은 필수입니다.");
-                return resultMap;
-            }
-            if (email.isEmpty()) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "이메일은 필수입니다.");
-                return resultMap;
-            }
-            if (phone.isEmpty()) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "연락처는 필수입니다.");
-                return resultMap;
-            }
+
             if (CommonUtil.nullToBlank(userManageVO.getOrgId()).isEmpty()) userManageVO.setOrgId(null);
-            if (userManageService.isDuplicateEmailForUpdate(userId, email)) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "이미 가입된 이메일입니다.");
-                return resultMap;
-            }
 
             resultMap.put("successYn", true);
             resultMap.put("data", userManageService.updateUser(userManageVO));
+        } catch (DuplicateEmailException e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", e.getMessage());
         } catch (Exception e) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
@@ -181,13 +198,6 @@ public class UserManageController extends BaseController {
     }
 
     private String generateTempPassword(int length) {
-        final String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        SecureRandom random = new SecureRandom();
-        StringBuilder tempPassword = new StringBuilder(length);
-        for (int i = 0; i < length; i++) {
-            int idx = random.nextInt(chars.length());
-            tempPassword.append(chars.charAt(idx));
-        }
-        return tempPassword.toString();
+        return RandomStringUtils.randomAlphanumeric(length);
     }
 }

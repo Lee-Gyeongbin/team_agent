@@ -28,4 +28,5 @@ public class UserManageVO extends CommonVO {
     private String modifyDt;
     private String crtrId;
     private String mdfrId;
+    private String acctStatusDesc;
 }

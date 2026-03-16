@@ -6,6 +6,8 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import kr.teamagent.common.exception.DuplicateEmailException;
+import kr.teamagent.common.exception.DuplicateUserIdException;
 import kr.teamagent.usermanage.service.UserManageVO;
 
 @Service
@@ -25,6 +27,28 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 생성 시 동일 ID가 이미 존재하는지 여부
+     * @param userId 생성하려는 사용자 ID
+     * @return true면 중복
+     */
+    public boolean isDuplicateUserIdForInsert(String userId) throws Exception {
+        UserManageVO vo = new UserManageVO();
+        vo.setUserId(userId);
+        return userManageDAO.countUserByUserId(vo) > 0;
+    }
+
+    /**
+     * 생성 시 동일 이메일이 이미 존재하는지 여부
+     * @param email 생성하려는 이메일
+     * @return true면 중복
+     */
+    public boolean isDuplicateEmailForInsert(String email) throws Exception {
+        UserManageVO vo = new UserManageVO();
+        vo.setEmail(email);
+        return userManageDAO.countUserByEmail(vo) > 0;
+    }
+
+    /**
      * 수정 시 동일 이메일을 다른 사용자가 사용 중인지 여부
      * @param userId 이메일을 변경하려는 사용자 ID
      * @param email 수정하려는 이메일
@@ -38,12 +62,37 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 사용자 정보 생성
+     * @param userManageVO
+     * @return 생성된 행 수
+     * @throws Exception
+     */
+    public int insertUser(UserManageVO userManageVO) throws Exception {
+        String userId = userManageVO.getUserId();
+        if (isDuplicateUserIdForInsert(userId)) {
+            throw new DuplicateUserIdException();
+        }
+
+        String email = userManageVO.getEmail();
+        if (email != null && !email.isEmpty() && isDuplicateEmailForInsert(email)) {
+            throw new DuplicateEmailException();
+        }
+
+        return userManageDAO.insertUser(userManageVO);
+    }
+
+    /**
      * 사용자 정보 수정
      * @param userManageVO
      * @return 수정된 행 수
      * @throws Exception
      */
     public int updateUser(UserManageVO userManageVO) throws Exception {
+        String userId = userManageVO.getUserId();
+        String email = userManageVO.getEmail();
+        if (email != null && !email.isEmpty() && isDuplicateEmailForUpdate(userId, email)) {
+            throw new DuplicateEmailException();
+        }
         return userManageDAO.updateUser(userManageVO);
     }
 

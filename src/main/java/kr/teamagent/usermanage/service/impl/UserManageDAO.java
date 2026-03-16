@@ -21,6 +21,26 @@ public class UserManageDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 사용자 ID 중복 여부 조회 (생성 시 사용)
+     * @param userManageVO userId
+     * @return 중복 건수
+     */
+    public int countUserByUserId(UserManageVO userManageVO) throws Exception {
+        Integer cnt = (Integer) selectOne("userManage.countUserByUserId", userManageVO);
+        return cnt != null ? cnt : 0;
+    }
+
+    /**
+     * 사용자 이메일 중복 여부 조회 (생성 시 사용)
+     * @param userManageVO email
+     * @return 중복 건수
+     */
+    public int countUserByEmail(UserManageVO userManageVO) throws Exception {
+        Integer cnt = (Integer) selectOne("userManage.countUserByEmail", userManageVO);
+        return cnt != null ? cnt : 0;
+    }
+
+    /**
      * 수정 시 이메일 중복 여부 조회
      * @param userManageVO userId, email
      * @return 중복 여부
@@ -28,6 +48,16 @@ public class UserManageDAO extends EgovComAbstractDAO {
     public int countUserByEmailExcludingUserId(UserManageVO userManageVO) throws Exception {
         Integer cnt = (Integer) selectOne("userManage.countUserByEmailExcludingUserId", userManageVO);
         return cnt != null ? cnt : 0;
+    }
+
+    /**
+     * 사용자 정보 생성
+     * @param userManageVO
+     * @return 영향받은 행 수
+     * @throws Exception
+     */
+    public int insertUser(UserManageVO userManageVO) throws Exception {
+        return insert("userManage.insertUser", userManageVO);
     }
 
     /**

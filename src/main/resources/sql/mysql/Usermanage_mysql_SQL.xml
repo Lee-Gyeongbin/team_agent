@@ -22,10 +22,30 @@
             U.CREATE_DT,
             U.MODIFY_DT,
             U.CRTR_ID,
-            U.MDFR_ID
+            U.MDFR_ID,
+            C.DESCRIPTION AS ACCT_STATUS_DESC
         FROM TB_USER U
+            LEFT JOIN TB_CODE C
+                ON U.ACCT_STATUS_CD = C.CODE_ID
+                AND C.CODE_GRP_ID = 'CG000001'
         WHERE 1 = 1
         ORDER BY U.CREATE_DT DESC
+    </select>
+
+    <!-- 사용자 ID 중복 여부 조회 -->
+    <select id="countUserByUserId" parameterType="userManageVO" resultType="int">
+        /* 사용자 ID 중복 여부 조회 */
+        SELECT COUNT(*)
+        FROM TB_USER
+        WHERE USER_ID = #{userId}
+    </select>
+
+    <!-- 사용자 이메일 중복 여부 조회 -->
+    <select id="countUserByEmail" parameterType="userManageVO" resultType="int">
+        /* 사용자 이메일 중복 여부 조회 */
+        SELECT COUNT(*)
+        FROM TB_USER
+        WHERE EMAIL = #{email}
     </select>
 
     <!-- 사용자 수정 시 이메일 중복 여부 조회 -->
@@ -37,6 +57,42 @@
           AND USER_ID != #{userId}
     </select>
 
+<!-- 사용자 정보 생성 -->
+<insert id="insertUser" parameterType="userManageVO">
+    /* 사용자 정보 생성 */
+    INSERT INTO TB_USER (
+        USER_ID
+      , USER_NM
+      , EMAIL
+      , PASSWD
+      , PHONE
+      , ORG_ID
+      , USE_YN
+      , LOGIN_FAIL_CNT
+      , TWO_FA_YN
+      , ACCT_STATUS_CD
+      , CREATE_DT
+      , MODIFY_DT
+      , CRTR_ID
+      , MDFR_ID
+    ) VALUES (
+        #{userId}
+      , #{userNm}
+      , #{email}
+      , #{passwd}
+      , #{phone}
+      , #{orgId}
+      , 'Y'
+      , 0
+      , 'N'
+      , '001'
+      , NOW()
+      , NULL
+      , #{crtrId}
+      , NULL
+    )
+</insert>
+
 <!-- 사용자 정보 수정 -->
 <update id="updateUser" parameterType="userManageVO">
     /* 사용자 정보 수정 */
@@ -45,11 +101,13 @@
         USER_NM = #{userNm},
         ORG_ID = #{orgId},
         EMAIL = #{email},
-        PHONE = #{phone}
+        PHONE = #{phone},
+        MODIFY_DT = NOW(),
+        MDFR_ID = #{mdfrId}
     WHERE USER_ID = #{userId}
 </update>
 
-<!-- 사용자 정보 삭제 (논리 삭제: USE_YN = 'N', ACCT_STATUS_CD = '002') -->
+<!-- 사용자 정보 삭제 -->
 <update id="deleteUser" parameterType="userManageVO">
     /* 사용자 정보 논리 삭제 */
     UPDATE TB_USER
