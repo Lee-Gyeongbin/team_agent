@@ -19,12 +19,12 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
     PromptDAO promptDAO;
 
     /**
-     * Prompt 목록 조회
+     * 시스템 프롬프트 목록 조회
      * @return
      * @throws Exception
      */
-    public List<PromptVO> selectPromptList() throws Exception {
-        return promptDAO.selectPromptList();
+    public List<PromptVO> selectSystemPromptList() throws Exception {
+        return promptDAO.selectSystemPromptList();
     }
 
 }

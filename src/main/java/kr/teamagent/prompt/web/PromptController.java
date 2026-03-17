@@ -23,15 +23,15 @@ public class PromptController extends BaseController {
     private PromptServiceImpl promptService;
 
     /**
-     * Prompt 목록 조회
+     * 시스템 프롬프트 목록 조회
      * @return { dataList: PromptVO[] }
      * @throws Exception
      */
-    @RequestMapping(value = "/list.do")
+    @RequestMapping(value = "/system/list.do")
     @ResponseBody
-    public ModelAndView list() throws Exception {
+    public ModelAndView systemList() throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", promptService.selectPromptList());
+        resultMap.put("dataList", promptService.selectSystemPromptList());
         return new ModelAndView("jsonView", resultMap);
     }
 
