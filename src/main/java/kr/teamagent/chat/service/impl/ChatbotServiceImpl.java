@@ -2,6 +2,7 @@ package kr.teamagent.chat.service.impl;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,9 +66,23 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public List<ChatbotVO> selectDmList(ChatbotVO searchVO) throws Exception {
         return chatbotDAO.selectDmList(searchVO);
     }
-
+    /**
+     * CHAT 대화방 참조 문서 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
     public List<ChatbotVO> selectChatDocList(ChatbotVO searchVO) throws Exception {
         return chatbotDAO.selectChatDocList(searchVO);
+    }
+    /**
+     * CHAT 대화방 tableData 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectTableDataList(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectTableDataList(searchVO);
     }
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
@@ -158,16 +173,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         if(CommonUtil.isNotEmpty(svcTy)){
             if(svcTy.equals("S")){
                 // 지역 권한 조회
-                List<ChatbotVO> regnCdVoList = chatbotDAO.selectRegnCdList(chatbotVO);
+                // List<ChatbotVO> regnCdVoList = chatbotDAO.selectRegnCdList(chatbotVO);
 
-                List<String> regnCdList = new ArrayList<>();
-                if (regnCdVoList != null) {
-                    for (ChatbotVO vo : regnCdVoList) {
-                        regnCdList.add(vo.getStAreaCd());
-                    }
-                }
+                // List<String> regnCdList = new ArrayList<>();
+                // if (regnCdVoList != null) {
+                //     for (ChatbotVO vo : regnCdVoList) {
+                //         regnCdList.add(vo.getStAreaCd());
+                //     }
+                // }
                 // 지역 권한
-                params.put("regn_auth_lst", regnCdList);
+                params.put("regn_auth_lst", Arrays.asList("02", "03", "04", "05", "06", "07", "08", "09"));
 
             }else if(svcTy.equals("M")){
                 // 관리자 권한 조회
@@ -305,17 +320,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         int outputTokens = 0;
         String savedLogId = "";
         String tableData = "";
+        String sql = "";
         boolean hasStreamError = false;
 
         try {
             while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                
-                // 빈 줄은 무시
-                if (line.isEmpty()) {
-                    continue;
-                }
-                
                 // event 라인 처리
                 if (line.startsWith("event: ")) {
                     currentEvent = line.substring(7).trim();
@@ -332,14 +341,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
                         
                         // answer_delta 이벤트 처리
-                        // M API는 event 라인 없이 text만 내려오는 경우가 있어 fallback 처리
-                        String chunkText = extractChunkText(data);
-                        if ("answer_delta".equals(currentEvent) || (CommonUtil.isEmpty(currentEvent) && CommonUtil.isNotEmpty(chunkText))) {
-                            if (CommonUtil.isNotEmpty(chunkText)) {
-                                accumulatedContent.append(chunkText);
-                                logger.info("answer_delta 이벤트 처리 - chunkText: {}, accumulatedContent: {}", chunkText, accumulatedContent.toString());
+                        if ("answer_delta".equals(currentEvent)) {
+                            String text = (String) data.get("text");
+                            if (text != null && !text.isEmpty()) {
+                                accumulatedContent.append(text);
                                 // 콜백을 통해 청크 즉시 전송 (한 글자씩 실시간 전송)
-                                callback.onChunk(chunkText, accumulatedContent.toString());
+                                callback.onChunk(text, accumulatedContent.toString());
                             }
                         }
                         // done 이벤트 처리
@@ -357,12 +364,20 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             inputTokens = parseTokenCount(data.get("input_tokens"));
                             outputTokens = parseTokenCount(data.get("output_tokens"));
                             // 차트를 위한 통계 값
-                            // Object tableDataObj = data.get("table_data");
-                            // if(tableDataObj != null){
-                            //     tableData = String.valueOf(tableDataObj);
-                            // }
+                            Object tableDataObj = data.get("table_data");
+
+                            if (tableDataObj != null) {
+                                com.google.gson.Gson gson = new com.google.gson.Gson();
+                                tableData = gson.toJson(tableDataObj);
+                            }
+
+                            Object sqlObj = data.get("sql");
+                            if(sqlObj != null){
+                                sql = String.valueOf(sqlObj);
+                            }
 
                             String filePathFromApi = CommonUtil.isNotEmpty((String) data.get("file_path")) ? (String) data.get("file_path") : "";
+                            // 추후 AI 개발 시 DOC_ID 받아서 매핑 필요함.
                             if (CommonUtil.isNotEmpty(filePathFromApi)) {
                                 if (filePathFromApi.contains("제조정보")) {
                                     responseFilePath = "/CAT_MFG_001/제조정보.pdf";
@@ -390,9 +405,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                     }
                                 }
                             }
-
-                            // done 이벤트에서는 완료 데이터만 확정하고,
-                            // 최종 onComplete는 finally에서 log 저장 후 logId와 함께 1회 호출한다.
                             break;
                         }
                     } catch (Exception e) {
@@ -409,7 +421,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // 정상 종료든 비정상 종료든 DB 저장은 여기서 무조건 실행!
             if (accumulatedContent.length() > 0 && "None".equals(errorCode)) {
                 try {
-                    savedLogId = this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId);
+                    savedLogId = this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId, tableData, sql);
                 } catch (Exception e) {
                     logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
                 }
@@ -434,28 +446,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             reader.close();
             responseBody.close();
         }
-    }
-
-    /**
-     * 다양한 SSE payload 포맷(text/chunk/content)을 단일 chunk 텍스트로 정규화
-     */
-    private String extractChunkText(JSONObject data) {
-        if (data == null) {
-            return "";
-        }
-        Object textObj = data.get("text");
-        if (textObj instanceof String && CommonUtil.isNotEmpty((String) textObj)) {
-            return (String) textObj;
-        }
-        Object chunkObj = data.get("chunk");
-        if (chunkObj instanceof String && CommonUtil.isNotEmpty((String) chunkObj)) {
-            return (String) chunkObj;
-        }
-        Object contentObj = data.get("content");
-        if (contentObj instanceof String && CommonUtil.isNotEmpty((String) contentObj)) {
-            return (String) contentObj;
-        }
-        return "";
     }
 
     /**
@@ -487,7 +477,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @return 생성된 logId
      * @throws Exception
      */
-    private String doInsertAiLog(String responseThreadId, String query, String answer, int inputTokens, int outputTokens, String svcTy, String refId, String docId, String filePath, String page, List<Integer> viewPage, String userId) throws Exception {
+    private String doInsertAiLog(String responseThreadId, String query, String answer, int inputTokens, int outputTokens, String svcTy, String refId, String docId, String filePath, String page, List<Integer> viewPage, String userId, String tableData, String sql) throws Exception {
 
         // 챗봇 로그 insert
         ChatbotVO chatbotVO = new ChatbotVO();
@@ -499,6 +489,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setOutTokens(outputTokens);
         chatbotVO.setRContent(answer);
         chatbotVO.setUserId(userId);
+        chatbotVO.setTableData(tableData);
+        chatbotVO.setSql(sql);
         chatbotDAO.insertChatLog(chatbotVO);
         
         if(svcTy.equals("M")){

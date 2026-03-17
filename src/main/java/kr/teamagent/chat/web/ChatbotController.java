@@ -116,6 +116,14 @@ public class ChatbotController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    @RequestMapping(value = "/ai/chatbot/selectTableDataList.do")
+    @ResponseBody
+    public ModelAndView selectTableDataList(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", chatbotService.selectTableDataList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
     /**
      * 챗봇 매뉴얼 PDF 파일 조회
      * - 로컬 환경: 파일 시스템에서 조회

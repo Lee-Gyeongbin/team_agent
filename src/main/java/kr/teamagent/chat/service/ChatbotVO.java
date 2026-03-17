@@ -20,6 +20,8 @@ public class ChatbotVO extends CommonVO {
     private String content;
     // 참조 문서 존재 여부
     private String docExist;
+    // 테이블 데이터 존재 여부
+    private String tableExist;
 
     // LLM 모델 정보(TB_LLM_MDL)
     // 모델 ID
@@ -72,6 +74,10 @@ public class ChatbotVO extends CommonVO {
     private String ttsq;
     // 재질문 횟수
     private int reaskCnt;
+    // 테이블 데이터
+    private String tableData;
+    // SQL
+    private String sql;
 
     /* AI 서비스 사용자별 일일 사용량 */
     // 사용 일자 (YYYYMMDD)

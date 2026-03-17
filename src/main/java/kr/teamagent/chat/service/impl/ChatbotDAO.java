@@ -31,6 +31,15 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * CHAT 대화방 tableData 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectTableDataList(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectTableDataList", searchVO);
+    }
+    /**
      * 데이터마트 조회
      * @param searchVO
      * @return

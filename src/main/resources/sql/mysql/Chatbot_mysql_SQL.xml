@@ -104,6 +104,7 @@
             OUT_TOKENS,
             SATIS_YN,
             TTSQ,
+            TABLE_DATA,
             REASK_CNT,
             CREATE_USER_ID,
             CREATE_DT
@@ -118,7 +119,8 @@
             #{inTokens},
             #{outTokens},
             #{satisYn},
-            #{ttsq},
+            #{sql},
+            #{tableData},
             #{reaskCnt},
             #{userId},
             NOW()
@@ -166,6 +168,10 @@
                 WHEN A.SVC_TY = 'M' AND B.DOC_ID IS NOT NULL THEN 'Y'
                 ELSE 'N'
                 END AS DOC_EXIST
+            , CASE
+            	WHEN A.TTSQ IS NOT NULL AND A.TABLE_DATA IS NOT NULL THEN 'Y'
+            	ELSE 'N'
+            	END AS TABLE_EXIST
         FROM
             TB_CHAT_LOG A
         LEFT OUTER JOIN TB_CHAT_REF B
@@ -192,6 +198,29 @@
             ON B.DOC_ID = A.DOC_ID 
             AND B.USE_YN = 'Y'
         WHERE 1=1 
+            AND A.LOG_ID = #{logId}
+    </select>
+
+    <select id="selectTableDataList" resultType="chatbotVO">
+        /* CHAT 대화방 tableData 조회 ai.chatbot.selectTableDataList */
+        SELECT
+            A.LOG_ID
+            , A.ROOM_ID
+            , A.SVC_TY
+            , A.REF_ID
+            , A.Q_CONTENT
+            , A.R_CONTENT
+            , A.IN_TOKENS
+            , A.OUT_TOKENS
+            , A.SATIS_YN
+            , A.TTSQ
+            , A.REASK_CNT
+            , A.CREATE_USER_ID
+            , A.CREATE_DT
+            , A.TABLE_DATA
+        FROM
+            TB_CHAT_LOG A
+        WHERE 1=1
             AND A.LOG_ID = #{logId}
     </select>
 </mapper>
