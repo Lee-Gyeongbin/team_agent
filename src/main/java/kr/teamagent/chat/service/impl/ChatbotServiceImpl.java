@@ -114,6 +114,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             case "S":
                 apiUrl = PropertyUtil.getProperty("Globals.chatbot.statQ.apiUrl");
                 break;
+            case "llmTest":
+                // TODO 추후 AI 개발 완료 후 삭제
+                apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
+                break;
             default:
                 throw new IllegalArgumentException("알 수 없는 서비스 타입: " + svcTy);
         }
@@ -419,7 +423,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             hasStreamError = true; // 추가
         } finally {
             // 정상 종료든 비정상 종료든 DB 저장은 여기서 무조건 실행!
-            if (accumulatedContent.length() > 0 && "None".equals(errorCode)) {
+            if (accumulatedContent.length() > 0 && "None".equals(errorCode) && !svcTy.equals("llmTest")) {
                 try {
                     savedLogId = this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId, tableData, sql);
                 } catch (Exception e) {
