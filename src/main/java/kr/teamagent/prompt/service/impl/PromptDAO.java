@@ -38,4 +38,23 @@ public class PromptDAO extends EgovComAbstractDAO {
         return delete("prompt.deleteSystemPrompt", vo);
     }
 
+    /**
+     * 콘텐츠 필터 정책 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<PromptVO.PolicyVO> selectPolicyList() throws Exception {
+        return selectList("prompt.selectPolicyList");
+    }
+
+    /**
+     * 금지어 목록 조회
+     * @param wordType I(입력) / O(출력)
+     * @return
+     * @throws Exception
+     */
+    public List<PromptVO.BanWordVO> selectBanWordList(String wordType) throws Exception {
+        return selectList("prompt.selectBanWordList", wordType);
+    }
+
 }

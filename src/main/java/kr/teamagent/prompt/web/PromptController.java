@@ -70,4 +70,17 @@ public class PromptController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 금지어/필터링 데이터 조회
+     * @return { data: { inputBanWords: BanWordVO[], outputBanWords: BanWordVO[] } }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/filter/data.do")
+    @ResponseBody
+    public ModelAndView filterData() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", promptService.selectFilterData());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

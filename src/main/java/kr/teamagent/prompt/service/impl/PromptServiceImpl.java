@@ -1,6 +1,8 @@
 package kr.teamagent.prompt.service.impl;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.slf4j.Logger;
@@ -55,6 +57,19 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
      */
     public void deleteSystemPrompt(PromptVO searchVO) throws Exception {
         promptDAO.deleteSystemPrompt(searchVO);
+    }
+
+    /**
+     * 금지어/필터링 데이터 조회
+     * @return { inputBanWords, outputBanWords }
+     * @throws Exception
+     */
+    public Map<String, Object> selectFilterData() throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        result.put("inputBanWords", promptDAO.selectBanWordList("I"));
+        result.put("outputBanWords", promptDAO.selectBanWordList("O"));
+        result.put("policies", promptDAO.selectPolicyList());
+        return result;
     }
 
 }

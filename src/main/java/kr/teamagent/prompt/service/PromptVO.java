@@ -23,4 +23,29 @@ public class PromptVO {
     /** TB_CODE 조인 (PR000001) */
     private String promptName;
 
+    /** TB_BAN_WORD */
+    @Getter
+    @Setter
+    public static class BanWordVO {
+        private String wordId;
+        private String word;
+        private String wordType;
+        private String useYn;
+        private String createDt;
+    }
+
+    /** TB_CONTENT_FLTR + TB_CODE (CF000001) */
+    @Getter
+    @Setter
+    public static class PolicyVO {
+        private String filterCd;
+        private String filterName;
+        private String filterDesc;
+        private String applyYn;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
 }
