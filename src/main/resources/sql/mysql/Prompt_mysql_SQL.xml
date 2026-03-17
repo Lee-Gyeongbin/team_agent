@@ -14,7 +14,6 @@
             , A.APPLY_LLM_YN
             , A.APPLY_RAG_YN
             , A.APPLY_SQL_YN
-            , A.VERSION
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -22,5 +21,53 @@
         WHERE 1 = 1
         ORDER BY A.PROMPT_ID
     </select>
+
+    <insert id="insertSystemPrompt" parameterType="promptVO">
+        /* 시스템 프롬프트 등록/수정 prompt.insertSystemPrompt */
+        INSERT INTO TB_PROMPT (
+            PROMPT_ID
+            , PROMPT_TYPE_CD
+            , PROMPT_NAME
+            , CONTENT
+            , TEMPERATURE
+            , TOP_P
+            , APPLY_LLM_YN
+            , APPLY_RAG_YN
+            , APPLY_SQL_YN
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{promptId}
+            , #{promptTypeCd, jdbcType=VARCHAR}
+            , #{promptName, jdbcType=VARCHAR}
+            , #{content, jdbcType=VARCHAR}
+            , #{temperature, jdbcType=DOUBLE}
+            , #{topP, jdbcType=DOUBLE}
+            , #{applyLlmYn, jdbcType=VARCHAR}
+            , #{applyRagYn, jdbcType=VARCHAR}
+            , #{applySqlYn, jdbcType=VARCHAR}
+            , #{useYn, jdbcType=VARCHAR}
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            PROMPT_TYPE_CD = VALUES(PROMPT_TYPE_CD)
+            , PROMPT_NAME = VALUES(PROMPT_NAME)
+            , CONTENT = VALUES(CONTENT)
+            , TEMPERATURE = VALUES(TEMPERATURE)
+            , TOP_P = VALUES(TOP_P)
+            , APPLY_LLM_YN = VALUES(APPLY_LLM_YN)
+            , APPLY_RAG_YN = VALUES(APPLY_RAG_YN)
+            , APPLY_SQL_YN = VALUES(APPLY_SQL_YN)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
+
+    <delete id="deleteSystemPrompt" parameterType="promptVO">
+        /* 시스템 프롬프트 삭제 prompt.deleteSystemPrompt */
+        DELETE FROM TB_PROMPT
+        WHERE PROMPT_ID = #{promptId}
+    </delete>
 
 </mapper>

@@ -16,7 +16,6 @@ public class PromptVO {
     private String applyLlmYn;
     private String applyRagYn;
     private String applySqlYn;
-    private String version;
     private String useYn;
     private String createDt;
     private String modifyDt;

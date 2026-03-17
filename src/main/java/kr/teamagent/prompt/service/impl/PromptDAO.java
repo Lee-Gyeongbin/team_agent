@@ -19,4 +19,23 @@ public class PromptDAO extends EgovComAbstractDAO {
         return selectList("prompt.selectSystemPromptList");
     }
 
+    /**
+     * 시스템 프롬프트 등록/수정
+     * @param vo
+     * @throws Exception
+     */
+    public void insertSystemPrompt(PromptVO vo) throws Exception {
+        insert("prompt.insertSystemPrompt", vo);
+    }
+
+    /**
+     * 시스템 프롬프트 삭제
+     * @param vo promptId 필수
+     * @return 삭제 행 수
+     * @throws Exception
+     */
+    public int deleteSystemPrompt(PromptVO vo) throws Exception {
+        return delete("prompt.deleteSystemPrompt", vo);
+    }
+
 }
