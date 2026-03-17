@@ -120,6 +120,8 @@ public class ChatbotController extends BaseController {
     @ResponseBody
     public ModelAndView selectTableDataList(ChatbotVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
+        // TODO 추후 시연 완료 후 삭제
+        resultMap.put("statList", chatbotService.selectStatList(searchVO));
         resultMap.put("list", chatbotService.selectTableDataList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }

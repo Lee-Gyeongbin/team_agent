@@ -37,6 +37,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     @Autowired
     ChatbotDAO chatbotDAO;
 
+    @Autowired
+    ChatbotStatDAO chatbotStatDAO;
+
     /**
      * 모델 목록 조회
      * @param searchVO
@@ -74,6 +77,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     public List<ChatbotVO> selectChatDocList(ChatbotVO searchVO) throws Exception {
         return chatbotDAO.selectChatDocList(searchVO);
+    }
+    /**
+     * 통계 목록 조회(TODO 추후 시연 완료 후 삭제)
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectStatList(ChatbotVO searchVO) throws Exception {
+        return chatbotStatDAO.selectStatList(searchVO);
     }
     /**
      * CHAT 대화방 tableData 조회

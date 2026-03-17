@@ -112,4 +112,8 @@ public class ChatbotVO extends CommonVO {
     private String mainPageNo;
     // 관련 페이지 번호
     private String relatedPages;
+
+    private String statId;
+    private String statNm;
+    private String detailItemCd;
 }

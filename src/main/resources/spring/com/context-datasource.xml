@@ -24,4 +24,22 @@
 	    <property name="minEvictableIdleTimeMillis" value="300000"/>
 	</bean>
 
+	<!-- TODO 추후 시연 완료 후 삭제 -->
+	<bean id="cmbDataSource" class="org.apache.commons.dbcp2.BasicDataSource" destroy-method="close">
+		<property name="driverClassName" value="${Globals.cmb.mysql.DriverClassName}"/>
+		<property name="url" value="${Globals.cmb.mysql.Url}" />
+		<property name="username" value="${Globals.cmb.mysql.UserName}"/>
+		<property name="password" value="${Globals.cmb.mysql.Password}"/>
+		<property name="initialSize" value="10"/>
+		<property name="maxTotal" value="50"/>
+		<property name="maxIdle" value="10"/>
+		<property name="minIdle" value="10"/>
+	    <property name="validationQuery" value="SELECT 1"/>
+	    <property name="testOnBorrow" value="true"/>
+	    <property name="testWhileIdle" value="true"/>
+	    <property name="timeBetweenEvictionRunsMillis" value="60000"/>
+	    <property name="minEvictableIdleTimeMillis" value="300000"/>
+	</bean>
+
+
 </beans>

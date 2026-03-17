@@ -16,6 +16,23 @@
 		</property>
 	</bean>
 
+	<!-- TODO 추후 시연 완료 후 삭제 -->
+	<bean id="cmb.sqlSession" class="kr.teamagent.common.util.RefreshableSqlSessionFactoryBean">
+		<property name="dataSource" ref="cmbDataSource"/>
+		<property name="interval" value="30000"/>
+		<property name="configLocation" value="classpath:/sql/config/mybatis-config.xml"/>
+		<property name="mapperLocations">
+			<array>
+				<value>classpath*:/sql/${Globals.DbType}/**/*_mysql_SQL.xml</value>
+				<value>classpath*:/sql/${Globals.DbType}/**/*Mapper.xml</value>
+			</array>
+		</property>
+	</bean>
+
+	<bean id="cmb.sqlSessionTemplate" class="org.mybatis.spring.SqlSessionTemplate">
+		<constructor-arg ref="cmb.sqlSession"/>
+	</bean>
+
 	<bean id="egov.sqlSessionTemplate" class="org.mybatis.spring.SqlSessionTemplate">
 		<constructor-arg ref="egov.sqlSession"/>
 	</bean>
