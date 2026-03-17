@@ -106,4 +106,34 @@
         ORDER BY A.WORD_ID
     </select>
 
+    <delete id="deleteAllBanWord">
+        /* 금지어 전체 삭제 prompt.deleteAllBanWord */
+        DELETE FROM TB_BAN_WORD
+    </delete>
+
+    <insert id="insertBanWord" parameterType="kr.teamagent.prompt.service.PromptVO$BanWordVO">
+        /* 금지어 등록 prompt.insertBanWord */
+        INSERT INTO TB_BAN_WORD (
+            WORD_ID
+            , WORD
+            , WORD_TYPE
+            , USE_YN
+            , CREATE_DT
+        ) VALUES (
+            #{wordId}
+            , #{word, jdbcType=VARCHAR}
+            , #{wordType, jdbcType=VARCHAR}
+            , #{useYn, jdbcType=VARCHAR}
+            , NOW()
+        )
+    </insert>
+
+    <update id="updatePolicyApplyYn" parameterType="kr.teamagent.prompt.service.PromptVO$PolicyVO">
+        /* 콘텐츠 필터 정책 APPLY_YN 수정 prompt.updatePolicyApplyYn */
+        UPDATE TB_CONTENT_FLTR
+        SET APPLY_YN = #{applyYn}
+            , MODIFY_DT = NOW()
+        WHERE FILTER_CD = #{filterCd}
+    </update>
+
 </mapper>

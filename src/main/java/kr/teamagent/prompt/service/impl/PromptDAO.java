@@ -57,4 +57,30 @@ public class PromptDAO extends EgovComAbstractDAO {
         return selectList("prompt.selectBanWordList", wordType);
     }
 
+    /**
+     * 금지어 전체 삭제
+     * @throws Exception
+     */
+    public void deleteAllBanWord() throws Exception {
+        delete("prompt.deleteAllBanWord");
+    }
+
+    /**
+     * 금지어 등록
+     * @param vo BanWordVO
+     * @throws Exception
+     */
+    public void insertBanWord(PromptVO.BanWordVO vo) throws Exception {
+        insert("prompt.insertBanWord", vo);
+    }
+
+    /**
+     * 콘텐츠 필터 정책 APPLY_YN 수정
+     * @param vo PolicyVO (filterCd, applyYn)
+     * @throws Exception
+     */
+    public void updatePolicyApplyYn(PromptVO.PolicyVO vo) throws Exception {
+        update("prompt.updatePolicyApplyYn", vo);
+    }
+
 }

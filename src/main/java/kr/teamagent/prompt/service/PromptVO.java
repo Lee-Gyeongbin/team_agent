@@ -1,5 +1,7 @@
 package kr.teamagent.prompt.service;
 
+import java.util.List;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -22,6 +24,11 @@ public class PromptVO {
 
     /** TB_CODE 조인 (PR000001) */
     private String promptName;
+
+    /** 금지어/필터링 저장용 */
+    private List<BanWordVO> inputBanWords;
+    private List<BanWordVO> outputBanWords;
+    private List<PolicyVO> policies;
 
     /** TB_BAN_WORD */
     @Getter

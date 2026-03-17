@@ -83,4 +83,19 @@ public class PromptController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 금지어/필터링 저장
+     * @param searchVO { inputBanWords: BanWordVO[], outputBanWords: BanWordVO[], policies: PolicyVO[] }
+     * @return { data: PromptVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/filter/save.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView filterSave(@RequestBody PromptVO searchVO) throws Exception {
+        promptService.saveFilterData(searchVO);
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", promptService.selectFilterData());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.prompt.service.PromptVO;
@@ -70,6 +71,39 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
         result.put("outputBanWords", promptDAO.selectBanWordList("O"));
         result.put("policies", promptDAO.selectPolicyList());
         return result;
+    }
+
+    /**
+     * 금지어/필터링 저장
+     * - TB_BAN_WORD: 전체 삭제 후 inputBanWords + outputBanWords INSERT (키 자동 생성)
+     * - TB_CONTENT_FLTR: APPLY_YN만 UPDATE
+     * @param searchVO inputBanWords, outputBanWords, policies
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void saveFilterData(PromptVO searchVO) throws Exception {
+        promptDAO.deleteAllBanWord();
+
+        if (searchVO.getInputBanWords() != null) {
+            for (PromptVO.BanWordVO vo : searchVO.getInputBanWords()) {
+                vo.setWordId(keyGenerate.generateTableKey("BW", "TB_BAN_WORD", "WORD_ID"));
+                vo.setWordType("I");
+                promptDAO.insertBanWord(vo);
+            }
+        }
+        if (searchVO.getOutputBanWords() != null) {
+            for (PromptVO.BanWordVO vo : searchVO.getOutputBanWords()) {
+                vo.setWordId(keyGenerate.generateTableKey("BW", "TB_BAN_WORD", "WORD_ID"));
+                vo.setWordType("O");
+                promptDAO.insertBanWord(vo);
+            }
+        }
+
+        if (searchVO.getPolicies() != null) {
+            for (PromptVO.PolicyVO vo : searchVO.getPolicies()) {
+                promptDAO.updatePolicyApplyYn(vo);
+            }
+        }
     }
 
 }
