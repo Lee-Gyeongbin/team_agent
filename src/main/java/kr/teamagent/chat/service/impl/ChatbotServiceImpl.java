@@ -493,7 +493,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setOutTokens(outputTokens);
         chatbotVO.setRContent(answer);
         chatbotVO.setUserId(userId);
-        chatbotVO.setTableData(tableData);
+        chatbotVO.setTableData(tableData != null && !tableData.trim().isEmpty() ? tableData : null);
         chatbotVO.setSql(sql);
         chatbotDAO.insertChatLog(chatbotVO);
         
