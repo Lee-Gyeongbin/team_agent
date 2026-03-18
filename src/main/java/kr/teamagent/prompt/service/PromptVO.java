@@ -59,4 +59,22 @@ public class PromptVO {
         private List<PolicyVO> policies;
     }
 
+    /** TB_TOKEN_LMT */
+    @Getter
+    @Setter
+    public static class TokenLmtVO {
+        private String limitId;
+        private Integer maxInTokens;
+        private Integer maxOutTokens;
+        private Integer ctxtWin;
+        private Integer dayUserLmt;
+        private Integer monOrgLmt;
+        private Integer rateLmtRpm;
+        private Integer minRespLen;
+        private Integer respTmo;
+        private Integer retryCnt;
+        private String streamYn;
+        private String modifyDt;
+    }
+
 }

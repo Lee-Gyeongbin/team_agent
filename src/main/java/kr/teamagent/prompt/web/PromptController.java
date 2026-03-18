@@ -98,4 +98,31 @@ public class PromptController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 토큰 제한 설정 조회
+     * @return { data: TokenLmtVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/limit/data.do")
+    @ResponseBody
+    public ModelAndView limitData() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", promptService.selectTokenLmt());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 토큰 제한 설정 저장
+     * @param tokenLmtVO TokenLmtVO
+     * @return { data: TokenLmtVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/limit/save.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView limitSave(@RequestBody PromptVO.TokenLmtVO tokenLmtVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", promptService.saveTokenLmt(tokenLmtVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

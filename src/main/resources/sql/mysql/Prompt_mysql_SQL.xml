@@ -4,6 +4,11 @@
 
     <resultMap id="banWordMap" type="kr.teamagent.prompt.service.PromptVO$BanWordVO" autoMapping="true"/>
     <resultMap id="policyMap" type="kr.teamagent.prompt.service.PromptVO$PolicyVO" autoMapping="true"/>
+    <resultMap id="tokenLmtMap" type="kr.teamagent.prompt.service.PromptVO$TokenLmtVO" autoMapping="true"/>
+
+    <parameterMap id="banWordParam" type="kr.teamagent.prompt.service.PromptVO$BanWordVO"/>
+    <parameterMap id="policyParam" type="kr.teamagent.prompt.service.PromptVO$PolicyVO"/>
+    <parameterMap id="tokenLmtParam" type="kr.teamagent.prompt.service.PromptVO$TokenLmtVO"/>
     
     <select id="selectSystemPromptList" resultType="promptVO">
         /* 시스템 프롬프트 목록 조회 prompt.selectSystemPromptList */
@@ -111,7 +116,7 @@
         DELETE FROM TB_BAN_WORD
     </delete>
 
-    <insert id="insertBanWord" parameterType="kr.teamagent.prompt.service.PromptVO$BanWordVO">
+    <insert id="insertBanWord" parameterMap="banWordParam">
         /* 금지어 등록 prompt.insertBanWord */
         INSERT INTO TB_BAN_WORD (
             WORD_ID
@@ -128,12 +133,76 @@
         )
     </insert>
 
-    <update id="updatePolicyApplyYn" parameterType="kr.teamagent.prompt.service.PromptVO$PolicyVO">
+    <update id="updatePolicyApplyYn" parameterMap="policyParam">
         /* 콘텐츠 필터 정책 APPLY_YN 수정 prompt.updatePolicyApplyYn */
         UPDATE TB_CONTENT_FLTR
         SET APPLY_YN = #{applyYn}
             , MODIFY_DT = NOW()
         WHERE FILTER_CD = #{filterCd}
     </update>
+
+    <select id="selectTokenLmt" resultMap="tokenLmtMap">
+        /* 토큰 제한 설정 조회 prompt.selectTokenLmt */
+        SELECT
+              A.LIMIT_ID
+            , A.MAX_IN_TOKENS
+            , A.MAX_OUT_TOKENS
+            , A.CTXT_WIN
+            , A.DAY_USER_LMT
+            , A.MON_ORG_LMT
+            , A.RATE_LMT_RPM
+            , A.MIN_RESP_LEN
+            , A.RESP_TMO
+            , A.RETRY_CNT
+            , A.STREAM_YN
+            , A.MODIFY_DT
+        FROM TB_TOKEN_LMT A
+        WHERE 1=1
+        ORDER BY A.MODIFY_DT DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertTokenLmt" parameterMap="tokenLmtParam">
+        /* 토큰 제한 설정 저장 prompt.insertTokenLmt */
+        INSERT INTO TB_TOKEN_LMT (
+              LIMIT_ID
+            , MAX_IN_TOKENS
+            , MAX_OUT_TOKENS
+            , CTXT_WIN
+            , DAY_USER_LMT
+            , MON_ORG_LMT
+            , RATE_LMT_RPM
+            , MIN_RESP_LEN
+            , RESP_TMO
+            , RETRY_CNT
+            , STREAM_YN
+            , MODIFY_DT
+        ) VALUES (
+              #{limitId}
+            , #{maxInTokens, jdbcType=INTEGER}
+            , #{maxOutTokens, jdbcType=INTEGER}
+            , #{ctxtWin, jdbcType=INTEGER}
+            , #{dayUserLmt, jdbcType=INTEGER}
+            , #{monOrgLmt, jdbcType=INTEGER}
+            , #{rateLmtRpm, jdbcType=INTEGER}
+            , #{minRespLen, jdbcType=INTEGER}
+            , #{respTmo, jdbcType=INTEGER}
+            , #{retryCnt, jdbcType=INTEGER}
+            , #{streamYn, jdbcType=VARCHAR}
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+              MAX_IN_TOKENS = VALUES(MAX_IN_TOKENS)
+            , MAX_OUT_TOKENS = VALUES(MAX_OUT_TOKENS)
+            , CTXT_WIN = VALUES(CTXT_WIN)
+            , DAY_USER_LMT = VALUES(DAY_USER_LMT)
+            , MON_ORG_LMT = VALUES(MON_ORG_LMT)
+            , RATE_LMT_RPM = VALUES(RATE_LMT_RPM)
+            , MIN_RESP_LEN = VALUES(MIN_RESP_LEN)
+            , RESP_TMO = VALUES(RESP_TMO)
+            , RETRY_CNT = VALUES(RETRY_CNT)
+            , STREAM_YN = VALUES(STREAM_YN)
+            , MODIFY_DT = NOW()
+    </insert>
 
 </mapper>

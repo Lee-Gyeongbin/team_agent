@@ -83,4 +83,22 @@ public class PromptDAO extends EgovComAbstractDAO {
         update("prompt.updatePolicyApplyYn", vo);
     }
 
+    /**
+     * 토큰 제한 설정 조회 (최신 1건)
+     * @return TokenLmtVO
+     * @throws Exception
+     */
+    public PromptVO.TokenLmtVO selectTokenLmt() throws Exception {
+        return selectOne("prompt.selectTokenLmt");
+    }
+
+    /**
+     * 토큰 제한 설정 저장 (ON DUPLICATE KEY UPDATE)
+     * @param vo TokenLmtVO
+     * @throws Exception
+     */
+    public void insertTokenLmt(PromptVO.TokenLmtVO vo) throws Exception {
+        insert("prompt.insertTokenLmt", vo);
+    }
+
 }

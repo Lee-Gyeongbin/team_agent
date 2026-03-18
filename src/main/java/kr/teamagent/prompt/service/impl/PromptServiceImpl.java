@@ -80,6 +80,29 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
      * @param searchVO inputBanWords, outputBanWords, policies
      * @throws Exception
      */
+    /**
+     * 토큰 제한 설정 조회 (최신 1건)
+     * @return TokenLmtVO
+     * @throws Exception
+     */
+    public PromptVO.TokenLmtVO selectTokenLmt() throws Exception {
+        return promptDAO.selectTokenLmt();
+    }
+
+    /**
+     * 토큰 제한 설정 저장 (ON DUPLICATE KEY UPDATE)
+     * @param tokenLmtVO TokenLmtVO
+     * @return 저장된 TokenLmtVO
+     * @throws Exception
+     */
+    public PromptVO.TokenLmtVO saveTokenLmt(PromptVO.TokenLmtVO tokenLmtVO) throws Exception {
+        if (tokenLmtVO.getLimitId() == null || tokenLmtVO.getLimitId().trim().isEmpty()) {
+            tokenLmtVO.setLimitId(keyGenerate.generateTableKey("TL", "TB_TOKEN_LMT", "LIMIT_ID"));
+        }
+        promptDAO.insertTokenLmt(tokenLmtVO);
+        return tokenLmtVO;
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void saveFilterData(PromptVO.FilterSaveVO searchVO) throws Exception {
         promptDAO.deleteAllBanWord();
