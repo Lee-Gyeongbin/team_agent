@@ -27,6 +27,7 @@
         <typeAlias alias="userManageVO"                      type="kr.teamagent.usermanage.service.UserManageVO"/>
         <typeAlias alias="orgManageVO"                       type="kr.teamagent.orgmanage.service.OrgManageVO"/>
         <typeAlias alias="fileVO"                            type="kr.teamagent.common.util.service.FileVO"/>
+        <typeAlias alias="datamartVO"                        type="kr.teamagent.datamart.service.DatamartVO"/>
     </typeAliases>
 
     <typeHandlers>
