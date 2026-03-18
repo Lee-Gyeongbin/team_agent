@@ -81,7 +81,7 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     @Transactional(rollbackFor = Exception.class)
-    public void saveFilterData(PromptVO searchVO) throws Exception {
+    public void saveFilterData(PromptVO.FilterSaveVO searchVO) throws Exception {
         promptDAO.deleteAllBanWord();
 
         if (searchVO.getInputBanWords() != null) {

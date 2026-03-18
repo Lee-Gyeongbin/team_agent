@@ -25,11 +25,6 @@ public class PromptVO {
     /** TB_CODE 조인 (PR000001) */
     private String promptName;
 
-    /** 금지어/필터링 저장용 */
-    private List<BanWordVO> inputBanWords;
-    private List<BanWordVO> outputBanWords;
-    private List<PolicyVO> policies;
-
     /** TB_BAN_WORD */
     @Getter
     @Setter
@@ -53,6 +48,15 @@ public class PromptVO {
         private String useYn;
         private String createDt;
         private String modifyDt;
+    }
+
+    /** 금지어/필터링 저장 요청용 */
+    @Getter
+    @Setter
+    public static class FilterSaveVO {
+        private List<BanWordVO> inputBanWords;
+        private List<BanWordVO> outputBanWords;
+        private List<PolicyVO> policies;
     }
 
 }

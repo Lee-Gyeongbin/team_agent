@@ -91,7 +91,7 @@ public class PromptController extends BaseController {
      */
     @RequestMapping(value = "/filter/save.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView filterSave(@RequestBody PromptVO searchVO) throws Exception {
+    public ModelAndView filterSave(@RequestBody PromptVO.FilterSaveVO searchVO) throws Exception {
         promptService.saveFilterData(searchVO);
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", promptService.selectFilterData());
