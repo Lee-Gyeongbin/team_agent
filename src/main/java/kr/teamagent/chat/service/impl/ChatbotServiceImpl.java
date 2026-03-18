@@ -422,10 +422,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             if (CommonUtil.isNotEmpty(filePathFromApi)) {
                                 if (filePathFromApi.contains("제조정보")) {
                                     responseFilePath = "/CAT_MFG_001/제조정보.pdf";
-                                    docId = "DOC_MFG_002";
+                                    docId = "DC000002";
                                 } else {
                                     responseFilePath = "/CAT_MFG_001/금형 및 Burr_수치넘침 검출 방안.pdf";
-                                    docId = "CAT_MFG_001";
+                                    docId = "DC000001";
                                 }
                             }
                             if (CommonUtil.isNotEmpty((String) data.get("page"))) {
