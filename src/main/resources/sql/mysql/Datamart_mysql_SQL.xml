@@ -49,4 +49,89 @@
         WHERE A.DATAMART_ID = #{datamartId}
     </select>
 
+    <insert id="saveDatamart" parameterType="datamartVO">
+        /* 데이터마트 등록/수정 datamart.saveDatamart */
+        INSERT INTO TB_DM (
+            DATAMART_ID
+            , DM_NM
+            , DESCRIPTION
+            , DB_TYPE
+            , DB_VERSION
+            , HOST
+            , PORT
+            , DB_NM
+            , USERNAME
+            , PWD_ENC
+            , SCH_NM
+            , CONN_OPT
+            , READONLY_YN
+            , IP_WLIST_YN
+            , SSL_YN
+            , TBL_CNT
+            , SORT_ORD
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{datamartId}
+            , #{dmNm, jdbcType=VARCHAR}
+            , #{description, jdbcType=VARCHAR}
+            , #{dbType, jdbcType=VARCHAR}
+            , #{dbVersion, jdbcType=VARCHAR}
+            , #{host, jdbcType=VARCHAR}
+            , #{port, jdbcType=INTEGER}
+            , #{dbNm, jdbcType=VARCHAR}
+            , #{username, jdbcType=VARCHAR}
+            , #{pwdEnc, jdbcType=VARCHAR}
+            , #{schNm, jdbcType=VARCHAR}
+            , #{connOpt, jdbcType=VARCHAR}
+            , #{readonlyYn, jdbcType=VARCHAR}
+            , #{ipWlistYn, jdbcType=VARCHAR}
+            , #{sslYn, jdbcType=VARCHAR}
+            , #{tblCnt, jdbcType=INTEGER}
+            , #{sortOrd, jdbcType=INTEGER}
+            , #{useYn, jdbcType=VARCHAR}
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            DM_NM = VALUES(DM_NM)
+            , DESCRIPTION = VALUES(DESCRIPTION)
+            , DB_TYPE = VALUES(DB_TYPE)
+            , DB_VERSION = VALUES(DB_VERSION)
+            , HOST = VALUES(HOST)
+            , PORT = VALUES(PORT)
+            , DB_NM = VALUES(DB_NM)
+            , USERNAME = VALUES(USERNAME)
+            , PWD_ENC = VALUES(PWD_ENC)
+            , SCH_NM = VALUES(SCH_NM)
+            , CONN_OPT = VALUES(CONN_OPT)
+            , READONLY_YN = VALUES(READONLY_YN)
+            , IP_WLIST_YN = VALUES(IP_WLIST_YN)
+            , SSL_YN = VALUES(SSL_YN)
+            , TBL_CNT = VALUES(TBL_CNT)
+            , SORT_ORD = VALUES(SORT_ORD)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
+
+    <update id="updateLastVerifyDt" parameterType="datamartVO">
+        /* 데이터마트 검증일시 업데이트 datamart.updateLastVerifyDt */
+        UPDATE TB_DM
+        SET LAST_VERIFY_DT = NOW()
+        WHERE DATAMART_ID = #{datamartId}
+    </update>
+
+    <select id="selectDatamartSummary" resultType="datamartSummaryVO">
+        /* 데이터마트 요약 정보 조회 datamart.selectDatamartSummary */
+        SELECT
+            COUNT(*) AS TOTAL_COUNT
+            , SUM(CASE WHEN A.USE_YN = 'Y' THEN 1 ELSE 0 END) AS ACTIVE_COUNT
+            , SUM(CASE WHEN A.USE_YN <![CDATA[<>]]> 'Y' OR A.USE_YN IS NULL THEN 1 ELSE 0 END) AS INACTIVE_COUNT
+            , COALESCE(SUM(A.TBL_CNT), 0) AS DATA_SOURCE_COUNT
+            , COALESCE(DATE_FORMAT(MAX(A.LAST_VERIFY_DT), '%Y-%m-%d %H:%i:%s'), '') AS LAST_SCAN_DATE
+            , COALESCE(GROUP_CONCAT(DISTINCT A.DB_TYPE ORDER BY A.DB_TYPE SEPARATOR ', '), '') AS CONNECTED_SYSTEMS
+        FROM TB_DM A
+    </select>
+
 </mapper>

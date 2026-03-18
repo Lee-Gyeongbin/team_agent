@@ -29,5 +29,17 @@ public class DatamartVO {
     private String useYn;
     private String createDt;
     private String modifyDt;
+    private String testType;
+
+    @Getter
+    @Setter
+    public static class SummaryVO {
+        private int totalCount;
+        private int activeCount;
+        private int inactiveCount;
+        private int dataSourceCount;
+        private String lastScanDate;
+        private String connectedSystems;
+    }
 
 }

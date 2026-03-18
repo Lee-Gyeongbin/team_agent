@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
@@ -34,6 +35,33 @@ public class DatamartController extends BaseController {
     public ModelAndView list() throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", datamartService.selectDatamartList());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터마트 요약 정보 조회 API
+     * @return { data: SummaryVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/summary.do")
+    @ResponseBody
+    public ModelAndView summary() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", datamartService.selectDatamartSummary());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터마트 등록/수정 API
+     * @param datamartVO 데이터마트 정보
+     * @return { data: DatamartVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/save.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView save(@RequestBody DatamartVO datamartVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", datamartService.saveDatamart(datamartVO));
         return new ModelAndView("jsonView", resultMap);
     }
 

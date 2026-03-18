@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.datamart.service.DatamartVO;
 
 @Service
@@ -25,6 +26,9 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     @Autowired
     DatamartDAO datamartDAO;
 
+    @Autowired
+    KeyGenerate keyGenerate;
+
     /**
      * 데이터마트 목록 조회
      * @return
@@ -32,6 +36,15 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      */
     public List<DatamartVO> selectDatamartList() throws Exception {
         return datamartDAO.selectDatamartList();
+    }
+
+    /**
+     * 데이터마트 요약 정보 조회
+     * @return
+     * @throws Exception
+     */
+    public DatamartVO.SummaryVO selectDatamartSummary() throws Exception {
+        return datamartDAO.selectDatamartSummary();
     }
 
     /**
@@ -45,6 +58,23 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 데이터마트 등록/수정
+     * @param datamartVO
+     * @return 저장된 DatamartVO
+     * @throws Exception
+     */
+    public DatamartVO saveDatamart(DatamartVO datamartVO) throws Exception {
+        if (datamartVO.getDatamartId() == null || datamartVO.getDatamartId().trim().isEmpty()) {
+            datamartVO.setDatamartId(keyGenerate.generateTableKey("DM", "TB_DM", "DATAMART_ID"));
+        }
+        if (CommonUtil.isEmpty(datamartVO.getConnOpt())) {
+            datamartVO.setConnOpt(null);
+        }
+        datamartDAO.saveDatamart(datamartVO);
+        return datamartDAO.selectDatamart(datamartVO);
+    }
+
+    /**
      * 데이터마트 DB 연결 테스트
      * @param searchVO (datamartId 필수)
      * @return result(SUCCESS/FAIL), msg
@@ -52,8 +82,13 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      */
     public HashMap<String, Object> testConnection(DatamartVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-
-        DatamartVO dm = datamartDAO.selectDatamart(searchVO);
+        DatamartVO dm = new DatamartVO();
+        if(!CommonUtil.isEmpty(searchVO.getTestType()) && searchVO.getTestType().equals("saved")) {
+            dm = datamartDAO.selectDatamart(searchVO);
+        }else{
+            dm = searchVO;
+        }
+        
         if (dm == null) {
             resultMap.put("result", "FAIL");
             resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
@@ -72,9 +107,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             jdbcUrl += "?" + dm.getConnOpt();
         }
 
-        // TODO: 추후 SecureService.decryptStr(dm.getPwdEnc()) 적용 예정
         String password = dm.getPwdEnc();
-
         logger.info("연결 테스트 시작 - host: {}, port: {}, schNm: {}, username: {}", dm.getHost(), port, dm.getSchNm(), dm.getUsername());
 
         Connection conn = null;
@@ -92,6 +125,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("result", "FAIL");
             resultMap.put("msg", "JDBC 드라이버를 찾을 수 없습니다.");
         } finally {
+            datamartDAO.updateLastVerifyDt(dm);
             if (conn != null) {
                 try { conn.close(); } catch (SQLException e) { logger.error(e.getMessage()); }
             }
