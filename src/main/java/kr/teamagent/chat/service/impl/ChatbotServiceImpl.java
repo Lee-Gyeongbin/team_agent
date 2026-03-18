@@ -88,6 +88,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return chatbotStatDAO.selectStatList(searchVO);
     }
     /**
+     * 통계 상세 목록 조회(TODO 추후 시연 완료 후 삭제)
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectStatDetailList(ChatbotVO searchVO) throws Exception {
+        return chatbotStatDAO.selectStatDetailList(searchVO);
+    }
+    /**
      * CHAT 대화방 tableData 조회
      * @param searchVO
      * @return
@@ -148,6 +157,22 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         int result = chatbotDAO.insertChatRoom(chatbotVO);
         return result > 0 ? chatbotVO : null;
     }
+    /**
+     * CHAT 대화방 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectChatRoomList(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectChatRoomList(searchVO);
+    }
+
+    /**
+     * CHAT 대화방 로그 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
     public List<ChatbotVO> selectChatLogList(ChatbotVO searchVO) throws Exception {
         return chatbotDAO.selectChatLogList(searchVO);
     }
@@ -438,6 +463,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             if (accumulatedContent.length() > 0 && "None".equals(errorCode) && !svcTy.equals("llmTest")) {
                 try {
                     savedLogId = this.doInsertAiLog(responseThreadId, query, accumulatedContent.toString(), inputTokens, outputTokens, svcTy, refId, docId, responseFilePath, mainPageNo, relatedPageNos, userId, tableData, sql);
+                    
+                    // 챗봇 대화방 마지막 채팅 일시 업데이트
+                    this.updateChatRoomLastChatDt(responseThreadId);
                 } catch (Exception e) {
                     logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
                 }
@@ -521,5 +549,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return chatbotVO.getLogId() != null ? String.valueOf(chatbotVO.getLogId()) : "";
     }
 
+    /**
+     * 챗봇 대화방 마지막 채팅 일시 업데이트
+     * @param responseThreadId
+     * @throws Exception
+     */
+    private void updateChatRoomLastChatDt(String responseThreadId) throws Exception {
+        ChatbotVO chatbotVO = new ChatbotVO();
+        chatbotVO.setRoomId(Long.parseLong(responseThreadId));
+        chatbotDAO.updateChatRoomLastChatDt(chatbotVO);
+    }
 }
 

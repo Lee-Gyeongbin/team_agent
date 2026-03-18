@@ -13,4 +13,7 @@ public class ChatbotStatDAO extends CmbComAbstractDAO {
     public List<ChatbotVO> selectStatList(ChatbotVO searchVO) throws Exception {
         return selectList("ai.chatbot.stat.selectStatList", searchVO);
     }
+    public List<ChatbotVO> selectStatDetailList(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.stat.selectStatDetailList", searchVO);
+    }
 }

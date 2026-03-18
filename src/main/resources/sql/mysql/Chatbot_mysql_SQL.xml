@@ -2,6 +2,19 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ai.chatbot">
 
+    <select id="selectChatRoomList" resultType="chatbotVO">
+        /* CHAT 대화방 목록 조회 ai.chatbot.selectChatRoomList */
+        SELECT
+            A.ROOM_ID           AS ROOM_ID
+            , A.ROOM_TITLE      AS TITLE
+            , A.CREATE_USER_ID  AS USER_ID
+            , A.CREATE_DT       AS CREATE_DT
+            , A.LAST_CHAT_DT    AS LAST_CHAT_DT
+        FROM TB_CHAT_ROOM A
+        WHERE 1=1 
+            AND A.CREATE_USER_ID = #{userId}
+        ORDER BY A.LAST_CHAT_DT DESC
+    </select>
 
     <select id="selectModelList" resultType="chatbotVO">
         /* 모델 목록 조회 ai.chatbot.selectModelList */
@@ -146,6 +159,13 @@
             NOW()
         )
     </insert>
+
+    <update id="updateChatRoomLastChatDt" parameterType="chatbotVO">
+        /* CHAT 대화방 마지막 채팅 일시 업데이트 ai.chatbot.updateChatRoomLastChatDt */
+        UPDATE TB_CHAT_ROOM
+        SET LAST_CHAT_DT = NOW()
+        WHERE ROOM_ID = #{roomId}
+    </update>
 
     <select id="selectChatLogList" resultType="chatbotVO">
         /* CHAT 대화방 로그 목록 조회 ai.chatbot.selectChatLogList */
