@@ -74,7 +74,7 @@
             , A.DM_NM           AS LABEL
             , A.DESCRIPTION
             , A.USE_YN
-            , A.DSPL_ORD
+            , A.SORT_ORD
             , A.DB_TYPE
             , A.DB_VERSION
             , A.HOST
@@ -93,7 +93,7 @@
             , A.MODIFY_DT
         FROM
             TB_DM A
-        ORDER BY DSPL_ORD 
+        ORDER BY SORT_ORD 
     </select>
 
     <insert id="insertChatRoom" parameterType="chatbotVO"
