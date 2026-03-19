@@ -13,6 +13,7 @@ public class ChatbotVO extends CommonVO {
     private Long roomId;
     // 대화방 제목
     private String roomTitle;
+    private String title;
     // 사용자 ID
     private String userId;
     // 마지막 채팅 일시
@@ -116,4 +117,5 @@ public class ChatbotVO extends CommonVO {
     private String statId;
     private String statNm;
     private String detailItemCd;
+    private String detailItemNm;
 }

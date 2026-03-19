@@ -7,15 +7,24 @@
         SELECT
             A.STAT_ID
             , A.STAT_NM
-            , B.DETAIL_ITEM_CODE_NM AS DETAIL_ITEM_CD
         FROM
             STAT_ATTR A
-        LEFT OUTER JOIN STAT_DETAIL_ITEM B
-            ON B.DETAIL_ITEM_GRP_ID = A.STAT_DETAIL_ITEM_GRP_ID
         WHERE 1=1
             AND A.USE_AT = 'Y'
         GROUP BY A.STAT_ID
-
     </select>
 
+    <!-- TODO 추후 시연 완료 후 삭제 -->
+    <select id="selectStatDetailList" resultType="chatbotVO">
+        /* 통계 상세 목록 조회 ai.chatbot.selectStatDetailList */
+        SELECT 
+            B.DETAIL_ITEM_CD 
+            , B.DETAIL_ITEM_CODE_NM AS DETAIL_ITEM_NM
+        FROM STAT_DETAIL_ITEM_GRP A 
+        LEFT OUTER JOIN STAT_DETAIL_ITEM B
+            ON B.DETAIL_ITEM_GRP_ID = A.DETAIL_ITEM_GRP_ID
+        WHERE 1=1
+            AND A.USE_AT = 'Y'
+            AND B.USE_AT = 'Y'
+    </select>
 </mapper>

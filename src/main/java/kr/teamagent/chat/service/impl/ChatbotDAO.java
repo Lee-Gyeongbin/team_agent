@@ -11,6 +11,15 @@ import kr.teamagent.chat.service.ChatbotVO;
 public class ChatbotDAO extends EgovComAbstractDAO {
 
     /**
+     * CHAT 대화방 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectChatRoomList(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectChatRoomList", searchVO);
+    }
+    /**
      * 모델 목록 조회
      * @param searchVO
      * @return
@@ -60,6 +69,9 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     }
     public int insertChatLog(ChatbotVO chatbotVO) throws Exception{
         return insert("ai.chatbot.insertChatLog", chatbotVO);
+    }
+    public int updateChatRoomLastChatDt(ChatbotVO chatbotVO) throws Exception{
+        return update("ai.chatbot.updateChatRoomLastChatDt", chatbotVO);
     }
     public int insertChatRef(ChatbotVO chatbotVO) throws Exception{
         return insert("ai.chatbot.insertChatRef", chatbotVO);

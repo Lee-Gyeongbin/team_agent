@@ -93,6 +93,14 @@ public class ChatbotController extends BaseController {
         resultMap.put("data", chatbotService.createChatRoom(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
+    
+    @RequestMapping(value="/ai/chatbot/selectChatRoomList.do")
+    @ResponseBody
+    public ModelAndView selectChatRoomList(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", chatbotService.selectChatRoomList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 
     /**
      * CHAT 대화방 로그 목록 조회
@@ -122,6 +130,7 @@ public class ChatbotController extends BaseController {
         HashMap<String, Object> resultMap = new HashMap<>();
         // TODO 추후 시연 완료 후 삭제
         resultMap.put("statList", chatbotService.selectStatList(searchVO));
+        resultMap.put("statDetailList", chatbotService.selectStatDetailList(searchVO));
         resultMap.put("list", chatbotService.selectTableDataList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
