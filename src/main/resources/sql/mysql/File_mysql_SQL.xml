@@ -17,7 +17,6 @@
             , A.KEYWORDS
             , A.REF_URL
             , A.USE_YN
-            , A.RAG_USE_CNT
             , A.CREATE_DT
             , A.MODIFY_DT
         FROM

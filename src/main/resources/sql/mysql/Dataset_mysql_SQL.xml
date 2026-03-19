@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dataset">
+
+    <select id="selectDatasetSummary" resultType="datasetVO">
+        /* 데이터셋 요약 조회 dataset.selectDatasetSummary */
+        SELECT
+            DS_SUM.TOTAL_DS_CNT                              AS TOTAL_DATASET_COUNT,
+            DS_SUM.ACTIVE_DS_CNT                             AS ACTIVE_DATASET_COUNT,
+            DS_SUM.INACTIVE_DS_CNT                           AS INACTIVE_DATASET_COUNT,
+            DS_SUM.TOTAL_CHUNK_CNT                           AS TOTAL_VECTOR_COUNT,
+            DS_SUM.AVG_SRCH_QUAL                             AS AVG_SEARCH_QUALITY,
+            (SRC_SUM.TOTAL_DOC_CNT + SRC_SUM.TOTAL_URL_CNT)  AS TOTAL_SOURCE_COUNT,
+            SRC_SUM.TOTAL_DOC_CNT                            AS TOTAL_DOC_COUNT,
+            SRC_SUM.TOTAL_URL_CNT                            AS TOTAL_URL_COUNT
+        FROM
+            (
+                SELECT
+                    COUNT(*) AS TOTAL_DS_CNT,
+                    SUM(CASE WHEN USE_YN = 'Y' THEN 1 ELSE 0 END) AS ACTIVE_DS_CNT,
+                    SUM(CASE WHEN USE_YN = 'N' THEN 1 ELSE 0 END) AS INACTIVE_DS_CNT,
+                    COALESCE(SUM(CHUNK_CNT), 0) AS TOTAL_CHUNK_CNT,
+                    ROUND(AVG(SRCH_QUAL), 1) AS AVG_SRCH_QUAL
+                FROM TB_DS
+            ) DS_SUM
+        CROSS JOIN
+            (
+                SELECT
+                    (SELECT COUNT(*) FROM TB_DOC WHERE USE_YN = 'Y') AS TOTAL_DOC_CNT,
+                    (SELECT COUNT(*) FROM TB_CNT_URL WHERE USE_YN = 'Y') AS TOTAL_URL_CNT
+            ) SRC_SUM
+    </select>
+
+    <select id="selectDatasetList" resultType="datasetVO">
+        /* 데이터셋 목록 조회 dataset.selectDatasetList */
+        SELECT
+            D.DATASET_ID,
+            D.DS_NM,
+            D.DESCRIPTION,
+            D.VERSION,
+            D.DATASET_BUILD_STATUS_CD,
+            D.USE_YN,
+            DATE_FORMAT(D.MODIFY_DT, '%Y-%m-%d') AS MODIFY_DT,
+            D.CHUNK_CNT,
+            D.SRCH_QUAL,
+            D.CHUNK_SIZE,
+            D.CHUNK_OVERLAP,
+            D.MIN_CHUNK_SZ,
+
+            COALESCE(DOC_CNT.DOC_CNT, 0) AS DOC_CNT,
+            COALESCE(URL_CNT.URL_CNT, 0) AS URL_CNT,
+
+            EM.CODE_NM  AS EMBED_MODEL_NM,
+            VDB.CODE_NM AS VECTOR_DB_NM,
+            CA.CODE_NM  AS CHUNK_ALGO_NM,
+            HI.CODE_NM  AS HDR_INCL_NM
+
+        FROM TB_DS D
+
+        LEFT JOIN (
+            SELECT
+                DATASET_ID,
+                COUNT(*) AS DOC_CNT
+            FROM TB_DS_DOC
+            WHERE SEL_YN = 'Y'
+            GROUP BY DATASET_ID
+        ) DOC_CNT
+            ON D.DATASET_ID = DOC_CNT.DATASET_ID
+
+        LEFT JOIN (
+            SELECT
+                DATASET_ID,
+                COUNT(*) AS URL_CNT
+            FROM TB_DS_URL
+            WHERE SEL_YN = 'Y'
+            GROUP BY DATASET_ID
+        ) URL_CNT
+            ON D.DATASET_ID = URL_CNT.DATASET_ID
+
+        /* 임베딩 모델 코드 */
+        LEFT JOIN TB_CODE EM
+            ON EM.CODE_GRP_ID = 'RG000004'
+        AND EM.CODE_ID = D.EMBED_MODEL_CD
+
+        /* 벡터DB 코드 */
+        LEFT JOIN TB_CODE VDB
+            ON VDB.CODE_GRP_ID = 'RG000005'
+        AND VDB.CODE_ID = D.VECTOR_DB_CD
+
+        /* 청크 알고리즘 코드 */
+        LEFT JOIN TB_CODE CA
+            ON CA.CODE_GRP_ID = 'RG000002'
+        AND CA.CODE_ID = D.CHUNK_ALGO_CD
+
+        /* 헤더 포함 여부 코드 */
+        LEFT JOIN TB_CODE HI
+            ON HI.CODE_GRP_ID = 'RG000003'
+        AND HI.CODE_ID = D.HDR_INCL_CD
+
+        ORDER BY D.CREATE_DT DESC
+    </select>
+
+    <select id="selectDataset" parameterType="datasetVO" resultType="datasetVO">
+        /* 데이터셋 단건 조회 dataset.selectDataset */
+        SELECT
+            D.DATASET_ID,
+            D.DS_NM,
+            D.DESCRIPTION,
+            D.VERSION,
+            D.CHUNK_ALGO_CD,
+            D.CHUNK_SIZE,
+            D.CHUNK_OVERLAP,
+            D.MIN_CHUNK_SZ,
+            D.HDR_INCL_CD,
+            D.DATASET_BUILD_STATUS_CD,
+            D.EMBED_MODEL_CD,
+            D.VECTOR_DB_CD,
+            D.EMBED_NORM_CD,
+            D.POOL_STRAT_CD,
+            D.DIM_REDUC_CD,
+            D.CHUNK_CNT,
+            D.SRCH_QUAL,
+            D.USE_YN,
+            DATE_FORMAT(D.MODIFY_DT, '%Y-%m-%d') AS MODIFY_DT,
+            P.LOWERCASE_YN,
+            P.WSP_NORM_YN,
+            P.SPEC_CHR_RM_YN,
+            P.HTML_RM_YN,
+            P.STOPWORD_RM_YN,
+            P.CODE_KEEP_YN,
+            P.SENT_SPLIT_ALGO_CD,
+            P.LANG_DETECT_CD
+        FROM TB_DS D
+        LEFT JOIN TB_DS_PREPROC P
+            ON D.DATASET_ID = P.DATASET_ID
+        WHERE D.DATASET_ID = #{datasetId}
+    </select>
+
+    <select id="selectCategoryList" resultType="datasetVO">
+        /* 카테고리 목록 조회 dataset.selectCategoryList */
+        SELECT
+            CATEGORY_ID,
+            CATEGORY_NAME,
+            PARN_CAT_ID,
+            CAT_LVL,
+            SORT_ORD,
+            CREATE_DT
+        FROM
+            TB_CONTENT_CAT
+        ORDER BY SORT_ORD DESC
+    </select>
+
+    <select id="selectDatasetDocList" parameterType="datasetVO" resultType="datasetVO">
+        /* 데이터셋 문서 목록 조회 dataset.selectDatasetDocList */
+        SELECT
+            M.DOC_ID,
+            M.DATASET_ID,
+            M.SEL_YN,
+            D.DOC_TITLE,
+            D.CATEGORY_ID 
+        FROM TB_DS_DOC M
+        INNER JOIN TB_DOC D
+            ON M.DOC_ID = D.DOC_ID
+        WHERE M.DATASET_ID = #{datasetId}
+          AND D.USE_YN = 'Y'
+        ORDER BY D.DOC_ID
+    </select>
+
+    <select id="selectDatasetUrlList" parameterType="datasetVO" resultType="datasetVO">
+        /* 데이터셋 URL 목록 조회 dataset.selectDatasetUrlList */
+        SELECT
+            M.URL_ID,
+            M.DATASET_ID,
+            M.SEL_YN,
+            U.URL_NAME,
+            U.URL_ADDR,
+            U.CATEGORY_ID 
+        FROM TB_DS_URL M
+        INNER JOIN TB_CNT_URL U
+            ON M.URL_ID = U.URL_ID
+        WHERE M.DATASET_ID = #{datasetId}
+        ORDER BY U.URL_ID
+    </select>
+
+    <insert id="saveDataset" parameterType="datasetVO">
+        /* 데이터셋 등록/수정 dataset.saveDataset */
+        INSERT INTO TB_DS (
+            DATASET_ID
+            , DS_NM
+            , DESCRIPTION
+            , VERSION
+            , CHUNK_ALGO_CD
+            , CHUNK_SIZE
+            , CHUNK_OVERLAP
+            , MIN_CHUNK_SZ
+            , HDR_INCL_CD
+            , DATASET_BUILD_STATUS_CD
+            , EMBED_MODEL_CD
+            , VECTOR_DB_CD
+            , EMBED_NORM_CD
+            , POOL_STRAT_CD
+            , DIM_REDUC_CD
+            , CHUNK_CNT
+            , SRCH_QUAL
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{datasetId}
+            , #{dsNm, jdbcType=VARCHAR}
+            , #{description, jdbcType=VARCHAR}
+            , #{version, jdbcType=VARCHAR}
+            , #{chunkAlgoCd, jdbcType=VARCHAR}
+            , #{chunkSize, jdbcType=INTEGER}
+            , #{chunkOverlap, jdbcType=INTEGER}
+            , #{minChunkSz, jdbcType=INTEGER}
+            , #{hdrInclCd, jdbcType=VARCHAR}
+            , #{datasetBuildStatusCd, jdbcType=VARCHAR}
+            , #{embedModelCd, jdbcType=VARCHAR}
+            , #{vectorDbCd, jdbcType=VARCHAR}
+            , #{embedNormCd, jdbcType=VARCHAR}
+            , #{poolStratCd, jdbcType=VARCHAR}
+            , #{dimReducCd, jdbcType=VARCHAR}
+            , #{chunkCnt, jdbcType=INTEGER}
+            , #{srchQual, jdbcType=DECIMAL}
+            , #{useYn, jdbcType=VARCHAR}
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            DS_NM = VALUES(DS_NM)
+            , DESCRIPTION = VALUES(DESCRIPTION)
+            , VERSION = VALUES(VERSION)
+            , CHUNK_ALGO_CD = VALUES(CHUNK_ALGO_CD)
+            , CHUNK_SIZE = VALUES(CHUNK_SIZE)
+            , CHUNK_OVERLAP = VALUES(CHUNK_OVERLAP)
+            , MIN_CHUNK_SZ = VALUES(MIN_CHUNK_SZ)
+            , HDR_INCL_CD = VALUES(HDR_INCL_CD)
+            , DATASET_BUILD_STATUS_CD = VALUES(DATASET_BUILD_STATUS_CD)
+            , EMBED_MODEL_CD = VALUES(EMBED_MODEL_CD)
+            , VECTOR_DB_CD = VALUES(VECTOR_DB_CD)
+            , EMBED_NORM_CD = VALUES(EMBED_NORM_CD)
+            , POOL_STRAT_CD = VALUES(POOL_STRAT_CD)
+            , DIM_REDUC_CD = VALUES(DIM_REDUC_CD)
+            , CHUNK_CNT = VALUES(CHUNK_CNT)
+            , SRCH_QUAL = VALUES(SRCH_QUAL)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
+
+    <insert id="saveDatasetPreproc" parameterType="datasetVO">
+        /* 데이터셋 전처리 등록/수정 dataset.saveDatasetPreproc */
+        INSERT INTO TB_DS_PREPROC (
+            DATASET_ID
+            , LOWERCASE_YN
+            , WSP_NORM_YN
+            , SPEC_CHR_RM_YN
+            , HTML_RM_YN
+            , STOPWORD_RM_YN
+            , CODE_KEEP_YN
+            , SENT_SPLIT_ALGO_CD
+            , LANG_DETECT_CD
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{datasetId}
+            , #{lowercaseYn, jdbcType=VARCHAR}
+            , #{wspNormYn, jdbcType=VARCHAR}
+            , #{specChrRmYn, jdbcType=VARCHAR}
+            , #{htmlRmYn, jdbcType=VARCHAR}
+            , #{stopwordRmYn, jdbcType=VARCHAR}
+            , #{codeKeepYn, jdbcType=VARCHAR}
+            , #{sentSplitAlgoCd, jdbcType=VARCHAR}
+            , #{langDetectCd, jdbcType=VARCHAR}
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            LOWERCASE_YN = VALUES(LOWERCASE_YN)
+            , WSP_NORM_YN = VALUES(WSP_NORM_YN)
+            , SPEC_CHR_RM_YN = VALUES(SPEC_CHR_RM_YN)
+            , HTML_RM_YN = VALUES(HTML_RM_YN)
+            , STOPWORD_RM_YN = VALUES(STOPWORD_RM_YN)
+            , CODE_KEEP_YN = VALUES(CODE_KEEP_YN)
+            , SENT_SPLIT_ALGO_CD = VALUES(SENT_SPLIT_ALGO_CD)
+            , LANG_DETECT_CD = VALUES(LANG_DETECT_CD)
+            , MODIFY_DT = NOW()
+    </insert>
+
+</mapper>
