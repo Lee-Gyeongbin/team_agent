@@ -17,6 +17,7 @@
         <typeAlias alias="codeVO"                            type="kr.teamagent.common.util.service.CodeVO"/>
         <typeAlias alias="userVO"                            type="kr.teamagent.common.security.service.UserVO"/>
         <typeAlias alias="accessLoginVO"                     type="kr.teamagent.common.security.service.AccessLoginVO"/>
+        <typeAlias alias="agentVO"                           type="kr.teamagent.agent.datamart.service.AgentVO"/>
         <typeAlias alias="langVO"                            type="kr.teamagent.common.system.service.LangVO"/>
         <typeAlias alias="chatbotVO"                         type="kr.teamagent.chat.service.ChatbotVO"/>
         <typeAlias alias="loginHistoryVO"                    type="kr.teamagent.loginhistory.service.LoginHistoryVO"/>
