@@ -82,7 +82,44 @@ public class DatasetVO {
     /** URL 주소 */
     private String urlAddr;
     /** 문서 ID 목록 */
-    private List<String> docIdList;
+    private List<DocIdItem> docIdList;
     /** URL ID 목록 */
-    private List<String> urlIdList;
+    private List<UrlIdItem> urlIdList;
+
+    /** TB_DS_HIST */
+    /** 이력 ID */
+    private String histId;
+    /** 버전 번호 */
+    private String verNo;
+    /** 변경 내용 */
+    private String chgContent;
+    /** 삭제 여부 */
+    private String delYn;
+
+    private Integer page;
+    private Integer pageSize;
+    private Integer offset;
+    private Integer totalCnt;
+
+    /**
+     * TB_DS_DOC 매핑용 DTO
+     * - 프론트에서 { "docId": "...", "datasetId": "..." } 형태로 내려오는 경우를 지원
+     */
+    @Getter
+    @Setter
+    public static class DocIdItem {
+        private String datasetId;
+        private String docId;
+    }
+
+    /**
+     * TB_DS_URL 매핑용 DTO
+     * - 프론트에서 { "urlId": "...", "datasetId": "..." } 형태로 내려오는 경우를 지원
+     */
+    @Getter
+    @Setter
+    public static class UrlIdItem {
+        private String datasetId;
+        private String urlId;
+    }
 }

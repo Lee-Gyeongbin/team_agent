@@ -132,6 +132,30 @@
         WHERE D.DATASET_ID = #{datasetId}
     </select>
 
+    <select id="selectDsDocList" parameterType="datasetVO" resultType="datasetVO">
+        /* 데이터셋 매핑 문서 목록 조회 dataset.selectDsDocList */
+        SELECT
+            A.DATASET_ID ,
+            A.DOC_ID 
+        FROM
+            TB_DS_DOC A
+        WHERE
+            1 = 1
+            AND A.DATASET_ID = #{datasetId}
+    </select>
+
+    <select id="selectDsUrlList" parameterType="datasetVO" resultType="datasetVO">
+        /* 데이터셋 매핑 URL 목록 조회 dataset.selectDsUrlList */
+        SELECT
+            A.DATASET_ID ,
+            A.URL_ID  
+        FROM
+            TB_DS_URL A
+        WHERE
+            1 = 1
+            AND A.DATASET_ID = #{datasetId}
+    </select>
+
     <select id="selectCategoryList" resultType="datasetVO">
         /* 카테고리 목록 조회 dataset.selectCategoryList */
         SELECT
@@ -154,11 +178,8 @@
             , A.DOC_TITLE 
             , A.FILE_NAME 
             , A.FILE_SIZE 
-            , B.DATASET_ID 
         FROM
             TB_DOC A
-        LEFT OUTER JOIN TB_DS_DOC B
-            ON B.DOC_ID = A.DOC_ID 
         WHERE
             1 = 1
             AND A.USE_YN = 'Y'
@@ -171,11 +192,8 @@
             , A.URL_ID 
             , A.URL_NAME 
             , A.URL_ADDR 
-            , B.DATASET_ID 
         FROM
             TB_CNT_URL A
-        LEFT OUTER JOIN TB_DS_URL B
-            ON B.URL_ID = A.URL_ID 
         WHERE
             1 = 1
             AND A.USE_YN = 'Y'
@@ -305,42 +323,85 @@
     </delete>
 
     <insert id="saveDsDoc" parameterType="datasetVO">
+        /* 데이터셋 매핑 문서 저장 dataset.saveDsDoc */
         INSERT INTO TB_DS_DOC
         (
             DATASET_ID,
             DOC_ID
         )
         VALUES
-        <foreach collection="docIdList" item="docId" separator=",">
+        <foreach collection="docIdList" item="item" separator=",">
             (
                 #{datasetId},
-                #{docId}
+                COALESCE(#{item.docId}, #{docId})
             )
         </foreach>
     </insert>
 
     <insert id="saveDsUrl" parameterType="datasetVO">
+        /* 데이터셋 매핑 URL 저장 dataset.saveDsUrl */
         INSERT INTO TB_DS_URL
         (
             DATASET_ID,
             URL_ID
         )
         VALUES
-        <foreach collection="urlIdList" item="urlId" separator=",">
+        <foreach collection="urlIdList" item="item" separator=",">
             (
                 #{datasetId},
-                #{urlId}
+                COALESCE(#{item.urlId}, #{urlId})
             )
         </foreach>
     </insert>
 
-    <update id="updateUseYn">
+    <update id="updateDataSetStatus">
+        /* 데이터셋 useYn, datasetBuildStatusCd 수정 dataset.updateDataSetStatus */
         UPDATE
             TB_DS
         SET
-            USE_YN = #{useYn, jdbcType=VARCHAR},
+            <if test="useYn != null and useYn != ''">
+                USE_YN = #{useYn, jdbcType=VARCHAR},
+            </if>
+            <if test="datasetBuildStatusCd != null and datasetBuildStatusCd != ''">
+                DATASET_BUILD_STATUS_CD = #{datasetBuildStatusCd, jdbcType=VARCHAR},
+            </if>
             MODIFY_DT = NOW()
         WHERE
             DATASET_ID = #{datasetId}
     </update>
+
+    <select id="selectDsHistList" resultType="datasetVO">
+        /* 데이터셋 매핑 이력 목록 조회 dataset.selectDsHistList */
+        SELECT
+            A.HIST_ID
+            , A.DATASET_ID
+            , A.VER_NO
+            , A.CHG_CONTENT
+            , A.DEL_YN
+            , A.CREATE_USER_ID
+            , A.CREATE_DT
+            , A.MODIFY_USER_ID
+            , A.MODIFY_DT
+        FROM
+            TB_DS_HIST A
+        WHERE
+            1 = 1
+            AND A.DATASET_ID = #{datasetId}
+        ORDER BY A.HIST_ID DESC
+        LIMIT
+            #{offset},
+            #{pageSize}
+    </select>
+
+    <select id="selectDsHistListCnt" resultType="int">
+        /* 데이터셋 매핑 이력 목록 조회 dataset.selectDsHistList */
+        SELECT
+            COUNT(*) AS TOTAL_CNT
+        FROM
+            TB_DS_HIST A
+        WHERE
+            1 = 1
+            AND A.DATASET_ID = #{datasetId}
+    </select>
+
 </mapper>

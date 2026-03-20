@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.dataset.service.DatasetVO;
+import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
+import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
 
 @Service
 public class DatasetServiceImpl extends EgovAbstractServiceImpl {
@@ -48,6 +50,24 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 데이터셋 매핑 문서 목록 조회
+     * @param datasetVO
+     * @return
+     * @throws Exception
+     */
+    public List<DocIdItem> selectDsDocList(DatasetVO datasetVO) throws Exception {
+        return datasetDAO.selectDsDocList(datasetVO);
+    }
+    /**
+     * 데이터셋 매핑 URL 목록 조회
+     * @param datasetVO
+     * @return
+     * @throws Exception
+     */
+    public List<UrlIdItem> selectDsUrlList(DatasetVO datasetVO) throws Exception {
+        return datasetDAO.selectDsUrlList(datasetVO);
+    }
+    /**
      * 카테고리 목록 조회
      * @param datasetVO
      * @return
@@ -86,6 +106,13 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
     public int saveDataset(DatasetVO datasetVO) throws Exception {
         int result = 0;
         String mode = "insert";
+
+        // TODO: 데이터셋 구축 시작 버튼 클릭 시 (datasetBuildStatusCd: 002) AI RAG 구축 시작 API 호출 -> 응답 받은 뒤 구축 성공일 경우 003 으로 세팅 
+        if(datasetVO.getDatasetBuildStatusCd().equals("002")) {
+            // AI RAG 구축 시작 API 호출 -> 응답 받은 뒤 구축 성공일 경우 003 으로 세팅
+            datasetVO.setDatasetBuildStatusCd("003");
+        }
+        
         if (datasetVO.getDatasetId() == null || datasetVO.getDatasetId().trim().isEmpty()) {
             datasetVO.setDatasetId(keyGenerate.generateTableKey("DS", "TB_DS", "DATASET_ID"));
         }else {
@@ -94,16 +121,17 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         // 데이터셋 관련 저장
         result += datasetDAO.saveDataset(datasetVO);
 
-        if(CommonUtil.isNotEmpty(datasetVO.getDocIdList())) {
-            if (mode.equals("update")) {
-                datasetDAO.deleteDatasetDoc(datasetVO);
-            }
+        // update 시: 기존 매핑은 항상 삭제 (체크 해제=전체 제거)
+        if (mode.equals("update")) {
+            datasetDAO.deleteDatasetDoc(datasetVO);
+            datasetDAO.deleteDatasetUrl(datasetVO);
+        }
+
+        // incoming 리스트가 비어있지 않을 때만 다시 저장
+        if (CommonUtil.isNotEmpty(datasetVO.getDocIdList())) {
             datasetDAO.saveDsDoc(datasetVO);
         }
-        if(CommonUtil.isNotEmpty(datasetVO.getUrlIdList())) {
-            if (mode.equals("update")) {
-                datasetDAO.deleteDatasetUrl(datasetVO);
-            }
+        if (CommonUtil.isNotEmpty(datasetVO.getUrlIdList())) {
             datasetDAO.saveDsUrl(datasetVO);
         }
         
@@ -116,8 +144,8 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @return 수정된 DatasetVO
      * @throws Exception
      */
-    public int updateUseYn(DatasetVO datasetVO) throws Exception {
-        int result =datasetDAO.updateUseYn(datasetVO);
+    public int updateDataSetStatus(DatasetVO datasetVO) throws Exception {
+        int result =datasetDAO.updateDataSetStatus(datasetVO);
         return result;
     }
 
@@ -136,5 +164,37 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         // 데이터셋 전처리 삭제
         result += datasetDAO.deleteDatasetPreproc(datasetVO);
         return result;
+    }
+
+    /**
+     * 데이터셋 매핑 이력 목록 조회
+     * @param datasetVO
+     * @return
+     * @throws Exception
+     */
+    public List<DatasetVO> selectDsHistList(DatasetVO datasetVO) throws Exception {
+        if (datasetVO == null) {
+            return java.util.Collections.emptyList();
+        }
+        
+        int page = datasetVO.getPage() == null ? 1 : datasetVO.getPage();
+        int pageSize = datasetVO.getPageSize() == null ? 5 : datasetVO.getPageSize();
+        int offset = (page - 1) * pageSize;
+        
+        // MyBatis SQL에서 LIMIT offset, pageSize를 사용하기 위해 page/pageSize/offset 보정
+        datasetVO.setPage(page);
+        datasetVO.setPageSize(pageSize);
+        datasetVO.setOffset(offset);
+        return datasetDAO.selectDsHistList(datasetVO);
+    }
+
+    /**
+     * 데이터셋 매핑 이력 목록 카운트 조회
+     * @param datasetVO
+     * @return
+     * @throws Exception
+     */
+    public int selectDsHistListCnt(DatasetVO datasetVO) throws Exception {
+        return datasetDAO.selectDsHistListCnt(datasetVO);
     }
 }

@@ -6,6 +6,8 @@ import org.springframework.stereotype.Repository;
 
 import egovframework.com.cmm.service.impl.EgovComAbstractDAO;
 import kr.teamagent.dataset.service.DatasetVO;
+import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
+import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
 
 @Repository
 public class DatasetDAO extends EgovComAbstractDAO {
@@ -50,6 +52,25 @@ public class DatasetDAO extends EgovComAbstractDAO {
         return selectOne("dataset.selectDataset", searchVO);
     }
 
+    /**
+     * 데이터셋 매핑 문서 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<DocIdItem> selectDsDocList(DatasetVO searchVO) throws Exception {
+        return selectList("dataset.selectDsDocList", searchVO);
+    }
+
+    /**
+     * 데이터셋 매핑 URL 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<UrlIdItem> selectDsUrlList(DatasetVO searchVO) throws Exception {
+        return selectList("dataset.selectDsUrlList", searchVO);
+    }
     /**
      * 카테고리 목록 조회
      * @param searchVO
@@ -138,7 +159,26 @@ public class DatasetDAO extends EgovComAbstractDAO {
      * @param datasetVO
      * @throws Exception
      */
-    public int updateUseYn(DatasetVO datasetVO) throws Exception {
-        return update("dataset.updateUseYn", datasetVO);
+    public int updateDataSetStatus(DatasetVO datasetVO) throws Exception {
+        return update("dataset.updateDataSetStatus", datasetVO);
+    }
+
+    /**
+     * 데이터셋 매핑 이력 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<DatasetVO> selectDsHistList(DatasetVO searchVO) throws Exception {
+        return selectList("dataset.selectDsHistList", searchVO);
+    }
+    /**
+     * 데이터셋 매핑 이력 목록 카운트 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int selectDsHistListCnt(DatasetVO searchVO) throws Exception {
+        return selectOne("dataset.selectDsHistListCnt", searchVO);
     }
 }

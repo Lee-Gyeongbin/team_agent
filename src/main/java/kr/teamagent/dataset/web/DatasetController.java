@@ -57,6 +57,8 @@ public class DatasetController extends BaseController {
     public ModelAndView select(@RequestBody DatasetVO datasetVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", docDatasetService.selectDataset(datasetVO));
+        resultMap.put("dsDocList", docDatasetService.selectDsDocList(datasetVO));
+        resultMap.put("dsUrlList", docDatasetService.selectDsUrlList(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -96,11 +98,11 @@ public class DatasetController extends BaseController {
      * @return { data: DatasetVO }
      * @throws Exception
      */
-    @RequestMapping(value = "/updateUseYn.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/updateDataSetStatus.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView updateUseYn(@RequestBody DatasetVO datasetVO) throws Exception {
+    public ModelAndView updateDataSetStatus(@RequestBody DatasetVO datasetVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", docDatasetService.updateUseYn(datasetVO));
+        resultMap.put("data", docDatasetService.updateDataSetStatus(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -118,6 +120,21 @@ public class DatasetController extends BaseController {
         }
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", docDatasetService.deleteDataset(datasetVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터셋 매핑 이력 목록 조회 API
+     * @param datasetVO 데이터셋 정보
+     * @return { dataList: DatasetVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/selectDsHistList.do")
+    @ResponseBody
+    public ModelAndView selectDsHistList(@RequestBody DatasetVO datasetVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", docDatasetService.selectDsHistList(datasetVO));
+        resultMap.put("totalCnt", docDatasetService.selectDsHistListCnt(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
 }
