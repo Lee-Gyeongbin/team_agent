@@ -418,7 +418,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             }
 
                             String filePathFromApi = CommonUtil.isNotEmpty((String) data.get("file_path")) ? (String) data.get("file_path") : "";
-                            // 추후 AI 개발 시 DOC_ID 받아서 매핑 필요함.
+                            // 추후 AI 개발 시 DOC_ID 받아서 매핑 필요함. (배열일 수도 있음. 배열이면 배열 처리)
                             if (CommonUtil.isNotEmpty(filePathFromApi)) {
                                 if (filePathFromApi.contains("제조정보")) {
                                     responseFilePath = "/CAT_MFG_001/제조정보.pdf";

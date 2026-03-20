@@ -33,9 +33,11 @@ public class DatasetDAO extends EgovComAbstractDAO {
      * @param datasetVO
      * @throws Exception
      */
-    public void saveDataset(DatasetVO datasetVO) throws Exception {
-        insert("dataset.saveDataset", datasetVO);
-        insert("dataset.saveDatasetPreproc", datasetVO);
+    public int saveDataset(DatasetVO datasetVO) throws Exception {
+        int result = 0;
+        result += insert("dataset.saveDataset", datasetVO);
+        result += insert("dataset.saveDatasetPreproc", datasetVO);
+        return result;
     }
 
     /**
@@ -83,16 +85,16 @@ public class DatasetDAO extends EgovComAbstractDAO {
      * @param datasetVO
      * @throws Exception
      */
-    public void deleteDataset(DatasetVO datasetVO) throws Exception {
-        delete("dataset.deleteDataset", datasetVO);
+    public int deleteDataset(DatasetVO datasetVO) throws Exception {
+        return delete("dataset.deleteDataset", datasetVO);
     }
     /**
      * 데이터셋 전처리 삭제
      * @param datasetVO
      * @throws Exception
      */
-    public void deleteDatasetPreproc(DatasetVO datasetVO) throws Exception {
-        delete("dataset.deleteDatasetPreproc", datasetVO);
+    public int deleteDatasetPreproc(DatasetVO datasetVO) throws Exception {
+        return delete("dataset.deleteDatasetPreproc", datasetVO);
     }
     
     /**
@@ -100,8 +102,8 @@ public class DatasetDAO extends EgovComAbstractDAO {
      * @param datasetVO
      * @throws Exception
      */
-    public void deleteDatasetDoc(DatasetVO datasetVO) throws Exception {
-        delete("dataset.deleteDatasetDoc", datasetVO);
+    public int deleteDatasetDoc(DatasetVO datasetVO) throws Exception {
+        return delete("dataset.deleteDatasetDoc", datasetVO);
     }
     
     /**
@@ -109,8 +111,8 @@ public class DatasetDAO extends EgovComAbstractDAO {
      * @param datasetVO
      * @throws Exception
      */
-    public void deleteDatasetUrl(DatasetVO datasetVO) throws Exception {
-        delete("dataset.deleteDatasetUrl", datasetVO);
+    public int deleteDatasetUrl(DatasetVO datasetVO) throws Exception {
+        return delete("dataset.deleteDatasetUrl", datasetVO);
     }
 
     /**

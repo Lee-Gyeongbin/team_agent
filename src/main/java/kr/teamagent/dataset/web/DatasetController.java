@@ -91,7 +91,7 @@ public class DatasetController extends BaseController {
     }
 
     /**
-     * 데이터셋 수정
+     * 데이터셋 useYn 수정
      * @param datasetVO 데이터셋 정보
      * @return { data: DatasetVO }
      * @throws Exception
@@ -101,6 +101,23 @@ public class DatasetController extends BaseController {
     public ModelAndView updateUseYn(@RequestBody DatasetVO datasetVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", docDatasetService.updateUseYn(datasetVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터셋 삭제 API
+     * @param datasetVO 데이터셋 정보
+     * @return { data: DatasetVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/deleteDataset.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteDataset(@RequestBody DatasetVO datasetVO) throws Exception {
+        if (datasetVO == null || datasetVO.getDatasetId() == null || datasetVO.getDatasetId().trim().isEmpty()) {
+            return makeFailJsonData("데이터셋ID가 없습니다.");
+        }
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", docDatasetService.deleteDataset(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
 }

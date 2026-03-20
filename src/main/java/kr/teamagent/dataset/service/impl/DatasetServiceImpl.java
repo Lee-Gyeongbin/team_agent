@@ -6,6 +6,7 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.dataset.service.DatasetVO;
 
@@ -82,7 +83,8 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @return 저장된 DatasetVO
      * @throws Exception
      */
-    public DatasetVO saveDataset(DatasetVO datasetVO) throws Exception {
+    public int saveDataset(DatasetVO datasetVO) throws Exception {
+        int result = 0;
         String mode = "insert";
         if (datasetVO.getDatasetId() == null || datasetVO.getDatasetId().trim().isEmpty()) {
             datasetVO.setDatasetId(keyGenerate.generateTableKey("DS", "TB_DS", "DATASET_ID"));
@@ -90,17 +92,22 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
             mode = "update";
         }
         // 데이터셋 관련 저장
-        datasetDAO.saveDataset(datasetVO);
-        if (mode.equals("update")) {
-            // 데이터셋 문서 및 URL 삭제
-            datasetDAO.deleteDatasetDoc(datasetVO);
-            datasetDAO.deleteDatasetDoc(datasetVO);
+        result += datasetDAO.saveDataset(datasetVO);
+
+        if(CommonUtil.isNotEmpty(datasetVO.getDocIdList())) {
+            if (mode.equals("update")) {
+                datasetDAO.deleteDatasetDoc(datasetVO);
+            }
+            datasetDAO.saveDsDoc(datasetVO);
         }
-        // 데이터셋 문서 및 URL 저장
-        datasetDAO.saveDsDoc(datasetVO);
-        datasetDAO.saveDsUrl(datasetVO);
+        if(CommonUtil.isNotEmpty(datasetVO.getUrlIdList())) {
+            if (mode.equals("update")) {
+                datasetDAO.deleteDatasetUrl(datasetVO);
+            }
+            datasetDAO.saveDsUrl(datasetVO);
+        }
         
-        return datasetDAO.selectDataset(datasetVO);
+        return result;
     }
 
     /**
@@ -119,10 +126,15 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @param datasetVO
      * @throws Exception
      */
-    public void deleteDataset(DatasetVO datasetVO) throws Exception {
-        datasetDAO.deleteDataset(datasetVO);
-        datasetDAO.deleteDatasetPreproc(datasetVO);
-        datasetDAO.deleteDatasetDoc(datasetVO);
-        datasetDAO.deleteDatasetUrl(datasetVO);
+    public int deleteDataset(DatasetVO datasetVO) throws Exception {
+        int result = 0;
+        // 데이터셋 삭제 전 데이터셋 문서 및 URL 삭제
+        result += datasetDAO.deleteDatasetDoc(datasetVO);
+        result += datasetDAO.deleteDatasetUrl(datasetVO);
+        // 데이터셋 삭제
+        result += datasetDAO.deleteDataset(datasetVO);
+        // 데이터셋 전처리 삭제
+        result += datasetDAO.deleteDatasetPreproc(datasetVO);
+        return result;
     }
 }

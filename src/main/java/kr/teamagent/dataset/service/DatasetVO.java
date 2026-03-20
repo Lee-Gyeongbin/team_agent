@@ -41,9 +41,12 @@ public class DatasetVO {
     private String lowercaseYn;
     private String wspNormYn;
     private String specChrRmYn;
+    private String singleCellText;
+
     private String htmlRmYn;
     private String stopwordRmYn;
     private String codeKeepYn;
+    
     private String sentSplitAlgoCd;
     private String langDetectCd;
 

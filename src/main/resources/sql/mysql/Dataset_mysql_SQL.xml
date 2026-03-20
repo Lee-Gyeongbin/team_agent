@@ -123,9 +123,7 @@
             P.LOWERCASE_YN,
             P.WSP_NORM_YN,
             P.SPEC_CHR_RM_YN,
-            P.HTML_RM_YN,
-            P.STOPWORD_RM_YN,
-            P.CODE_KEEP_YN,
+            P.SINGLE_CELL_TEXT,
             P.SENT_SPLIT_ALGO_CD,
             P.LANG_DETECT_CD
         FROM TB_DS D
@@ -256,9 +254,7 @@
             , LOWERCASE_YN
             , WSP_NORM_YN
             , SPEC_CHR_RM_YN
-            , HTML_RM_YN
-            , STOPWORD_RM_YN
-            , CODE_KEEP_YN
+            , SINGLE_CELL_TEXT
             , SENT_SPLIT_ALGO_CD
             , LANG_DETECT_CD
             , CREATE_DT
@@ -268,9 +264,7 @@
             , #{lowercaseYn, jdbcType=VARCHAR}
             , #{wspNormYn, jdbcType=VARCHAR}
             , #{specChrRmYn, jdbcType=VARCHAR}
-            , #{htmlRmYn, jdbcType=VARCHAR}
-            , #{stopwordRmYn, jdbcType=VARCHAR}
-            , #{codeKeepYn, jdbcType=VARCHAR}
+            , #{singleCellText, jdbcType=VARCHAR}
             , #{sentSplitAlgoCd, jdbcType=VARCHAR}
             , #{langDetectCd, jdbcType=VARCHAR}
             , NOW()
@@ -280,9 +274,7 @@
             LOWERCASE_YN = VALUES(LOWERCASE_YN)
             , WSP_NORM_YN = VALUES(WSP_NORM_YN)
             , SPEC_CHR_RM_YN = VALUES(SPEC_CHR_RM_YN)
-            , HTML_RM_YN = VALUES(HTML_RM_YN)
-            , STOPWORD_RM_YN = VALUES(STOPWORD_RM_YN)
-            , CODE_KEEP_YN = VALUES(CODE_KEEP_YN)
+            , SINGLE_CELL_TEXT = VALUES(SINGLE_CELL_TEXT)
             , SENT_SPLIT_ALGO_CD = VALUES(SENT_SPLIT_ALGO_CD)
             , LANG_DETECT_CD = VALUES(LANG_DETECT_CD)
             , MODIFY_DT = NOW()
