@@ -62,7 +62,6 @@
                 DATASET_ID,
                 COUNT(*) AS DOC_CNT
             FROM TB_DS_DOC
-            WHERE SEL_YN = 'Y'
             GROUP BY DATASET_ID
         ) DOC_CNT
             ON D.DATASET_ID = DOC_CNT.DATASET_ID
@@ -72,7 +71,6 @@
                 DATASET_ID,
                 COUNT(*) AS URL_CNT
             FROM TB_DS_URL
-            WHERE SEL_YN = 'Y'
             GROUP BY DATASET_ID
         ) URL_CNT
             ON D.DATASET_ID = URL_CNT.DATASET_ID
@@ -153,33 +151,36 @@
     <select id="selectDatasetDocList" parameterType="datasetVO" resultType="datasetVO">
         /* 데이터셋 문서 목록 조회 dataset.selectDatasetDocList */
         SELECT
-            M.DOC_ID,
-            M.DATASET_ID,
-            M.SEL_YN,
-            D.DOC_TITLE,
-            D.CATEGORY_ID 
-        FROM TB_DS_DOC M
-        INNER JOIN TB_DOC D
-            ON M.DOC_ID = D.DOC_ID
-        WHERE M.DATASET_ID = #{datasetId}
-          AND D.USE_YN = 'Y'
-        ORDER BY D.DOC_ID
+            A.CATEGORY_ID 
+            , A.DOC_ID 
+            , A.DOC_TITLE 
+            , A.FILE_NAME 
+            , A.FILE_SIZE 
+            , B.DATASET_ID 
+        FROM
+            TB_DOC A
+        LEFT OUTER JOIN TB_DS_DOC B
+            ON B.DOC_ID = A.DOC_ID 
+        WHERE
+            1 = 1
+            AND A.USE_YN = 'Y'
     </select>
 
     <select id="selectDatasetUrlList" parameterType="datasetVO" resultType="datasetVO">
         /* 데이터셋 URL 목록 조회 dataset.selectDatasetUrlList */
         SELECT
-            M.URL_ID,
-            M.DATASET_ID,
-            M.SEL_YN,
-            U.URL_NAME,
-            U.URL_ADDR,
-            U.CATEGORY_ID 
-        FROM TB_DS_URL M
-        INNER JOIN TB_CNT_URL U
-            ON M.URL_ID = U.URL_ID
-        WHERE M.DATASET_ID = #{datasetId}
-        ORDER BY U.URL_ID
+            A.CATEGORY_ID 
+            , A.URL_ID 
+            , A.URL_NAME 
+            , A.URL_ADDR 
+            , B.DATASET_ID 
+        FROM
+            TB_CNT_URL A
+        LEFT OUTER JOIN TB_DS_URL B
+            ON B.URL_ID = A.URL_ID 
+        WHERE
+            1 = 1
+            AND A.USE_YN = 'Y'
     </select>
 
     <insert id="saveDataset" parameterType="datasetVO">
@@ -287,4 +288,67 @@
             , MODIFY_DT = NOW()
     </insert>
 
+    <delete id="deleteDataset" parameterType="datasetVO">
+        /* 데이터셋 삭제 dataset.deleteDataset */
+        DELETE FROM TB_DS
+        WHERE DATASET_ID = #{datasetId}
+    </delete>
+
+    <delete id="deleteDatasetPreproc" parameterType="datasetVO">
+        /* 데이터셋 전처리 삭제 dataset.deleteDatasetPreproc */
+        DELETE FROM TB_DS_PREPROC
+        WHERE DATASET_ID = #{datasetId}
+    </delete>
+
+    <delete id="deleteDatasetDoc" parameterType="datasetVO">
+        /* 데이터셋 문서 삭제 dataset.deleteDatasetDoc */
+        DELETE FROM TB_DS_DOC
+        WHERE DATASET_ID = #{datasetId}
+    </delete>
+
+    <delete id="deleteDatasetUrl" parameterType="datasetVO">
+        /* 데이터셋 URL 삭제 dataset.deleteDatasetUrl */
+        DELETE FROM TB_DS_URL
+        WHERE DATASET_ID = #{datasetId}
+    </delete>
+
+    <insert id="saveDsDoc" parameterType="datasetVO">
+        INSERT INTO TB_DS_DOC
+        (
+            DATASET_ID,
+            DOC_ID
+        )
+        VALUES
+        <foreach collection="docIdList" item="docId" separator=",">
+            (
+                #{datasetId},
+                #{docId}
+            )
+        </foreach>
+    </insert>
+
+    <insert id="saveDsUrl" parameterType="datasetVO">
+        INSERT INTO TB_DS_URL
+        (
+            DATASET_ID,
+            URL_ID
+        )
+        VALUES
+        <foreach collection="urlIdList" item="urlId" separator=",">
+            (
+                #{datasetId},
+                #{urlId}
+            )
+        </foreach>
+    </insert>
+
+    <update id="updateUseYn">
+        UPDATE
+            TB_DS
+        SET
+            USE_YN = #{useYn, jdbcType=VARCHAR},
+            MODIFY_DT = NOW()
+        WHERE
+            DATASET_ID = #{datasetId}
+    </update>
 </mapper>

@@ -1,6 +1,7 @@
 package kr.teamagent.dataset.service;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -69,8 +70,6 @@ public class DatasetVO {
     private String docId;
     /** 문서 제목 */
     private String docTitle;
-    /** 선택 여부 */
-    private String selYn;
 
     /** TB_DS_URL */
     /** URL ID */
@@ -79,4 +78,8 @@ public class DatasetVO {
     private String urlName;
     /** URL 주소 */
     private String urlAddr;
+    /** 문서 ID 목록 */
+    private List<String> docIdList;
+    /** URL ID 목록 */
+    private List<String> urlIdList;
 }

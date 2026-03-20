@@ -77,4 +77,66 @@ public class DatasetDAO extends EgovComAbstractDAO {
     public List<DatasetVO> selectDatasetUrlList(DatasetVO searchVO) throws Exception {
         return selectList("dataset.selectDatasetUrlList", searchVO);
     }
+
+    /**
+     * 데이터셋 삭제
+     * @param datasetVO
+     * @throws Exception
+     */
+    public void deleteDataset(DatasetVO datasetVO) throws Exception {
+        delete("dataset.deleteDataset", datasetVO);
+    }
+    /**
+     * 데이터셋 전처리 삭제
+     * @param datasetVO
+     * @throws Exception
+     */
+    public void deleteDatasetPreproc(DatasetVO datasetVO) throws Exception {
+        delete("dataset.deleteDatasetPreproc", datasetVO);
+    }
+    
+    /**
+     * 데이터셋 문서 삭제
+     * @param datasetVO
+     * @throws Exception
+     */
+    public void deleteDatasetDoc(DatasetVO datasetVO) throws Exception {
+        delete("dataset.deleteDatasetDoc", datasetVO);
+    }
+    
+    /**
+     * 데이터셋 URL 삭제
+     * @param datasetVO
+     * @throws Exception
+     */
+    public void deleteDatasetUrl(DatasetVO datasetVO) throws Exception {
+        delete("dataset.deleteDatasetUrl", datasetVO);
+    }
+
+    /**
+     * 데이터셋 문서 저장
+     * @param datasetVO
+     * @throws Exception
+     */
+    public void saveDsDoc(DatasetVO datasetVO) throws Exception {
+        insert("dataset.saveDsDoc", datasetVO);
+    }
+    
+    /**
+     * 데이터셋 URL 저장
+     * @param datasetVO
+     * @throws Exception
+     */
+    public void saveDsUrl(DatasetVO datasetVO) throws Exception {
+        insert("dataset.saveDsUrl", datasetVO);
+    }
+    
+    /**
+     * 데이터셋 수정
+     * @param datasetVO
+     * @throws Exception
+     */
+    public int updateUseYn(DatasetVO datasetVO) throws Exception {
+        return update("dataset.updateUseYn", datasetVO);
+    }
 }

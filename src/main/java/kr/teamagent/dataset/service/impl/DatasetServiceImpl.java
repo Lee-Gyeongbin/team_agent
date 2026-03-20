@@ -83,10 +83,46 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     public DatasetVO saveDataset(DatasetVO datasetVO) throws Exception {
+        String mode = "insert";
         if (datasetVO.getDatasetId() == null || datasetVO.getDatasetId().trim().isEmpty()) {
             datasetVO.setDatasetId(keyGenerate.generateTableKey("DS", "TB_DS", "DATASET_ID"));
+        }else {
+            mode = "update";
         }
+        // 데이터셋 관련 저장
         datasetDAO.saveDataset(datasetVO);
+        if (mode.equals("update")) {
+            // 데이터셋 문서 및 URL 삭제
+            datasetDAO.deleteDatasetDoc(datasetVO);
+            datasetDAO.deleteDatasetDoc(datasetVO);
+        }
+        // 데이터셋 문서 및 URL 저장
+        datasetDAO.saveDsDoc(datasetVO);
+        datasetDAO.saveDsUrl(datasetVO);
+        
         return datasetDAO.selectDataset(datasetVO);
+    }
+
+    /**
+     * 데이터셋 수정
+     * @param datasetVO
+     * @return 수정된 DatasetVO
+     * @throws Exception
+     */
+    public int updateUseYn(DatasetVO datasetVO) throws Exception {
+        int result =datasetDAO.updateUseYn(datasetVO);
+        return result;
+    }
+
+    /**
+     * 데이터셋 삭제
+     * @param datasetVO
+     * @throws Exception
+     */
+    public void deleteDataset(DatasetVO datasetVO) throws Exception {
+        datasetDAO.deleteDataset(datasetVO);
+        datasetDAO.deleteDatasetPreproc(datasetVO);
+        datasetDAO.deleteDatasetDoc(datasetVO);
+        datasetDAO.deleteDatasetUrl(datasetVO);
     }
 }

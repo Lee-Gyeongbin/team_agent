@@ -57,6 +57,19 @@ public class DatasetController extends BaseController {
     public ModelAndView select(@RequestBody DatasetVO datasetVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", docDatasetService.selectDataset(datasetVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터셋 문서 및 URL 목록 조회 API
+     * @param datasetVO 데이터셋 정보
+     * @return { dataList: DatasetVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/selectDatasetSrcList.do")
+    @ResponseBody
+    public ModelAndView selectDatasetSrcList(@RequestBody DatasetVO datasetVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("categoryList", docDatasetService.selectCategoryList(datasetVO));
         resultMap.put("docList", docDatasetService.selectDatasetDocList(datasetVO));
         resultMap.put("urlList", docDatasetService.selectDatasetUrlList(datasetVO));
@@ -74,6 +87,20 @@ public class DatasetController extends BaseController {
     public ModelAndView save(@RequestBody DatasetVO datasetVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", docDatasetService.saveDataset(datasetVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터셋 수정
+     * @param datasetVO 데이터셋 정보
+     * @return { data: DatasetVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/updateUseYn.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateUseYn(@RequestBody DatasetVO datasetVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", docDatasetService.updateUseYn(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
 }
