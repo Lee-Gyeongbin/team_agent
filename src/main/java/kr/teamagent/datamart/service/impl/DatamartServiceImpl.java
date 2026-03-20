@@ -1,7 +1,9 @@
 package kr.teamagent.datamart.service.impl;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
@@ -108,14 +110,24 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         }
 
         String password = dm.getPwdEnc();
-        logger.info("연결 테스트 시작 - host: {}, port: {}, schNm: {}, username: {}", dm.getHost(), port, dm.getSchNm(), dm.getUsername());
+        logger.info("####### 연결 테스트 시작 - host: {}, port: {}, schNm: {}, username: {}", dm.getHost(), port, dm.getSchNm(), dm.getUsername());
 
         Connection conn = null;
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
             conn = DriverManager.getConnection(jdbcUrl, dm.getUsername(), password);
+
+            int tblCnt = 0;
+            DatabaseMetaData metaData = conn.getMetaData();
+            ResultSet rs = metaData.getTables(dm.getSchNm(), null, "%", new String[]{"TABLE"});
+            while (rs.next()) {
+                tblCnt++;
+            }
+            rs.close();
+
             resultMap.put("result", "SUCCESS");
             resultMap.put("msg", "연결 성공! 데이터베이스에 정상적으로 연결되었습니다.");
+            resultMap.put("tblCnt", tblCnt);
         } catch (SQLException e) {
             logger.error("DB 연결 실패 - url: {}, error: {}", jdbcUrl, e.getMessage());
             resultMap.put("result", "FAIL");
