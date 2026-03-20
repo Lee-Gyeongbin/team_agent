@@ -165,4 +165,17 @@ public class DatasetController extends BaseController {
         resultMap.put("data", docDatasetService.insertDocDatasetHistory(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
+
+    /**
+     * 데이터셋 테스트 API
+     * @return { data: DatasetVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/testDataSet.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView testDataSet(@RequestBody DatasetVO datasetVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", docDatasetService.testDataSet(datasetVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

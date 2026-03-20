@@ -222,4 +222,16 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         datasetVO.setModifyUserId(SessionUtil.getUserId());
         return datasetDAO.insertDocDatasetHistory(datasetVO);
     }
+
+    /**
+     * 데이터셋 테스트
+     * @param datasetVO
+     * @return
+     * @throws Exception
+     */
+    public int testDataSet(DatasetVO datasetVO) throws Exception {
+        int result = 0;
+        // TODO 데이터셋 테스트 AI API 개발 완료 시 개발 필요
+        return result;
+    }
 }
