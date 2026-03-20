@@ -78,4 +78,20 @@ public class DatamartController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 데이터마트 삭제 API
+     * @param datamartVO datamartId 필수
+     * @return { data: { datamartId: String } }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/delete.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView delete(@RequestBody DatamartVO datamartVO) throws Exception {
+        if (datamartVO == null || datamartVO.getDatamartId() == null || datamartVO.getDatamartId().trim().isEmpty()) {
+            return makeFailJsonData("datamartId is required");
+        }
+        datamartService.deleteDatamart(datamartVO);
+        return makeSuccessJsonData();
+    }
+
 }

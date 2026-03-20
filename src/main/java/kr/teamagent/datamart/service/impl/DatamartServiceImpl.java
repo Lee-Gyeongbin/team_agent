@@ -5,6 +5,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLTimeoutException;
 import java.util.HashMap;
 import java.util.List;
 
@@ -24,7 +25,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     private static final Logger logger = LoggerFactory.getLogger(DatamartServiceImpl.class);
 
     private static final int DEFAULT_MYSQL_PORT = 3306;
-
     @Autowired
     DatamartDAO datamartDAO;
 
@@ -77,6 +77,15 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 데이터마트 삭제
+     * @param datamartVO datamartId 필수
+     * @throws Exception
+     */
+    public void deleteDatamart(DatamartVO datamartVO) throws Exception {
+        datamartDAO.deleteDatamart(datamartVO);
+    }
+
+    /**
      * 데이터마트 DB 연결 테스트
      * @param searchVO (datamartId 필수)
      * @return result(SUCCESS/FAIL), msg
@@ -115,6 +124,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         Connection conn = null;
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
+            DriverManager.setLoginTimeout(5);
             conn = DriverManager.getConnection(jdbcUrl, dm.getUsername(), password);
 
             int tblCnt = 0;
@@ -128,6 +138,10 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("result", "SUCCESS");
             resultMap.put("msg", "연결 성공! 데이터베이스에 정상적으로 연결되었습니다.");
             resultMap.put("tblCnt", tblCnt);
+        } catch (SQLTimeoutException e) {
+            logger.error("DB 연결 타임아웃 - url: {}, error: {}", jdbcUrl, e.getMessage());
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "연결 실패: Timeout");
         } catch (SQLException e) {
             logger.error("DB 연결 실패 - url: {}, error: {}", jdbcUrl, e.getMessage());
             resultMap.put("result", "FAIL");

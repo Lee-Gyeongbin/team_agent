@@ -122,6 +122,12 @@
         WHERE DATAMART_ID = #{datamartId}
     </update>
 
+    <delete id="deleteDatamart" parameterType="datamartVO">
+        /* 데이터마트 삭제 datamart.deleteDatamart */
+        DELETE FROM TB_DM
+        WHERE DATAMART_ID = #{datamartId}
+    </delete>
+
     <select id="selectDatamartSummary" resultType="datamartSummaryVO">
         /* 데이터마트 요약 정보 조회 datamart.selectDatamartSummary */
         SELECT

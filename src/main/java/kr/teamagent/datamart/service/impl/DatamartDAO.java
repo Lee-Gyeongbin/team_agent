@@ -57,4 +57,14 @@ public class DatamartDAO extends EgovComAbstractDAO {
         return update("datamart.updateLastVerifyDt", datamartVO);
     }
 
+    /**
+     * 데이터마트 삭제
+     * @param datamartVO datamartId 필수
+     * @return
+     * @throws Exception
+     */
+    public int deleteDatamart(DatamartVO datamartVO) throws Exception {
+        return delete("datamart.deleteDatamart", datamartVO);
+    }
+
 }
