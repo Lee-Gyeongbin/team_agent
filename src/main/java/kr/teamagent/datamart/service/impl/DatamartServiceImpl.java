@@ -77,6 +77,15 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 데이터마트 삭제
+     * @param datamartVO datamartId 필수
+     * @throws Exception
+     */
+    public void deleteDatamart(DatamartVO datamartVO) throws Exception {
+        datamartDAO.deleteDatamart(datamartVO);
+    }
+
+    /**
      * 데이터마트 DB 연결 테스트
      * @param searchVO (datamartId 필수)
      * @return result(SUCCESS/FAIL), msg
