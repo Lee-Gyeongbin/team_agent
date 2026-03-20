@@ -137,4 +137,32 @@ public class DatasetController extends BaseController {
         resultMap.put("totalCnt", docDatasetService.selectDsHistListCnt(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
+    
+    /**
+     * 데이터셋 변경 이력 삭제 API
+     * @param datasetVO 데이터셋 정보
+     * @return { data: DatasetVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/deleteDocDatasetHistory.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteDocDatasetHistory(@RequestBody DatasetVO datasetVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", docDatasetService.deleteDocDatasetHistory(datasetVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터셋 변경 이력 등록 API
+     * @param datasetVO 데이터셋 정보
+     * @return { data: DatasetVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/saveDocDatasetHistory.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView saveDocDatasetHistory(@RequestBody DatasetVO datasetVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", docDatasetService.insertDocDatasetHistory(datasetVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

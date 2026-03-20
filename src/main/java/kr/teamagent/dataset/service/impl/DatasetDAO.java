@@ -181,4 +181,24 @@ public class DatasetDAO extends EgovComAbstractDAO {
     public int selectDsHistListCnt(DatasetVO searchVO) throws Exception {
         return selectOne("dataset.selectDsHistListCnt", searchVO);
     }
+
+    /**
+     * 데이터셋 변경 이력 삭제
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int deleteDocDatasetHistory(DatasetVO searchVO) throws Exception {
+        return delete("dataset.deleteDocDatasetHistory", searchVO);
+    }
+
+    /**
+     * 데이터셋 변경 이력 등록
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int insertDocDatasetHistory(DatasetVO searchVO) throws Exception {
+        return insert("dataset.insertDocDatasetHistory", searchVO);
+    }
 }

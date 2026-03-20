@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
+import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.dataset.service.DatasetVO;
 import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
 import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
@@ -196,5 +197,29 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      */
     public int selectDsHistListCnt(DatasetVO datasetVO) throws Exception {
         return datasetDAO.selectDsHistListCnt(datasetVO);
+    }
+
+    /**
+     * 데이터셋 변경 이력 삭제
+     * @param datasetVO
+     * @return
+     * @throws Exception
+     */
+    public int deleteDocDatasetHistory(DatasetVO datasetVO) throws Exception {
+        return datasetDAO.deleteDocDatasetHistory(datasetVO);
+    }
+
+    /**
+     * 데이터셋 변경 이력 등록
+     * @param datasetVO
+     * @return
+     * @throws Exception
+     */
+    public int insertDocDatasetHistory(DatasetVO datasetVO) throws Exception {
+        datasetVO.setHistId(keyGenerate.generateTableKey("HI", "TB_DS_HIST", "HIST_ID"));
+        datasetVO.setDelYn("N");
+        datasetVO.setCreateUserId(SessionUtil.getUserId());
+        datasetVO.setModifyUserId(SessionUtil.getUserId());
+        return datasetDAO.insertDocDatasetHistory(datasetVO);
     }
 }

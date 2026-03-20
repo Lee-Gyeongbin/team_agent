@@ -387,6 +387,7 @@
         WHERE
             1 = 1
             AND A.DATASET_ID = #{datasetId}
+            AND A.DEL_YN = 'N'
         ORDER BY A.HIST_ID DESC
         LIMIT
             #{offset},
@@ -402,6 +403,43 @@
         WHERE
             1 = 1
             AND A.DATASET_ID = #{datasetId}
+            AND A.DEL_YN = 'N'
     </select>
 
+    <delete id="deleteDocDatasetHistory" parameterType="datasetVO">
+        /* 데이터셋 변경 이력 삭제 dataset.deleteDocDatasetHistory */
+        UPDATE
+            TB_DS_HIST
+        SET
+            DEL_YN = 'Y'
+        WHERE
+            HIST_ID = #{histId}
+    </delete>
+
+    <insert id="insertDocDatasetHistory" parameterType="datasetVO">
+        INSERT INTO TB_DS_HIST
+            (
+                HIST_ID,
+                DATASET_ID,
+                VER_NO,
+                CHG_CONTENT,
+                DEL_YN,
+                CREATE_USER_ID,
+                CREATE_DT,
+                MODIFY_USER_ID,
+                MODIFY_DT
+            )
+        VALUES
+            (   
+                #{histId},
+                #{datasetId},
+                #{verNo},
+                #{chgContent},
+                #{delYn},
+                #{createUserId},
+                NOW(),
+                #{modifyUserId},
+                NOW()
+            )
+    </insert>
 </mapper>

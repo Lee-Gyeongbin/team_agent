@@ -95,6 +95,8 @@ public class DatasetVO {
     private String chgContent;
     /** 삭제 여부 */
     private String delYn;
+    private String createUserId;
+    private String modifyUserId;
 
     private Integer page;
     private Integer pageSize;
