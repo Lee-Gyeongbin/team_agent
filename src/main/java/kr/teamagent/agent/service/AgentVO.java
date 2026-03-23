@@ -31,4 +31,40 @@ public class AgentVO {
 
     private String dynamicQuery;
 
+    @Getter
+    @Setter
+    public static class ModelVO {
+        private String modelId;
+        private String modelName;
+    }
+
+    /** TB_AGT_DS */
+    @Getter
+    @Setter
+    public static class DsVO {
+        private String agentId;
+        private String datasetId;
+        private String dsNm;
+        private String connYn;
+        private Integer sortOrd;
+        private String description;
+        private Integer docCount;
+        private Integer chunkSize;
+        private String modifyDt;
+    }
+
+    /** TB_AGT_DM */
+    @Getter
+    @Setter
+    public static class DmVO {
+        private String agentId;
+        private String datamartId;
+        private String dmNm;
+        private String description;
+        private String connYn;
+        private String dbType;
+        private Integer tblCnt;
+        private String lastVerifyDt;
+    }
+
 }
