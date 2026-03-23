@@ -1,6 +1,8 @@
 package kr.teamagent.common.web;
 
 import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -12,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.amazonaws.HttpMethod;
@@ -85,7 +86,7 @@ public class FileController extends BaseController {
     }
 
     @RequestMapping("/com/file/downloadFile.do")
-    public Map<String, Object> downloadFile(@RequestParam FileVO dataVO) throws Exception {
+    public Map<String, Object> downloadFile(@RequestBody FileVO dataVO) throws Exception {
 
         FileVO doc = fileService.selectFileByDocId(dataVO);
 
@@ -93,13 +94,19 @@ public class FileController extends BaseController {
 
         Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
 
+        String originalFileName = doc.getFileName();
+        String encodedFileName = URLEncoder.encode(originalFileName, StandardCharsets.UTF_8.toString())
+                .replaceAll("\\+", "%20");
+
+        ResponseHeaderOverrides headers = new ResponseHeaderOverrides();
+        headers.setContentDisposition(
+                "attachment; filename=\"download.pdf\"; filename*=UTF-8''" + encodedFileName
+        );
+
         GeneratePresignedUrlRequest request =
                 new GeneratePresignedUrlRequest(getBucketName(), key)
                         .withMethod(HttpMethod.GET)
                         .withExpiration(expiration);
-
-        ResponseHeaderOverrides headers = new ResponseHeaderOverrides();
-        headers.setContentDisposition("attachment; filename=\"" + doc.getFileName() + "\"");
 
         request.setResponseHeaders(headers);
 

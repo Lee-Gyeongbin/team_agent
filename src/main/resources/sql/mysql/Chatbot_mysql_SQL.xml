@@ -38,33 +38,32 @@
     <select id="selectRagDsList" resultType="chatbotVO">
         /* RAG 데이터 목록 조회 ai.chatbot.selectRagDsList */
         SELECT
-            A.DATASET_ID                AS VALUE
-            , A.DS_NM                   AS LABEL
+            A.DATASET_ID        AS VALUE
+            , A.DS_NM           AS LABEL
             , A.DESCRIPTION
             , A.VERSION
-            , A.ICON_TEXT
-            , A.ICON_COLOR
-            , A.DATASET_BUILD_STATUS_CD
-            , A.EMBED_MODEL
-            , A.VECTOR_DB
-            , A.CHUNK_ALGO
+            , A.CHUNK_ALGO_CD
             , A.CHUNK_SIZE
             , A.CHUNK_OVERLAP
             , A.MIN_CHUNK_SZ
-            , A.HDR_INCL
-            , A.EMBED_NORM
-            , A.POOL_STRAT
-            , A.DIM_REDUC
+            , A.HDR_INCL_CD
+            , A.DATASET_BUILD_STATUS_CD
+            , A.EMBED_MODEL_CD
+            , A.VECTOR_DB_CD
+            , A.EMBED_NORM_CD
+            , A.POOL_STRAT_CD
+            , A.DIM_REDUC_CD
             , A.CHUNK_CNT
-            , A.DOC_CNT
-            , A.URL_CNT
             , A.SRCH_QUAL
+            , A.SORT_ORD
+            , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
         FROM
-            TB_RAG_DS A
+            TB_DS A
         WHERE 1=1 
-            AND A.DATASET_BUILD_STATUS_CD = 'ACTIVE'
+            AND A.USE_YN = 'Y'
+            AND A.DATASET_BUILD_STATUS_CD = '003'
     </select>
 
     <select id="selectDmList" resultType="chatbotVO">

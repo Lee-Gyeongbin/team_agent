@@ -421,10 +421,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             // 추후 AI 개발 시 DOC_ID 받아서 매핑 필요함. (배열일 수도 있음. 배열이면 배열 처리)
                             if (CommonUtil.isNotEmpty(filePathFromApi)) {
                                 if (filePathFromApi.contains("제조정보")) {
-                                    responseFilePath = "/CAT_MFG_001/제조정보.pdf";
+                                    responseFilePath = "/CT000001/제조정보.pdf";
                                     docId = "DC000002";
                                 } else {
-                                    responseFilePath = "/CAT_MFG_001/금형 및 Burr_수치넘침 검출 방안.pdf";
+                                    responseFilePath = "/CT000001/금형 및 Burr_수치넘침 검출 방안.pdf";
                                     docId = "DC000001";
                                 }
                             }
