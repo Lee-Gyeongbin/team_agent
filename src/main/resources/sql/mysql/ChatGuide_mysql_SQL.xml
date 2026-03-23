@@ -6,72 +6,80 @@
         /* 챗봇가이드 인사멘트 조회 */
         SELECT
             A.GUIDE_ID
-            , C.CODE_NM AS GUIDE_TP_CD
+            , A.GUIDE_TP_CD
             , A.GUIDE_KEY
             , A.ENBL_YN
             , A.CONTENT
             , A.MODIFY_DT
         FROM TB_CHAT_GUIDE A
-        LEFT JOIN TB_CODE C
-            ON A.GUIDE_TP_CD = C.CODE_ID
-            AND C.CODE_GRP_ID = 'GI000001'
         WHERE 1=1
-        ORDER BY A.START_DT DESC
+          AND A.GUIDE_TP_CD = '001'
     </select>
 
     <select id="selectChatGuideNoticeList" resultType="chatGuideVO">
         /* 챗봇가이드 안내멘트 조회 */
         SELECT
             A.GUIDE_ID
-            , C.CODE_NM AS GUIDE_TP_CD
+            , A.GUIDE_TP_CD
             , A.GUIDE_KEY
             , A.ENBL_YN
             , A.CONTENT
             , A.DSPL_COND
             , A.MODIFY_DT
+            , A.AUTO_DETECT_YN
         FROM TB_CHAT_GUIDE A
-        LEFT JOIN TB_CODE C
-            ON A.GUIDE_TP_CD = C.CODE_ID
-            AND C.CODE_GRP_ID = 'GI000001'
         WHERE 1=1
-        ORDER BY A.START_DT DESC
+          AND A.GUIDE_TP_CD = '002'
     </select>
 
-    <select id="selectChatGuideErrorList" resultType="chatGuideVO">
-        /* 챗봇가이드 에러메시지 조회 */
+    <select id="selectChatGuideErrorMessageList" resultType="chatGuideVO">
+        /* 챗봇가이드 오류메시지 조회 */
         SELECT
             A.GUIDE_ID
-            , C.CODE_NM AS GUIDE_TP_CD
+            , A.GUIDE_TP_CD
             , A.GUIDE_KEY
             , A.ENBL_YN
             , A.CONTENT
             , A.MAX_CHARS
             , A.MODIFY_DT
         FROM TB_CHAT_GUIDE A
-        LEFT JOIN TB_CODE C
-            ON A.GUIDE_TP_CD = C.CODE_ID
-            AND C.CODE_GRP_ID = 'GI000001'
         WHERE 1=1
-        ORDER BY A.START_DT DESC
+          AND A.GUIDE_TP_CD = '003'
     </select>
 
     <select id="selectChatGuideMaintenanceList" resultType="chatGuideVO">
         /* 챗봇가이드 점검/장애 조회 */
         SELECT
             A.GUIDE_ID
-            , C.CODE_NM AS GUIDE_TP_CD
+            , A.GUIDE_TP_CD
             , A.GUIDE_KEY
+            , A.TITLE
             , A.ENBL_YN
             , A.CONTENT
             , A.START_DT
             , A.END_DT
+            , A.ADVANCE_NOTICE_CD
+            , C.CODE_NM AS ADVANCE_NOTICE_NM
             , A.MODIFY_DT
+            , A.AUTO_DSPL_YN
         FROM TB_CHAT_GUIDE A
         LEFT JOIN TB_CODE C
-            ON A.GUIDE_TP_CD = C.CODE_ID
-            AND C.CODE_GRP_ID = 'GI000001'
+          ON C.CODE_GRP_ID = 'GI0000002'
+         AND C.USE_YN = 'Y'
+         AND C.CODE_ID = A.ADVANCE_NOTICE_CD
         WHERE 1=1
-        ORDER BY A.START_DT DESC
+          AND A.GUIDE_TP_CD = '004'
+    </select>
+
+    <select id="selectGuideIdByTypeAndKey" parameterType="chatGuideVO" resultType="string">
+        /* 챗 가이드 타입/키로 GUIDE_ID 조회 */
+        SELECT
+            A.GUIDE_ID
+        FROM TB_CHAT_GUIDE A
+        WHERE 1=1
+          AND A.GUIDE_TP_CD = #{guideTpCd}
+          AND A.GUIDE_KEY = #{guideKey}
+        LIMIT 1
     </select>
 
     <insert id="insertChatGuideGreetingList" parameterType="chatGuideVO">
@@ -93,7 +101,6 @@
         )
         ON DUPLICATE KEY UPDATE
             GUIDE_TP_CD = '001'
-            , GUIDE_KEY = VALUES(GUIDE_KEY)
             , ENBL_YN = VALUES(ENBL_YN)
             , CONTENT = VALUES(CONTENT)
             , MODIFY_DT = NOW()
@@ -108,6 +115,7 @@
             , ENBL_YN
             , CONTENT
             , DSPL_COND
+            , AUTO_DETECT_YN
             , MODIFY_DT
         ) VALUES (
             #{guideId}
@@ -116,18 +124,19 @@
             , #{enblYn}
             , #{content}
             , #{dsplCond}
+            , #{autoDetectYn}
             , NOW()
         )
         ON DUPLICATE KEY UPDATE
             GUIDE_TP_CD = '002'
-            , GUIDE_KEY = VALUES(GUIDE_KEY)
             , ENBL_YN = VALUES(ENBL_YN)
             , CONTENT = VALUES(CONTENT)
             , DSPL_COND = VALUES(DSPL_COND)
+            , AUTO_DETECT_YN = VALUES(AUTO_DETECT_YN)
             , MODIFY_DT = NOW()
     </insert>
 
-    <insert id="insertChatGuideErrorList" parameterType="chatGuideVO">
+    <insert id="insertChatGuideErrorMessageList" parameterType="chatGuideVO">
         /* 챗 가이드 오류메시지 등록/수정 */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
@@ -148,7 +157,6 @@
         )
         ON DUPLICATE KEY UPDATE
             GUIDE_TP_CD = '003'
-            , GUIDE_KEY = VALUES(GUIDE_KEY)
             , ENBL_YN = VALUES(ENBL_YN)
             , CONTENT = VALUES(CONTENT)
             , MAX_CHARS = VALUES(MAX_CHARS)
@@ -161,28 +169,36 @@
             GUIDE_ID
             , GUIDE_TP_CD
             , GUIDE_KEY
+            , TITLE
             , ENBL_YN
             , CONTENT
             , START_DT
             , END_DT
+            , ADVANCE_NOTICE_CD
+            , AUTO_DSPL_YN
             , MODIFY_DT
         ) VALUES (
             #{guideId}
             , '004'
             , #{guideKey}
+            , #{title}
             , #{enblYn}
             , #{content}
             , #{startDt}
             , #{endDt}
+            , #{advanceNoticeCd}
+            , #{autoDsplYn}
             , NOW()
         )
         ON DUPLICATE KEY UPDATE
             GUIDE_TP_CD = '004'
-            , GUIDE_KEY = VALUES(GUIDE_KEY)
+            , TITLE = VALUES(TITLE)
             , ENBL_YN = VALUES(ENBL_YN)
             , CONTENT = VALUES(CONTENT)
             , START_DT = VALUES(START_DT)
             , END_DT = VALUES(END_DT)
+            , ADVANCE_NOTICE_CD = VALUES(ADVANCE_NOTICE_CD)
+            , AUTO_DSPL_YN = VALUES(AUTO_DSPL_YN)
             , MODIFY_DT = NOW()
     </insert>
 </mapper>
