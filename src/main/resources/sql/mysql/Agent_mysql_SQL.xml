@@ -2,4 +2,33 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="agent">
 
+    <select id="selectAgentList" resultType="agentVO">
+        /* 에이전트 목록 조회 agent.selectAgentList */
+        SELECT
+            A.AGENT_ID
+            , A.AGENT_NM
+            , A.AGENT_TYPE_CD
+            , CC.CODE_NM        AS AGENT_TYPE_CD_NM
+            , A.DESCRIPTION
+            , A.SORT_ORD
+            , A.USE_YN
+            , A.LAST_MDF_DT
+            , A.CREATE_DT
+            , A.MODIFY_DT
+            , CASE WHEN A.AGENT_TYPE_CD = '001' THEN (SELECT count(B.DATASET_ID) FROM TB_AGT_DS B WHERE A.AGENT_ID = B.AGENT_ID)
+                WHEN A.AGENT_TYPE_CD = '002' THEN (SELECT count(C.DATAMART_ID) FROM TB_AGT_DM C WHERE A.AGENT_ID = C.AGENT_ID)
+                ELSE 0 END AS CONN_COUNT
+        FROM TB_AGT A
+            LEFT JOIN TB_CODE CC ON A.AGENT_TYPE_CD = CC.CODE_ID AND CC.CODE_GRP_ID = 'AT000001'
+        WHERE 1=1
+        ORDER BY A.SORT_ORD, A.AGENT_ID
+    </select>
+
+    <update id="updateAgentUseYn" parameterType="agentVO">
+        /* 에이전트 활성/비활성 agent.updateAgentUseYn */
+        UPDATE TB_AGT
+        SET USE_YN = #{useYn}
+        WHERE AGENT_ID = #{agentId}
+    </update>
+
 </mapper>
