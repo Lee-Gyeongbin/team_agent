@@ -2,6 +2,10 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="agent">
 
+    <resultMap id="agtDsResultMap" type="kr.teamagent.agent.service.AgentVO$DsVO" autoMapping="true"/>
+    <resultMap id="agtDmResultMap" type="kr.teamagent.agent.service.AgentVO$DmVO" autoMapping="true"/>
+    <resultMap id="modelResultMap" type="kr.teamagent.agent.service.AgentVO$ModelVO" autoMapping="true"/>
+
     <select id="selectAgentList" resultType="agentVO">
         /* 에이전트 목록 조회 agent.selectAgentList */
         SELECT
@@ -53,6 +57,64 @@
             </if>
         WHERE 1=1 
             AND A.AGENT_ID = #{agentId}
+    </select>
+
+    <select id="selectModelList" resultMap="modelResultMap">
+        /* 모델 옵션 조회 agent.selectModelList */
+        SELECT
+            A.MODEL_ID
+            , A.MODEL_NAME
+        FROM TB_LLM_MDL A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+        ORDER BY SORT_ORDER
+    </select>
+
+    <select id="selectAgentDsList" parameterType="agentVO" resultMap="agtDsResultMap">
+        /* 에이전트 데이터셋 목록 조회 agent.selectAgentDsList */
+        SELECT
+            A.AGENT_ID
+            , A.DATASET_ID
+            , B.DS_NM
+            , A.CONN_YN
+            , A.SORT_ORD
+            , B.DESCRIPTION 
+            , IFNULL(C.DOC_COUNT, 0) AS DOC_COUNT
+            , B.CHUNK_SIZE
+            , B.MODIFY_DT
+        FROM TB_AGT_DS A
+            INNER JOIN TB_DS B
+                ON A.DATASET_ID = B.DATASET_ID
+            LEFT JOIN (
+                SELECT
+                    DATASET_ID
+                    , COUNT(DOC_ID) AS DOC_COUNT
+                FROM TB_DS_DOC
+                GROUP BY DATASET_ID
+            ) C
+                ON A.DATASET_ID = C.DATASET_ID
+        WHERE 1=1
+            AND A.AGENT_ID = #{agentId}
+        ORDER BY
+            A.SORT_ORD
+    </select>
+
+    <select id="selectAgentDmList" parameterType="agentVO" resultMap="agtDmResultMap">
+        /* 에이전트 데이터마트 목록 조회 agent.selectAgentDmList */
+        SELECT
+            A.AGENT_ID
+            , A.DATAMART_ID
+            , B.DM_NM
+            , A.CONN_YN
+            , B.DESCRIPTION
+            , B.DB_TYPE
+            , B.TBL_CNT
+            , B.LAST_VERIFY_DT
+        FROM TB_AGT_DM A
+            INNER JOIN TB_DM B ON A.DATAMART_ID = B.DATAMART_ID
+        WHERE 1=1
+            AND A.AGENT_ID = #{agentId}
+        ORDER BY B.SORT_ORD
     </select>
 
 </mapper>

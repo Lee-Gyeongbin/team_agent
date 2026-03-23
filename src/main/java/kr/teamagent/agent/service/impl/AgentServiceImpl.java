@@ -1,5 +1,6 @@
 package kr.teamagent.agent.service.impl;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -33,6 +34,15 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 모델 옵션 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<AgentVO.ModelVO> selectModelList() throws Exception {
+        return agentDAO.selectModelList();
+    }
+
+    /**
      * 에이전트 상세 조회
      * @param searchVO agentId
      * @return
@@ -41,6 +51,21 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
     public AgentVO selectAgent(AgentVO searchVO) throws Exception {
         searchVO.setDynamicQuery(buildDynamicQuery(searchVO));
         return agentDAO.selectAgent(searchVO);
+    }
+
+    /**
+     * 에이전트 상세 데이터 목록 조회 (agentTypeCd 분기)
+     * @param searchVO agentId, agentTypeCd
+     * @return DsVO 또는 DmVO 리스트
+     * @throws Exception
+     */
+    public List<?> selectAgentDetailDataList(AgentVO searchVO) throws Exception {
+        if ("001".equals(searchVO.getAgentTypeCd())) {
+            return agentDAO.selectAgentDsList(searchVO);
+        } else if ("002".equals(searchVO.getAgentTypeCd())) {
+            return agentDAO.selectAgentDmList(searchVO);
+        }
+        return new ArrayList<>();
     }
 
     /**

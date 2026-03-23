@@ -38,4 +38,33 @@ public class AgentDAO extends EgovComAbstractDAO {
     public AgentVO selectAgent(AgentVO searchVO) throws Exception {
         return (AgentVO) selectOne("agent.selectAgent", searchVO);
     }
+
+    /**
+     * 모델 옵션 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<AgentVO.ModelVO> selectModelList() throws Exception {
+        return selectList("agent.selectModelList");
+    }
+
+    /**
+     * 에이전트 데이터셋 목록 조회
+     * @param searchVO agentId
+     * @return
+     * @throws Exception
+     */
+    public List<AgentVO.DsVO> selectAgentDsList(AgentVO searchVO) throws Exception {
+        return selectList("agent.selectAgentDsList", searchVO);
+    }
+
+    /**
+     * 에이전트 데이터마트 목록 조회
+     * @param searchVO agentId
+     * @return
+     * @throws Exception
+     */
+    public List<AgentVO.DmVO> selectAgentDmList(AgentVO searchVO) throws Exception {
+        return selectList("agent.selectAgentDmList", searchVO);
+    }
 }
