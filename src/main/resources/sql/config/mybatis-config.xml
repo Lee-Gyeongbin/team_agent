@@ -32,6 +32,7 @@
         <typeAlias alias="datamartSummaryVO"                 type="kr.teamagent.datamart.service.DatamartVO$SummaryVO"/>
         <typeAlias alias="datasetVO"                         type="kr.teamagent.dataset.service.DatasetVO"/>
         <typeAlias alias="repositoryVO"                      type="kr.teamagent.repository.service.RepositoryVO"/>
+        <typeAlias alias="agentVO"                           type="kr.teamagent.agent.service.AgentVO"/>
     </typeAliases>
 
     <typeHandlers>
