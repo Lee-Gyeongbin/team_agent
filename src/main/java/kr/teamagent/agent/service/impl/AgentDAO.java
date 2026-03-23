@@ -67,4 +67,74 @@ public class AgentDAO extends EgovComAbstractDAO {
     public List<AgentVO.DmVO> selectAgentDmList(AgentVO searchVO) throws Exception {
         return selectList("agent.selectAgentDmList", searchVO);
     }
+
+    /**
+     * 에이전트 저장 (TB_AGT upsert)
+     * @param agentVO
+     * @return
+     * @throws Exception
+     */
+    public int saveAgent(AgentVO agentVO) throws Exception {
+        return (int) insert("agent.saveAgent", agentVO);
+    }
+
+    /**
+     * RAG 설정 저장 (TB_AGT_RAG_CFG upsert)
+     * @param agentVO
+     * @return
+     * @throws Exception
+     */
+    public int saveAgentRagCfg(AgentVO agentVO) throws Exception {
+        return (int) insert("agent.saveAgentRagCfg", agentVO);
+    }
+
+    /**
+     * 에이전트 데이터셋 연결 삭제
+     * @param agentVO agentId
+     * @return
+     * @throws Exception
+     */
+    public int deleteAgentDs(AgentVO agentVO) throws Exception {
+        return delete("agent.deleteAgentDs", agentVO);
+    }
+
+    /**
+     * 에이전트 데이터셋 연결 저장 (일괄 INSERT)
+     * @param formVO agentId, datasetList
+     * @return
+     * @throws Exception
+     */
+    public int insertAgentDs(AgentVO.SaveFormVO formVO) throws Exception {
+        return (int) insert("agent.insertAgentDs", formVO);
+    }
+
+    /**
+     * SQL 설정 저장 (TB_AGT_SQL_CFG upsert)
+     * @param agentVO
+     * @return
+     * @throws Exception
+     */
+    public int saveAgentSqlCfg(AgentVO agentVO) throws Exception {
+        return (int) insert("agent.saveAgentSqlCfg", agentVO);
+    }
+
+    /**
+     * 에이전트 데이터마트 연결 삭제
+     * @param agentVO agentId
+     * @return
+     * @throws Exception
+     */
+    public int deleteAgentDm(AgentVO agentVO) throws Exception {
+        return delete("agent.deleteAgentDm", agentVO);
+    }
+
+    /**
+     * 에이전트 데이터마트 연결 저장 (일괄 INSERT)
+     * @param formVO agentId, datamartList
+     * @return
+     * @throws Exception
+     */
+    public int insertAgentDm(AgentVO.SaveFormVO formVO) throws Exception {
+        return (int) insert("agent.insertAgentDm", formVO);
+    }
 }

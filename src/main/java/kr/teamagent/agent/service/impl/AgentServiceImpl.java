@@ -2,18 +2,24 @@ package kr.teamagent.agent.service.impl;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import kr.teamagent.agent.service.AgentVO;
+import kr.teamagent.common.util.KeyGenerate;
 
 @Service
 public class AgentServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private AgentDAO agentDAO;
+
+    @Autowired
+    private KeyGenerate keyGenerate;
 
     /**
      * 에이전트 목록 조회
@@ -66,6 +72,54 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
             return agentDAO.selectAgentDmList(searchVO);
         }
         return new ArrayList<>();
+    }
+
+    /**
+     * 에이전트 저장 (agentTypeCd 분기)
+     * @param formVO 저장 폼
+     * @return 저장된 에이전트 상세
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public AgentVO saveAgent(AgentVO.SaveFormVO formVO) throws Exception {
+        if (formVO.getAgentId() == null || formVO.getAgentId().trim().isEmpty()) {
+            formVO.setAgentId(keyGenerate.generateTableKey("AG", "TB_AGT", "AGENT_ID"));
+        }
+
+        agentDAO.saveAgent(formVO);
+
+        if ("001".equals(formVO.getAgentTypeCd())) {
+            agentDAO.saveAgentRagCfg(formVO);
+
+            agentDAO.deleteAgentDs(formVO);
+            if (formVO.getDatasetList() != null) {
+                List<AgentVO.DsVO> connList = formVO.getDatasetList().stream()
+                        .filter(ds -> "Y".equals(ds.getConnYn()))
+                        .collect(Collectors.toList());
+                if (!connList.isEmpty()) {
+                    formVO.setDatasetList(connList);
+                    agentDAO.insertAgentDs(formVO);
+                }
+            }
+        } else if ("002".equals(formVO.getAgentTypeCd())) {
+            agentDAO.saveAgentSqlCfg(formVO);
+
+            agentDAO.deleteAgentDm(formVO);
+            if (formVO.getDatamartList() != null) {
+                List<AgentVO.DmVO> connList = formVO.getDatamartList().stream()
+                        .filter(dm -> "Y".equals(dm.getConnYn()))
+                        .collect(Collectors.toList());
+                if (!connList.isEmpty()) {
+                    formVO.setDatamartList(connList);
+                    agentDAO.insertAgentDm(formVO);
+                }
+            }
+        }
+
+        AgentVO result = new AgentVO();
+        result.setAgentId(formVO.getAgentId());
+        result.setAgentTypeCd(formVO.getAgentTypeCd());
+        return selectAgent(result);
     }
 
     /**

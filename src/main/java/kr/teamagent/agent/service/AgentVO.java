@@ -1,5 +1,7 @@
 package kr.teamagent.agent.service;
 
+import java.util.List;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -51,6 +53,14 @@ public class AgentVO {
         private Integer docCount;
         private Integer chunkSize;
         private String modifyDt;
+    }
+
+    /** 에이전트 저장 폼 */
+    @Getter
+    @Setter
+    public static class SaveFormVO extends AgentVO {
+        private List<DsVO> datasetList;
+        private List<DmVO> datamartList;
     }
 
     /** TB_AGT_DM */

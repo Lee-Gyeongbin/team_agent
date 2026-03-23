@@ -50,6 +50,20 @@ public class AgentController extends BaseController {
     }
 
     /**
+     * 에이전트 저장 API
+     * @param formVO { agentId, agentTypeCd, agentNm, ..., datasetList }
+     * @return { data: AgentVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/save.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView save(@RequestBody AgentVO.SaveFormVO formVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", agentService.saveAgent(formVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 에이전트 활성화/비활성화 (USE_YN만 갱신)
      * @param searchVO { agentId, useYn }
      * @return
