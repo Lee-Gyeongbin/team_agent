@@ -31,4 +31,28 @@
         WHERE AGENT_ID = #{agentId}
     </update>
 
+    <select id="selectAgent" parameterType="agentVO" resultType="agentVO">
+        /* 에이전트 상세 조회 agent.selectAgent */
+        SELECT
+            A.AGENT_ID
+            , A.AGENT_NM
+            , A.AGENT_TYPE_CD
+            , A.DESCRIPTION
+            , A.SORT_ORD
+            , A.USE_YN
+            , A.LAST_MDF_DT
+            , A.CREATE_DT
+            , A.MODIFY_DT
+            ${dynamicQuery}
+        FROM TB_AGT A
+            <if test="agentTypeCd == '001'">
+                LEFT JOIN TB_AGT_RAG_CFG B ON A.AGENT_ID = B.AGENT_ID
+            </if>
+            <if test="agentTypeCd == '002'">
+                LEFT JOIN TB_AGT_SQL_CFG B ON A.AGENT_ID = B.AGENT_ID
+            </if>
+        WHERE 1=1 
+            AND A.AGENT_ID = #{agentId}
+    </select>
+
 </mapper>

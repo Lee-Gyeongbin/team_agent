@@ -18,7 +18,17 @@ public class AgentVO {
     private String lastMdfDt;
     private String createDt;
     private String modifyDt;
+    private String simThresh;
+    private String maxSrchRslt;
+    private String modelId;
+    private String maxQrySec;
+    private String sqlValidYn;
+    private String readonlyYn;
+    private String userCfrmYn;
+
     /** 데이터셋/데이터마트 연결 건수 */
     private Integer connCount;
+
+    private String dynamicQuery;
 
 }

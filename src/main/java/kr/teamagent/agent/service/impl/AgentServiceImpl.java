@@ -25,11 +25,47 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 에이전트 활성/비활성 (USE_YN만 갱신)
-     * @param vo agentId, useYn
+     * @param searchVO agentId, useYn
      * @throws Exception
      */
-    public void updateAgentUseYn(AgentVO vo) throws Exception {
-        agentDAO.updateAgentUseYn(vo);
+    public void updateAgentUseYn(AgentVO searchVO) throws Exception {
+        agentDAO.updateAgentUseYn(searchVO);
+    }
+
+    /**
+     * 에이전트 상세 조회
+     * @param searchVO agentId
+     * @return
+     * @throws Exception
+     */
+    public AgentVO selectAgent(AgentVO searchVO) throws Exception {
+        searchVO.setDynamicQuery(buildDynamicQuery(searchVO));
+        return agentDAO.selectAgent(searchVO);
+    }
+
+    /**
+     * 동적 쿼리 생성
+     * @param searchVO agentId
+     * @return
+     * @throws Exception
+     */
+    private String buildDynamicQuery(AgentVO searchVO) throws Exception {
+        StringBuffer sb = new StringBuffer();
+        if(searchVO == null || searchVO.getAgentTypeCd() == null || searchVO.getAgentTypeCd().isEmpty()){
+            return "";
+        }
+        if(searchVO.getAgentTypeCd().equals("001")){ // RAG 에이전트
+            sb.append(", B.SIM_THRESH\n");
+            sb.append(", B.MAX_SRCH_RSLT");
+        }
+        if(searchVO.getAgentTypeCd().equals("002")){ // SQL 에이전트
+            sb.append(", B.MODEL_ID\n");
+            sb.append(", B.MAX_QRY_SEC\n");
+            sb.append(", B.SQL_VALID_YN\n");
+            sb.append(", B.READONLY_YN\n");
+            sb.append(", B.USER_CFRM_YN");
+        }
+        return sb.toString();
     }
 
 }

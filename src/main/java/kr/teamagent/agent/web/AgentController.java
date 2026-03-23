@@ -49,4 +49,19 @@ public class AgentController extends BaseController {
         return makeSuccessJsonData();
     }
 
+    /**
+     * 에이전트 상세 조회 API
+     * @param searchVO { agentId }
+     * @return { data: AgentVO }
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/detail.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView detail(@RequestBody AgentVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", agentService.selectAgent(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

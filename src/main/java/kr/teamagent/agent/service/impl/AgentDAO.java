@@ -21,12 +21,21 @@ public class AgentDAO extends EgovComAbstractDAO {
 
     /**
      * 에이전트 USE_YN만 갱신
-     * @param vo agentId, useYn
+     * @param searchVO agentId, useYn
      * @return
      * @throws Exception
      */
-    public int updateAgentUseYn(AgentVO vo) throws Exception {
-        return update("agent.updateAgentUseYn", vo);
+    public int updateAgentUseYn(AgentVO searchVO) throws Exception {
+        return update("agent.updateAgentUseYn", searchVO);
     }
 
+    /**
+     * 에이전트 상세 조회
+     * @param searchVO agentId
+     * @return
+     * @throws Exception
+     */
+    public AgentVO selectAgent(AgentVO searchVO) throws Exception {
+        return (AgentVO) selectOne("agent.selectAgent", searchVO);
+    }
 }
