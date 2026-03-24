@@ -31,6 +31,15 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 에이전트 순서 일괄 변경
+     * @param orderList 순서 변경 목록
+     * @throws Exception
+     */
+    public void updateAgentOrder(List<AgentVO.OrderItemVO> orderList) throws Exception {
+        agentDAO.updateAgentOrder(orderList);
+    }
+
+    /**
      * 에이전트 활성/비활성 (USE_YN만 갱신)
      * @param searchVO agentId, useYn
      * @throws Exception
@@ -121,6 +130,25 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
         result.setAgentId(formVO.getAgentId());
         result.setAgentTypeCd(formVO.getAgentTypeCd());
         return selectAgent(result);
+    }
+
+    /**
+     * 에이전트 삭제 (agentTypeCd 분기)
+     * 001: TB_AGT_DS → TB_AGT_RAG_CFG → TB_AGT
+     * 002: TB_AGT_DM → TB_AGT_SQL_CFG → TB_AGT
+     * @param searchVO agentId, agentTypeCd
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteAgent(AgentVO searchVO) throws Exception {
+        if ("001".equals(searchVO.getAgentTypeCd())) {
+            agentDAO.deleteAgentDs(searchVO);
+            agentDAO.deleteAgentRagCfg(searchVO);
+        } else if ("002".equals(searchVO.getAgentTypeCd())) {
+            agentDAO.deleteAgentDm(searchVO);
+            agentDAO.deleteAgentSqlCfg(searchVO);
+        }
+        agentDAO.deleteAgent(searchVO);
     }
 
     /**

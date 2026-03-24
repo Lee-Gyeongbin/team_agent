@@ -137,6 +137,20 @@
             A.SORT_ORD
     </select>
 
+    <update id="updateAgentOrder" parameterType="hashmap">
+        /* 에이전트 순서 변경 agent.updateAgentOrder */
+        UPDATE TB_AGT
+        SET SORT_ORD = CASE AGENT_ID
+            <foreach collection="orderList" item="item">
+                WHEN #{item.agentId} THEN #{item.sortOrd}
+            </foreach>
+        END
+        WHERE AGENT_ID IN
+        <foreach collection="orderList" item="item" open="(" separator="," close=")">
+            #{item.agentId}
+        </foreach>
+    </update>
+
     <insert id="saveAgent" parameterType="agentVO">
         /* 에이전트 저장 agent.saveAgent */
         INSERT INTO TB_AGT (
@@ -250,5 +264,23 @@
             )
         </foreach>
     </insert>
+
+    <delete id="deleteAgentRagCfg" parameterType="agentVO">
+        /* RAG 설정 삭제 agent.deleteAgentRagCfg */
+        DELETE FROM TB_AGT_RAG_CFG
+        WHERE AGENT_ID = #{agentId}
+    </delete>
+
+    <delete id="deleteAgentSqlCfg" parameterType="agentVO">
+        /* SQL 설정 삭제 agent.deleteAgentSqlCfg */
+        DELETE FROM TB_AGT_SQL_CFG
+        WHERE AGENT_ID = #{agentId}
+    </delete>
+
+    <delete id="deleteAgent" parameterType="agentVO">
+        /* 에이전트 삭제 agent.deleteAgent */
+        DELETE FROM TB_AGT
+        WHERE AGENT_ID = #{agentId}
+    </delete>
 
 </mapper>

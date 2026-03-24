@@ -1,6 +1,7 @@
 package kr.teamagent.agent.web;
 
 import java.util.HashMap;
+import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
@@ -79,6 +80,21 @@ public class AgentController extends BaseController {
     }
 
     /**
+     * 에이전트 순서 변경 API
+     * @param orderList [{ agentId, sortOrd }]
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/order.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView order(@RequestBody List<AgentVO.OrderItemVO> orderList) throws Exception {
+        if (orderList != null && !orderList.isEmpty()) {
+            agentService.updateAgentOrder(orderList);
+        }
+        return makeSuccessJsonData();
+    }
+
+    /**
      * 에이전트 상세 조회 API
      * @param searchVO { agentId }
      * @return { data: AgentVO }
@@ -91,6 +107,21 @@ public class AgentController extends BaseController {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", agentService.selectAgent(searchVO));
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 에이전트 삭제 API
+     * @param searchVO { agentId, agentTypeCd }
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/delete.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView delete(@RequestBody AgentVO searchVO) throws Exception {
+        if (searchVO != null && searchVO.getAgentId() != null && searchVO.getAgentTypeCd() != null) {
+            agentService.deleteAgent(searchVO);
+        }
+        return makeSuccessJsonData();
     }
 
     /**

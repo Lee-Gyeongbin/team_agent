@@ -1,5 +1,6 @@
 package kr.teamagent.agent.service.impl;
 
+import java.util.HashMap;
 import java.util.List;
 
 import org.springframework.stereotype.Repository;
@@ -17,6 +18,18 @@ public class AgentDAO extends EgovComAbstractDAO {
      */
     public List<AgentVO> selectAgentList() throws Exception {
         return selectList("agent.selectAgentList");
+    }
+
+    /**
+     * 에이전트 순서 일괄 변경
+     * @param orderList 순서 변경 목록
+     * @return
+     * @throws Exception
+     */
+    public int updateAgentOrder(List<AgentVO.OrderItemVO> orderList) throws Exception {
+        HashMap<String, Object> paramMap = new HashMap<>();
+        paramMap.put("orderList", orderList);
+        return update("agent.updateAgentOrder", paramMap);
     }
 
     /**
@@ -136,5 +149,35 @@ public class AgentDAO extends EgovComAbstractDAO {
      */
     public int insertAgentDm(AgentVO.SaveFormVO formVO) throws Exception {
         return (int) insert("agent.insertAgentDm", formVO);
+    }
+
+    /**
+     * RAG 설정 삭제 (TB_AGT_RAG_CFG)
+     * @param agentVO agentId
+     * @return
+     * @throws Exception
+     */
+    public int deleteAgentRagCfg(AgentVO agentVO) throws Exception {
+        return delete("agent.deleteAgentRagCfg", agentVO);
+    }
+
+    /**
+     * SQL 설정 삭제 (TB_AGT_SQL_CFG)
+     * @param agentVO agentId
+     * @return
+     * @throws Exception
+     */
+    public int deleteAgentSqlCfg(AgentVO agentVO) throws Exception {
+        return delete("agent.deleteAgentSqlCfg", agentVO);
+    }
+
+    /**
+     * 에이전트 삭제 (TB_AGT)
+     * @param agentVO agentId
+     * @return
+     * @throws Exception
+     */
+    public int deleteAgent(AgentVO agentVO) throws Exception {
+        return delete("agent.deleteAgent", agentVO);
     }
 }

@@ -63,6 +63,14 @@ public class AgentVO {
         private List<DmVO> datamartList;
     }
 
+    /** 에이전트 순서 변경 항목 */
+    @Getter
+    @Setter
+    public static class OrderItemVO {
+        private String agentId;
+        private Integer sortOrd;
+    }
+
     /** TB_AGT_DM */
     @Getter
     @Setter
