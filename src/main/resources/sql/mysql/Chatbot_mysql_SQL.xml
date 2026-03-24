@@ -178,6 +178,8 @@
             , A.IN_TOKENS
             , A.OUT_TOKENS
             , A.SATIS_YN
+            , A.SATIS_CONTENT 
+            , A.SATIS_DT 
             , A.TTSQ
             , A.REASK_CNT
             , A.CREATE_USER_ID
@@ -242,4 +244,13 @@
         WHERE 1=1
             AND A.LOG_ID = #{logId}
     </select>
+
+    <update id="updateSatisYn" parameterType="chatbotVO">
+        /* CHAT 대화방 만족도 조회 ai.chatbot.selectSatisYn */
+        UPDATE TB_CHAT_LOG
+        SET SATIS_YN = #{satisYn}
+            , SATIS_CONTENT = #{satisContent}
+            , SATIS_DT = NOW()
+        WHERE LOG_ID = #{logId}
+    </update>
 </mapper>

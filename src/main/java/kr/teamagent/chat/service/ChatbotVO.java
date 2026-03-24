@@ -65,6 +65,10 @@ public class ChatbotVO extends CommonVO {
     private int outTokens;
     // 만족 여부 (Y/N)
     private String satisYn;
+    // 만족 내용
+    private String satisContent;
+    // 만족 일시
+    private String satisDt;
     // 파일 경로
     private String filePath;
     // 페이지 번호
