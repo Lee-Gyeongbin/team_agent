@@ -38,6 +38,16 @@ public class KeyGenerate {
         return CommonUtil.generateTableKey(businessPrefix, lastId);
     }
 
+    /**
+     * 테이블 컬럼 MAX 정수값 조회
+     * @param tableName 테이블명 (예: TB_AGT)
+     * @param columnName 컬럼명 (예: SORT_ORD)
+     * @return MAX값, 데이터 없으면 0
+     */
+    public int selectMaxInt(String tableName, String columnName) throws Exception {
+        return commonDAO.selectMaxInt(tableName, columnName);
+    }
+
 
 	public static String getKey() {
 

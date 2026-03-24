@@ -84,6 +84,7 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
     public AgentVO saveAgent(AgentVO.SaveFormVO formVO) throws Exception {
         if (formVO.getAgentId() == null || formVO.getAgentId().trim().isEmpty()) {
             formVO.setAgentId(keyGenerate.generateTableKey("AG", "TB_AGT", "AGENT_ID"));
+            formVO.setSortOrd(keyGenerate.selectMaxInt("TB_AGT", "SORT_ORD") + 1);
         }
 
         agentDAO.saveAgent(formVO);

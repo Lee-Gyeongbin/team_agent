@@ -103,4 +103,10 @@
         FROM ${tableName}
     </select>
 
+    <select id="selectMaxInt" resultType="int">
+        /* 테이블 컬럼 MAX 정수값 조회 common.selectMaxInt */
+        SELECT IFNULL(MAX(${columnName}), 0)
+        FROM ${tableName}
+    </select>
+
 </mapper>

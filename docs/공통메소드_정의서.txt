@@ -132,3 +132,54 @@
   - 비로그인 또는 세션 만료 시 null 반환 → null 체크 필수
   - Controller가 아닌 Service/DAO에서 호출 가능 (RequestContextHolder 사용)
   - 관련 메소드: getCompId(), getUniqueUserId(), getUserVO(), getAttribute(name)
+
+================================================================================
+3. selectMaxInt - 테이블 컬럼 MAX 정수값 조회
+================================================================================
+
+■ 개요
+  - 지정한 테이블·컬럼의 MAX 정수값을 조회 (예: SORT_ORD 최대값)
+  - 데이터가 없으면 0 반환
+  - 신규 등록 시 정렬순서 등 자동 채번에 활용
+
+■ 사용 방법
+
+  [KeyGenerate 서비스 사용]
+  - Spring Bean으로 주입 후 호출
+  - 테이블명, 컬럼명을 파라미터로 전달
+
+    @Autowired
+    KeyGenerate keyGenerate;
+
+    // 신규 에이전트 등록 시 SORT_ORD 자동 채번
+    int maxSortOrd = keyGenerate.selectMaxInt("TB_AGT", "SORT_ORD");
+    formVO.setSortOrd(maxSortOrd + 1);
+
+■ 파라미터
+
+  KeyGenerate.selectMaxInt(tableName, columnName)
+    - tableName:  테이블명 (예: TB_AGT)
+    - columnName: 컬럼명 (예: SORT_ORD)
+
+■ 반환값
+  - int (해당 컬럼의 MAX값, 데이터 없으면 0)
+
+■ 소스 위치
+  - KeyGenerate:   src/main/java/kr/teamagent/common/util/KeyGenerate.java
+  - CommonDAO:     src/main/java/kr/teamagent/common/system/service/impl/CommonDAO.java
+  - SQL:           src/main/resources/sql/mysql/Common_mysql_SQL.xml (selectMaxInt)
+
+■ 샘플 소스 (실제 사용 예)
+  - AgentServiceImpl.saveAgent()
+    경로: src/main/java/kr/teamagent/agent/service/impl/AgentServiceImpl.java
+    라인: 85~88
+
+    if (formVO.getAgentId() == null || formVO.getAgentId().trim().isEmpty()) {
+        formVO.setAgentId(keyGenerate.generateTableKey("AG", "TB_AGT", "AGENT_ID"));
+        formVO.setSortOrd(keyGenerate.selectMaxInt("TB_AGT", "SORT_ORD") + 1);
+    }
+
+■ 주의사항
+  - ${tableName}, ${columnName}은 MyBatis ${}(문자열 치환)으로 처리 → 외부 입력 직접 전달 금지 (SQL Injection 위험)
+  - 서비스 코드에서 하드코딩된 테이블명/컬럼명만 전달할 것
+  - 동시 등록 시 race condition 가능성 있음 → 필요 시 트랜잭션/락 검토
