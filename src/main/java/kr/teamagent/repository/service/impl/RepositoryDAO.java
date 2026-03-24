@@ -36,4 +36,24 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     public Integer selectDocRepositoryListCnt(RepositoryVO searchVO) throws Exception {
         return selectOne("repository.selectDocRepositoryListCnt", searchVO);
     }
+
+    /**
+     * 문서 삭제
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int deleteDocument(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteDocument", searchVO);
+    }
+    
+    /**
+     * 문서 저장
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int saveDocument(RepositoryVO searchVO) throws Exception {
+        return insert("repository.saveDocument", searchVO);
+    }
 }

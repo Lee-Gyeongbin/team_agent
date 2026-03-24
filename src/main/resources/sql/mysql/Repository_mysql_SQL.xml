@@ -64,7 +64,6 @@
         INNER JOIN TB_CONTENT_CAT B
 	        ON B.CATEGORY_ID = A.CATEGORY_ID 
         WHERE 1=1
-            AND A.USE_YN = 'Y'
             AND EXISTS (
                 WITH RECURSIVE CAT_SUBTREE AS (
                     SELECT CATEGORY_ID
@@ -82,6 +81,9 @@
                     A.CONTENT LIKE CONCAT('%', #{findContent}, '%')
                     OR A.DOC_TITLE LIKE CONCAT('%', #{findContent}, '%')
                 )
+            </if>
+            <if test="useYn != null and useYn != ''">
+                AND A.USE_YN = #{useYn}
             </if>
         ORDER BY A.DOC_ID DESC
     </select>
@@ -117,4 +119,55 @@
             </if>
         ORDER BY A.DOC_ID DESC
     </select>
+
+    <insert id="saveDocument" parameterType="repositoryVO">
+        /* 문서 저장(등록/수정) repository.saveDocument */
+        INSERT INTO TB_DOC (
+            DOC_ID
+            , DOC_TITLE
+            , CATEGORY_ID
+            , AUTHOR
+            , SEC_LVL
+            , CONTENT
+            , FILE_NAME
+            , FILE_PATH
+            , FILE_SIZE
+            , FILE_TYPE
+            , KEYWORDS
+            , REF_URL
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{docId}
+            , #{docTitle, jdbcType=VARCHAR}
+            , #{categoryId, jdbcType=VARCHAR}
+            , #{author, jdbcType=VARCHAR}
+            , #{secLvl, jdbcType=VARCHAR}
+            , #{content, jdbcType=LONGVARCHAR}
+            , #{fileName, jdbcType=VARCHAR}
+            , #{filePath, jdbcType=VARCHAR}
+            , #{fileSize, jdbcType=BIGINT}
+            , #{fileType, jdbcType=VARCHAR}
+            , #{keywords, jdbcType=VARCHAR}
+            , #{refUrl, jdbcType=VARCHAR}
+            , #{useYn, jdbcType=CHAR}
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            DOC_TITLE = VALUES(DOC_TITLE)
+            , CATEGORY_ID = VALUES(CATEGORY_ID)
+            , AUTHOR = VALUES(AUTHOR)
+            , SEC_LVL = VALUES(SEC_LVL)
+            , CONTENT = VALUES(CONTENT)
+            , FILE_NAME = VALUES(FILE_NAME)
+            , FILE_PATH = VALUES(FILE_PATH)
+            , FILE_SIZE = VALUES(FILE_SIZE)
+            , FILE_TYPE = VALUES(FILE_TYPE)
+            , KEYWORDS = VALUES(KEYWORDS)
+            , REF_URL = VALUES(REF_URL)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
 </mapper>

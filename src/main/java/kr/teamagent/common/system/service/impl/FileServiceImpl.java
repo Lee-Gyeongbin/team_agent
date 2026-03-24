@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +39,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> createUploadPresignedUrl(FileVO req) {
 
         // TODO 추후 개발 시 manual->doc_id 로 파일 저장 경로 수정 필요
-        String key = "manual/" + UUID.randomUUID() + "_" + req.getFileName();
+        String key = req.getCategoryId() + "/" + req.getFileName();
         Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
 
         log.debug("Upload presigned URL request. key={}", key);
