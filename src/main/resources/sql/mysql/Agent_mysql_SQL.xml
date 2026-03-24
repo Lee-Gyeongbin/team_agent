@@ -98,7 +98,12 @@
             /* AGENT 연결 여부 */
             LEFT JOIN TB_AGT_DS AG
                 ON A.DATASET_ID = AG.DATASET_ID
-                AND AG.AGENT_ID = #{agentId}
+                <if test='agentId != null and agentId != ""'>
+                    AND AG.AGENT_ID = #{agentId}
+                </if>
+                <if test='agentId == null or agentId == ""'>
+                    AND 1 = 0
+                </if>
         WHERE 1=1
             AND A.USE_YN = 'Y'
         ORDER BY A.SORT_ORD
@@ -120,7 +125,12 @@
         FROM TB_DM A
             LEFT JOIN TB_AGT_DM AG
                 ON A.DATAMART_ID = AG.DATAMART_ID
-                AND AG.AGENT_ID = #{agentId}
+                <if test="agentId != null and agentId != ''">
+                    AND AG.AGENT_ID = #{agentId}
+                </if>
+                <if test="agentId == null or agentId == ''">
+                    AND 1 = 0
+                </if>
         WHERE 1=1
             AND A.USE_YN = 'Y'
         ORDER BY
