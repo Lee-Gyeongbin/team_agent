@@ -44,9 +44,9 @@ public class LibraryController extends BaseController {
      * @return
      * @throws Exception
      */
-    @RequestMapping(value = "/cardList.do")
+    @RequestMapping(value = "/cardList.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView cardList(LibraryVO searchVO) throws Exception {
+    public ModelAndView cardList(@RequestBody LibraryVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", libraryService.selectCardList(searchVO));
         return new ModelAndView("jsonView", resultMap);

@@ -34,6 +34,8 @@ public class LibraryVO {
     private String qryRslt;
     private String useYn;
     private String modifyDt;
+    private String searchTitle;
+    private String searchSort;
 
     /** TB_CHAT_LOG 조인 필드 */
     private String qContent;

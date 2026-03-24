@@ -59,7 +59,23 @@
         <if test="archiveYn != null and archiveYn != ''">
             AND ARCHIVE_YN = #{archiveYn}
         </if>
-        ORDER BY SORT_ORD, CREATE_DT DESC
+        <if test="searchTitle != null and searchTitle != ''">
+            AND TITLE LIKE CONCAT('%', #{searchTitle}, '%')
+        </if>
+        <choose>
+            <when test='searchSort == "custom"'>
+                ORDER BY SORT_ORD
+            </when>
+            <when test='searchSort == "latest"'>
+                ORDER BY CREATE_DT DESC
+            </when>
+            <when test='searchSort == "name"'>
+                ORDER BY TITLE
+            </when>
+            <otherwise>
+                ORDER BY SORT_ORD
+            </otherwise>
+        </choose>
     </select>
 
     <select id="selectCardDetail" resultType="libraryVO">
