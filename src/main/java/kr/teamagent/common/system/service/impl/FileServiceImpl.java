@@ -3,8 +3,11 @@ package kr.teamagent.common.system.service.impl;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -38,7 +41,6 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
 
     public Map<String, Object> createUploadPresignedUrl(FileVO req) {
 
-        // TODO 추후 개발 시 manual->doc_id 로 파일 저장 경로 수정 필요
         String key = req.getCategoryId() + "/" + req.getFileName();
         Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
 
@@ -105,5 +107,57 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         URL url = s3Client.generatePresignedUrl(request);
 
         return Map.of("url", url.toString());
+    }
+
+    /**
+     * docId 목록에 해당하는 TB_DOC 행의 FILE_PATH(S3 키)로 NCP 오브젝트 스토리지 객체 삭제
+     *
+     * @param dataVO docIds(복수) 또는 docId(단건)
+     */
+    public Map<String, Object> deleteFilesByDocIds(FileVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        List<String> docIds = dataVO.getDocIdList();
+        if ((docIds == null || docIds.isEmpty()) && dataVO.getDocId() != null && !dataVO.getDocId().isEmpty()) {
+            docIds = Collections.singletonList(dataVO.getDocId());
+        }
+        if (docIds == null || docIds.isEmpty()) {
+            result.put("successYn", true);
+            return result;
+        }
+
+        String bucket = getBucketName();
+        List<String> errors = new ArrayList<>();
+
+        for (String docId : docIds) {
+            if (docId == null || docId.trim().isEmpty()) {
+                continue;
+            }
+            String id = docId.trim();
+            FileVO query = new FileVO();
+            query.setDocId(id);
+            try {
+                FileVO doc = selectFileByDocId(query);
+                if (doc == null) {
+                    errors.add("문서 없음: " + id);
+                    continue;
+                }
+                String key = doc.getFilePath();
+                if (key == null || key.trim().isEmpty()) {
+                    log.debug("Skip S3 delete, empty filePath. docId={}", id);
+                    continue;
+                }
+                s3Client.deleteObject(bucket, key.trim());
+                log.debug("Deleted object. bucket={}, key={}", bucket, key);
+            } catch (Exception e) {
+                log.warn("NCP 객체 삭제 실패. docId={}", id, e);
+                errors.add(id + ": " + e.getMessage());
+            }
+        }
+
+        result.put("successYn", errors.isEmpty());
+        if (!errors.isEmpty()) {
+            result.put("returnMsg", String.join("; ", errors));
+        }
+        return result;
     }
 }

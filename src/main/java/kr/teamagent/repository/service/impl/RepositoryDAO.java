@@ -38,6 +38,26 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 문서 상세 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public RepositoryVO selectDetailByDocId(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectDetailByDocId", searchVO);
+    }
+
+    /**
+     * 문서 존재 여부 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public Integer selectDocExistCnt(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectDocExistCnt", searchVO);
+    }
+
+    /**
      * 문서 삭제
      * @param searchVO
      * @return
@@ -55,5 +75,25 @@ public class RepositoryDAO extends EgovComAbstractDAO {
      */
     public int saveDocument(RepositoryVO searchVO) throws Exception {
         return insert("repository.saveDocument", searchVO);
+    }
+
+    /**
+     * 카테고리 저장
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int saveCategory(RepositoryVO searchVO) throws Exception {
+        return insert("repository.saveCategory", searchVO);
+    }
+
+    /**
+     * 카테고리 수정
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int renameCategory(RepositoryVO searchVO) throws Exception {
+        return update("repository.renameCategory", searchVO);
     }
 }

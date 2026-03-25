@@ -1,5 +1,7 @@
 package kr.teamagent.repository.service;
 
+import java.util.List;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -61,5 +63,19 @@ public class RepositoryVO {
     /** 데이터셋 문서 개수 */
     private String dsDocCnt;
 
+    private List<RepositoryVO> docIdList;
 
+    /**
+     * 문서 저장 시 NCP 업로드 완료 후 파일 메타 배열 (JSON 키: "file")
+     */
+    private List<RepositoryFileItem> file;
+
+    @Getter
+    @Setter
+    public static class RepositoryFileItem {
+        private String fileName;
+        private String filePath;
+        private String fileSize;
+        private String fileType;
+    }
 }
