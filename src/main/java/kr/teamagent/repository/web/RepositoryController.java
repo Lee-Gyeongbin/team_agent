@@ -46,7 +46,7 @@ public class RepositoryController extends BaseController {
     public ModelAndView selectDocRepositoryList(@RequestBody RepositoryVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", repositoryService.selectDocRepositoryList(searchVO));
-        resultMap.put("totalCount", repositoryService.selectDocRepositoryListCnt(searchVO));
+        resultMap.put("totalCnt", repositoryService.selectDocRepositoryListCnt(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -135,6 +135,27 @@ public class RepositoryController extends BaseController {
         return responseMap;
     }
 
+    /**
+     * 문서 존재 여부 조회
+     * @param dataVO
+     * @param bindingResult
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping("/selectDocumentExistCnt.do")
+    public @ResponseBody Map<String, Object> selectDocumentExistCnt(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", repositoryService.selectDocumentExistCnt(dataVO));
+        return resultMap;
+    }
+
+    /**
+     * 카테고리 저장
+     * @param dataVO
+     * @param bindingResult
+     * @return
+     * @throws Exception
+     */
     @RequestMapping("/saveCategory.do")
     public @ResponseBody Map<String, Object> saveCategory(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();

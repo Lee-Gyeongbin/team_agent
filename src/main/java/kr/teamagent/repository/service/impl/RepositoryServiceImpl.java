@@ -95,6 +95,16 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 문서 존재 여부 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public Integer selectDocumentExistCnt(RepositoryVO searchVO) throws Exception {
+        return repositoryDAO.selectDocumentExistCnt(searchVO);
+    }   
+
+    /**
      * 문서 저장
      * @param searchVO
      * @return
@@ -104,8 +114,10 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> resultMap = new HashMap<>();
 
         try {
+            // docId가 있으면 업데이트, 없으면 인서트
+            boolean isUpdate = StringUtils.isNotBlank(searchVO.getDocId());
             List<RepositoryFileItem> fileList = searchVO.getFile();
-            if (fileList != null && !fileList.isEmpty()) {
+            if (!isUpdate && fileList != null && !fileList.isEmpty()) {
                 List<RepositoryFileItem> validFiles = new ArrayList<>();
                 for (RepositoryFileItem item : fileList) {
                     if (item != null && StringUtils.isNotBlank(item.getFilePath())) {
@@ -136,7 +148,7 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                     resultMap.put("returnMsg", "일부 문서 저장에 실패하였습니다.");
                     resultMap.put("savedCount", inserted);
                 }
-            } else {
+            } else if (!isUpdate) {
                 searchVO.setDocId(keyGenerate.generateTableKey("DC", "TB_DOC", "DOC_ID"));
                 searchVO.setUseYn("Y");
                 int result = repositoryDAO.saveDocument(searchVO);
@@ -147,6 +159,53 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                 } else {
                     resultMap.put("successYn", false);
                     resultMap.put("returnMsg", "문서 저장에 실패하였습니다.");
+                }
+            } else {
+                // 업데이트 로직: docId는 클라이언트에서 전달된 값을 그대로 사용
+                if (fileList != null && !fileList.isEmpty()) {
+                    List<RepositoryFileItem> validFiles = new ArrayList<>();
+                    for (RepositoryFileItem item : fileList) {
+                        if (item != null && StringUtils.isNotBlank(item.getFilePath())) {
+                            validFiles.add(item);
+                        }
+                    }
+
+                    if (validFiles.isEmpty()) {
+                        resultMap.put("successYn", false);
+                        resultMap.put("returnMsg", "파일 정보(filePath)가 없습니다.");
+                        return resultMap;
+                    }
+                    // 현재 VO/요청 스펙상 docId는 1개로 판단하므로, 업데이트는 1건 파일만 허용
+                    if (validFiles.size() != 1) {
+                        resultMap.put("successYn", false);
+                        resultMap.put("returnMsg", "업데이트는 파일 1건만 지원합니다.");
+                        return resultMap;
+                    }
+
+                    RepositoryVO row = buildDocRow(searchVO, validFiles.get(0));
+                    row.setDocId(searchVO.getDocId());
+                    row.setUseYn("Y");
+                    int result = repositoryDAO.saveDocument(row);
+                    if (result > 0) {
+                        resultMap.put("successYn", true);
+                        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+                        resultMap.put("savedCount", 1);
+                    } else {
+                        resultMap.put("successYn", false);
+                        resultMap.put("returnMsg", "문서 업데이트에 실패하였습니다.");
+                    }
+                } else {
+                    // 파일 배열이 없으면 기존 단일 필드들(fileName/filePath...)로 업데이트
+                    searchVO.setUseYn("Y");
+                    int result = repositoryDAO.updateDocument(searchVO);
+                    if (result > 0) {
+                        resultMap.put("successYn", true);
+                        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+                        resultMap.put("savedCount", 1);
+                    } else {
+                        resultMap.put("successYn", false);
+                        resultMap.put("returnMsg", "문서 업데이트에 실패하였습니다.");
+                    }
                 }
             }
         } catch (Exception e) {
