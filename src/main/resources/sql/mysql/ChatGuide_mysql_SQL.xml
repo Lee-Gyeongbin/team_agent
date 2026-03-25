@@ -71,19 +71,8 @@
           AND A.GUIDE_TP_CD = '004'
     </select>
 
-    <select id="selectGuideIdByTypeAndKey" parameterType="chatGuideVO" resultType="string">
-        /* 챗 가이드 타입/키로 GUIDE_ID 조회 chatGuide.selectGuideIdByTypeAndKey */
-        SELECT
-            A.GUIDE_ID
-        FROM TB_CHAT_GUIDE A
-        WHERE 1=1
-          AND A.GUIDE_TP_CD = #{guideTpCd}
-          AND A.GUIDE_KEY = #{guideKey}
-        LIMIT 1
-    </select>
-
     <insert id="insertChatGuideGreetingList" parameterType="chatGuideVO">
-        /* 챗 가이드 인사멘트 등록/수정 chatGuide.insertChatGuideGreetingList */
+        /* 챗봇가이드 인사멘트 등록/수정 chatGuide.insertChatGuideGreetingList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -107,7 +96,7 @@
     </insert>
 
     <insert id="insertChatGuideNoticeList" parameterType="chatGuideVO">
-        /* 챗 가이드 안내멘트 등록/수정 chatGuide.insertChatGuideNoticeList */
+        /* 챗봇가이드 안내멘트 등록/수정 chatGuide.insertChatGuideNoticeList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -137,7 +126,7 @@
     </insert>
 
     <insert id="insertChatGuideErrorMessageList" parameterType="chatGuideVO">
-        /* 챗 가이드 오류메시지 등록/수정 chatGuide.insertChatGuideErrorMessageList */
+        /* 챗봇가이드 오류메시지 등록/수정 chatGuide.insertChatGuideErrorMessageList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -164,7 +153,7 @@
     </insert>
 
     <insert id="insertChatGuideMaintenanceList" parameterType="chatGuideVO">
-        /* 챗 가이드 점검/장애 등록/수정 chatGuide.insertChatGuideMaintenanceList */
+        /* 챗봇가이드 점검/장애 등록/수정 chatGuide.insertChatGuideMaintenanceList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD

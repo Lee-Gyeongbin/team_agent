@@ -42,8 +42,4 @@ public class ChatGuideDAO extends EgovComAbstractDAO {
         insert("chatGuide.insertChatGuideMaintenanceList", vo);
     }
 
-    public String selectGuideIdByTypeAndKey(ChatGuideVO vo) throws Exception {
-        return (String) selectOne("chatGuide.selectGuideIdByTypeAndKey", vo);
-    }
-
 }

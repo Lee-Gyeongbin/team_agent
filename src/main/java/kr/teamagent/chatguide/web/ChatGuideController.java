@@ -4,6 +4,7 @@ import java.util.HashMap;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -16,10 +17,16 @@ import kr.teamagent.common.web.BaseController;
 
 @Controller
 @RequestMapping("/chatguide")
-public class ChatGuideController extends BaseController<ChatGuideVO> {
+public class ChatGuideController extends BaseController<Object> {
 
     @Autowired
     private ChatGuideServiceImpl chatGuideService;
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseBody
+    public ModelAndView handleIllegalArgument(IllegalArgumentException ex) {
+        return makeFailJsonData(ex.getMessage());
+    }
 
     /**
      * 챗봇가이드 인사멘트 목록 조회
@@ -38,17 +45,15 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     /**
      * 챗봇가이드 인사멘트 저장
      * @param searchVO ChatGuideVO
-     * @return ModelAndView
+     * @return { result, msg, data: ChatGuideVO }
      * @throws Exception
      */
     @RequestMapping(value = "/greetingSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView greetingSave(@RequestBody ChatGuideVO searchVO) throws Exception {
-        if (searchVO == null) {
-            return makeFailJsonData("요청 본문은 필수입니다.");
-        }
-        chatGuideService.insertChatGuideGreetingList(searchVO);
-        return makeSuccessJsonData();
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", chatGuideService.insertChatGuideGreetingList(searchVO));
+        return makeSuccessJsonData(resultMap);
     }
 
     /**
@@ -68,28 +73,26 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     /**
      * 챗봇가이드 안내멘트 저장(묶음)
      * @param requestVO NoticeSaveVO
-     * @return ModelAndView
+     * @return { result, msg, data: NoticeSaveVO }
      * @throws Exception
      */
     @RequestMapping(value = "/noticeSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView noticeSave(@RequestBody ChatGuideVO.NoticeSaveVO requestVO) throws Exception {
-        if (requestVO == null) {
-            return makeFailJsonData("요청 본문은 필수입니다.");
-        }
-        chatGuideService.saveNoticeGroups(requestVO);
-        return makeSuccessJsonData();
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", chatGuideService.saveNoticeGroups(requestVO));
+        return makeSuccessJsonData(resultMap);
     }
 
     /**
-     * 챗봇가이드 오류메시지 목록 조회 (dataList[0] = apiErrors / inputErrors / responseErrors 묶음)
+     * 챗봇가이드 오류메시지 목록 조회
      * @param searchVO ChatGuideVO
      * @return ModelAndView
      * @throws Exception
      */
     @RequestMapping(value = "/errorMessageList.do")
     @ResponseBody
-    public ModelAndView errorList(ChatGuideVO searchVO) throws Exception {
+    public ModelAndView errorMessageList(ChatGuideVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", chatGuideService.selectChatGuideErrorMessageListGrouped(searchVO));
         return new ModelAndView("jsonView", resultMap);
@@ -98,17 +101,15 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     /**
      * 챗봇가이드 오류메시지 저장(묶음)
      * @param requestVO ErrorMessageSaveVO
-     * @return ModelAndView
+     * @return { result, msg, data: ErrorMessageSaveVO }
      * @throws Exception
      */
     @RequestMapping(value = "/errorMessageSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView errorMessageSave(@RequestBody ChatGuideVO.ErrorMessageSaveVO requestVO) throws Exception {
-        if (requestVO == null) {
-            return makeFailJsonData("요청 본문은 필수입니다.");
-        }
-        chatGuideService.saveErrorMessageGroups(requestVO);
-        return makeSuccessJsonData();
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", chatGuideService.saveErrorMessageGroups(requestVO));
+        return makeSuccessJsonData(resultMap);
     }
 
     /**
@@ -128,17 +129,15 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     /**
      * 챗봇가이드 점검/장애 묶음 저장
      * @param requestVO MaintenanceSaveVO
-     * @return ModelAndView
+     * @return { result, msg, data: MaintenanceSaveVO }
      * @throws Exception
      */
     @RequestMapping(value = "/maintenanceSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView maintenanceSave(@RequestBody ChatGuideVO.MaintenanceSaveVO requestVO) throws Exception {
-        if (requestVO == null) {
-            return makeFailJsonData("요청 본문은 필수입니다.");
-        }
-        chatGuideService.saveMaintenanceGroups(requestVO);
-        return makeSuccessJsonData();
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", chatGuideService.saveMaintenanceGroups(requestVO));
+        return makeSuccessJsonData(resultMap);
     }
 
 }
