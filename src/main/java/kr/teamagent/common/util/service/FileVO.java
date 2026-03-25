@@ -1,5 +1,7 @@
 package kr.teamagent.common.util.service;
 
+import java.util.List;
+
 import kr.teamagent.common.CommonVO;
 import lombok.Getter;
 import lombok.Setter;
@@ -9,6 +11,9 @@ public class FileVO extends CommonVO {
     private static final long serialVersionUID = 1L;
 
     private String docId;
+
+    /** NCP 객체 삭제 등, docId 다건 요청용 */
+    private List<String> docIdList;
     private String docTitle;
     private String categoryId;
     private String author;

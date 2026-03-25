@@ -1,29 +1,20 @@
 package kr.teamagent.chat.web;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.util.HashMap;
 import java.util.Map;
-
-import javax.servlet.http.HttpServletResponse;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
-import org.springframework.util.FileCopyUtils;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
-import egovframework.com.cmm.util.EgovResourceCloseHelper;
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
-import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.web.BaseController;
 

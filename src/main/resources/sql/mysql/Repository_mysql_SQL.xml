@@ -120,8 +120,55 @@
         ORDER BY A.DOC_ID DESC
     </select>
 
+    <select id="selectDetailByDocId" resultType="repositoryVO">
+        /* 문서 상세 조회 repository.selectDetailByDocId */
+        SELECT
+            A.DOC_ID
+            , A.DOC_TITLE
+            , A.CATEGORY_ID
+            , A.AUTHOR
+            , A.SEC_LVL
+            , A.CONTENT
+            , A.FILE_NAME
+            , A.FILE_PATH
+            , A.FILE_SIZE
+            , A.FILE_TYPE
+            , A.KEYWORDS
+            , A.REF_URL
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM TB_DOC A
+        WHERE A.DOC_ID = #{docId}
+    </select>
+
+    <select id="selectDocExistCnt" resultType="int">
+        /* 문서 존재 여부 조회 repository.selectDocExistCnt */
+        SELECT COUNT(*) AS CNT
+        FROM TB_DOC
+        WHERE USE_YN = 'Y'
+        AND (CATEGORY_ID, FILE_NAME) IN (
+            <foreach collection="docIdList" item="item" separator=",">
+                (#{item.categoryId}, #{item.fileName})
+            </foreach>
+        )
+    </select>
+
+    <delete id="deleteDocument" parameterType="repositoryVO">
+        /* 문서 삭제 repository.deleteDocument */
+        DELETE FROM TB_DOC
+        WHERE 1=1
+        <if test="docIdList != null and docIdList.size() > 0">
+            AND DOC_ID IN
+            <foreach collection="docIdList" item="item" separator="," open="(" close=")">
+                #{item.docId}
+            </foreach>
+        </if>
+    </delete>
+
     <insert id="saveDocument" parameterType="repositoryVO">
-        /* 문서 저장(등록/수정) repository.saveDocument */
+        /* 문서 저장(등록/수정) repository.saveDocument
+           - 서비스에서 file[]가 있으면 파일 건마다 본 INSERT를 반복 호출 (DOC_ID 각각 생성) */
         INSERT INTO TB_DOC (
             DOC_ID
             , DOC_TITLE
@@ -170,4 +217,52 @@
             , USE_YN = VALUES(USE_YN)
             , MODIFY_DT = NOW()
     </insert>
+
+    <insert id="saveCategory" parameterType="repositoryVO">
+        /* 카테고리 저장(등록) repository.saveCategory
+           - CAT_LVL 자동 계산: 루트(부모 없음)=1, 자식=부모 CAT_LVL + 1
+           - 부모 ID가 전달되었는데 부모가 없으면 INSERT 하지 않음 */
+        INSERT INTO TB_CONTENT_CAT (
+            CATEGORY_ID
+            , CATEGORY_NAME
+            , PARN_CAT_ID
+            , CAT_LVL
+            , SORT_ORD
+            , CREATE_DT
+        )
+        SELECT
+            V.CATEGORY_ID
+            , V.CATEGORY_NAME
+            , V.PARN_CAT_ID
+            , CASE
+                WHEN V.PARN_CAT_ID IS NULL THEN 1
+                ELSE P.CAT_LVL + 1
+              END
+            , V.SORT_ORD
+            , NOW()
+        FROM (
+            SELECT
+                #{categoryId, jdbcType=VARCHAR} AS CATEGORY_ID
+                , #{categoryName, jdbcType=VARCHAR} AS CATEGORY_NAME
+                , NULLIF(#{parnCatId, jdbcType=VARCHAR}, '') AS PARN_CAT_ID
+                , COALESCE(#{sortOrd, jdbcType=INTEGER}, 0) AS SORT_ORD
+        ) V
+        LEFT JOIN TB_CONTENT_CAT P
+            ON P.CATEGORY_ID = V.PARN_CAT_ID
+        WHERE V.PARN_CAT_ID IS NULL
+              OR P.CATEGORY_ID IS NOT NULL
+    </insert>
+
+    <update id="renameCategory" parameterType="repositoryVO">
+        /* 카테고리 수정 repository.renameCategory */
+        UPDATE TB_CONTENT_CAT
+        SET CATEGORY_NAME = #{categoryName, jdbcType=VARCHAR}
+        WHERE CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteCategory" parameterType="repositoryVO">
+        /* 카테고리 삭제 repository.deleteCategory */
+        DELETE FROM TB_CONTENT_CAT
+        WHERE CATEGORY_ID = #{categoryId, jdbcType=VARCHAR} OR PARN_CAT_ID = #{categoryId, jdbcType=VARCHAR}
+    </delete>
 </mapper>
