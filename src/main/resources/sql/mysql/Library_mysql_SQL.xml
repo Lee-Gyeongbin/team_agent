@@ -2,8 +2,9 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="library">
 
-    <!-- insertCategory 전용 (매퍼 내부에서만 사용) -->
     <parameterMap id="categoryItem" type="kr.teamagent.library.service.LibraryVO$CategoryItem"/>
+    <parameterMap id="cardItem" type="kr.teamagent.library.service.LibraryVO$CardItem"/>
+    <resultMap id="docItemResult" type="kr.teamagent.library.service.LibraryVO$DocItem" autoMapping="true"/>
 
     <select id="selectCategoryList" resultType="libraryVO">
         /* 카테고리 목록 조회 library.selectCategoryList */
@@ -76,6 +77,32 @@
                 ORDER BY SORT_ORD
             </otherwise>
         </choose>
+    </select>
+
+    <select id="selectDocList" parameterMap="cardItem" resultMap="docItemResult">
+        /* 참조 매뉴얼(문서) 목록 조회 library.selectDocList */
+        SELECT
+            B.DOC_ID
+            , B.DOC_TITLE
+            , B.CATEGORY_ID
+            , B.AUTHOR
+            , B.SEC_LVL
+            , B.CONTENT
+            , B.FILE_NAME
+            , B.FILE_PATH
+            , B.FILE_SIZE
+            , B.FILE_TYPE
+            , B.KEYWORDS
+            , B.REF_URL
+            , B.USE_YN
+            , B.CREATE_DT
+            , B.MODIFY_DT
+            , A.RELATED_PAGES
+        FROM TB_CHAT_REF A
+            INNER JOIN TB_DOC B
+                ON A.DOC_ID = B.DOC_ID
+        WHERE 1=1
+            AND A.LOG_ID = #{logId}
     </select>
 
     <select id="selectCardDetail" resultType="libraryVO">

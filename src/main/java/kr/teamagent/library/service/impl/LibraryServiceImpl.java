@@ -1,5 +1,6 @@
 package kr.teamagent.library.service.impl;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -90,6 +91,19 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      */
     public LibraryVO selectCardDetail(LibraryVO searchVO) throws Exception {
         return libraryDAO.selectCardDetail(searchVO);
+    }
+
+    /**
+     * 참조 매뉴얼(문서) 목록 조회
+     * @param card logId 필수 (요청 body의 card)
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.DocItem> selectDocList(LibraryVO.CardItem card) throws Exception {
+        if (card == null || CommonUtil.isEmpty(card.getLogId())) {
+            return Collections.emptyList();
+        }
+        return libraryDAO.selectDocList(card);
     }
 
     /**

@@ -61,6 +61,16 @@ public class LibraryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 참조 매뉴얼(문서) 목록 조회 — card.logId 필수
+     * @param card LOG_ID 기준 TB_CHAT_LOG·TB_DS_DOC·TB_DOC 조인
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.DocItem> selectDocList(LibraryVO.CardItem card) throws Exception {
+        return selectList("library.selectDocList", card);
+    }
+
+    /**
      * 카드 PIN 여부 업데이트
      * @param searchVO cardId, pinYn 필수
      * @return

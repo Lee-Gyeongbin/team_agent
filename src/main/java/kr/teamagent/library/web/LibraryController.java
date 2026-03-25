@@ -95,6 +95,21 @@ public class LibraryController extends BaseController {
     }
 
     /**
+     * 참조 매뉴얼(문서) 목록 조회 API
+     * @param searchVO body: { card: { logId, ... } } — 조회 키는 card.logId
+     * @return jsonView dataList: DocItem[]
+     * @throws Exception
+     */
+    @RequestMapping(value = "/docList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView docList(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        LibraryVO.CardItem card = searchVO != null ? searchVO.getCard() : null;
+        resultMap.put("dataList", libraryService.selectDocList(card));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 카드 수정 (기존 카드만 UPDATE, 신규 등록 없음)
      * @param searchVO { card: { cardId, userId, categoryId, ... } }
      * @return

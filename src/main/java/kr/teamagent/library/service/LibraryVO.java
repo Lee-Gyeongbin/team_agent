@@ -106,4 +106,26 @@ public class LibraryVO {
         private String modifyDt;
     }
 
+    /** 참조 매뉴얼(문서) 목록 조회 API 응답 — TB_DOC 조회 결과 [TB_DOC] */
+    @Getter
+    @Setter
+    public static class DocItem {
+        private String docId;
+        private String docTitle;
+        private String categoryId;
+        private String author;
+        private String secLvl;
+        private String content;
+        private String fileName;
+        private String filePath;
+        private Long fileSize;
+        private String fileType;
+        private String keywords;
+        private String refUrl;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+        private String relatedPages;
+    }
+
 }
