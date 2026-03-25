@@ -166,9 +166,20 @@
         </if>
     </delete>
 
+    <select id="selectDocumentExistCnt" resultType="int">
+        /* 문서 존재 여부 조회 repository.selectDocumentExistCnt */
+        SELECT
+            COUNT(*)
+        FROM
+            TB_DOC
+        WHERE
+            1 = 1
+            AND DOC_TITLE = #{docTitle, jdbcType=VARCHAR}
+            AND CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+    </select>
+
     <insert id="saveDocument" parameterType="repositoryVO">
-        /* 문서 저장(등록/수정) repository.saveDocument
-           - 서비스에서 file[]가 있으면 파일 건마다 본 INSERT를 반복 호출 (DOC_ID 각각 생성) */
+        /* 문서 저장(등록/수정) repository.saveDocument */
         INSERT INTO TB_DOC (
             DOC_ID
             , DOC_TITLE
@@ -202,21 +213,27 @@
             , NOW()
             , NOW()
         )
-        ON DUPLICATE KEY UPDATE
-            DOC_TITLE = VALUES(DOC_TITLE)
-            , CATEGORY_ID = VALUES(CATEGORY_ID)
-            , AUTHOR = VALUES(AUTHOR)
-            , SEC_LVL = VALUES(SEC_LVL)
-            , CONTENT = VALUES(CONTENT)
-            , FILE_NAME = VALUES(FILE_NAME)
-            , FILE_PATH = VALUES(FILE_PATH)
-            , FILE_SIZE = VALUES(FILE_SIZE)
-            , FILE_TYPE = VALUES(FILE_TYPE)
-            , KEYWORDS = VALUES(KEYWORDS)
-            , REF_URL = VALUES(REF_URL)
-            , USE_YN = VALUES(USE_YN)
-            , MODIFY_DT = NOW()
     </insert>
+
+    <update id="updateDocument" parameterType="repositoryVO">
+        /* 문서 수정 repository.updateDocument */
+        UPDATE TB_DOC
+        SET DOC_TITLE = #{docTitle, jdbcType=VARCHAR}
+            , CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+            , AUTHOR = #{author, jdbcType=VARCHAR}
+            , SEC_LVL = #{secLvl, jdbcType=VARCHAR}
+            , CONTENT = #{content, jdbcType=LONGVARCHAR}
+            , FILE_NAME = #{fileName, jdbcType=VARCHAR}
+            , FILE_PATH = #{filePath, jdbcType=VARCHAR}
+            , FILE_SIZE = #{fileSize, jdbcType=BIGINT}
+            , FILE_TYPE = #{fileType, jdbcType=VARCHAR}
+            , KEYWORDS = #{keywords, jdbcType=VARCHAR}
+            , REF_URL = #{refUrl, jdbcType=VARCHAR}
+            , USE_YN = #{useYn, jdbcType=CHAR}
+            , MODIFY_DT = NOW()
+        WHERE DOC_TITLE = #{docTitle, jdbcType=BIGINT}
+            AND CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+    </update>
 
     <insert id="saveCategory" parameterType="repositoryVO">
         /* 카테고리 저장(등록) repository.saveCategory
