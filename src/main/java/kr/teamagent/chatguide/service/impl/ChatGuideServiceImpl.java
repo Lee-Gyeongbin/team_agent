@@ -185,6 +185,15 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
         if (vo == null) {
             throw new IllegalArgumentException("요청 본문은 필수입니다.");
         }
+        // DB datetime 컬럼 null 처리
+        if (vo.getStartDt() != null) {
+            String startDt = vo.getStartDt().trim();
+            vo.setStartDt(startDt.isEmpty() ? null : startDt);
+        }
+        if (vo.getEndDt() != null) {
+            String endDt = vo.getEndDt().trim();
+            vo.setEndDt(endDt.isEmpty() ? null : endDt);
+        }
         resolveGuideIdIfBlank(vo);
         chatGuideDAO.insertChatGuideMaintenanceList(vo);
         return vo;
