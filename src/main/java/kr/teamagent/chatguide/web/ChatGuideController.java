@@ -12,22 +12,14 @@ import org.springframework.web.servlet.ModelAndView;
 
 import kr.teamagent.chatguide.service.ChatGuideVO;
 import kr.teamagent.chatguide.service.impl.ChatGuideServiceImpl;
-import kr.teamagent.codes.service.CodesVO;
-import kr.teamagent.codes.service.impl.CodesServiceImpl;
 import kr.teamagent.common.web.BaseController;
 
 @Controller
 @RequestMapping("/chatguide")
 public class ChatGuideController extends BaseController<ChatGuideVO> {
 
-    /** 점검 사전 안내(TB_CODE) — CODE_GRP_ID */
-    private static final String MAINT_ADVANCE_NOTICE_CODE_GRP_ID = "GI0000002";
-
     @Autowired
     private ChatGuideServiceImpl chatGuideService;
-
-    @Autowired
-    private CodesServiceImpl codesService;
 
     /**
      * 챗봇가이드 인사멘트 목록 조회
@@ -52,6 +44,9 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     @RequestMapping(value = "/greetingSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView greetingSave(@RequestBody ChatGuideVO searchVO) throws Exception {
+        if (searchVO == null) {
+            return makeFailJsonData("요청 본문은 필수입니다.");
+        }
         chatGuideService.insertChatGuideGreetingList(searchVO);
         return makeSuccessJsonData();
     }
@@ -79,6 +74,9 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     @RequestMapping(value = "/noticeSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView noticeSave(@RequestBody ChatGuideVO.NoticeSaveVO requestVO) throws Exception {
+        if (requestVO == null) {
+            return makeFailJsonData("요청 본문은 필수입니다.");
+        }
         chatGuideService.saveNoticeGroups(requestVO);
         return makeSuccessJsonData();
     }
@@ -93,7 +91,7 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     @ResponseBody
     public ModelAndView errorList(ChatGuideVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", chatGuideService.selectChatGuideErrorMessageListGrouped(searchVO));
+        resultMap.put("data", chatGuideService.selectChatGuideErrorMessageListGrouped(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -106,24 +104,11 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     @RequestMapping(value = "/errorMessageSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView errorMessageSave(@RequestBody ChatGuideVO.ErrorMessageSaveVO requestVO) throws Exception {
+        if (requestVO == null) {
+            return makeFailJsonData("요청 본문은 필수입니다.");
+        }
         chatGuideService.saveErrorMessageGroups(requestVO);
         return makeSuccessJsonData();
-    }
-
-    /**
-     * 점검 사전 안내 코드 목록 (TB_CODE, 셀렉트용)
-     * @return ModelAndView
-     * @throws Exception
-     */
-    @RequestMapping(value = "/maintenanceAdvanceNoticeCodeList.do")
-    @ResponseBody
-    public ModelAndView maintenanceAdvanceNoticeCodeList() throws Exception {
-        CodesVO searchVO = new CodesVO();
-        searchVO.setCodeGrpId(MAINT_ADVANCE_NOTICE_CODE_GRP_ID);
-        searchVO.setUseYn("Y");
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", codesService.selectCodeList(searchVO));
-        return new ModelAndView("jsonView", resultMap);
     }
 
     /**
@@ -149,6 +134,9 @@ public class ChatGuideController extends BaseController<ChatGuideVO> {
     @RequestMapping(value = "/maintenanceSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView maintenanceSave(@RequestBody ChatGuideVO.MaintenanceSaveVO requestVO) throws Exception {
+        if (requestVO == null) {
+            return makeFailJsonData("요청 본문은 필수입니다.");
+        }
         chatGuideService.saveMaintenanceGroups(requestVO);
         return makeSuccessJsonData();
     }

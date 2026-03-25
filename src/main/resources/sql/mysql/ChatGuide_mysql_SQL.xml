@@ -3,7 +3,7 @@
 <mapper namespace="chatGuide">
 
     <select id="selectChatGuideGreetingList" resultType="chatGuideVO">
-        /* 챗봇가이드 인사멘트 조회 */
+        /* 챗봇가이드 인사멘트 조회 chatGuide.selectChatGuideGreetingList */
         SELECT
             A.GUIDE_ID
             , A.GUIDE_TP_CD
@@ -17,7 +17,7 @@
     </select>
 
     <select id="selectChatGuideNoticeList" resultType="chatGuideVO">
-        /* 챗봇가이드 안내멘트 조회 */
+        /* 챗봇가이드 안내멘트 조회 chatGuide.selectChatGuideNoticeList */
         SELECT
             A.GUIDE_ID
             , A.GUIDE_TP_CD
@@ -33,7 +33,7 @@
     </select>
 
     <select id="selectChatGuideErrorMessageList" resultType="chatGuideVO">
-        /* 챗봇가이드 오류메시지 조회 */
+        /* 챗봇가이드 오류메시지 조회 chatGuide.selectChatGuideErrorMessageList */
         SELECT
             A.GUIDE_ID
             , A.GUIDE_TP_CD
@@ -48,7 +48,7 @@
     </select>
 
     <select id="selectChatGuideMaintenanceList" resultType="chatGuideVO">
-        /* 챗봇가이드 점검/장애 조회 */
+        /* 챗봇가이드 점검/장애 조회 chatGuide.selectChatGuideMaintenanceList */
         SELECT
             A.GUIDE_ID
             , A.GUIDE_TP_CD
@@ -72,7 +72,7 @@
     </select>
 
     <select id="selectGuideIdByTypeAndKey" parameterType="chatGuideVO" resultType="string">
-        /* 챗 가이드 타입/키로 GUIDE_ID 조회 */
+        /* 챗 가이드 타입/키로 GUIDE_ID 조회 chatGuide.selectGuideIdByTypeAndKey */
         SELECT
             A.GUIDE_ID
         FROM TB_CHAT_GUIDE A
@@ -83,7 +83,7 @@
     </select>
 
     <insert id="insertChatGuideGreetingList" parameterType="chatGuideVO">
-        /* 챗 가이드 인사멘트 등록/수정 */
+        /* 챗 가이드 인사멘트 등록/수정 chatGuide.insertChatGuideGreetingList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -107,7 +107,7 @@
     </insert>
 
     <insert id="insertChatGuideNoticeList" parameterType="chatGuideVO">
-        /* 챗 가이드 안내멘트 등록/수정 */
+        /* 챗 가이드 안내멘트 등록/수정 chatGuide.insertChatGuideNoticeList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -137,7 +137,7 @@
     </insert>
 
     <insert id="insertChatGuideErrorMessageList" parameterType="chatGuideVO">
-        /* 챗 가이드 오류메시지 등록/수정 */
+        /* 챗 가이드 오류메시지 등록/수정 chatGuide.insertChatGuideErrorMessageList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -164,7 +164,7 @@
     </insert>
 
     <insert id="insertChatGuideMaintenanceList" parameterType="chatGuideVO">
-        /* 챗 가이드 점검/장애 등록/수정 */
+        /* 챗 가이드 점검/장애 등록/수정 chatGuide.insertChatGuideMaintenanceList */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
