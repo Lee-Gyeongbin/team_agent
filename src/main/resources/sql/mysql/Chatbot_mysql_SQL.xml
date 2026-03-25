@@ -253,4 +253,93 @@
             , SATIS_DT = NOW()
         WHERE LOG_ID = #{logId}
     </update>
+
+    <resultMap id="knowledgeItemMap" type="kr.teamagent.chat.service.ChatbotVO$KnowledgeItem" autoMapping="true"/>
+
+    <select id="selectChatLogByLogId" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 채팅 로그 단건 조회 ai.chatbot.selectChatLogByLogId */
+        SELECT
+            A.LOG_ID
+            , A.ROOM_ID
+            , A.SVC_TY
+            , A.REF_ID
+            , A.Q_CONTENT
+            , A.R_CONTENT
+            , A.TTSQ
+            , A.TABLE_DATA
+            , A.CREATE_USER_ID  AS USER_ID
+            , A.CREATE_DT
+        FROM TB_CHAT_LOG A
+        WHERE 1=1
+            AND A.LOG_ID = #{logId}
+    </select>
+
+    <select id="selectMaxSortOrd" parameterType="chatbotVO" resultType="Integer">
+        /* 지식 카드 최대 정렬 순서 조회 ai.chatbot.selectMaxSortOrd */
+        SELECT IFNULL(MAX(A.SORT_ORD), 0)
+        FROM TB_KNOW_CARD A
+        WHERE A.USER_ID = #{userId}
+          AND A.CATEGORY_ID = #{categoryId}
+    </select>
+
+    <insert id="insertKnowledgeCard" parameterType="chatbotVO">
+        /* 지식 카드 등록 ai.chatbot.insertKnowledgeCard */
+        INSERT INTO TB_KNOW_CARD
+        (
+            CARD_ID,
+            USER_ID,
+            CATEGORY_ID,
+            LOG_ID,
+            SVC_TY,
+            TITLE,
+            TAGS,
+            PIN_YN,
+            ARCHIVE_YN,
+            ARCHIVE_DT,
+            SORT_ORD,
+            SRC_DOCS,
+            SQL_CODE,
+            CHART_CFG,
+            QRY_RSLT,
+            USE_YN,
+            CREATE_DT,
+            MODIFY_DT
+        )
+        VALUES
+        (
+            #{cardId},
+            #{userId},
+            #{categoryId},
+            #{logId},
+            #{svcTy},
+            #{title},
+            #{tags, jdbcType=VARCHAR},
+            #{pinYn},
+            #{archiveYn},
+            #{archiveDt, jdbcType=TIMESTAMP},
+            #{sortOrd, jdbcType=INTEGER},
+            #{srcDocs, jdbcType=VARCHAR},
+            #{sqlCode, jdbcType=VARCHAR},
+            #{chartCfg, jdbcType=VARCHAR},
+            #{qryRslt, jdbcType=VARCHAR},
+            #{useYn},
+            NOW(),
+            NOW()
+        )
+    </insert>
+
+    <select id="selectKnowledgeList" parameterType="chatbotVO" resultMap="knowledgeItemMap">
+        /* 지식 카테고리 목록 조회 ai.chatbot.selectKnowledgeList */
+        SELECT
+            A.CATEGORY_ID
+            , A.USER_ID
+            , A.CATEGORY_NM
+            , A.COLOR
+            , A.SORT_ORD
+            , A.CREATE_DT
+        FROM TB_KNOW_CAT A
+        WHERE 1=1
+            AND A.USER_ID = #{userId}
+        ORDER BY A.SORT_ORD
+    </select>
 </mapper>

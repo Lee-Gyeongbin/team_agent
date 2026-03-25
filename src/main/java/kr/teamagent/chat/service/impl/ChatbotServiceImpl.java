@@ -20,7 +20,9 @@ import org.springframework.web.socket.WebSocketSession;
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.socket.ChatbotWebSocketHandler;
 import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
+import kr.teamagent.common.util.SessionUtil;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -39,6 +41,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     ChatbotStatDAO chatbotStatDAO;
+
+    @Autowired
+    KeyGenerate keyGenerate;
 
     /**
      * 모델 목록 조회
@@ -559,5 +564,57 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setRoomId(Long.parseLong(responseThreadId));
         chatbotDAO.updateChatRoomLastChatDt(chatbotVO);
     }
+
+    /**
+     * 지식 카드 등록
+     * @param chatbotVO logId, categoryId, userId 필수
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> saveKnowledge(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        ChatbotVO chatLog = chatbotDAO.selectChatLogByLogId(chatbotVO);
+
+        chatbotVO.setCardId(keyGenerate.generateTableKey("KD", "TB_KNOW_CARD", "CARD_ID"));
+
+        Integer maxSortOrd = chatbotDAO.selectMaxSortOrd(chatbotVO);
+        chatbotVO.setSortOrd(maxSortOrd != null ? maxSortOrd + 1 : 1);
+
+        chatbotVO.setSvcTy(chatLog.getSvcTy());
+        chatbotVO.setTitle(truncateTitle(chatLog.getQContent(), 50));
+        chatbotVO.setPinYn("N");
+        chatbotVO.setArchiveYn("N");
+        chatbotVO.setUseYn("Y");
+
+        if ("S".equals(chatLog.getSvcTy())) {
+            chatbotVO.setSqlCode(chatLog.getTtsq());
+        }
+
+        chatbotDAO.insertKnowledgeCard(chatbotVO);
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        return resultMap;
+    }
+
+    private String truncateTitle(String text, int maxLength) {
+        if (CommonUtil.isEmpty(text)) {
+            return "";
+        }
+        return text.length() <= maxLength ? text : text.substring(0, maxLength);
+    }
+
+    /**
+     * 지식 카테고리 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO.KnowledgeItem> selectKnowledgeList(ChatbotVO searchVO) throws Exception {
+        searchVO.setUserId(SessionUtil.getUserId());
+        return chatbotDAO.selectKnowledgeList(searchVO);
+    }
+
 }
 
