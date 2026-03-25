@@ -106,6 +106,14 @@ public class LibraryVO {
         private String modifyDt;
     }
 
+    /** 테이블 데이터 조회 API 응답 [TB_CHAT_LOG] */
+    @Getter
+    @Setter
+    public static class TableDataItem {
+        private String logId;
+        private String tableData;
+    }
+
     /** 참조 매뉴얼(문서) 목록 조회 API 응답 — TB_DOC 조회 결과 [TB_DOC] */
     @Getter
     @Setter
@@ -126,6 +134,22 @@ public class LibraryVO {
         private String createDt;
         private String modifyDt;
         private String relatedPages;
+    }
+
+    /** 차트 통계 속성 목록 조회 API 응답 [stat_attr] */
+    @Getter
+    @Setter
+    public static class ChartStatItem {
+        private String statId;
+        private String statNm;
+    }
+
+    /** 차트 라벨 목록 조회 API 응답 [stat_detail_item] */
+    @Getter
+    @Setter
+    public static class ChartDetailCdItem {
+        private String detailItemCd;
+        private String detailItemNm;
     }
 
 }

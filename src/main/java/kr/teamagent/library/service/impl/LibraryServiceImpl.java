@@ -94,6 +94,19 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 테이블 데이터 조회
+     * @param card logId 필수 (요청 body의 card)
+     * @return
+     * @throws Exception
+     */
+    public LibraryVO.TableDataItem selectTableData(LibraryVO.CardItem card) throws Exception {
+        if (card == null || CommonUtil.isEmpty(card.getLogId())) {
+            return null;
+        }
+        return libraryDAO.selectTableData(card);
+    }
+
+    /**
      * 참조 매뉴얼(문서) 목록 조회
      * @param card logId 필수 (요청 body의 card)
      * @return
@@ -228,6 +241,26 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         }
         searchVO.setUserId(userId);
         return libraryDAO.moveCard(searchVO);
+    }
+
+    /**
+     * 차트 통계 속성 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.ChartStatItem> selectChartStatList(LibraryVO searchVO) throws Exception {
+        return libraryDAO.selectChartStatList(searchVO);
+    }
+
+    /**
+     * 차트 라벨 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.ChartDetailCdItem> selectChartDetailCdList(LibraryVO searchVO) throws Exception {
+        return libraryDAO.selectChartDetailCdList(searchVO);
     }
 
 }

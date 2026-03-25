@@ -110,6 +110,21 @@ public class LibraryController extends BaseController {
     }
 
     /**
+     * 테이블 데이터 조회 API
+     * @param searchVO body: { card: { logId, ... } } — 조회 키는 card.logId
+     * @return jsonView data: TableDataItem
+     * @throws Exception
+     */
+    @RequestMapping(value = "/tableData.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView tableData(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        LibraryVO.CardItem card = searchVO != null ? searchVO.getCard() : null;
+        resultMap.put("data", libraryService.selectTableData(card));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 카드 수정 (기존 카드만 UPDATE, 신규 등록 없음)
      * @param searchVO { card: { cardId, userId, categoryId, ... } }
      * @return
@@ -210,6 +225,21 @@ public class LibraryController extends BaseController {
             libraryService.moveCard(searchVO);
         }
         return makeSuccessJsonData();
+    }
+
+    /**
+     * 차트 라벨 목록 조회
+     * @param searchVO logId (프로토타입 시연용)
+     * @return jsonView statList: ChartStatItem[], detailCdList: ChartDetailCdItem[]
+     * @throws Exception
+     */
+    @RequestMapping(value = "/chartLabel.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView chartLabel(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("statList", libraryService.selectChartStatList(searchVO));
+        resultMap.put("detailCdList", libraryService.selectChartDetailCdList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
     }
 
 }

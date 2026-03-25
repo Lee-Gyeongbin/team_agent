@@ -61,6 +61,16 @@ public class LibraryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 테이블 데이터 조회 — card.logId 필수
+     * @param card LOG_ID 기준 TB_CHAT_LOG 조회
+     * @return
+     * @throws Exception
+     */
+    public LibraryVO.TableDataItem selectTableData(LibraryVO.CardItem card) throws Exception {
+        return selectOne("library.selectTableData", card);
+    }
+
+    /**
      * 참조 매뉴얼(문서) 목록 조회 — card.logId 필수
      * @param card LOG_ID 기준 TB_CHAT_LOG·TB_DS_DOC·TB_DOC 조인
      * @return
@@ -138,6 +148,26 @@ public class LibraryDAO extends EgovComAbstractDAO {
      */
     public int moveCard(LibraryVO searchVO) throws Exception {
         return update("library.moveCard", searchVO);
+    }
+
+    /**
+     * 차트 통계 속성 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.ChartStatItem> selectChartStatList(LibraryVO searchVO) throws Exception {
+        return selectList("library.selectChartStatList", searchVO);
+    }
+
+    /**
+     * 차트 라벨 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.ChartDetailCdItem> selectChartDetailCdList(LibraryVO searchVO) throws Exception {
+        return selectList("library.selectChartDetailCdList", searchVO);
     }
 
 }
