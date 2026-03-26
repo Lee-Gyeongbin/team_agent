@@ -33,6 +33,7 @@
         <typeAlias alias="datasetVO"                         type="kr.teamagent.dataset.service.DatasetVO"/>
         <typeAlias alias="repositoryVO"                      type="kr.teamagent.repository.service.RepositoryVO"/>
         <typeAlias alias="agentVO"                           type="kr.teamagent.agent.service.AgentVO"/>
+        <typeAlias alias="noticeVO"                          type="kr.teamagent.notice.service.NoticeVO"/>
     </typeAliases>
 
     <typeHandlers>
