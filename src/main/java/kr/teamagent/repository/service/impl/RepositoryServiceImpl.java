@@ -1,9 +1,11 @@
 package kr.teamagent.repository.service.impl;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -11,6 +13,8 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import kr.teamagent.common.system.service.impl.FileServiceImpl;
+import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.repository.service.RepositoryVO;
 import kr.teamagent.repository.service.RepositoryVO.RepositoryFileItem;
@@ -22,6 +26,9 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private KeyGenerate keyGenerate;
+
+    @Autowired
+    private FileServiceImpl fileService;
 
     /**
      * 카테고리 목록 조회
@@ -126,6 +133,7 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         try {
             boolean isUpdate = StringUtils.isNotBlank(searchVO.getDocId());
             List<RepositoryFileItem> fileList = searchVO.getFile();
+            List<String> deleteFileIds = searchVO.getDeleteFileIds();
             if (!isUpdate) {
                 searchVO.setDocId(keyGenerate.generateTableKey("DC", "TB_DOC", "DOC_ID"));
                 searchVO.setUseYn("Y");
@@ -145,6 +153,28 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
 
+            int deletedFileCount = 0;
+            if (isUpdate && deleteFileIds != null && !deleteFileIds.isEmpty()) {
+                List<String> validDeleteFileIds = getValidDeleteFileIds(deleteFileIds);
+                if (!validDeleteFileIds.isEmpty()) {
+                    // NCP 삭제(=S3 오브젝트) 먼저 수행하고, 성공 시에만 DB 파일 삭제 수행
+                    FileVO ncpVo = new FileVO();
+                    ncpVo.setDocId(searchVO.getDocId());
+                    ncpVo.setDocFileIdList(validDeleteFileIds);
+                    Map<String, Object> ncpResult = fileService.deleteFilesByDocFileIds(ncpVo);
+                    if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
+                        resultMap.put("successYn", false);
+                        resultMap.put("returnMsg", "NCP 파일 삭제에 실패하였습니다. (" + ncpResult.get("returnMsg") + ")");
+                        return resultMap;
+                    }
+
+                    RepositoryVO deleteVo = new RepositoryVO();
+                    deleteVo.setDocId(searchVO.getDocId());
+                    deleteVo.setDeleteFileIds(validDeleteFileIds);
+                    deletedFileCount = repositoryDAO.deleteDocumentFileByIds(deleteVo);
+                }
+            }
+
             int savedFileCount = 0;
             if (fileList != null) {
                 List<RepositoryFileItem> validFiles = getValidFileList(fileList);
@@ -154,15 +184,17 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                     return resultMap;
                 }
 
-                repositoryDAO.deleteDocumentFileByDocId(searchVO);
-                int fileOrd = 1;
-                for (RepositoryFileItem file : validFiles) {
-                    RepositoryVO fileRow = buildDocFileRow(searchVO, file, fileOrd);
-                    int fileResult = repositoryDAO.saveDocumentFile(fileRow);
-                    if (fileResult > 0) {
-                        savedFileCount++;
+                if (!validFiles.isEmpty()) {
+                    Integer maxFileOrd = repositoryDAO.selectMaxFileOrdByDocId(searchVO);
+                    int fileOrd = (maxFileOrd == null ? 0 : maxFileOrd) + 1;
+                    for (RepositoryFileItem file : validFiles) {
+                        RepositoryVO fileRow = buildDocFileRow(searchVO, file, fileOrd);
+                        int fileResult = repositoryDAO.saveDocumentFile(fileRow);
+                        if (fileResult > 0) {
+                            savedFileCount++;
+                        }
+                        fileOrd++;
                     }
-                    fileOrd++;
                 }
             }
 
@@ -170,6 +202,7 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
             resultMap.put("savedCount", 1);
             resultMap.put("savedFileCount", savedFileCount);
+            resultMap.put("deletedFileCount", deletedFileCount);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -182,12 +215,29 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
      */
     private List<RepositoryFileItem> getValidFileList(List<RepositoryFileItem> fileList) {
         List<RepositoryFileItem> validFiles = new ArrayList<>();
+        Set<String> dedupPathSet = new HashSet<>();
         for (RepositoryFileItem item : fileList) {
             if (item != null && StringUtils.isNotBlank(item.getFilePath())) {
-                validFiles.add(item);
+                String normalizedPath = item.getFilePath().trim();
+                if (dedupPathSet.add(normalizedPath)) {
+                    validFiles.add(item);
+                }
             }
         }
         return validFiles;
+    }
+
+    /**
+     * 삭제 요청 파일 ID 배열에서 유효한 값만 필터링
+     */
+    private List<String> getValidDeleteFileIds(List<String> deleteFileIds) {
+        List<String> validDeleteFileIds = new ArrayList<>();
+        for (String deleteFileId : deleteFileIds) {
+            if (StringUtils.isNotBlank(deleteFileId)) {
+                validDeleteFileIds.add(deleteFileId);
+            }
+        }
+        return validDeleteFileIds;
     }
 
     /**

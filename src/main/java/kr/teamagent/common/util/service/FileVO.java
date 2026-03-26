@@ -14,6 +14,8 @@ public class FileVO extends CommonVO {
 
     /** TB_DOC_FILE.PK */
     private String docFileId;
+    /** 선택 삭제용 TB_DOC_FILE.PK 목록 */
+    private List<String> docFileIdList;
     /** TB_DOC_FILE.FILE_ORD */
     private Integer fileOrd;
 

@@ -73,6 +73,11 @@ public class RepositoryVO {
      */
     private List<RepositoryFileItem> file;
 
+    /**
+     * 문서 수정 시 삭제할 파일 ID 배열 (JSON 키: "deleteFileIds")
+     */
+    private List<String> deleteFileIds;
+
     @Getter
     @Setter
     public static class RepositoryFileItem {

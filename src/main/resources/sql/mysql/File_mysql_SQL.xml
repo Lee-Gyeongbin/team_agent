@@ -43,4 +43,31 @@
             AND A.DOC_ID = #{docId}
             AND A.DOC_FILE_ID = #{docFileId}
     </select>
+
+    <select id="selectFileListByDocIdAndDocFileIds" resultType="fileVO">
+        /* 문서 파일 선택 조회 file.selectFileListByDocIdAndDocFileIds */
+        SELECT
+            A.DOC_FILE_ID
+            , A.DOC_ID
+            , A.FILE_NAME
+            , A.FILE_PATH
+            , A.FILE_SIZE
+            , A.FILE_TYPE
+            , A.FILE_ORD
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM
+            TB_DOC_FILE A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+            AND A.DOC_ID = #{docId}
+            <if test="docFileIdList != null and docFileIdList.size() > 0">
+                AND A.DOC_FILE_ID IN
+                <foreach collection="docFileIdList" item="item" separator="," open="(" close=")">
+                    #{item}
+                </foreach>
+            </if>
+        ORDER BY A.DOC_FILE_ID, A.FILE_ORD
+    </select>
 </mapper>

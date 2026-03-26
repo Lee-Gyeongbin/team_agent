@@ -118,6 +118,26 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 문서 파일 선택 삭제
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int deleteDocumentFileByIds(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteDocumentFileByIds", searchVO);
+    }
+
+    /**
+     * 문서 파일 최대 순번 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public Integer selectMaxFileOrdByDocId(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectMaxFileOrdByDocId", searchVO);
+    }
+
+    /**
      * 카테고리 저장
      * @param searchVO
      * @return

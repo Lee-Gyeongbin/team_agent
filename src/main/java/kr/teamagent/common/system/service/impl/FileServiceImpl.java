@@ -211,4 +211,53 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         }
         return result;
     }
+
+    /**
+     * docId 1건 기준, docFileIdList에 해당하는 TB_DOC_FILE FILE_PATH(S3 키) 전건으로 NCP 오브젝트 삭제
+     *
+     * @param dataVO docId(단건) + docFileIdList(복수)
+     */
+    public Map<String, Object> deleteFilesByDocFileIds(FileVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        if (dataVO == null) {
+            result.put("successYn", true);
+            return result;
+        }
+        if (dataVO.getDocId() == null || dataVO.getDocId().trim().isEmpty()) {
+            result.put("successYn", true);
+            return result;
+        }
+        if (dataVO.getDocFileIdList() == null || dataVO.getDocFileIdList().isEmpty()) {
+            result.put("successYn", true);
+            return result;
+        }
+
+        String bucket = getBucketName();
+        List<String> errors = new ArrayList<>();
+
+        try {
+            List<FileVO> files = fileDAO.selectFileListByDocIdAndDocFileIds(dataVO);
+            if (files != null) {
+                for (FileVO f : files) {
+                    if (f == null) {
+                        continue;
+                    }
+                    String key = f.getFilePath();
+                    if (key == null || key.trim().isEmpty()) {
+                        continue;
+                    }
+                    s3Client.deleteObject(bucket, key.trim());
+                }
+            }
+        } catch (Exception e) {
+            errors.add(e.getMessage());
+            log.warn("NCP 객체 삭제 실패. docId={}, err={}", dataVO.getDocId(), e.getMessage(), e);
+        }
+
+        result.put("successYn", errors.isEmpty());
+        if (!errors.isEmpty()) {
+            result.put("returnMsg", String.join("; ", errors));
+        }
+        return result;
+    }
 }

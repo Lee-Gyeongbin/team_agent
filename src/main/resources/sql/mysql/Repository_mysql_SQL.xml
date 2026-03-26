@@ -262,7 +262,8 @@
             , USE_YN
             , CREATE_DT
             , MODIFY_DT
-        ) VALUES (
+        )
+        SELECT
             #{docFileId, jdbcType=VARCHAR}
             , #{docId, jdbcType=VARCHAR}
             , #{fileName, jdbcType=VARCHAR}
@@ -273,6 +274,13 @@
             , #{useYn, jdbcType=CHAR}
             , NOW()
             , NOW()
+        FROM DUAL
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM TB_DOC_FILE
+            WHERE DOC_ID = #{docId, jdbcType=VARCHAR}
+              AND FILE_PATH = #{filePath, jdbcType=VARCHAR}
+              AND USE_YN = 'Y'
         )
     </insert>
 
@@ -281,6 +289,25 @@
         DELETE FROM TB_DOC_FILE
         WHERE DOC_ID = #{docId, jdbcType=VARCHAR}
     </delete>
+
+    <delete id="deleteDocumentFileByIds" parameterType="repositoryVO">
+        /* 문서 파일 선택 삭제 repository.deleteDocumentFileByIds */
+        DELETE FROM TB_DOC_FILE
+        WHERE DOC_ID = #{docId, jdbcType=VARCHAR}
+        <if test="deleteFileIds != null and deleteFileIds.size() > 0">
+            AND DOC_FILE_ID IN
+            <foreach collection="deleteFileIds" item="item" separator="," open="(" close=")">
+                #{item}
+            </foreach>
+        </if>
+    </delete>
+
+    <select id="selectMaxFileOrdByDocId" parameterType="repositoryVO" resultType="int">
+        /* 문서 파일 최대 순번 조회 repository.selectMaxFileOrdByDocId */
+        SELECT COALESCE(MAX(FILE_ORD), 0)
+        FROM TB_DOC_FILE
+        WHERE DOC_ID = #{docId, jdbcType=VARCHAR}
+    </select>
 
     <insert id="saveCategory" parameterType="repositoryVO">
         /* 카테고리 저장(등록) repository.saveCategory
