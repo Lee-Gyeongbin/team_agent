@@ -178,4 +178,17 @@ public class DatasetController extends BaseController {
         resultMap.put("data", docDatasetService.testDataSet(datasetVO));
         return new ModelAndView("jsonView", resultMap);
     }
+
+    /**
+     * 프롬프트 목록 조회 API
+     * @return { dataList: PromptVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/selectPromptList.do")
+    @ResponseBody
+    public ModelAndView selectPromptList() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", docDatasetService.selectPromptList());
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

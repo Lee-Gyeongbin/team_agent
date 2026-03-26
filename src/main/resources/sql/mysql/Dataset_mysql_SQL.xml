@@ -442,4 +442,15 @@
                 NOW()
             )
     </insert>
+
+    <select id="selectPromptList" resultType="promptVO">
+        /* 프롬프트 목록 조회 dataset.selectPromptList */
+        SELECT
+            PROMPT_ID
+            , PROMPT_NAME
+        FROM TB_PROMPT
+        WHERE 1 = 1
+            AND USE_YN = 'Y'
+        ORDER BY PROMPT_ID
+    </select>
 </mapper>

@@ -34,6 +34,7 @@ public class RepositoryVO {
     /** RAG 지식원천 문서 마스터 */
     /** 문서 ID */
     private String docId;
+    private String docFileId;
     /** 문서 제목 */
     private String docTitle;
     /** 작성자 */
