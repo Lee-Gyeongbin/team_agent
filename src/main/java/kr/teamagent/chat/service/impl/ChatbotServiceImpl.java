@@ -158,7 +158,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @throws Exception
      */
     public ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception {
-        chatbotVO.setRoomTitle(chatbotVO.getContent());
+        chatbotVO.setRoomTitle(generateSummaryTitle(chatbotVO.getContent(),null ));
         int result = chatbotDAO.insertChatRoom(chatbotVO);
         return result > 0 ? chatbotVO : null;
     }
@@ -616,8 +616,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         String prompt = "다음 대화의 핵심 내용을 20자 이내의 한 줄 제목으로 요약해줘. 제목만 출력해. "
-                + "질문: " + truncateTitle(qContent, 200)
-                + " 답변: " + truncateTitle(rContent, 500);
+                + "질문: " + truncateTitle(qContent, 200);
+        if (CommonUtil.isNotEmpty(rContent)) {
+            prompt += " 답변: " + truncateTitle(rContent, 500);
+        }
 
         String result = callAiSummary(prompt, "title");
         if (CommonUtil.isNotEmpty(result)) {
