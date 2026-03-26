@@ -71,8 +71,8 @@
           AND A.GUIDE_TP_CD = '004'
     </select>
 
-    <insert id="insertChatGuideGreetingList" parameterType="chatGuideVO">
-        /* 챗봇가이드 인사멘트 등록/수정 chatGuide.insertChatGuideGreetingList */
+    <insert id="upsertChatGuideGreeting" parameterType="chatGuideVO">
+        /* 챗봇가이드 인사멘트 등록/수정 chatGuide.upsertChatGuideGreeting */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -95,8 +95,8 @@
             , MODIFY_DT = NOW()
     </insert>
 
-    <insert id="insertChatGuideNoticeList" parameterType="chatGuideVO">
-        /* 챗봇가이드 안내멘트 등록/수정 chatGuide.insertChatGuideNoticeList */
+    <insert id="upsertChatGuideNotice" parameterType="chatGuideVO">
+        /* 챗봇가이드 안내멘트 등록/수정 chatGuide.upsertChatGuideNotice */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -125,8 +125,8 @@
             , MODIFY_DT = NOW()
     </insert>
 
-    <insert id="insertChatGuideErrorMessageList" parameterType="chatGuideVO">
-        /* 챗봇가이드 오류메시지 등록/수정 chatGuide.insertChatGuideErrorMessageList */
+    <insert id="upsertChatGuideErrorMessage" parameterType="chatGuideVO">
+        /* 챗봇가이드 오류메시지 등록/수정 chatGuide.upsertChatGuideErrorMessage */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
@@ -152,8 +152,8 @@
             , MODIFY_DT = NOW()
     </insert>
 
-    <insert id="insertChatGuideMaintenanceList" parameterType="chatGuideVO">
-        /* 챗봇가이드 점검/장애 등록/수정 chatGuide.insertChatGuideMaintenanceList */
+    <insert id="upsertChatGuideMaintenance" parameterType="chatGuideVO">
+        /* 챗봇가이드 점검/장애 등록/수정 chatGuide.upsertChatGuideMaintenance */
         INSERT INTO TB_CHAT_GUIDE (
             GUIDE_ID
             , GUIDE_TP_CD
