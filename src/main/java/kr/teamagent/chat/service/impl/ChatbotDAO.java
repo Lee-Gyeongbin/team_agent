@@ -130,4 +130,20 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public int saveSatisYn(ChatbotVO dataVO)throws Exception {
         return update("ai.chatbot.updateSatisYn", dataVO);
     }
+
+    public List<ChatbotVO.KnowledgeItem> selectKnowledgeList(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectKnowledgeList", searchVO);
+    }
+
+    public ChatbotVO selectChatLogByLogId(ChatbotVO searchVO) throws Exception {
+        return selectOne("ai.chatbot.selectChatLogByLogId", searchVO);
+    }
+
+    public Integer selectMaxSortOrd(ChatbotVO searchVO) throws Exception {
+        return selectOne("ai.chatbot.selectMaxSortOrd", searchVO);
+    }
+
+    public int insertKnowledgeCard(ChatbotVO dataVO) throws Exception {
+        return insert("ai.chatbot.insertKnowledgeCard", dataVO);
+    }
 }

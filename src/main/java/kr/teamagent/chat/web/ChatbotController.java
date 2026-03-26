@@ -27,6 +27,8 @@ public class ChatbotController extends BaseController {
     @Autowired
     private ChatbotServiceImpl chatbotService;
 
+    
+
     /**
      * 모델 목록 조회
      * @param searchVO
@@ -148,5 +150,40 @@ public class ChatbotController extends BaseController {
         return resultMap;
     }
 
+    @RequestMapping("/ai/chatbot/saveKnowledge.do")
+    public @ResponseBody Map<String, Object> saveKnowledge(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+                return resultMap;
+            }
+
+            dataVO.setUserId(SessionUtil.getUserId());
+            resultMap = chatbotService.saveKnowledge(dataVO);
+
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * 지식 카테고리 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value="/ai/chatbot/selectKnowledgeList.do")
+    @ResponseBody
+    public ModelAndView selectKnowledgeList(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", chatbotService.selectKnowledgeList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
     
 }

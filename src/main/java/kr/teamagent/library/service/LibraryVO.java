@@ -28,10 +28,7 @@ public class LibraryVO {
     private String pinYn;
     private String archiveYn;
     private String archiveDt;
-    private String srcDocs;
     private String sqlCode;
-    private String chartCfg;
-    private String qryRslt;
     private String useYn;
     private String modifyDt;
     private String searchTitle;
@@ -97,10 +94,7 @@ public class LibraryVO {
         private String archiveYn;
         private String archiveDt;
         private Integer sortOrd;
-        private String srcDocs;
         private String sqlCode;
-        private String chartCfg;
-        private String qryRslt;
         private String useYn;
         private String createDt;
         private String modifyDt;
@@ -119,20 +113,11 @@ public class LibraryVO {
     @Setter
     public static class DocItem {
         private String docId;
-        private String docTitle;
-        private String categoryId;
-        private String author;
-        private String secLvl;
-        private String content;
+        private String docFileId;
         private String fileName;
         private String filePath;
         private Long fileSize;
         private String fileType;
-        private String keywords;
-        private String refUrl;
-        private String useYn;
-        private String createDt;
-        private String modifyDt;
         private String relatedPages;
     }
 

@@ -44,15 +44,15 @@ public class ChatGuideController extends BaseController<Object> {
 
     /**
      * 챗봇가이드 인사멘트 저장
-     * @param searchVO ChatGuideVO
+     * @param requestVO ChatGuideVO
      * @return { result, msg, data: ChatGuideVO }
      * @throws Exception
      */
     @RequestMapping(value = "/greetingSave.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView greetingSave(@RequestBody ChatGuideVO searchVO) throws Exception {
+    public ModelAndView greetingSave(@RequestBody ChatGuideVO requestVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", chatGuideService.insertChatGuideGreetingList(searchVO));
+        resultMap.put("data", chatGuideService.saveChatGuideGreeting(requestVO));
         return makeSuccessJsonData(resultMap);
     }
 
@@ -94,7 +94,7 @@ public class ChatGuideController extends BaseController<Object> {
     @ResponseBody
     public ModelAndView errorMessageList(ChatGuideVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", chatGuideService.selectChatGuideErrorMessageListGrouped(searchVO));
+        resultMap.put("dataList", chatGuideService.selectChatGuideErrorMessageListGrouped(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 

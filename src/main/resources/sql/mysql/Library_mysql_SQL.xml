@@ -41,10 +41,7 @@
             , ARCHIVE_YN
             , ARCHIVE_DT
             , SORT_ORD
-            , SRC_DOCS
             , SQL_CODE
-            , CHART_CFG
-            , QRY_RSLT
             , USE_YN
             , CREATE_DT
             , MODIFY_DT
@@ -64,7 +61,7 @@
             AND ARCHIVE_YN = #{archiveYn}
         </if>
         <if test="searchTitle != null and searchTitle != ''">
-            AND TITLE LIKE CONCAT('%', #{searchTitle}, '%')
+            AND (TITLE LIKE CONCAT('%', #{searchTitle}, '%') OR TAGS LIKE CONCAT('%', #{searchTitle}, '%'))
         </if>
         <choose>
             <when test='searchSort == "custom"'>
@@ -95,27 +92,18 @@
     <select id="selectDocList" parameterMap="cardItem" resultMap="docItemResult">
         /* 참조 매뉴얼(문서) 목록 조회 library.selectDocList */
         SELECT
-            B.DOC_ID
-            , B.DOC_TITLE
-            , B.CATEGORY_ID
-            , B.AUTHOR
-            , B.SEC_LVL
-            , B.CONTENT
-            , B.FILE_NAME
+            B.DOC_ID 
+            , B.DOC_FILE_ID 
+			, B.FILE_NAME
             , B.FILE_PATH
             , B.FILE_SIZE
             , B.FILE_TYPE
-            , B.KEYWORDS
-            , B.REF_URL
-            , B.USE_YN
-            , B.CREATE_DT
-            , B.MODIFY_DT
             , A.RELATED_PAGES
         FROM TB_CHAT_REF A
-            INNER JOIN TB_DOC B
-                ON A.DOC_ID = B.DOC_ID
+            INNER JOIN TB_DOC_FILE B ON A.DOC_ID = B.DOC_ID AND A.DOC_FILE_ID = B.DOC_FILE_ID 
         WHERE 1=1
             AND A.LOG_ID = #{logId}
+        ORDER BY A.CHAT_REF_ID
     </select>
 
     <select id="selectCardDetail" resultType="libraryVO">
@@ -132,10 +120,7 @@
             , A.ARCHIVE_YN
             , A.ARCHIVE_DT
             , A.SORT_ORD
-            , A.SRC_DOCS
             , A.SQL_CODE
-            , A.CHART_CFG
-            , A.QRY_RSLT
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -166,10 +151,7 @@
             , A.ARCHIVE_YN
             , A.ARCHIVE_DT
             , A.SORT_ORD
-            , A.SRC_DOCS
             , A.SQL_CODE
-            , A.CHART_CFG
-            , A.QRY_RSLT
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -183,7 +165,7 @@
             AND A.ARCHIVE_YN = 'Y'
             AND A.USE_YN = 'Y'
             AND A.USER_ID = #{userId}
-        ORDER BY A.SORT_ORD, A.CREATE_DT DESC
+        ORDER BY A.ARCHIVE_DT DESC
     </select>
 
     <select id="selectTrashCardList" resultType="libraryVO">
@@ -200,10 +182,7 @@
             , A.ARCHIVE_YN
             , A.ARCHIVE_DT
             , A.SORT_ORD
-            , A.SRC_DOCS
             , A.SQL_CODE
-            , A.CHART_CFG
-            , A.QRY_RSLT
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -216,7 +195,7 @@
         WHERE 1=1
             AND A.USE_YN = 'N'
             AND A.USER_ID = #{userId}
-        ORDER BY A.SORT_ORD, A.CREATE_DT DESC
+        ORDER BY A.MODIFY_DT DESC
     </select>
 
     <update id="updateCardPin">
@@ -281,6 +260,14 @@
             , COLOR = VALUES(COLOR)
             , SORT_ORD = VALUES(SORT_ORD)
     </insert>
+
+    <select id="selectCategoryCardCount" parameterMap="categoryItem" resultType="int">
+        /* 카테고리 하위 카드 존재여부 카운트 library.selectCategoryCardCount */
+        SELECT COUNT(*)
+        FROM TB_KNOW_CARD
+        WHERE CATEGORY_ID = #{categoryId}
+          AND USER_ID = #{userId}
+    </select>
 
     <delete id="deleteCategory" parameterMap="categoryItem">
         /* 카테고리 삭제 library.deleteCategory */
@@ -347,6 +334,13 @@
             </foreach>
         </foreach>
     </update>
+
+    <delete id="deleteTrashCard">
+        /* 휴지통 카드 완전 삭제 library.deleteTrashCard */
+        DELETE FROM TB_KNOW_CARD
+        WHERE USE_YN = 'N'
+          AND USER_ID = #{userId}
+    </delete>
 
     <select id="selectChartStatList" resultMap="chartStatItemResult">
         /* 차트 통계 속성 목록 조회 library.selectChartStatList */

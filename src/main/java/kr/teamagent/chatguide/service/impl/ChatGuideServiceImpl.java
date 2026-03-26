@@ -38,7 +38,7 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
      * @return 저장 반영된 vo
      * @throws Exception
      */
-    public ChatGuideVO insertChatGuideGreetingList(ChatGuideVO vo) throws Exception {
+    public ChatGuideVO saveChatGuideGreeting(ChatGuideVO vo) throws Exception {
         if (vo == null) {
             throw new IllegalArgumentException("요청 본문은 필수입니다.");
         }
@@ -47,7 +47,7 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
             vo.setGuideKey("GREET_WELCOME");
         }
         resolveGuideIdIfBlank(vo);
-        chatGuideDAO.insertChatGuideGreetingList(vo);
+        chatGuideDAO.upsertChatGuideGreeting(vo);
         return vo;
     }
 
@@ -85,12 +85,12 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
      * @return 저장 반영된 vo
      * @throws Exception
      */
-    public ChatGuideVO insertChatGuideNoticeList(ChatGuideVO vo) throws Exception {
+    public ChatGuideVO saveChatGuideNotice(ChatGuideVO vo) throws Exception {
         if (vo == null) {
             throw new IllegalArgumentException("요청 본문은 필수입니다.");
         }
         resolveGuideIdIfBlank(vo);
-        chatGuideDAO.insertChatGuideNoticeList(vo);
+        chatGuideDAO.upsertChatGuideNotice(vo);
         return vo;
     }
 
@@ -100,7 +100,7 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
      * @return 그룹별 오류메시지 Map
      * @throws Exception
      */
-    public Map<String, Object> selectChatGuideErrorMessageListGrouped(ChatGuideVO searchVO) throws Exception {
+    public Map<String, List<ChatGuideVO>> selectChatGuideErrorMessageListGrouped(ChatGuideVO searchVO) throws Exception {
         List<ChatGuideVO> flat = chatGuideDAO.selectChatGuideErrorMessageList(searchVO);
         Map<String, List<ChatGuideVO>> grouped = new HashMap<>();
         grouped.put("apiErrors", new ArrayList<ChatGuideVO>());
@@ -111,11 +111,11 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
             if (row == null) {
                 continue;
             }
-            String gk = row.getGuideKey();
-            if (!(gk != null && !gk.trim().isEmpty())) {
+            String guideKey = row.getGuideKey();
+            if (!(guideKey != null && !guideKey.trim().isEmpty())) {
                 continue;
             }
-            String normalizedKey = gk.trim().toUpperCase();
+            String normalizedKey = guideKey.trim().toUpperCase();
             if (normalizedKey.startsWith("INPUT_")) {
                 grouped.get("inputErrors").add(row);
             } else if (normalizedKey.startsWith("RESP_")) {
@@ -124,7 +124,7 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
                 grouped.get("apiErrors").add(row);
             }
         }
-        return new HashMap<String, Object>(grouped);
+        return grouped;
     }
 
     /**
@@ -167,42 +167,28 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
         }
         if (requestVO.getDataList() != null) {
             for (ChatGuideVO vo : requestVO.getDataList()) {
-                if (vo != null) {
-                    insertChatGuideMaintenanceList(vo);
+                if (vo == null) {
+                    continue;
                 }
+                if (vo.getStartDt() != null) {
+                    String startDt = vo.getStartDt().trim();
+                    vo.setStartDt(startDt.isEmpty() ? null : startDt);
+                }
+                if (vo.getEndDt() != null) {
+                    String endDt = vo.getEndDt().trim();
+                    vo.setEndDt(endDt.isEmpty() ? null : endDt);
+                }
+                resolveGuideIdIfBlank(vo);
+                chatGuideDAO.upsertChatGuideMaintenance(vo);
             }
         }
         return requestVO;
     }
 
-    /**
-     * 점검/장애 저장
-     * @param vo 저장 대상
-     * @return 저장 반영된 vo
-     * @throws Exception
-     */
-    public ChatGuideVO insertChatGuideMaintenanceList(ChatGuideVO vo) throws Exception {
-        if (vo == null) {
-            throw new IllegalArgumentException("요청 본문은 필수입니다.");
-        }
-        // DB datetime 컬럼 null 처리
-        if (vo.getStartDt() != null) {
-            String startDt = vo.getStartDt().trim();
-            vo.setStartDt(startDt.isEmpty() ? null : startDt);
-        }
-        if (vo.getEndDt() != null) {
-            String endDt = vo.getEndDt().trim();
-            vo.setEndDt(endDt.isEmpty() ? null : endDt);
-        }
-        resolveGuideIdIfBlank(vo);
-        chatGuideDAO.insertChatGuideMaintenanceList(vo);
-        return vo;
-    }
-
     /** 안내멘트 저장 */
     private void saveNoticeIfPresent(ChatGuideVO vo) throws Exception {
         if (vo != null) {
-            insertChatGuideNoticeList(vo);
+            saveChatGuideNotice(vo);
         }
     }
 
@@ -216,7 +202,7 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
                 continue;
             }
             resolveGuideIdIfBlank(vo);
-            chatGuideDAO.insertChatGuideErrorMessageList(vo);
+            chatGuideDAO.upsertChatGuideErrorMessage(vo);
         }
     }
 

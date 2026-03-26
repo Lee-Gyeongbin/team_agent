@@ -14,32 +14,32 @@ public class ChatGuideDAO extends EgovComAbstractDAO {
         return selectList("chatGuide.selectChatGuideGreetingList", searchVO);
     }
 
-    public void insertChatGuideGreetingList(ChatGuideVO vo) throws Exception {
-        insert("chatGuide.insertChatGuideGreetingList", vo);
+    public void upsertChatGuideGreeting(ChatGuideVO vo) throws Exception {
+        insert("chatGuide.upsertChatGuideGreeting", vo);
     }
 
     public List<ChatGuideVO> selectChatGuideNoticeList(ChatGuideVO searchVO) throws Exception {
         return selectList("chatGuide.selectChatGuideNoticeList", searchVO);
     }
 
-    public void insertChatGuideNoticeList(ChatGuideVO vo) throws Exception {
-        insert("chatGuide.insertChatGuideNoticeList", vo);
+    public void upsertChatGuideNotice(ChatGuideVO vo) throws Exception {
+        insert("chatGuide.upsertChatGuideNotice", vo);
     }
 
     public List<ChatGuideVO> selectChatGuideErrorMessageList(ChatGuideVO searchVO) throws Exception {
         return selectList("chatGuide.selectChatGuideErrorMessageList", searchVO);
     }
 
-    public void insertChatGuideErrorMessageList(ChatGuideVO vo) throws Exception {
-        insert("chatGuide.insertChatGuideErrorMessageList", vo);
+    public void upsertChatGuideErrorMessage(ChatGuideVO vo) throws Exception {
+        insert("chatGuide.upsertChatGuideErrorMessage", vo);
     }
 
     public List<ChatGuideVO> selectChatGuideMaintenanceList(ChatGuideVO searchVO) throws Exception {
         return selectList("chatGuide.selectChatGuideMaintenanceList", searchVO);
     }
 
-    public void insertChatGuideMaintenanceList(ChatGuideVO vo) throws Exception {
-        insert("chatGuide.insertChatGuideMaintenanceList", vo);
+    public void upsertChatGuideMaintenance(ChatGuideVO vo) throws Exception {
+        insert("chatGuide.upsertChatGuideMaintenance", vo);
     }
 
 }

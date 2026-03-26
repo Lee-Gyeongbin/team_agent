@@ -123,4 +123,26 @@ public class ChatbotVO extends CommonVO {
     private String statNm;
     private String detailItemCd;
     private String detailItemNm;
+
+    private String categoryId;
+
+    // 지식 카드 정보(TB_KNOW_CARD)
+    private String cardId;
+    private String tags;
+    private String pinYn;
+    private String archiveYn;
+    private String archiveDt;
+    private Integer sortOrd;
+    private String sqlCode;
+
+    @Getter
+    @Setter
+    public static class KnowledgeItem {
+        private String categoryId;
+        private String userId;
+        private String categoryNm;
+        private String color;
+        private Integer sortOrd;
+        private String createDt;
+    }
 }
