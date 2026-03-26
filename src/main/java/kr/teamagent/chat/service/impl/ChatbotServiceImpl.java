@@ -582,7 +582,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setSortOrd(maxSortOrd != null ? maxSortOrd + 1 : 1);
 
         chatbotVO.setSvcTy(chatLog.getSvcTy());
-        chatbotVO.setTitle(truncateTitle(chatLog.getQContent(), 50));
+        chatbotVO.setTitle(generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()));
+        chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent()));
         chatbotVO.setPinYn("N");
         chatbotVO.setArchiveYn("N");
         chatbotVO.setUseYn("Y");
@@ -603,6 +604,142 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return "";
         }
         return text.length() <= maxLength ? text : text.substring(0, maxLength);
+    }
+
+    /**
+     * AI 서버를 통해 질문/답변을 요약한 제목을 생성한다.
+     * 실패 시 qContent를 50자로 잘라 반환(fallback).
+     */
+    private String generateSummaryTitle(String qContent, String rContent) {
+        if (CommonUtil.isEmpty(qContent)) {
+            return truncateTitle(rContent, 50);
+        }
+
+        String prompt = "다음 대화의 핵심 내용을 20자 이내의 한 줄 제목으로 요약해줘. 제목만 출력해. "
+                + "질문: " + truncateTitle(qContent, 200)
+                + " 답변: " + truncateTitle(rContent, 500);
+
+        String result = callAiSummary(prompt, "title");
+        if (CommonUtil.isNotEmpty(result)) {
+            return truncateTitle(result, 50);
+        }
+        return truncateTitle(qContent, 50);
+    }
+
+    /**
+     * AI 서버를 통해 질문/답변에서 태그를 추출한다.
+     * 쉼표(,)로 구분된 최대 5개 태그를 반환한다.
+     * 실패 시 빈 문자열 반환(fallback).
+     */
+    private String generateSummaryTags(String qContent, String rContent) {
+        if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
+            return "";
+        }
+
+        String prompt = "다음 대화에서 핵심 키워드를 최대 5개 추출해줘. 쉼표(,)로 구분해서 키워드만 출력해. 부연 설명 없이 키워드만. "
+                + "질문: " + truncateTitle(qContent, 200)
+                + " 답변: " + truncateTitle(rContent, 500);
+
+        String result = callAiSummary(prompt, "tags");
+        if (CommonUtil.isNotEmpty(result)) {
+            return truncateTitle(result.trim(), 200);
+        }
+        return "";
+    }
+
+    /**
+     * GPT endpoint에 동기 호출하여 AI 응답 텍스트를 반환한다.
+     * doInsertAiLog를 호출하지 않으므로 로그 테이블에 쌓이지 않는다.
+     * @param prompt 요청 프롬프트
+     * @param purpose 로깅용 호출 목적 (title, tags 등)
+     * @return AI 응답 텍스트, 실패 시 null
+     */
+    private String callAiSummary(String prompt, String purpose) {
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            logger.warn("{} 생성 실패 - GPT API URL 미설정", purpose);
+            return null;
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", prompt);
+        params.put("user_id", "");
+        params.put("threadId", "string");
+
+        try {
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build();
+
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            String jsonBody = gson.toJson(params);
+            RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "text/event-stream")
+                    .build();
+
+            logger.info("AI {} 생성 호출 시작 - url: {}", purpose, apiUrl);
+
+            try (okhttp3.Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("AI {} 응답 오류: {}", purpose, response.code());
+                    return null;
+                }
+
+                try (okhttp3.ResponseBody responseBody = response.body()) {
+                    java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
+
+                    String line;
+                    StringBuilder accumulated = new StringBuilder();
+                    String currentEvent = null;
+
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith("event: ")) {
+                            currentEvent = line.substring(7).trim();
+                            continue;
+                        }
+                        if (line.startsWith("data: ")) {
+                            String jsonStr = line.substring(6).trim();
+                            try {
+                                JSONParser jsonParser = new JSONParser();
+                                JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
+
+                                if ("answer_delta".equals(currentEvent)) {
+                                    String text = (String) data.get("text");
+                                    if (text != null && !text.isEmpty()) {
+                                        accumulated.append(text);
+                                    }
+                                } else if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
+                                    String answer = (String) data.get("answer");
+                                    if (answer != null && !answer.isEmpty()) {
+                                        accumulated = new StringBuilder(answer);
+                                    }
+                                    break;
+                                }
+                            } catch (Exception e) {
+                                logger.warn("AI {} SSE 파싱 오류 (무시): {}", purpose, e.getMessage());
+                            }
+                        }
+                    }
+
+                    if (accumulated.length() > 0) {
+                        String result = accumulated.toString().trim();
+                        logger.info("AI {} 생성 완료: {}", purpose, result);
+                        return result;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("AI {} 생성 중 오류 발생: {}", purpose, e.getMessage());
+        }
+
+        return null;
     }
 
     /**
