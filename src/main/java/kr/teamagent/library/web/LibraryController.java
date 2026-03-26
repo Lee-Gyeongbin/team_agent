@@ -177,7 +177,10 @@ public class LibraryController extends BaseController {
     @ResponseBody
     public ModelAndView deleteCategory(@RequestBody LibraryVO searchVO) throws Exception {
         if (searchVO != null) {
-            libraryService.deleteCategory(searchVO.getCategory());
+            int result = libraryService.deleteCategory(searchVO.getCategory());
+            if (result == -1) {
+                return makeFailJsonData("카테고리 하위에 카드가 존재하여 삭제할 수 없습니다.\n(보관함 또는 휴지통)");
+            }
         }
         return makeSuccessJsonData();
     }
@@ -224,6 +227,19 @@ public class LibraryController extends BaseController {
         if (searchVO != null) {
             libraryService.moveCard(searchVO);
         }
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 휴지통 카드 완전 삭제 (USE_YN='N'인 해당 사용자의 카드 일괄 DELETE)
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/deleteTrashCard.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteTrashCard(@RequestBody LibraryVO searchVO) throws Exception {
+        libraryService.deleteTrashCard(searchVO);
         return makeSuccessJsonData();
     }
 
