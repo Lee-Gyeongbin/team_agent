@@ -166,10 +166,15 @@
 
     <select id="selectDocExistCnt" resultType="int">
         /* 문서 존재 여부 조회 repository.selectDocExistCnt */
-        SELECT COUNT(*) AS CNT
-        FROM TB_DOC
-        WHERE USE_YN = 'Y'
-        AND (CATEGORY_ID, FILE_NAME) IN (
+        SELECT
+            COUNT(*)	AS CNT
+        FROM
+            TB_DOC_FILE A
+        LEFT OUTER JOIN TB_DOC B
+            ON B.DOC_ID = A.DOC_ID
+        WHERE 1 = 1
+        AND A.USE_YN = 'Y'
+        AND (B.CATEGORY_ID, A.FILE_NAME) IN (
             <foreach collection="docIdList" item="item" separator=",">
                 (#{item.categoryId}, #{item.fileName})
             </foreach>
@@ -209,10 +214,6 @@
             , AUTHOR
             , SEC_LVL
             , CONTENT
-            , FILE_NAME
-            , FILE_PATH
-            , FILE_SIZE
-            , FILE_TYPE
             , KEYWORDS
             , REF_URL
             , USE_YN
@@ -225,10 +226,6 @@
             , #{author, jdbcType=VARCHAR}
             , #{secLvl, jdbcType=VARCHAR}
             , #{content, jdbcType=LONGVARCHAR}
-            , #{fileName, jdbcType=VARCHAR}
-            , #{filePath, jdbcType=VARCHAR}
-            , #{fileSize, jdbcType=BIGINT}
-            , #{fileType, jdbcType=VARCHAR}
             , #{keywords, jdbcType=VARCHAR}
             , #{refUrl, jdbcType=VARCHAR}
             , #{useYn, jdbcType=CHAR}
@@ -245,17 +242,45 @@
             , AUTHOR = #{author, jdbcType=VARCHAR}
             , SEC_LVL = #{secLvl, jdbcType=VARCHAR}
             , CONTENT = #{content, jdbcType=LONGVARCHAR}
-            , FILE_NAME = #{fileName, jdbcType=VARCHAR}
-            , FILE_PATH = #{filePath, jdbcType=VARCHAR}
-            , FILE_SIZE = #{fileSize, jdbcType=BIGINT}
-            , FILE_TYPE = #{fileType, jdbcType=VARCHAR}
             , KEYWORDS = #{keywords, jdbcType=VARCHAR}
             , REF_URL = #{refUrl, jdbcType=VARCHAR}
             , USE_YN = #{useYn, jdbcType=CHAR}
             , MODIFY_DT = NOW()
-        WHERE DOC_TITLE = #{docTitle, jdbcType=BIGINT}
-            AND CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+        WHERE DOC_ID = #{docId, jdbcType=VARCHAR}
     </update>
+
+    <insert id="saveDocumentFile" parameterType="repositoryVO">
+        /* 문서 파일 저장 repository.saveDocumentFile */
+        INSERT INTO TB_DOC_FILE (
+            DOC_FILE_ID
+            , DOC_ID
+            , FILE_NAME
+            , FILE_PATH
+            , FILE_SIZE
+            , FILE_TYPE
+            , FILE_ORD
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{docFileId, jdbcType=VARCHAR}
+            , #{docId, jdbcType=VARCHAR}
+            , #{fileName, jdbcType=VARCHAR}
+            , #{filePath, jdbcType=VARCHAR}
+            , #{fileSize, jdbcType=BIGINT}
+            , #{fileType, jdbcType=VARCHAR}
+            , #{fileOrd, jdbcType=INTEGER}
+            , #{useYn, jdbcType=CHAR}
+            , NOW()
+            , NOW()
+        )
+    </insert>
+
+    <delete id="deleteDocumentFileByDocId" parameterType="repositoryVO">
+        /* 문서 파일 삭제 repository.deleteDocumentFileByDocId */
+        DELETE FROM TB_DOC_FILE
+        WHERE DOC_ID = #{docId, jdbcType=VARCHAR}
+    </delete>
 
     <insert id="saveCategory" parameterType="repositoryVO">
         /* 카테고리 저장(등록) repository.saveCategory

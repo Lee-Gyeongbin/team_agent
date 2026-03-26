@@ -124,100 +124,52 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> resultMap = new HashMap<>();
 
         try {
-            // docId가 있으면 업데이트, 없으면 인서트
             boolean isUpdate = StringUtils.isNotBlank(searchVO.getDocId());
             List<RepositoryFileItem> fileList = searchVO.getFile();
-            if (!isUpdate && fileList != null && !fileList.isEmpty()) {
-                List<RepositoryFileItem> validFiles = new ArrayList<>();
-                for (RepositoryFileItem item : fileList) {
-                    if (item != null && StringUtils.isNotBlank(item.getFilePath())) {
-                        validFiles.add(item);
-                    }
+            if (!isUpdate) {
+                searchVO.setDocId(keyGenerate.generateTableKey("DC", "TB_DOC", "DOC_ID"));
+                searchVO.setUseYn("Y");
+                int result = repositoryDAO.saveDocument(searchVO);
+                if (result <= 0) {
+                    resultMap.put("successYn", false);
+                    resultMap.put("returnMsg", "문서 저장에 실패하였습니다.");
+                    return resultMap;
                 }
-                if (validFiles.isEmpty()) {
+            } else {
+                searchVO.setUseYn("Y");
+                int result = repositoryDAO.updateDocument(searchVO);
+                if (result <= 0) {
+                    resultMap.put("successYn", false);
+                    resultMap.put("returnMsg", "문서 업데이트에 실패하였습니다.");
+                    return resultMap;
+                }
+            }
+
+            int savedFileCount = 0;
+            if (fileList != null) {
+                List<RepositoryFileItem> validFiles = getValidFileList(fileList);
+                if (!fileList.isEmpty() && validFiles.isEmpty()) {
                     resultMap.put("successYn", false);
                     resultMap.put("returnMsg", "파일 정보(filePath)가 없습니다.");
                     return resultMap;
                 }
-                int inserted = 0;
-                for (RepositoryFileItem item : validFiles) {
-                    RepositoryVO row = buildDocRow(searchVO, item);
-                    row.setDocId(keyGenerate.generateTableKey("DC", "TB_DOC", "DOC_ID"));
-                    row.setUseYn("Y");
-                    int result = repositoryDAO.saveDocument(row);
-                    if (result > 0) {
-                        inserted++;
-                    }
-                }
-                if (inserted == validFiles.size()) {
-                    resultMap.put("successYn", true);
-                    resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
-                    resultMap.put("savedCount", inserted);
-                } else {
-                    resultMap.put("successYn", false);
-                    resultMap.put("returnMsg", "일부 문서 저장에 실패하였습니다.");
-                    resultMap.put("savedCount", inserted);
-                }
-            } else if (!isUpdate) {
-                searchVO.setDocId(keyGenerate.generateTableKey("DC", "TB_DOC", "DOC_ID"));
-                searchVO.setUseYn("Y");
-                int result = repositoryDAO.saveDocument(searchVO);
-                if (result > 0) {
-                    resultMap.put("successYn", true);
-                    resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
-                    resultMap.put("savedCount", 1);
-                } else {
-                    resultMap.put("successYn", false);
-                    resultMap.put("returnMsg", "문서 저장에 실패하였습니다.");
-                }
-            } else {
-                // 업데이트 로직: docId는 클라이언트에서 전달된 값을 그대로 사용
-                if (fileList != null && !fileList.isEmpty()) {
-                    List<RepositoryFileItem> validFiles = new ArrayList<>();
-                    for (RepositoryFileItem item : fileList) {
-                        if (item != null && StringUtils.isNotBlank(item.getFilePath())) {
-                            validFiles.add(item);
-                        }
-                    }
 
-                    if (validFiles.isEmpty()) {
-                        resultMap.put("successYn", false);
-                        resultMap.put("returnMsg", "파일 정보(filePath)가 없습니다.");
-                        return resultMap;
+                repositoryDAO.deleteDocumentFileByDocId(searchVO);
+                int fileOrd = 1;
+                for (RepositoryFileItem file : validFiles) {
+                    RepositoryVO fileRow = buildDocFileRow(searchVO, file, fileOrd);
+                    int fileResult = repositoryDAO.saveDocumentFile(fileRow);
+                    if (fileResult > 0) {
+                        savedFileCount++;
                     }
-                    // 현재 VO/요청 스펙상 docId는 1개로 판단하므로, 업데이트는 1건 파일만 허용
-                    if (validFiles.size() != 1) {
-                        resultMap.put("successYn", false);
-                        resultMap.put("returnMsg", "업데이트는 파일 1건만 지원합니다.");
-                        return resultMap;
-                    }
-
-                    RepositoryVO row = buildDocRow(searchVO, validFiles.get(0));
-                    row.setDocId(searchVO.getDocId());
-                    row.setUseYn("Y");
-                    int result = repositoryDAO.saveDocument(row);
-                    if (result > 0) {
-                        resultMap.put("successYn", true);
-                        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
-                        resultMap.put("savedCount", 1);
-                    } else {
-                        resultMap.put("successYn", false);
-                        resultMap.put("returnMsg", "문서 업데이트에 실패하였습니다.");
-                    }
-                } else {
-                    // 파일 배열이 없으면 기존 단일 필드들(fileName/filePath...)로 업데이트
-                    searchVO.setUseYn("Y");
-                    int result = repositoryDAO.updateDocument(searchVO);
-                    if (result > 0) {
-                        resultMap.put("successYn", true);
-                        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
-                        resultMap.put("savedCount", 1);
-                    } else {
-                        resultMap.put("successYn", false);
-                        resultMap.put("returnMsg", "문서 업데이트에 실패하였습니다.");
-                    }
+                    fileOrd++;
                 }
             }
+
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            resultMap.put("savedCount", 1);
+            resultMap.put("savedFileCount", savedFileCount);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -226,21 +178,31 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 공통 메타 + 파일 한 건만 반영한 VO (TB_DOC 1행)
+     * 요청 파일 배열에서 filePath가 있는 항목만 필터링
      */
-    private RepositoryVO buildDocRow(RepositoryVO meta, RepositoryFileItem file) {
+    private List<RepositoryFileItem> getValidFileList(List<RepositoryFileItem> fileList) {
+        List<RepositoryFileItem> validFiles = new ArrayList<>();
+        for (RepositoryFileItem item : fileList) {
+            if (item != null && StringUtils.isNotBlank(item.getFilePath())) {
+                validFiles.add(item);
+            }
+        }
+        return validFiles;
+    }
+
+    /**
+     * TB_DOC_FILE 저장용 VO 생성
+     */
+    private RepositoryVO buildDocFileRow(RepositoryVO docMeta, RepositoryFileItem file, int fileOrd) throws Exception {
         RepositoryVO row = new RepositoryVO();
-        row.setDocTitle(meta.getDocTitle());
-        row.setCategoryId(meta.getCategoryId());
-        row.setAuthor(meta.getAuthor());
-        row.setSecLvl(meta.getSecLvl());
-        row.setContent(meta.getContent());
-        row.setKeywords(meta.getKeywords());
-        row.setRefUrl(meta.getRefUrl());
+        row.setDocFileId(keyGenerate.generateTableKey("DF", "TB_DOC_FILE", "DOC_FILE_ID"));
+        row.setDocId(docMeta.getDocId());
         row.setFileName(file.getFileName());
         row.setFilePath(file.getFilePath());
         row.setFileSize(file.getFileSize());
         row.setFileType(file.getFileType());
+        row.setFileOrd(fileOrd);
+        row.setUseYn("Y");
         return row;
     }
 

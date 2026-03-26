@@ -51,6 +51,8 @@ public class RepositoryVO {
     private String fileSize;
     /** 파일 타입 */
     private String fileType;
+    /** 파일 순번 */
+    private Integer fileOrd;
     /** 키워드 */
     private String keywords;
     /** 참조 URL */
