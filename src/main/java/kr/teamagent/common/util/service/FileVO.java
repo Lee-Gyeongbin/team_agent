@@ -12,6 +12,11 @@ public class FileVO extends CommonVO {
 
     private String docId;
 
+    /** TB_DOC_FILE.PK */
+    private String docFileId;
+    /** TB_DOC_FILE.FILE_ORD */
+    private Integer fileOrd;
+
     /** NCP 객체 삭제 등, docId 다건 요청용 */
     private List<String> docIdList;
     private String docTitle;

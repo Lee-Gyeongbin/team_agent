@@ -11,7 +11,7 @@
             STAT_ATTR A
         WHERE 1=1
             AND A.USE_AT = 'Y'
-        GROUP BY A.STAT_ID
+        GROUP BY A.STAT_ID, A.STAT_NM
     </select>
 
     <!-- TODO 추후 시연 완료 후 삭제 -->

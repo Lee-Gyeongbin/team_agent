@@ -64,6 +64,16 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 문서별 파일 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<RepositoryVO> selectDocFileListByDocId(RepositoryVO searchVO) throws Exception {
+        return repositoryDAO.selectDocFileListByDocId(searchVO);
+    }
+
+    /**
      * 문서 존재 여부 조회
      * @param searchVO
      * @return
@@ -271,6 +281,25 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         } else {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "카테고리 수정에 실패하였습니다.");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 카테고리 삭제
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> deleteCategory(RepositoryVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        int result = repositoryDAO.deleteCategory(searchVO);
+        if (result > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "카테고리 삭제에 실패하였습니다.");
         }
         return resultMap;
     }

@@ -71,6 +71,13 @@ public class DatasetVO {
     /** TB_DS_DOC */
     /** 문서 ID */
     private String docId;
+    private String docFileId;
+    private String fileName;
+    private String filePath;
+    private String fileSize;
+    private String fileType;
+    private String fileOrd;
+    private String fileCount;
     /** 문서 제목 */
     private String docTitle;
 

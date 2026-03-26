@@ -8,6 +8,7 @@ import egovframework.com.cmm.service.impl.EgovComAbstractDAO;
 import kr.teamagent.dataset.service.DatasetVO;
 import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
 import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
+import kr.teamagent.prompt.service.PromptVO;
 
 @Repository
 public class DatasetDAO extends EgovComAbstractDAO {
@@ -200,5 +201,9 @@ public class DatasetDAO extends EgovComAbstractDAO {
      */
     public int insertDocDatasetHistory(DatasetVO searchVO) throws Exception {
         return insert("dataset.insertDocDatasetHistory", searchVO);
+    }
+
+    public List<PromptVO> selectPromptList() throws Exception {
+        return selectList("dataset.selectPromptList");
     }
 }

@@ -61,6 +61,7 @@ public class RepositoryController extends BaseController {
     public ModelAndView selectDetailByDocId(@RequestBody RepositoryVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", repositoryService.selectDetailByDocId(searchVO));
+        resultMap.put("fileList", repositoryService.selectDocFileListByDocId(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -81,16 +82,13 @@ public class RepositoryController extends BaseController {
     @RequestMapping("/deleteDocument.do")
     public @ResponseBody Map<String, Object> deleteDocument(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        Map<String, Object> responseMap = new HashMap<>();
 
         try {
             // 유효성 검사
             if (bindingResult.hasErrors()) {
                 resultMap.put("successYn", false);
                 resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
-                responseMap.put("data", resultMap);
-                responseMap.putAll(resultMap);
-                return responseMap;
+                return resultMap;
             }
 
             resultMap = repositoryService.deleteDocument(dataVO);
@@ -100,9 +98,7 @@ public class RepositoryController extends BaseController {
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
 
-        responseMap.put("data", resultMap);
-        responseMap.putAll(resultMap);
-        return responseMap;
+        return resultMap;
     }
     
     @RequestMapping("/saveDocument.do")
@@ -111,16 +107,13 @@ public class RepositoryController extends BaseController {
             BindingResult bindingResult
     ) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        Map<String, Object> responseMap = new HashMap<>();
 
         try {
             // 유효성 검사
             if (bindingResult.hasErrors()) {
                 resultMap.put("successYn", false);
                 resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
-                responseMap.put("data", resultMap);
-                responseMap.putAll(resultMap);
-                return responseMap;
+                return resultMap;
             }
 
             resultMap = repositoryService.saveDocument(dataVO);
@@ -130,9 +123,7 @@ public class RepositoryController extends BaseController {
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
 
-        responseMap.put("data", resultMap);
-        responseMap.putAll(resultMap);
-        return responseMap;
+        return resultMap;
     }
 
     /**
@@ -159,16 +150,13 @@ public class RepositoryController extends BaseController {
     @RequestMapping("/saveCategory.do")
     public @ResponseBody Map<String, Object> saveCategory(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        Map<String, Object> responseMap = new HashMap<>();
 
         try {
             // 유효성 검사
             if (bindingResult.hasErrors()) {
                 resultMap.put("successYn", false);
                 resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
-                responseMap.put("data", resultMap);
-                responseMap.putAll(resultMap);
-                return responseMap;
+                return resultMap;
             }
 
             resultMap = repositoryService.saveCategory(dataVO);
@@ -178,24 +166,19 @@ public class RepositoryController extends BaseController {
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
 
-        responseMap.put("data", resultMap);
-        responseMap.putAll(resultMap);
-        return responseMap;
+        return resultMap;
     }
 
     @RequestMapping("/renameCategory.do")
     public @ResponseBody Map<String, Object> renameCategory(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        Map<String, Object> responseMap = new HashMap<>();
 
         try {
             // 유효성 검사
             if (bindingResult.hasErrors()) {
                 resultMap.put("successYn", false);
                 resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
-                responseMap.put("data", resultMap);
-                responseMap.putAll(resultMap);
-                return responseMap;
+                return resultMap;
             }
 
             resultMap = repositoryService.renameCategory(dataVO);
@@ -204,8 +187,26 @@ public class RepositoryController extends BaseController {
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
 
-        responseMap.put("data", resultMap);
-        responseMap.putAll(resultMap);
-        return responseMap;
+        return resultMap;
+    }
+
+    @RequestMapping("/deleteCategory.do")
+    public @ResponseBody Map<String, Object> deleteCategory(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        
+        try {
+            // 유효성 검사
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+            }
+            
+            resultMap = repositoryService.deleteCategory(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
     }
 }

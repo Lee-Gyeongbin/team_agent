@@ -566,6 +566,72 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * 채팅방 제목 수정
+     * @param chatbotVO roomId, roomTitle 필수
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> renameChatRoom(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            int result = chatbotDAO.renameChatRoom(chatbotVO);
+            if (result > 0) {
+                resultMap.put("successYn", true);
+                resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * 채팅방 삭제
+     * @param chatbotVO roomId 필수
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> deleteChatRoom(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            int result = chatbotDAO.deleteChatRoom(chatbotVO);
+            if (result > 0) {
+                resultMap.put("successYn", true);
+                resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * 채팅방 고정
+     * @param chatbotVO roomId 필수
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> pinChatRoom(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            int result = chatbotDAO.pinChatRoom(chatbotVO);
+            if (result > 0) {
+                resultMap.put("successYn", true);
+                resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        return resultMap;
+    }
+
+    /**
      * 지식 카드 등록
      * @param chatbotVO logId, categoryId, userId 필수
      * @return

@@ -12,6 +12,7 @@ import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.dataset.service.DatasetVO;
 import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
 import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
+import kr.teamagent.prompt.service.PromptVO;
 
 @Service
 public class DatasetServiceImpl extends EgovAbstractServiceImpl {
@@ -233,5 +234,9 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         int result = 0;
         // TODO 데이터셋 테스트 AI API 개발 완료 시 개발 필요
         return result;
+    }
+
+    public List<PromptVO> selectPromptList() throws Exception {
+        return datasetDAO.selectPromptList();
     }
 }

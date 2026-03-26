@@ -60,10 +60,22 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
+    /**
+     * 문서별 파일 상세 조회
+     * @param dataVO
+     * @return
+     * @throws Exception
+     */
     public FileVO selectFileByDocId(FileVO dataVO) throws Exception {
         return fileDAO.selectFileByDocId(dataVO);
     }
 
+    /**
+     * 문서별 파일 뷰 생성
+     * @param dataVO
+     * @return
+     * @throws Exception
+     */
     public Map<String, Object> createViewPresignedUrl(FileVO dataVO) throws Exception {
 
         FileVO doc = selectFileByDocId(dataVO);
@@ -82,9 +94,45 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         return Map.of("url", url.toString());
     }
 
+    /**
+     * 문서별 파일 다운로드 생성
+     * @param dataVO
+     * @return
+     * @throws Exception
+     */
     public Map<String, Object> createDownloadPresignedUrl(FileVO dataVO) throws Exception {
+        // docFileId가 없으면 문서의 첨부 전체를 순차 다운로드할 수 있도록 URL 리스트를 생성한다.
+        if (dataVO.getDocFileId() == null || dataVO.getDocFileId().trim().isEmpty()) {
+            List<FileVO> fileList = fileDAO.selectFileListByDocId(dataVO);
+            List<Map<String, String>> downloadList = new ArrayList<>();
+            if (fileList != null) {
+                for (FileVO file : fileList) {
+                    if (file == null) {
+                        continue;
+                    }
+                    String key = file.getFilePath();
+                    if (key == null || key.trim().isEmpty()) {
+                        continue;
+                    }
+                    String url = createDownloadUrlByFile(file);
+                    downloadList.add(Map.of(
+                            "docFileId", file.getDocFileId(),
+                            "fileName", file.getFileName(),
+                            "url", url
+                    ));
+                }
+            }
+            return Map.of("downloadList", downloadList);
+        }
 
         FileVO doc = selectFileByDocId(dataVO);
+        if (doc == null) {
+            return Map.of("url", "");
+        }
+        return Map.of("url", createDownloadUrlByFile(doc));
+    }
+
+    private String createDownloadUrlByFile(FileVO doc) throws Exception {
         String key = doc.getFilePath();
         Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
 
@@ -101,16 +149,14 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
                 new GeneratePresignedUrlRequest(getBucketName(), key)
                         .withMethod(HttpMethod.GET)
                         .withExpiration(expiration);
-
         request.setResponseHeaders(headers);
 
         URL url = s3Client.generatePresignedUrl(request);
-
-        return Map.of("url", url.toString());
+        return url.toString();
     }
 
     /**
-     * docId 목록에 해당하는 TB_DOC 행의 FILE_PATH(S3 키)로 NCP 오브젝트 스토리지 객체 삭제
+     * docId 목록에 해당하는 TB_DOC_FILE의 FILE_PATH(S3 키) 전건으로 NCP 오브젝트 스토리지 객체 삭제
      *
      * @param dataVO docIds(복수) 또는 docId(단건)
      */
@@ -136,18 +182,23 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
             FileVO query = new FileVO();
             query.setDocId(id);
             try {
-                FileVO doc = selectFileByDocId(query);
-                if (doc == null) {
-                    errors.add("문서 없음: " + id);
+                List<FileVO> files = fileDAO.selectFileListByDocId(query);
+                if (files == null || files.isEmpty()) {
+                    log.debug("Skip S3 delete, no TB_DOC_FILE rows. docId={}", id);
                     continue;
                 }
-                String key = doc.getFilePath();
-                if (key == null || key.trim().isEmpty()) {
-                    log.debug("Skip S3 delete, empty filePath. docId={}", id);
-                    continue;
+                for (FileVO f : files) {
+                    if (f == null) {
+                        continue;
+                    }
+                    String key = f.getFilePath();
+                    if (key == null || key.trim().isEmpty()) {
+                        log.debug("Skip S3 delete, empty filePath. docId={}, docFileId={}", id, f.getDocFileId());
+                        continue;
+                    }
+                    s3Client.deleteObject(bucket, key.trim());
+                    log.debug("Deleted object. bucket={}, key={}", bucket, key);
                 }
-                s3Client.deleteObject(bucket, key.trim());
-                log.debug("Deleted object. bucket={}, key={}", bucket, key);
             } catch (Exception e) {
                 log.warn("NCP 객체 삭제 실패. docId={}", id, e);
                 errors.add(id + ": " + e.getMessage());
