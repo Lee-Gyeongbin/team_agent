@@ -92,27 +92,18 @@
     <select id="selectDocList" parameterMap="cardItem" resultMap="docItemResult">
         /* 참조 매뉴얼(문서) 목록 조회 library.selectDocList */
         SELECT
-            B.DOC_ID
-            , B.DOC_TITLE
-            , B.CATEGORY_ID
-            , B.AUTHOR
-            , B.SEC_LVL
-            , B.CONTENT
-            , B.FILE_NAME
+            B.DOC_ID 
+            , B.DOC_FILE_ID 
+			, B.FILE_NAME
             , B.FILE_PATH
             , B.FILE_SIZE
             , B.FILE_TYPE
-            , B.KEYWORDS
-            , B.REF_URL
-            , B.USE_YN
-            , B.CREATE_DT
-            , B.MODIFY_DT
             , A.RELATED_PAGES
         FROM TB_CHAT_REF A
-            INNER JOIN TB_DOC B
-                ON A.DOC_ID = B.DOC_ID
+            INNER JOIN TB_DOC_FILE B ON A.DOC_ID = B.DOC_ID AND A.DOC_FILE_ID = B.DOC_FILE_ID 
         WHERE 1=1
             AND A.LOG_ID = #{logId}
+        ORDER BY A.CHAT_REF_ID
     </select>
 
     <select id="selectCardDetail" resultType="libraryVO">

@@ -113,20 +113,11 @@ public class LibraryVO {
     @Setter
     public static class DocItem {
         private String docId;
-        private String docTitle;
-        private String categoryId;
-        private String author;
-        private String secLvl;
-        private String content;
+        private String docFileId;
         private String fileName;
         private String filePath;
         private Long fileSize;
         private String fileType;
-        private String keywords;
-        private String refUrl;
-        private String useYn;
-        private String createDt;
-        private String modifyDt;
         private String relatedPages;
     }
 
