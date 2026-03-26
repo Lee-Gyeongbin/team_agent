@@ -261,6 +261,19 @@
         WHERE ROOM_ID = #{roomId}
     </update>
 
+    <update id="updateChatRoomTitle" parameterType="chatbotVO">
+        /* 채팅방 제목 수정 ai.chatbot.updateChatRoomTitle */
+        UPDATE TB_CHAT_ROOM
+        SET ROOM_TITLE = #{roomTitle}
+        WHERE ROOM_ID = #{roomId}
+    </update>
+
+    <delete id="deleteChatRoom" parameterType="chatbotVO">
+        /* 채팅방 삭제 ai.chatbot.deleteChatRoom */
+        DELETE FROM TB_CHAT_ROOM
+        WHERE ROOM_ID = #{roomId}
+    </delete>
+
     <resultMap id="knowledgeItemMap" type="kr.teamagent.chat.service.ChatbotVO$KnowledgeItem" autoMapping="true"/>
 
     <select id="selectChatLogByLogId" parameterType="chatbotVO" resultType="chatbotVO">
