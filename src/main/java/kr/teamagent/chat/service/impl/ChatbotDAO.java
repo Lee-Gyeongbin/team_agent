@@ -135,6 +135,10 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return selectList("ai.chatbot.selectKnowledgeList", searchVO);
     }
 
+    public int pinChatRoom(ChatbotVO dataVO) throws Exception {
+        return update("ai.chatbot.updatePinChatRoom", dataVO);
+    }
+
     public ChatbotVO selectChatLogByLogId(ChatbotVO searchVO) throws Exception {
         return selectOne("ai.chatbot.selectChatLogByLogId", searchVO);
     }

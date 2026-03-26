@@ -10,10 +10,11 @@
             , A.CREATE_USER_ID  AS USER_ID
             , A.CREATE_DT       AS CREATE_DT
             , A.LAST_CHAT_DT    AS LAST_CHAT_DT
+            , A.FIX_YN          AS FIX_YN
         FROM TB_CHAT_ROOM A
         WHERE 1=1 
             AND A.CREATE_USER_ID = #{userId}
-        ORDER BY A.LAST_CHAT_DT DESC
+        ORDER BY A.FIX_YN = 'Y' DESC, A.LAST_CHAT_DT DESC
     </select>
 
     <select id="selectModelList" resultType="chatbotVO">
@@ -251,6 +252,13 @@
             , SATIS_CONTENT = #{satisContent}
             , SATIS_DT = NOW()
         WHERE LOG_ID = #{logId}
+    </update>
+
+    <update id="updatePinChatRoom" parameterType="chatbotVO">
+        /* 채팅방 고정 ai.chatbot.updatePinChatRoom */
+        UPDATE TB_CHAT_ROOM
+        SET FIX_YN = CASE WHEN FIX_YN = 'Y' THEN 'N' ELSE 'Y' END
+        WHERE ROOM_ID = #{roomId}
     </update>
 
     <resultMap id="knowledgeItemMap" type="kr.teamagent.chat.service.ChatbotVO$KnowledgeItem" autoMapping="true"/>

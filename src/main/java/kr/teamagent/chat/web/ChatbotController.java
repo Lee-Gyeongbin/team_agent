@@ -172,6 +172,28 @@ public class ChatbotController extends BaseController {
         return resultMap;
     }
 
+    @RequestMapping("/ai/chatbot/pinChatRoom.do")
+    public @ResponseBody Map<String, Object> pinChatRoom(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+                return resultMap;
+            }
+
+            dataVO.setUserId(SessionUtil.getUserId());
+            resultMap = chatbotService.pinChatRoom(dataVO);
+
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
+    }
+
     /**
      * 지식 카테고리 목록 조회
      * @param searchVO

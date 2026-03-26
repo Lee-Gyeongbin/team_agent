@@ -145,4 +145,7 @@ public class ChatbotVO extends CommonVO {
         private Integer sortOrd;
         private String createDt;
     }
+
+    // 고정 여부
+    private String fixYn;
 }
