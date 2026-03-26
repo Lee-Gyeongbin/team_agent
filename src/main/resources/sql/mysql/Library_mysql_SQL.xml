@@ -41,10 +41,7 @@
             , ARCHIVE_YN
             , ARCHIVE_DT
             , SORT_ORD
-            , SRC_DOCS
             , SQL_CODE
-            , CHART_CFG
-            , QRY_RSLT
             , USE_YN
             , CREATE_DT
             , MODIFY_DT
@@ -132,10 +129,7 @@
             , A.ARCHIVE_YN
             , A.ARCHIVE_DT
             , A.SORT_ORD
-            , A.SRC_DOCS
             , A.SQL_CODE
-            , A.CHART_CFG
-            , A.QRY_RSLT
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -166,10 +160,7 @@
             , A.ARCHIVE_YN
             , A.ARCHIVE_DT
             , A.SORT_ORD
-            , A.SRC_DOCS
             , A.SQL_CODE
-            , A.CHART_CFG
-            , A.QRY_RSLT
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -200,10 +191,7 @@
             , A.ARCHIVE_YN
             , A.ARCHIVE_DT
             , A.SORT_ORD
-            , A.SRC_DOCS
             , A.SQL_CODE
-            , A.CHART_CFG
-            , A.QRY_RSLT
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT

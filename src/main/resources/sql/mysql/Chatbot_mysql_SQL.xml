@@ -297,10 +297,7 @@
             ARCHIVE_YN,
             ARCHIVE_DT,
             SORT_ORD,
-            SRC_DOCS,
             SQL_CODE,
-            CHART_CFG,
-            QRY_RSLT,
             USE_YN,
             CREATE_DT,
             MODIFY_DT
@@ -318,10 +315,7 @@
             #{archiveYn},
             #{archiveDt, jdbcType=TIMESTAMP},
             #{sortOrd, jdbcType=INTEGER},
-            #{srcDocs, jdbcType=VARCHAR},
             #{sqlCode, jdbcType=VARCHAR},
-            #{chartCfg, jdbcType=VARCHAR},
-            #{qryRslt, jdbcType=VARCHAR},
             #{useYn},
             NOW(),
             NOW()
