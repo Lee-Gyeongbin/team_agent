@@ -94,7 +94,7 @@ public class ChatGuideController extends BaseController<Object> {
     @ResponseBody
     public ModelAndView errorMessageList(ChatGuideVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", chatGuideService.selectChatGuideErrorMessageListGrouped(searchVO));
+        resultMap.put("dataList", chatGuideService.selectChatGuideErrorMessageListGrouped(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
