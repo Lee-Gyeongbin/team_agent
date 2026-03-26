@@ -132,10 +132,7 @@ public class ChatbotVO extends CommonVO {
     private String archiveYn;
     private String archiveDt;
     private Integer sortOrd;
-    private String srcDocs;
     private String sqlCode;
-    private String chartCfg;
-    private String qryRslt;
 
     @Getter
     @Setter

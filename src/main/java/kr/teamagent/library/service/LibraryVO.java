@@ -28,10 +28,7 @@ public class LibraryVO {
     private String pinYn;
     private String archiveYn;
     private String archiveDt;
-    private String srcDocs;
     private String sqlCode;
-    private String chartCfg;
-    private String qryRslt;
     private String useYn;
     private String modifyDt;
     private String searchTitle;
@@ -97,10 +94,7 @@ public class LibraryVO {
         private String archiveYn;
         private String archiveDt;
         private Integer sortOrd;
-        private String srcDocs;
         private String sqlCode;
-        private String chartCfg;
-        private String qryRslt;
         private String useYn;
         private String createDt;
         private String modifyDt;
