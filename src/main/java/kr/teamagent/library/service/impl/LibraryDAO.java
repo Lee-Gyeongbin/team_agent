@@ -111,6 +111,16 @@ public class LibraryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 카테고리 하위 카드 존재여부 카운트
+     * @param searchVO categoryId, userId 필수
+     * @return
+     * @throws Exception
+     */
+    public int selectCategoryCardCount(LibraryVO.CategoryItem searchVO) throws Exception {
+        return selectOne("library.selectCategoryCardCount", searchVO);
+    }
+
+    /**
      * 카테고리 삭제
      * @param searchVO categoryId, userId 필수
      * @return
@@ -148,6 +158,16 @@ public class LibraryDAO extends EgovComAbstractDAO {
      */
     public int moveCard(LibraryVO searchVO) throws Exception {
         return update("library.moveCard", searchVO);
+    }
+
+    /**
+     * 휴지통 카드 완전 삭제 (USE_YN='N'인 해당 사용자의 카드 일괄 DELETE)
+     * @param searchVO userId 필수 (세션에서 설정됨)
+     * @return
+     * @throws Exception
+     */
+    public int deleteTrashCard(LibraryVO searchVO) throws Exception {
+        return delete("library.deleteTrashCard", searchVO);
     }
 
     /**

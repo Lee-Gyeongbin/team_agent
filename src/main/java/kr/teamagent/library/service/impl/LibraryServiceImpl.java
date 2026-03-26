@@ -178,17 +178,21 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 카테고리 삭제
+     * 카테고리 삭제 (하위 카드 존재 시 삭제 불가)
      * @param searchVO categoryId 필수 (세션 userId로 본인 카테고리만 삭제)
-     * @return
+     * @return 삭제 성공 시 삭제 건수, 하위 카드 존재 시 -1
      * @throws Exception
      */
-    public void deleteCategory(LibraryVO.CategoryItem searchVO) throws Exception {
+    public int deleteCategory(LibraryVO.CategoryItem searchVO) throws Exception {
         String userId = SessionUtil.getUserId();
         if (userId != null) {
             searchVO.setUserId(userId);
         }
-        libraryDAO.deleteCategory(searchVO);
+        int cardCount = libraryDAO.selectCategoryCardCount(searchVO);
+        if (cardCount > 0) {
+            return -1;
+        }
+        return libraryDAO.deleteCategory(searchVO);
     }
 
     /**
@@ -241,6 +245,21 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         }
         searchVO.setUserId(userId);
         return libraryDAO.moveCard(searchVO);
+    }
+
+    /**
+     * 휴지통 카드 완전 삭제 (USE_YN='N'인 해당 사용자의 카드 일괄 DELETE)
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int deleteTrashCard(LibraryVO searchVO) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (userId == null) {
+            return 0;
+        }
+        searchVO.setUserId(userId);
+        return libraryDAO.deleteTrashCard(searchVO);
     }
 
     /**
