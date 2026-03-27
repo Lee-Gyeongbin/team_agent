@@ -1,21 +1,37 @@
 package kr.teamagent.dataset.service.impl;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
+import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.dataset.service.DatasetVO;
 import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
 import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
 import kr.teamagent.prompt.service.PromptVO;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
 
 @Service
 public class DatasetServiceImpl extends EgovAbstractServiceImpl {
+    private static final Logger logger = LoggerFactory.getLogger(DatasetServiceImpl.class);
+    private static final ExecutorService DATASET_BUILD_EXECUTOR = Executors.newFixedThreadPool(5);
 
     @Autowired
     private DatasetDAO datasetDAO;
@@ -108,12 +124,6 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
     public int saveDataset(DatasetVO datasetVO) throws Exception {
         int result = 0;
         String mode = "insert";
-
-        // TODO: 데이터셋 구축 시작 버튼 클릭 시 (datasetBuildStatusCd: 002) AI RAG 구축 시작 API 호출 -> 응답 받은 뒤 구축 성공일 경우 003 으로 세팅 
-        if(datasetVO.getDatasetBuildStatusCd().equals("002")) {
-            // AI RAG 구축 시작 API 호출 -> 응답 받은 뒤 구축 성공일 경우 003 으로 세팅
-            datasetVO.setDatasetBuildStatusCd("003");
-        }
         
         if (datasetVO.getDatasetId() == null || datasetVO.getDatasetId().trim().isEmpty()) {
             datasetVO.setDatasetId(keyGenerate.generateTableKey("DS", "TB_DS", "DATASET_ID"));
@@ -234,6 +244,109 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         int result = 0;
         // TODO 데이터셋 테스트 AI API 개발 완료 시 개발 필요
         return result;
+    }
+
+    /**
+     * 데이터셋 구축 시작 API 호출 후 SSE를 화면으로 중계
+     * @param datasetId 저장된 데이터셋 ID
+     * @return SseEmitter
+     */
+    public SseEmitter streamDatasetBuild(String datasetId) {
+        SseEmitter emitter = new SseEmitter(0L);
+        String apiUrl = PropertyUtil.getProperty("Globals.dataset.build.apiUrl");
+
+        if (CommonUtil.isEmpty(datasetId)) {
+            sendSseEvent(emitter, "error", buildErrorData("datasetId가 없습니다."));
+            emitter.complete();
+            return emitter;
+        }
+        if (CommonUtil.isEmpty(apiUrl)) {
+            sendSseEvent(emitter, "error", buildErrorData("dataset build API URL이 설정되지 않았습니다."));
+            emitter.complete();
+            return emitter;
+        }
+
+        emitter.onTimeout(() -> {
+            logger.warn("dataset build SSE timeout - datasetId={}", datasetId);
+            sendSseEvent(emitter, "error", buildErrorData("dataset build stream timeout"));
+            emitter.complete();
+        });
+        emitter.onError((e) -> logger.warn("dataset build SSE error - datasetId={}, message={}", datasetId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("dataset build SSE complete - datasetId={}", datasetId));
+
+        DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, emitter));
+        return emitter;
+    }
+
+    private void relayDatasetBuildStream(String apiUrl, String datasetId, SseEmitter emitter) {
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(300, TimeUnit.SECONDS)
+                .build();
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("dataset_id", datasetId);
+
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        String jsonBody = gson.toJson(params);
+        RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+
+        Request request = new Request.Builder()
+                .url(apiUrl)
+                .post(body)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "text/event-stream")
+                .build();
+
+        try (okhttp3.Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                sendSseEvent(emitter, "error", buildErrorData("dataset build API response error: " + response.code()));
+                return;
+            }
+
+            String currentEvent = null;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body().byteStream(), "UTF-8"), 1)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("event: ")) {
+                        currentEvent = line.substring(7).trim();
+                        continue;
+                    }
+                    if (line.startsWith("data: ")) {
+                        String eventName = CommonUtil.isNotEmpty(currentEvent) ? currentEvent : "message";
+                        String data = line.substring(6).trim();
+                        if (!sendSseEvent(emitter, eventName, data)) {
+                            return;
+                        }
+                        if ("done".equals(eventName)) {
+                            return;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("dataset build stream relay error - datasetId={}", datasetId, e);
+            sendSseEvent(emitter, "error", buildErrorData("dataset build stream relay error"));
+        } finally {
+            emitter.complete();
+        }
+    }
+
+    private boolean sendSseEvent(SseEmitter emitter, String eventName, String data) {
+        try {
+            emitter.send(SseEmitter.event().name(eventName).data(data));
+            return true;
+        } catch (Exception e) {
+            logger.warn("SSE event send failed - eventName={}, message={}", eventName, e.getMessage());
+            return false;
+        }
+    }
+
+    private String buildErrorData(String message) {
+        Map<String, Object> errorData = new HashMap<>();
+        errorData.put("status", "error");
+        errorData.put("message", message);
+        return new com.google.gson.Gson().toJson(errorData);
     }
 
     public List<PromptVO> selectPromptList() throws Exception {

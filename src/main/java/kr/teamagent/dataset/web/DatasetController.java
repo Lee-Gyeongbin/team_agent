@@ -5,10 +5,12 @@ import java.util.HashMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.dataset.service.DatasetVO;
@@ -89,7 +91,20 @@ public class DatasetController extends BaseController {
     public ModelAndView save(@RequestBody DatasetVO datasetVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", docDatasetService.saveDataset(datasetVO));
+        resultMap.put("datasetId", datasetVO.getDatasetId());
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 데이터셋 구축 진행 스트림 중계 API
+     * @param datasetId 저장된 데이터셋 ID
+     * @return SSE stream
+     * @throws Exception
+     */
+    @RequestMapping(value = "/buildStream.do", method = RequestMethod.GET, produces = "text/event-stream")
+    @ResponseBody
+    public SseEmitter buildStream(@RequestParam("datasetId") String datasetId) throws Exception {
+        return docDatasetService.streamDatasetBuild(datasetId);
     }
 
     /**
