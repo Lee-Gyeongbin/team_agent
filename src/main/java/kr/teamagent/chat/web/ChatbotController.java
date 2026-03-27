@@ -124,7 +124,6 @@ public class ChatbotController extends BaseController {
         // TODO 추후 시연 완료 후 삭제
         resultMap.put("statList", chatbotService.selectStatList(searchVO));
         resultMap.put("statDetailList", chatbotService.selectStatDetailList(searchVO));
-        resultMap.put("list", chatbotService.selectTableDataList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 

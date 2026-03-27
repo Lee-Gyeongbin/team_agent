@@ -210,6 +210,7 @@
             , A.SATIS_YN
             , A.SATIS_CONTENT 
             , A.SATIS_DT 
+            , A.TABLE_DATA 
             , A.TTSQ
             , A.REASK_CNT
             , A.CREATE_USER_ID
