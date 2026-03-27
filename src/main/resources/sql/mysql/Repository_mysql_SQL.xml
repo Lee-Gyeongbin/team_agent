@@ -64,6 +64,9 @@
             , (
                 SELECT COUNT(*) FROM TB_DS_DOC B WHERE 1=1 AND B.DOC_ID = A.DOC_ID
               ) AS DS_DOC_CNT
+            , (
+                SELECT COUNT(*) FROM TB_DOC_FILE B WHERE 1=1 AND B.DOC_ID = A.DOC_ID
+            ) AS FILE_CNT
         FROM
             TB_DOC A
         INNER JOIN TB_CONTENT_CAT B

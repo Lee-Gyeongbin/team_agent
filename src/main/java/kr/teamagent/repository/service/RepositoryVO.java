@@ -35,6 +35,8 @@ public class RepositoryVO {
     /** 문서 ID */
     private String docId;
     private String docFileId;
+    /** 문서 파일 개수 */
+    private String fileCnt;
     /** 문서 제목 */
     private String docTitle;
     /** 작성자 */
