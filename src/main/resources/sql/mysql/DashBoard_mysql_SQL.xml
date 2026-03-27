@@ -3,6 +3,10 @@
 <mapper namespace="dashboard">
 
     <resultMap id="statSummaryResult" type="kr.teamagent.dashboard.service.DashBoardVO$StatSummary" autoMapping="true"/>
+    <resultMap id="queryRatioResult" type="kr.teamagent.dashboard.service.DashBoardVO$QueryRatio" autoMapping="true"/>
+    <resultMap id="noticeItemResult" type="kr.teamagent.dashboard.service.DashBoardVO$NoticeItem" autoMapping="true"/>
+    <resultMap id="tokenUsageResult" type="kr.teamagent.dashboard.service.DashBoardVO$TokenUsage" autoMapping="true"/>
+    <resultMap id="visitorTrendResult" type="kr.teamagent.dashboard.service.DashBoardVO$VisitorTrend" autoMapping="true"/>
 
     <select id="selectStatSummary" resultMap="statSummaryResult">
         /* 대시보드 상단 통계 카드 dashboard.selectStatSummary */
@@ -38,6 +42,117 @@
             , DATA3.DATA_VAL AS SATISFACTION_RATE
             , DATA4.DATA_VAL AS DISSATISFACTION_RATE
         FROM DATA2, DATA3, DATA4
+    </select>
+
+    <select id="selectQueryRatio" resultMap="queryRatioResult">
+        /* 대시보드 질의 비율 dashboard.selectQueryRatio */
+        WITH BASE AS (
+            SELECT
+                A.SVC_TY
+            FROM TB_CHAT_LOG A
+            WHERE 1=1
+        )
+        , DATA1 AS (
+            SELECT
+                CAST(COALESCE(ROUND(SUM(CASE WHEN SVC_TY = 'C' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2), 0) AS DECIMAL(5,2)) AS DATA_VAL
+            FROM BASE
+        )
+        , DATA2 AS (
+            SELECT
+                CAST(COALESCE(ROUND(SUM(CASE WHEN SVC_TY = 'M' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2), 0) AS DECIMAL(5,2)) AS DATA_VAL
+            FROM BASE
+        )
+        , DATA3 AS (
+            SELECT
+                CAST(COALESCE(ROUND(SUM(CASE WHEN SVC_TY = 'S' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2), 0) AS DECIMAL(5,2)) AS DATA_VAL
+            FROM BASE
+        )
+        SELECT
+            DATA1.DATA_VAL AS LLM
+            , DATA2.DATA_VAL AS RAG
+            , DATA3.DATA_VAL AS TEXT_TO_SQL
+        FROM DATA1, DATA2, DATA3
+    </select>
+
+    <select id="selectDashboardNoticeList" resultMap="noticeItemResult">
+        /* 대시보드 공지 요약 목록 dashboard.selectDashboardNoticeList */
+        SELECT
+            A.NOTICE_ID
+            , A.TITLE
+            , A.FEATURED_YN
+            , A.CRTR_ID
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM TB_NOTICE A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+        ORDER BY A.CREATE_DT DESC
+    </select>
+
+    <select id="selectTokenUsageList" resultMap="tokenUsageResult">
+        /* 대시보드 토큰 사용량 목록 dashboard.selectTokenUsageList */
+        WITH RECURSIVE MONTHS AS (
+            SELECT DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 3 MONTH), '%Y-%m-01') AS YM
+                UNION ALL
+            SELECT DATE_FORMAT(DATE_ADD(YM, INTERVAL 1 MONTH), '%Y-%m-01')
+            FROM MONTHS
+            WHERE YM <![CDATA[<]]> DATE_FORMAT(CURDATE(), '%Y-%m-01')
+        )
+        , TOKEN_LMT AS (
+            SELECT
+                COALESCE((
+                    SELECT A.MON_ORG_LMT
+                    FROM TB_TOKEN_LMT A
+                    ORDER BY A.MODIFY_DT DESC
+                    LIMIT 1
+                ), 0) AS MON_ORG_LMT
+        )
+        , TOKEN_SUM AS (
+            SELECT
+                DATE_FORMAT(A.CREATE_DT, '%Y-%m-01') AS YM
+                , SUM(IFNULL(A.IN_TOKENS, 0) + IFNULL(A.OUT_TOKENS, 0)) AS TOKEN_USAGE
+            FROM TB_CHAT_LOG A
+            WHERE A.CREATE_DT <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 3 MONTH), '%Y-%m-01')
+                AND A.CREATE_DT <![CDATA[<]]> DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-01')
+            GROUP BY DATE_FORMAT(A.CREATE_DT, '%Y-%m-01')
+        )
+        SELECT
+            DATE_FORMAT(M.YM, '%Y년 %m월') AS YM
+            , IFNULL(TS.TOKEN_USAGE, 0) AS TOKEN_USAGE
+            , TL.MON_ORG_LMT
+            , CAST(COALESCE(ROUND(IFNULL(TS.TOKEN_USAGE, 0) * 100.0 / NULLIF(TL.MON_ORG_LMT, 0), 2), 0) AS DECIMAL(7,2)) AS USAGE_RATE
+        FROM MONTHS M
+            LEFT JOIN TOKEN_SUM TS
+                ON M.YM = TS.YM
+            CROSS JOIN TOKEN_LMT TL
+        ORDER BY M.YM
+    </select>
+
+    <select id="selectVisitorTrendList" resultMap="visitorTrendResult">
+        /* 대시보드 사용자 추이 dashboard.selectVisitorTrendList */
+        WITH RECURSIVE DAYS AS (
+            SELECT DATE_SUB(CURDATE(), INTERVAL 9 DAY) AS DT
+            UNION ALL
+            SELECT DATE_ADD(DT, INTERVAL 1 DAY)
+            FROM DAYS
+            WHERE DT <![CDATA[<]]> CURDATE()
+        )
+        , LOGIN_SUM AS (
+            SELECT
+                A.STAT_DATE
+                , SUM(IFNULL(A.SUCCESS_CNT, 0)) AS SUCCESS_CNT
+            FROM TB_AUDIT_LOGIN_DAILY_STAT A
+            WHERE A.STAT_DATE <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 9 DAY), '%Y%m%d')
+                AND A.STAT_DATE <![CDATA[<=]]> DATE_FORMAT(CURDATE(), '%Y%m%d')
+            GROUP BY A.STAT_DATE
+        )
+        SELECT
+            DATE_FORMAT(D.DT, '%m월 %d일') AS STAT_DATE
+            , IFNULL(L.SUCCESS_CNT, 0) AS SUCCESS_CNT
+        FROM DAYS D
+            LEFT JOIN LOGIN_SUM L
+                ON DATE_FORMAT(D.DT, '%Y%m%d') = L.STAT_DATE
+        ORDER BY D.DT
     </select>
 
 </mapper>
