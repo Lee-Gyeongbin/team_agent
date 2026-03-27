@@ -33,6 +33,7 @@
             , CRTR_ID
             , CREATE_DT
             , MODIFY_DT
+            , FEATURED_YN
         FROM TB_NOTICE
         WHERE NOTICE_ID = #{noticeId}
     </select>
@@ -60,14 +61,25 @@
         /* 공지사항 등록 notice.insertNotice */
         INSERT INTO TB_NOTICE (
             NOTICE_ID
-            , TITLE = #{title}
-            , CONTENT = #{content}
-            , PIN_YN = #{pinYn}
-            , VIEW_CNT = #{viewCnt}
-            , FEATURED_YN = #{featuredYn}
-            , USE_YN = #{useYn}
-            , CRTR_ID = #{crtrId}
-            , CREATE_DT = NOW()
+            , TITLE
+            , CONTENT
+            , PIN_YN
+            , VIEW_CNT
+            , FEATURED_YN
+            , USE_YN
+            , CRTR_ID
+            , CREATE_DT
+        )
+        VALUES (
+            #{noticeId}
+            , #{title}
+            , #{content}
+            , IFNULL(#{pinYn}, 'N')
+            , IFNULL(#{viewCnt}, 0)
+            , IFNULL(#{featuredYn}, 'N')
+            , IFNULL(#{useYn}, 'Y')
+            , #{crtrId}
+            , NOW()
         )
     </insert>
 
@@ -77,10 +89,10 @@
         SET
             TITLE = #{title}
             , CONTENT = #{content}
-            , PIN_YN = #{pinYn}
-            , VIEW_CNT = #{viewCnt}
-            , FEATURED_YN = #{featuredYn}
-            , USE_YN = #{useYn}
+            , PIN_YN = IFNULL(#{pinYn}, 'N')
+            , VIEW_CNT = IFNULL(#{viewCnt}, 0)
+            , FEATURED_YN = IFNULL(#{featuredYn}, 'N')
+            , USE_YN = IFNULL(#{useYn}, 'Y')
             , MODIFY_DT = NOW()
         WHERE NOTICE_ID = #{noticeId}
     </update>

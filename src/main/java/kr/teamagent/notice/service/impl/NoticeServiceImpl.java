@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import kr.teamagent.common.util.KeyGenerate;
+import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.notice.service.NoticeVO;
 
 @Service
@@ -14,6 +16,9 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private NoticeDAO noticeDAO;
+
+    @Autowired
+    private KeyGenerate keyGenerate;
 
     public List<NoticeVO> selectNoticeList(NoticeVO searchVO) throws Exception {
         return noticeDAO.selectNoticeList(searchVO);
@@ -26,6 +31,11 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
 
     @Transactional(rollbackFor = Exception.class)
     public int insertNotice(NoticeVO noticeVO) throws Exception {
+        if (noticeVO.getNoticeId() == null || noticeVO.getNoticeId().trim().isEmpty()) {
+            noticeVO.setNoticeId(keyGenerate.generateTableKey("NT", "TB_NOTICE", "NOTICE_ID"));
+        }
+        noticeVO.setCrtrId(SessionUtil.getUserId());
+
         if ("Y".equals(noticeVO.getFeaturedYn())) {
             noticeDAO.resetNoticeFeaturedYn(noticeVO);
         }

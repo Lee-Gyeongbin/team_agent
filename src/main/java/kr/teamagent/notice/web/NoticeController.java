@@ -2,6 +2,7 @@ package kr.teamagent.notice.web;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -27,28 +28,28 @@ public class NoticeController extends BaseController<Object> {
     /* 공지사항 상세 조회 */
     @RequestMapping(value = "/detail.do")
     @ResponseBody
-    public ModelAndView detail(NoticeVO searchVO) throws Exception {
+    public ModelAndView detail(@RequestBody NoticeVO searchVO) throws Exception {
         return makeJsonData(noticeService.selectNoticeDetail(searchVO));
     }
 
     /* 공지사항 등록 */
     @RequestMapping(value = "/insert.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView insert(NoticeVO searchVO) throws Exception {
+    public ModelAndView insert(@RequestBody NoticeVO searchVO) throws Exception {
         return makeJsonDataByResultCnt(noticeService.insertNotice(searchVO));
     }
 
     /* 공지사항 수정 */
     @RequestMapping(value = "/update.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView update(NoticeVO searchVO) throws Exception {
+    public ModelAndView update(@RequestBody NoticeVO searchVO) throws Exception {
         return makeJsonDataByResultCnt(noticeService.updateNotice(searchVO));
     }
 
     /* 공지사항 삭제 */
     @RequestMapping(value = "/delete.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView delete(NoticeVO searchVO) throws Exception {
+    public ModelAndView delete(@RequestBody NoticeVO searchVO) throws Exception {
         return makeJsonDataByResultCnt(noticeService.deleteNotice(searchVO));
     }
 }
