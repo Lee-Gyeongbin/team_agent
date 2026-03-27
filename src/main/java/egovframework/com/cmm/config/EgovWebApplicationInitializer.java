@@ -28,6 +28,8 @@ public class EgovWebApplicationInitializer implements WebApplicationInitializer 
 		FilterRegistration.Dynamic characterEncoding = servletContext.addFilter("encodingFilter", new org.springframework.web.filter.CharacterEncodingFilter());
 		characterEncoding.setInitParameter("encoding", "UTF-8");
 		characterEncoding.setInitParameter("forceEncoding", "true");
+		// 비동기 지원
+		characterEncoding.setAsyncSupported(true);
 		characterEncoding.addMappingForUrlPatterns(null, false, "*.do");
 
 		XmlWebApplicationContext rootContext = new XmlWebApplicationContext();
@@ -46,13 +48,19 @@ public class EgovWebApplicationInitializer implements WebApplicationInitializer 
 		ServletRegistration.Dynamic dispatcher = servletContext.addServlet("dispatcher", new DispatcherServlet(xmlWebApplicationContext));
 		dispatcher.addMapping("/");
 		dispatcher.setLoadOnStartup(1);
+		// 비동기 지원
+		dispatcher.setAsyncSupported(true);
 
 		MultipartFilter springMultipartFilter = new MultipartFilter();
 		springMultipartFilter.setMultipartResolverBeanName("multipartResolver");
 		FilterRegistration.Dynamic multipartFilter = servletContext.addFilter("springMultipartFilter", springMultipartFilter);
+		// 비동기 지원
+		multipartFilter.setAsyncSupported(true);
 		multipartFilter.addMappingForUrlPatterns(null, false, "*.do");
 
 		FilterRegistration.Dynamic htmlTagFilter = servletContext.addFilter("htmlTagFilter", new HTMLTagFilter());
+		// 비동기 지원
+		htmlTagFilter.setAsyncSupported(true);
 		htmlTagFilter.addMappingForUrlPatterns(null, false, "*.do");
 
 		servletContext.addListener(new RequestContextListener());
