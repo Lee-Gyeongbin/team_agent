@@ -274,8 +274,6 @@
             , EMBED_NORM_CD = VALUES(EMBED_NORM_CD)
             , POOL_STRAT_CD = VALUES(POOL_STRAT_CD)
             , DIM_REDUC_CD = VALUES(DIM_REDUC_CD)
-            , CHUNK_CNT = VALUES(CHUNK_CNT)
-            , SRCH_QUAL = VALUES(SRCH_QUAL)
             , USE_YN = VALUES(USE_YN)
             , MODIFY_DT = NOW()
     </insert>

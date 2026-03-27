@@ -252,10 +252,13 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @return SseEmitter
      */
     public SseEmitter streamDatasetBuild(String datasetId) {
+        // sse 초기화
         SseEmitter emitter = new SseEmitter(0L);
+        // API URL 조회
         String apiUrl = PropertyUtil.getProperty("Globals.dataset.build.apiUrl");
 
         if (CommonUtil.isEmpty(datasetId)) {
+            // datasetId가 없으면 에러 발생
             sendSseEvent(emitter, "error", buildErrorData("datasetId가 없습니다."));
             emitter.complete();
             return emitter;
@@ -265,7 +268,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
             emitter.complete();
             return emitter;
         }
-
+        // 타임아웃 처리
         emitter.onTimeout(() -> {
             logger.warn("dataset build SSE timeout - datasetId={}", datasetId);
             sendSseEvent(emitter, "error", buildErrorData("dataset build stream timeout"));
@@ -274,11 +277,19 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         emitter.onError((e) -> logger.warn("dataset build SSE error - datasetId={}, message={}", datasetId, e.getMessage()));
         emitter.onCompletion(() -> logger.info("dataset build SSE complete - datasetId={}", datasetId));
 
+        // 데이터셋 구축 스트림 중계
         DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, emitter));
         return emitter;
     }
 
+    /**
+     * 데이터셋 구축 스트림 중계
+     * @param apiUrl API URL
+     * @param datasetId 데이터셋 ID
+     * @param emitter SSE emitter
+     */
     private void relayDatasetBuildStream(String apiUrl, String datasetId, SseEmitter emitter) {
+        // OkHttpClient 초기화
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(300, TimeUnit.SECONDS)
@@ -298,8 +309,10 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
                 .addHeader("Accept", "text/event-stream")
                 .build();
 
+        // API 호출
         try (okhttp3.Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
+                // 에러 발생 시 처리
                 sendSseEvent(emitter, "error", buildErrorData("dataset build API response error: " + response.code()));
                 return;
             }
@@ -308,13 +321,18 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body().byteStream(), "UTF-8"), 1)) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    // event 처리
                     if (line.startsWith("event: ")) {
                         currentEvent = line.substring(7).trim();
                         continue;
                     }
+                    // data 처리
                     if (line.startsWith("data: ")) {
+                        // eventName 처리
                         String eventName = CommonUtil.isNotEmpty(currentEvent) ? currentEvent : "message";
+                        // data 처리
                         String data = line.substring(6).trim();
+                        // SSE 이벤트 전송
                         if (!sendSseEvent(emitter, eventName, data)) {
                             return;
                         }
@@ -332,8 +350,16 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
+    /**
+     * SSE 이벤트 전송
+     * @param emitter SSE emitter
+     * @param eventName 이벤트 이름
+     * @param data 이벤트 데이터
+     * @return 성공 여부
+     */
     private boolean sendSseEvent(SseEmitter emitter, String eventName, String data) {
         try {
+            // SSE 이벤트 전송
             emitter.send(SseEmitter.event().name(eventName).data(data));
             return true;
         } catch (Exception e) {
