@@ -1,5 +1,7 @@
 package kr.teamagent.notice.web;
 
+import java.util.HashMap;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,14 +24,18 @@ public class NoticeController extends BaseController<Object> {
     @RequestMapping(value = "/list.do")
     @ResponseBody
     public ModelAndView list(NoticeVO searchVO) throws Exception {
-        return makeJsonListData(noticeService.selectNoticeList(searchVO));
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", noticeService.selectNoticeList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
     }
 
     /* 공지사항 상세 조회 */
-    @RequestMapping(value = "/detail.do")
+    @RequestMapping(value = "/detail.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView detail(@RequestBody NoticeVO searchVO) throws Exception {
-        return makeJsonData(noticeService.selectNoticeDetail(searchVO));
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", noticeService.selectNoticeDetail(searchVO));
+        return new ModelAndView("jsonView", resultMap);
     }
 
     /* 공지사항 등록 */

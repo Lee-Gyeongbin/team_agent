@@ -18,7 +18,9 @@
         FROM TB_NOTICE
         WHERE 1 = 1
             AND USE_YN = 'Y'
-        ORDER BY CREATE_DT DESC
+        ORDER BY
+            CASE WHEN PIN_YN = 'Y' THEN 0 ELSE 1 END
+            , CREATE_DT DESC
     </select>
 
     <select id="selectNoticeDetail" parameterType="noticeVO" resultType="noticeVO">
@@ -36,6 +38,7 @@
             , FEATURED_YN
         FROM TB_NOTICE
         WHERE NOTICE_ID = #{noticeId}
+            AND USE_YN = 'Y'
     </select>
 
     <update id="updateNoticeViewCnt" parameterType="noticeVO">
@@ -90,7 +93,6 @@
             TITLE = #{title}
             , CONTENT = #{content}
             , PIN_YN = IFNULL(#{pinYn}, 'N')
-            , VIEW_CNT = IFNULL(#{viewCnt}, 0)
             , FEATURED_YN = IFNULL(#{featuredYn}, 'N')
             , USE_YN = IFNULL(#{useYn}, 'Y')
             , MODIFY_DT = NOW()
