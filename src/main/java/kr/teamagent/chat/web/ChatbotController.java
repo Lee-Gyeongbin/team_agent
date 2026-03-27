@@ -108,7 +108,7 @@ public class ChatbotController extends BaseController {
         resultMap.put("list", chatbotService.selectChatLogList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
-    
+
     @RequestMapping(value = "/ai/chatbot/selectChatDocList.do")
     @ResponseBody
     public ModelAndView selectChatDocList(ChatbotVO searchVO) throws Exception {
@@ -250,4 +250,26 @@ public class ChatbotController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
     
+    /**
+         * 대화방 공유 토큰 발급 (TB_SHARE_TOKEN 저장, 만료 3일)
+         */
+    @RequestMapping(value = "/ai/chatbot/createShareToken.do")
+    @ResponseBody
+    public ModelAndView createShareToken(@RequestBody ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(chatbotService.createShareToken(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 대화방 공유 토큰으로 채팅 로그 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/ai/chatbot/selectSharedChatLogList.do")
+    @ResponseBody
+    public ModelAndView selectSharedChatLogList(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(chatbotService.selectSharedChatLogList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

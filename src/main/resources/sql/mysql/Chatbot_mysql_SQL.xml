@@ -104,6 +104,35 @@
         VALUES (#{roomTitle}, #{userId}, NOW(), NOW())
     </insert>
 
+    <insert id="insertShareToken" parameterType="chatbotVO">
+        /* 공유 토큰 등록 ai.chatbot.insertShareToken — EXPIRED_DT: NOW() + 3일 */
+        INSERT INTO TB_SHARE_TOKEN
+        (SHARE_TOKEN, ROOM_ID, CRTR_ID, CREATE_DT, EXPIRED_DT)
+        VALUES
+        (
+            #{shareToken},
+            #{roomId},
+            #{userId},
+            NOW(),
+            DATE_ADD(NOW(), INTERVAL 3 DAY)
+        )
+    </insert>
+
+    <select id="selectShareTokenValidRoomId" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 유효한 공유 토큰 → ROOM_ID (만료되지 않은 경우만) ai.chatbot.selectShareTokenValidRoomId */
+        SELECT T.ROOM_ID AS roomId
+        FROM TB_SHARE_TOKEN T
+        WHERE T.SHARE_TOKEN = #{shareToken}
+          AND T.EXPIRED_DT &gt; NOW()
+    </select>
+
+    <select id="countShareTokenByToken" parameterType="chatbotVO" resultType="int">
+        /* 공유 토큰 존재 여부 (만료 여부 판별용) ai.chatbot.countShareTokenByToken */
+        SELECT COUNT(1)
+        FROM TB_SHARE_TOKEN T
+        WHERE T.SHARE_TOKEN = #{shareToken}
+    </select>
+
     <insert id="insertChatLog" parameterType="chatbotVO" useGeneratedKeys="true" keyProperty="logId">
         /* CHAT 대화방 로그 등록 ai.chatbot.insertChatLog */
         INSERT INTO TB_CHAT_LOG

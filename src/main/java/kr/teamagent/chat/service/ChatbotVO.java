@@ -148,4 +148,9 @@ public class ChatbotVO extends CommonVO {
 
     // 고정 여부
     private String fixYn;
+
+    /** TB_SHARE_TOKEN.SHARE_TOKEN */
+    private String shareToken;
+    /** TB_SHARE_TOKEN.EXPIRED_DT (조회 시 매핑, INSERT는 쿼리에서 DATE_ADD) */
+    private String expiredDt;
 }

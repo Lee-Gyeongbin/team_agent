@@ -158,4 +158,26 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public int insertKnowledgeCard(ChatbotVO dataVO) throws Exception {
         return insert("ai.chatbot.insertKnowledgeCard", dataVO);
     }
+
+    /**
+     * 공유 토큰 등록 (TB_SHARE_TOKEN)
+     */
+    public int insertShareToken(ChatbotVO dataVO) throws Exception {
+        return insert("ai.chatbot.insertShareToken", dataVO);
+    }
+
+    /**
+     * 만료되지 않은 공유 토큰에 매핑된 ROOM_ID
+     */
+    public ChatbotVO selectShareTokenValidRoomId(ChatbotVO searchVO) throws Exception {
+        return selectOne("ai.chatbot.selectShareTokenValidRoomId", searchVO);
+    }
+
+    /**
+     * 공유 토큰 행 존재 여부 (만료/무효 구분)
+     */
+    public int countShareTokenByToken(ChatbotVO searchVO) throws Exception {
+        Integer cnt = selectOne("ai.chatbot.countShareTokenByToken", searchVO);
+        return cnt != null ? cnt : 0;
+    }
 }

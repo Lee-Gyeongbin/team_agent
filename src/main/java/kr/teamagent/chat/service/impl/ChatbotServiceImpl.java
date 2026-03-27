@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONArray;
@@ -819,6 +820,80 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public List<ChatbotVO.KnowledgeItem> selectKnowledgeList(ChatbotVO searchVO) throws Exception {
         searchVO.setUserId(SessionUtil.getUserId());
         return chatbotDAO.selectKnowledgeList(searchVO);
+    }
+
+    /**
+     * 대화방 공유 토큰 발급
+     * @param chatbotVO
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> createShareToken(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (chatbotVO == null || chatbotVO.getRoomId() == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "roomId가 필요합니다.");
+            return resultMap;
+        }
+
+        String userId = SessionUtil.getUserId();
+        chatbotVO.setUserId(userId);
+
+        String shareToken = UUID.randomUUID().toString();
+        chatbotVO.setShareToken(shareToken);
+
+        int inserted = chatbotDAO.insertShareToken(chatbotVO);
+        if (inserted > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("shareToken", shareToken);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "토큰 저장에 실패하였습니다.");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 공유 토큰으로 채팅 로그 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> selectSharedChatLogList(ChatbotVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        String shareToken = searchVO != null ? searchVO.getShareToken() : null;
+
+        if (CommonUtil.isEmpty(shareToken)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "shareToken이 필요합니다.");
+            resultMap.put("list", new ArrayList<ChatbotVO>());
+            return resultMap;
+        }
+
+        ChatbotVO tokenParam = new ChatbotVO();
+        tokenParam.setShareToken(shareToken);
+
+        ChatbotVO validRoom = chatbotDAO.selectShareTokenValidRoomId(tokenParam);
+        if (validRoom != null && validRoom.getRoomId() != null) {
+            ChatbotVO logParam = new ChatbotVO();
+            logParam.setRoomId(validRoom.getRoomId());
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            resultMap.put("list", selectChatLogList(logParam));
+            return resultMap;
+        }
+
+        int exists = chatbotDAO.countShareTokenByToken(tokenParam);
+        resultMap.put("successYn", false);
+        if (exists > 0) {
+            resultMap.put("returnMsg", "만료된 공유 URL입니다.");
+        } else {
+            resultMap.put("returnMsg", "유효하지 않은 공유 링크입니다.");
+        }
+        resultMap.put("list", new ArrayList<ChatbotVO>());
+        return resultMap;
     }
 
 }
