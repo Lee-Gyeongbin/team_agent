@@ -22,6 +22,10 @@ public class NoticeDAO extends EgovComAbstractDAO {
         return update("notice.updateNoticeViewCnt", searchVO);
     }
 
+    public int resetNoticeFeaturedYn(NoticeVO noticeVO) throws Exception {
+        return update("notice.resetNoticeFeaturedYn", noticeVO);
+    }
+
     public int insertNotice(NoticeVO noticeVO) throws Exception {
         return insert("notice.insertNotice", noticeVO);
     }

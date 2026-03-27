@@ -14,6 +14,7 @@ public class NoticeVO extends CommonVO {
     private String content;
     private String pinYn;
     private Integer viewCnt;
+    private String featuredYn;
     private String useYn;
     private String crtrId;
     private String createDt;

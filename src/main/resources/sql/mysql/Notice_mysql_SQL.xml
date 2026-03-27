@@ -45,6 +45,17 @@
         WHERE NOTICE_ID = #{noticeId}
     </update>
 
+    <update id="resetNoticeFeaturedYn" parameterType="noticeVO">
+        /* 대표 공지 초기화 notice.resetNoticeFeaturedYn */
+        UPDATE TB_NOTICE
+        SET
+            FEATURED_YN = 'N'
+        WHERE FEATURED_YN = 'Y'
+        <if test="noticeId != null and noticeId != ''">
+            AND NOTICE_ID != #{noticeId}
+        </if>
+    </update>
+
     <insert id="insertNotice" parameterType="noticeVO">
         /* 공지사항 등록 notice.insertNotice */
         INSERT INTO TB_NOTICE (

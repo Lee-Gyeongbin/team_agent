@@ -5,6 +5,7 @@ import java.util.List;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import kr.teamagent.notice.service.NoticeVO;
 
@@ -23,11 +24,19 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
         return noticeDAO.selectNoticeDetail(searchVO);
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public int insertNotice(NoticeVO noticeVO) throws Exception {
+        if ("Y".equals(noticeVO.getFeaturedYn())) {
+            noticeDAO.resetNoticeFeaturedYn(noticeVO);
+        }
         return noticeDAO.insertNotice(noticeVO);
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public int updateNotice(NoticeVO noticeVO) throws Exception {
+        if ("Y".equals(noticeVO.getFeaturedYn())) {
+            noticeDAO.resetNoticeFeaturedYn(noticeVO);
+        }
         return noticeDAO.updateNotice(noticeVO);
     }
 
