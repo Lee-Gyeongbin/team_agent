@@ -30,4 +30,52 @@ public class DashBoardController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 질의 비율
+     * @return { data: DashBoardVO.QueryRatio }
+     */
+    @RequestMapping(value = "/query-ratio.do")
+    @ResponseBody
+    public ModelAndView queryRatio() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", dashBoardService.selectQueryRatio());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 공지 요약 목록
+     * @return { dataList: DashBoardVO.NoticeItem[] }
+     */
+    @RequestMapping(value = "/notice-list.do")
+    @ResponseBody
+    public ModelAndView noticeList() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", dashBoardService.selectDashboardNoticeList());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 토큰 사용량
+     * @return { data: DashBoardVO.TokenUsage[] }
+     */
+    @RequestMapping(value = "/token-usage.do")
+    @ResponseBody
+    public ModelAndView tokenUsage() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", dashBoardService.selectTokenUsage());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 사용자 추이 (기간 조건 필요 시 POST body 객체로 별도 메서드 추가)
+     * @return { dataList: DashBoardVO.VisitorTrend[] }
+     */
+    @RequestMapping(value = "/visitor-trend.do")
+    @ResponseBody
+    public ModelAndView visitorTrend() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", dashBoardService.selectVisitorTrend());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }
