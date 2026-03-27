@@ -1,5 +1,36 @@
 package kr.teamagent.notice.service.impl;
 
-public class NoticeDAO {
-    
+import java.util.List;
+
+import org.springframework.stereotype.Repository;
+
+import egovframework.com.cmm.service.impl.EgovComAbstractDAO;
+import kr.teamagent.notice.service.NoticeVO;
+
+@Repository
+public class NoticeDAO extends EgovComAbstractDAO {
+
+    public List<NoticeVO> selectNoticeList(NoticeVO searchVO) throws Exception {
+        return selectList("notice.selectNoticeList", searchVO);
+    }
+
+    public NoticeVO selectNoticeDetail(NoticeVO searchVO) throws Exception {
+        return (NoticeVO) selectOne("notice.selectNoticeDetail", searchVO);
+    }
+
+    public int updateNoticeViewCnt(NoticeVO searchVO) throws Exception {
+        return update("notice.updateNoticeViewCnt", searchVO);
+    }
+
+    public int insertNotice(NoticeVO noticeVO) throws Exception {
+        return insert("notice.insertNotice", noticeVO);
+    }
+
+    public int updateNotice(NoticeVO noticeVO) throws Exception {
+        return update("notice.updateNotice", noticeVO);
+    }
+
+    public int deleteNotice(NoticeVO noticeVO) throws Exception {
+        return update("notice.deleteNotice", noticeVO);
+    }
 }
