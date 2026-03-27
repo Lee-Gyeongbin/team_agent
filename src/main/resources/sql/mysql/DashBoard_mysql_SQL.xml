@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dashboard">
+
+    <resultMap id="statSummaryResult" type="kr.teamagent.dashboard.service.DashBoardVO$StatSummary" autoMapping="true"/>
+
+    <select id="selectStatSummary" resultMap="statSummaryResult">
+        /* 대시보드 상단 통계 카드 dashboard.selectStatSummary */
+        WITH LOG_BASE AS (
+            SELECT
+                A.CREATE_DT
+                , A.SATIS_YN
+            FROM TB_CHAT_LOG A
+            WHERE 1=1
+        )
+        , DATA2 AS (
+            SELECT
+                COUNT(*) AS DATA_VAL
+            FROM LOG_BASE
+            WHERE CREATE_DT <![CDATA[>=]]> CURDATE()
+                AND CREATE_DT <![CDATA[<]]> DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+        )
+        , DATA3 AS (
+            SELECT
+                CAST(COALESCE(ROUND(SUM(CASE WHEN SATIS_YN = 'Y' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(SATIS_YN), 0), 2), 0) AS DECIMAL(5,2)) AS DATA_VAL
+            FROM LOG_BASE
+            WHERE SATIS_YN IS NOT NULL
+        )
+        , DATA4 AS (
+            SELECT
+                CAST(COALESCE(ROUND(SUM(CASE WHEN SATIS_YN = 'N' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(SATIS_YN), 0), 2), 0) AS DECIMAL(5,2)) AS DATA_VAL
+            FROM LOG_BASE
+            WHERE SATIS_YN IS NOT NULL
+        )
+        SELECT
+            0 AS FEEDBACK_COUNT
+            , DATA2.DATA_VAL AS TODAY_QUERY_COUNT
+            , DATA3.DATA_VAL AS SATISFACTION_RATE
+            , DATA4.DATA_VAL AS DISSATISFACTION_RATE
+        FROM DATA2, DATA3, DATA4
+    </select>
+
+</mapper>
