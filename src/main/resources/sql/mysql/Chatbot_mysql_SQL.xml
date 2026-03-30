@@ -39,60 +39,25 @@
     <select id="selectRagDsList" resultType="chatbotVO">
         /* RAG 데이터 목록 조회 ai.chatbot.selectRagDsList */
         SELECT
-            A.DATASET_ID        AS VALUE
-            , A.DS_NM           AS LABEL
-            , A.DESCRIPTION
-            , A.VERSION
-            , A.CHUNK_ALGO_CD
-            , A.CHUNK_SIZE
-            , A.CHUNK_OVERLAP
-            , A.HDR_INCL_CD
-            , A.DATASET_BUILD_STATUS_CD
-            , A.EMBED_MODEL_CD
-            , A.VECTOR_DB_CD
-            , A.EMBED_NORM_CD
-            , A.POOL_STRAT_CD
-            , A.DIM_REDUC_CD
-            , A.CHUNK_CNT
-            , A.SRCH_QUAL
-            , A.SORT_ORD
-            , A.USE_YN
-            , A.CREATE_DT
-            , A.MODIFY_DT
+            A.DATASET_ID 		AS VALUE
+            , B.DS_NM 			AS LABEL
         FROM
-            TB_DS A
-        WHERE 1=1 
-            AND A.USE_YN = 'Y'
-            AND A.DATASET_BUILD_STATUS_CD = '003'
+            TB_AGT_DS A
+        INNER JOIN TB_DS B
+            ON B.DATASET_ID = A.DATASET_ID
+        GROUP BY A.DATASET_ID
     </select>
 
     <select id="selectDmList" resultType="chatbotVO">
         /* 데이터마트 조회 ai.chatbot.selectDmList */
         SELECT
-            A.DATAMART_ID       AS VALUE
-            , A.DM_NM           AS LABEL
-            , A.DESCRIPTION
-            , A.USE_YN
-            , A.SORT_ORD
-            , A.DB_TYPE
-            , A.DB_VERSION
-            , A.HOST
-            , A.PORT
-            , A.DB_NM
-            , A.USERNAME
-            , A.PWD_ENC
-            , A.SCH_NM
-            , A.CONN_OPT
-            , A.READONLY_YN
-            , A.IP_WLIST_YN
-            , A.SSL_YN
-            , A.TBL_CNT
-            , A.LAST_VERIFY_DT
-            , A.CREATE_DT
-            , A.MODIFY_DT
+            A.DATAMART_ID		AS VALUE
+            , B.DM_NM			AS LABEL
         FROM
-            TB_DM A
-        ORDER BY SORT_ORD 
+            TB_AGT_DM A
+        INNER JOIN TB_DM B
+            ON B.DATAMART_ID = A.DATAMART_ID
+        GROUP BY A.DATAMART_ID
     </select>
 
     <insert id="insertChatRoom" parameterType="chatbotVO"

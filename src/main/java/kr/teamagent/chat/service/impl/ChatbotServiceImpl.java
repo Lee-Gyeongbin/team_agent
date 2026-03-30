@@ -386,7 +386,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                     if ("answer_delta".equals(currentEvent)) {
                         String text = (String) data.get("text");
-                        if (CommonUtil.isNotEmpty(text)) {
+                        if (text != null && text.length() > 0) {
                             accumulatedContent.append(text);
                             callback.onChunk(text, accumulatedContent.toString());
                         }
@@ -402,8 +402,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             accumulatedContent = new StringBuilder(answer);
                         }
 
-                        inputTokens = parseTokenCount(data.get("input_tokens"));
-                        outputTokens = parseTokenCount(data.get("output_tokens"));
+                        inputTokens = parseTokenCount(data.get("input_token"));
+                        outputTokens = parseTokenCount(data.get("output_token"));
                         tableData = toJsonIfExists(data.get("table_data"));
                         sql = getString(data.get("sql"));
 
