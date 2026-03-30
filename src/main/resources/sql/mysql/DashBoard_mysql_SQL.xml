@@ -17,6 +17,12 @@
             FROM TB_CHAT_LOG A
             WHERE 1=1
         )
+        , DATA1 AS (
+            SELECT
+                COUNT(*) AS DATA_VAL
+            FROM TB_INQ
+            WHERE USE_YN = 'Y'
+        )
         , DATA2 AS (
             SELECT
                 COUNT(*) AS DATA_VAL
@@ -37,11 +43,11 @@
             WHERE SATIS_YN IS NOT NULL
         )
         SELECT
-            0 AS FEEDBACK_COUNT
+            DATA1.DATA_VAL AS FEEDBACK_COUNT
             , DATA2.DATA_VAL AS TODAY_QUERY_COUNT
             , DATA3.DATA_VAL AS SATISFACTION_RATE
             , DATA4.DATA_VAL AS DISSATISFACTION_RATE
-        FROM DATA2, DATA3, DATA4
+        FROM DATA1, DATA2, DATA3, DATA4
     </select>
 
     <select id="selectQueryRatio" resultMap="queryRatioResult">

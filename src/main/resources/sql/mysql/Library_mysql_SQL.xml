@@ -112,6 +112,7 @@
             A.CARD_ID
             , A.USER_ID
             , A.CATEGORY_ID
+            , C.CATEGORY_NM
             , A.LOG_ID
             , A.SVC_TY
             , A.TITLE
@@ -130,6 +131,8 @@
         FROM TB_KNOW_CARD A
         LEFT JOIN TB_CHAT_LOG B
                ON A.LOG_ID = B.LOG_ID
+        LEFT JOIN TB_KNOW_CAT C
+               ON A.CATEGORY_ID = C.CATEGORY_ID AND A.USER_ID = C.USER_ID
         WHERE 1=1
             AND A.USE_YN = 'Y'
             <if test="cardId != null and cardId != ''">

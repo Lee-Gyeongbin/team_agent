@@ -86,6 +86,7 @@ public class LibraryVO {
         private String cardId;
         private String userId;
         private String categoryId;
+        private String categoryNm;
         private String logId;
         private String svcTy;
         private String title;
