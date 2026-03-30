@@ -222,6 +222,7 @@
             , DESCRIPTION
             , VERSION
             , CHUNK_ALGO_CD
+            , CHUNK_OPT_JSON
             , CHUNK_SIZE
             , CHUNK_OVERLAP
             , MIN_CHUNK_SZ
@@ -243,6 +244,7 @@
             , #{description, jdbcType=VARCHAR}
             , #{version, jdbcType=VARCHAR}
             , #{chunkAlgoCd, jdbcType=VARCHAR}
+            , #{chunkOptJson, jdbcType=VARCHAR}
             , #{chunkSize, jdbcType=INTEGER}
             , #{chunkOverlap, jdbcType=INTEGER}
             , #{minChunkSz, jdbcType=INTEGER}
@@ -264,6 +266,7 @@
             , DESCRIPTION = VALUES(DESCRIPTION)
             , VERSION = VALUES(VERSION)
             , CHUNK_ALGO_CD = VALUES(CHUNK_ALGO_CD)
+            , CHUNK_OPT_JSON = VALUES(CHUNK_OPT_JSON)
             , CHUNK_SIZE = VALUES(CHUNK_SIZE)
             , CHUNK_OVERLAP = VALUES(CHUNK_OVERLAP)
             , MIN_CHUNK_SZ = VALUES(MIN_CHUNK_SZ)

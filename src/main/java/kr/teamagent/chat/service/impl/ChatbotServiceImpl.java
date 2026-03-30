@@ -216,6 +216,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("query", query);
         params.put("user_id", userId != null ? userId : "");
         params.put("threadId", threadId != null ? threadId : "string");
+        params.put("room_id", threadId != null ? threadId : "string");
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setUserId(userId);
         // 통계질의일 경우 지역권한코드도 같이 넘겨주기
@@ -797,7 +798,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return "";
         }
 
-        String prompt = "다음 대화에서 핵심 키워드를 최대 5개 추출해줘. 쉼표(,)로 구분해서 키워드만 출력해. 부연 설명 없이 키워드만. "
+        String prompt = "다음 대화에서 핵심 키워드를 최대 5개 추출해줘. 쉼표(,)로 구분해서 키워드만 출력해. 부연 설명 없이 키워드만.각 키워드는 5글자 이내로 하고, 반드시 최대 5개까지만 추출해줘."
                 + "질문: " + truncateTitle(qContent, 200)
                 + " 답변: " + truncateTitle(rContent, 500);
 
