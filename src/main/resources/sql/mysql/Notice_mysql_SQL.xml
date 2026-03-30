@@ -7,6 +7,7 @@
         /* 공지사항 일반 목록 조회 notice.selectNoticeListNormal */
         SELECT
             NOTICE_ID
+            , NOTICE_TYPE_CD
             , TITLE
             , PIN_YN
             , VIEW_CNT
@@ -27,6 +28,7 @@
         /* 공지사항 고정 목록 조회 notice.selectNoticeListPinned */
         SELECT
             NOTICE_ID
+            , NOTICE_TYPE_CD
             , TITLE
             , PIN_YN
             , VIEW_CNT
@@ -46,6 +48,7 @@
         /* 공지사항 상세 조회 notice.selectNoticeDetail */
         SELECT
             NOTICE_ID
+            , NOTICE_TYPE_CD
             , TITLE
             , CONTENT
             , PIN_YN
@@ -83,6 +86,7 @@
         /* 공지사항 등록 notice.insertNotice */
         INSERT INTO TB_NOTICE (
             NOTICE_ID
+            , NOTICE_TYPE_CD
             , TITLE
             , CONTENT
             , PIN_YN
@@ -109,7 +113,8 @@
         /* 공지사항 수정 notice.updateNotice */
         UPDATE TB_NOTICE
         SET
-            TITLE = #{title}
+            NOTICE_TYPE_CD = #{noticeTypeCd}
+            , TITLE = #{title}
             , CONTENT = #{content}
             , PIN_YN = IFNULL(#{pinYn}, 'N')
             , FEATURED_YN = IFNULL(#{featuredYn}, 'N')

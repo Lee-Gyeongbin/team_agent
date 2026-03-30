@@ -10,6 +10,7 @@ public class NoticeVO extends CommonVO {
     private static final long serialVersionUID = 1L;
 
     private String noticeId;
+    private String noticeTypeCd;
     private String title;
     private String content;
     private String pinYn;
