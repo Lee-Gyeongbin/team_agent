@@ -714,7 +714,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         Map<String, Object> resultMap = new HashMap<>();
 
         try {
-            int result = chatbotDAO.deleteChatRoom(chatbotVO);
+            int result = 0;
+            result += chatbotDAO.deleteChatRef(chatbotVO);
+            result += chatbotDAO.deleteChatLog(chatbotVO);
+            result += chatbotDAO.deleteChatRoom(chatbotVO);
             if (result > 0) {
                 resultMap.put("successYn", true);
                 resultMap.put("returnMsg", "요청사항을 성공하였습니다.");

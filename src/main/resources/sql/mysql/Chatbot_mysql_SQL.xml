@@ -265,6 +265,19 @@
         WHERE ROOM_ID = #{roomId}
     </delete>
 
+    <delete id="deleteChatLog" parameterType="chatbotVO">
+        /* 채팅 로그 삭제 ai.chatbot.deleteChatLog */
+        DELETE FROM TB_CHAT_LOG
+        WHERE ROOM_ID = #{roomId}
+    </delete>
+
+    <delete id="deleteChatRef" parameterType="chatbotVO">
+        /* 채팅 참조 삭제 ai.chatbot.deleteChatRef */
+        DELETE FROM TB_CHAT_REF
+        WHERE 1=1 
+        AND LOG_ID IN (SELECT LOG_ID FROM TB_CHAT_LOG WHERE 1=1 AND ROOM_ID = #{roomId})
+    </delete>
+
     <resultMap id="knowledgeItemMap" type="kr.teamagent.chat.service.ChatbotVO$KnowledgeItem" autoMapping="true"/>
 
     <select id="selectChatLogByLogId" parameterType="chatbotVO" resultType="chatbotVO">
