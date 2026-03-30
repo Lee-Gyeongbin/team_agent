@@ -542,11 +542,34 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * done 페이로드 최상위 page가 0이면 매뉴얼 미매칭 등으로 보고,
+     * file_info에 파일이 있어도 참조(TB_CHAT_REF·onComplete docFileId)에 쓰지 않는다.
+     */
+    private boolean isRootPageZero(JSONObject data) {
+        Object pageObj = data.get("page");
+        if (pageObj == null) {
+            return false;
+        }
+        if (pageObj instanceof Number) {
+            return ((Number) pageObj).intValue() == 0;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(pageObj).trim()) == 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /**
      * done 페이로드에서 TB_CHAT_REF 저장용 참조 목록 추출.
      * file_info 우선, 없으면 docFileId + page + relatedPages(또는 view_page) 1건.
      */
     private List<ChatRefItem> extractChatRefItems(JSONObject data) {
         List<ChatRefItem> result = new ArrayList<>();
+
+        if (isRootPageZero(data)) {
+            return result;
+        }
 
         Object fileInfoObj = data.get("file_info");
         if (fileInfoObj instanceof JSONArray) {
