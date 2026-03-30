@@ -100,7 +100,7 @@
             , B.FILE_TYPE
             , A.RELATED_PAGES
         FROM TB_CHAT_REF A
-            INNER JOIN TB_DOC_FILE B ON A.DOC_ID = B.DOC_ID AND A.DOC_FILE_ID = B.DOC_FILE_ID 
+            INNER JOIN TB_DOC_FILE B ON A.DOC_FILE_ID = B.DOC_FILE_ID 
         WHERE 1=1
             AND A.LOG_ID = #{logId}
         ORDER BY A.CHAT_REF_ID
