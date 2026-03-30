@@ -76,6 +76,16 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     public int deleteDocument(RepositoryVO searchVO) throws Exception {
         return delete("repository.deleteDocument", searchVO);
     }
+
+    /**
+     * 문서 파일 삭제
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public int deleteDocumentFile(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteDocumentFile", searchVO);
+    }
     
     /**
      * 문서 저장

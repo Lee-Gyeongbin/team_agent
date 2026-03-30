@@ -204,6 +204,18 @@
         </if>
     </delete>
 
+    <delete id="deleteDocumentFile" parameterType="repositoryVO">
+        /* 문서 파일 삭제 repository.deleteDocumentFile */
+        DELETE FROM TB_DOC_FILE
+        WHERE 1=1
+        <if test="docIdList != null and docIdList.size() > 0">
+            AND DOC_ID IN
+            <foreach collection="docIdList" item="item" separator="," open="(" close=")">
+                #{item.docId}
+            </foreach>
+        </if>
+    </delete>
+
     <select id="selectDocumentExistCnt" resultType="int">
         /* 문서 존재 여부 조회 repository.selectDocumentExistCnt */
         SELECT
