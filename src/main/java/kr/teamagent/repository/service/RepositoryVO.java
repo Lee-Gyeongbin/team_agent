@@ -68,6 +68,9 @@ public class RepositoryVO {
     /** 데이터셋 문서 개수 */
     private String dsDocCnt;
 
+    /** 문서 파일 ID 목록 */
+    private String docFileIdList;
+
     private List<RepositoryVO> docIdList;
 
     /**

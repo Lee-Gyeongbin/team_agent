@@ -67,6 +67,14 @@
             , (
                 SELECT COUNT(*) FROM TB_DOC_FILE B WHERE 1=1 AND B.DOC_ID = A.DOC_ID
             ) AS FILE_CNT
+            , (
+                SELECT
+                    GROUP_CONCAT(F.DOC_FILE_ID ORDER BY F.FILE_ORD SEPARATOR ',')
+                FROM
+                    TB_DOC_FILE F
+                WHERE
+                    F.DOC_ID = A.DOC_ID
+            ) AS DOC_FILE_ID_LIST
         FROM
             TB_DOC A
         INNER JOIN TB_CONTENT_CAT B

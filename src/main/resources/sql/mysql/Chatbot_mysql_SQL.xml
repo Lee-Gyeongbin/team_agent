@@ -174,7 +174,7 @@
         INSERT INTO TB_CHAT_REF
         (
             LOG_ID,
-            DOC_ID,
+            DOC_FILE_ID,
             MAIN_PAGE_NO,
             RELATED_PAGES,
             CREATE_DT
@@ -182,7 +182,7 @@
         VALUES
         (
             #{logId},
-            #{docId},
+            #{docFileId},
             #{mainPageNo},
             #{relatedPages},
             NOW()
@@ -215,9 +215,9 @@
             , A.REASK_CNT
             , A.CREATE_USER_ID
             , A.CREATE_DT
-            , B.DOC_ID 
+            , (SELECT MIN(D.DOC_ID) FROM TB_CHAT_REF R INNER JOIN TB_DOC_FILE D ON D.DOC_FILE_ID = R.DOC_FILE_ID AND D.USE_YN = 'Y' WHERE R.LOG_ID = A.LOG_ID) AS DOC_ID
             , CASE
-                WHEN A.SVC_TY = 'M' AND B.DOC_ID IS NOT NULL THEN 'Y'
+                WHEN A.SVC_TY = 'M' AND EXISTS (SELECT 1 FROM TB_CHAT_REF R2 WHERE R2.LOG_ID = A.LOG_ID) THEN 'Y'
                 ELSE 'N'
                 END AS DOC_EXIST
             , CASE
@@ -226,8 +226,6 @@
             	END AS TABLE_EXIST
         FROM
             TB_CHAT_LOG A
-        LEFT OUTER JOIN TB_CHAT_REF B
-	        ON B.LOG_ID = A.LOG_ID 
         WHERE 1=1
             AND A.ROOM_ID = #{roomId}
         ORDER BY A.CREATE_DT DESC
@@ -244,11 +242,10 @@
             , B.RELATED_PAGES 
         FROM
             TB_DOC_FILE A
-        LEFT OUTER JOIN TB_CHAT_REF B
-            ON B.DOC_ID = A.DOC_ID 
-            AND B.DOC_FILE_ID = A.DOC_FILE_ID
-        WHERE 1=1 
+        INNER JOIN TB_CHAT_REF B
+            ON B.DOC_FILE_ID = A.DOC_FILE_ID
             AND B.LOG_ID = #{logId}
+        WHERE 1=1 
             AND A.USE_YN = 'Y'
     </select>
 
