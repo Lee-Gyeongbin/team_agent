@@ -1,14 +1,23 @@
 package kr.teamagent.common.system.service.impl;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +29,7 @@ import com.amazonaws.HttpMethod;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.ResponseHeaderOverrides;
+import com.amazonaws.services.s3.model.S3Object;
 
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.service.FileVO;
@@ -28,6 +38,9 @@ import kr.teamagent.common.util.service.FileVO;
 public class FileServiceImpl extends EgovAbstractServiceImpl {
 
     private final Logger log = LoggerFactory.getLogger(this.getClass());
+    private static final long VIEW_URL_EXPIRE_MILLIS = 30 * 60 * 1000L;
+    private static final int DEFAULT_TXT_MAX_BYTES = 1024 * 1024;
+    private static final int DEFAULT_CONVERT_TIMEOUT_SEC = 60;
 
     @Autowired
     private FileDAO fileDAO;
@@ -77,21 +90,268 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     public Map<String, Object> createViewPresignedUrl(FileVO dataVO) throws Exception {
-
         FileVO doc = selectFileByDocId(dataVO);
+        if (doc == null || doc.getFilePath() == null || doc.getFilePath().trim().isEmpty()) {
+            return createDownloadFallbackResponse(doc, "FILE_NOT_FOUND");
+        }
+
         String key = doc.getFilePath();
-        Date expiration = new Date(System.currentTimeMillis() + 30 * 60 * 1000);
+        String ext = resolveFileExtension(doc);
 
-        log.debug("bucketName={}, key={}", getBucketName(), key);
+        if ("txt".equals(ext)) {
+            return createTextViewResponse(doc, key);
+        }
 
+        if ("pdf".equals(ext)) {
+            return createPdfViewResponse(doc, key);
+        }
+
+        if (isConvertibleByLibreOffice(ext)) {
+            try {
+                String convertedPdfKey = ensureConvertedPdfObject(doc);
+                return createPdfViewResponse(doc, convertedPdfKey);
+            } catch (Exception e) {
+                log.warn("File convert failed. docId={}, docFileId={}, ext={}", doc.getDocId(), doc.getDocFileId(), ext, e);
+                return createDownloadFallbackResponse(doc, "CONVERT_FAILED");
+            }
+        }
+
+        return createDownloadFallbackResponse(doc, "UNSUPPORTED_VIEW_TYPE");
+    }
+
+    private Map<String, Object> createPdfViewResponse(FileVO doc, String key) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("viewType", "PDF");
+        result.put("url", createViewUrlByKey(key));
+        result.put("fileName", doc == null ? null : doc.getFileName());
+        return result;
+    }
+
+    private Map<String, Object> createTextViewResponse(FileVO doc, String key) throws Exception {
+        TextReadResult textReadResult = readTextFromObjectStorage(key);
+        Map<String, Object> result = new HashMap<>();
+        result.put("viewType", "TEXT");
+        result.put("content", textReadResult.getContent());
+        result.put("encoding", "UTF-8");
+        result.put("truncatedYn", textReadResult.isTruncated() ? "Y" : "N");
+        result.put("fileName", doc == null ? null : doc.getFileName());
+        return result;
+    }
+
+    private Map<String, Object> createDownloadFallbackResponse(FileVO doc, String reason) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        result.put("viewType", "DOWNLOAD");
+        result.put("fileName", doc == null ? null : doc.getFileName());
+        result.put("reason", reason);
+        if (doc == null) {
+            result.put("downloadUrl", "");
+            return result;
+        }
+        result.put("downloadUrl", createDownloadUrlByFile(doc));
+        return result;
+    }
+
+    private String createViewUrlByKey(String key) {
+        Date expiration = new Date(System.currentTimeMillis() + VIEW_URL_EXPIRE_MILLIS);
+        log.debug("View presigned URL request. bucketName={}, key={}", getBucketName(), key);
         GeneratePresignedUrlRequest request =
                 new GeneratePresignedUrlRequest(getBucketName(), key)
                         .withMethod(HttpMethod.GET)
                         .withExpiration(expiration);
-
         URL url = s3Client.generatePresignedUrl(request);
+        return url.toString();
+    }
 
-        return Map.of("url", url.toString());
+    private String resolveFileExtension(FileVO doc) {
+        String fileName = doc == null ? null : doc.getFileName();
+        if (fileName != null) {
+            int idx = fileName.lastIndexOf('.');
+            if (idx >= 0 && idx < fileName.length() - 1) {
+                return fileName.substring(idx + 1).toLowerCase();
+            }
+        }
+
+        String fileType = doc == null ? null : doc.getFileType();
+        if (fileType == null) {
+            return "";
+        }
+        String normalized = fileType.trim().toLowerCase();
+        if (normalized.startsWith(".")) {
+            return normalized.substring(1);
+        }
+        int slashIdx = normalized.lastIndexOf('/');
+        if (slashIdx >= 0 && slashIdx < normalized.length() - 1) {
+            return normalized.substring(slashIdx + 1);
+        }
+        return normalized;
+    }
+
+    private boolean isConvertibleByLibreOffice(String ext) {
+        return "doc".equals(ext)
+                || "docx".equals(ext)
+                || "ppt".equals(ext)
+                || "pptx".equals(ext)
+                || "xls".equals(ext)
+                || "xlsx".equals(ext)
+                || "hwp".equals(ext);
+    }
+
+    private TextReadResult readTextFromObjectStorage(String key) throws Exception {
+        int maxBytes = parseIntProperty("fileView.txt.maxBytes", DEFAULT_TXT_MAX_BYTES);
+        byte[] bodyBytes;
+        boolean truncated = false;
+
+        try (S3Object s3Object = s3Client.getObject(getBucketName(), key);
+             InputStream in = new BufferedInputStream(s3Object.getObjectContent());
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int total = 0;
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                if (total + read > maxBytes) {
+                    int writable = Math.max(0, maxBytes - total);
+                    if (writable > 0) {
+                        out.write(buffer, 0, writable);
+                    }
+                    truncated = true;
+                    break;
+                }
+                out.write(buffer, 0, read);
+                total += read;
+            }
+            bodyBytes = out.toByteArray();
+        }
+
+        if (bodyBytes.length >= 3
+                && (bodyBytes[0] & 0xFF) == 0xEF
+                && (bodyBytes[1] & 0xFF) == 0xBB
+                && (bodyBytes[2] & 0xFF) == 0xBF) {
+            byte[] withoutBom = new byte[bodyBytes.length - 3];
+            System.arraycopy(bodyBytes, 3, withoutBom, 0, withoutBom.length);
+            bodyBytes = withoutBom;
+        }
+
+        return new TextReadResult(new String(bodyBytes, StandardCharsets.UTF_8), truncated);
+    }
+
+    private String ensureConvertedPdfObject(FileVO doc) throws Exception {
+        String sourceKey = doc.getFilePath();
+        String convertedKey = sourceKey + ".view.pdf";
+        String bucket = getBucketName();
+
+        if (s3Client.doesObjectExist(bucket, convertedKey)) {
+            return convertedKey;
+        }
+
+        Path workDir = createViewWorkDir();
+        String inputFileName = createSafeInputFileName(doc, sourceKey);
+        Path inputPath = workDir.resolve(inputFileName);
+        Path outputPath = workDir.resolve(replaceExtensionToPdf(inputFileName));
+
+        try {
+            try (S3Object sourceObject = s3Client.getObject(bucket, sourceKey);
+                 InputStream in = sourceObject.getObjectContent()) {
+                Files.copy(in, inputPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            runLibreOfficeConvert(inputPath, workDir);
+
+            if (!Files.exists(outputPath)) {
+                throw new IOException("Converted PDF file not found: " + outputPath);
+            }
+
+            s3Client.putObject(bucket, convertedKey, outputPath.toFile());
+            return convertedKey;
+        } finally {
+            deleteQuietly(inputPath);
+            deleteQuietly(outputPath);
+            deleteQuietly(workDir);
+        }
+    }
+
+    private Path createViewWorkDir() throws Exception {
+        String baseTempDir = getPropertyOrDefault("fileView.tempDir", System.getProperty("java.io.tmpdir"));
+        Path baseDir = Paths.get(baseTempDir, "teamagent-view");
+        Files.createDirectories(baseDir);
+        return Files.createTempDirectory(baseDir, "conv-");
+    }
+
+    private void runLibreOfficeConvert(Path inputPath, Path outDir) throws Exception {
+        String libreOfficeExec = getPropertyOrDefault("fileView.libreOffice.exec", "soffice");
+        int timeoutSec = parseIntProperty("fileView.convertTimeoutSec", DEFAULT_CONVERT_TIMEOUT_SEC);
+
+        List<String> command = new ArrayList<>();
+        command.add(libreOfficeExec);
+        command.add("--headless");
+        command.add("--convert-to");
+        command.add("pdf");
+        command.add("--outdir");
+        command.add(outDir.toString());
+        command.add(inputPath.toString());
+
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+
+        Process process = processBuilder.start();
+        boolean finished = process.waitFor(timeoutSec, TimeUnit.SECONDS);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("LibreOffice convert timeout. timeoutSec=" + timeoutSec);
+        }
+        if (process.exitValue() != 0) {
+            throw new IOException("LibreOffice convert exit code=" + process.exitValue());
+        }
+    }
+
+    private String createSafeInputFileName(FileVO doc, String sourceKey) {
+        String originName = doc == null ? null : doc.getFileName();
+        if (originName == null || originName.trim().isEmpty()) {
+            int slashIdx = sourceKey.lastIndexOf('/');
+            originName = slashIdx >= 0 ? sourceKey.substring(slashIdx + 1) : sourceKey;
+        }
+        originName = originName.replaceAll("[\\\\/:*?\"<>|]", "_");
+        return System.currentTimeMillis() + "_" + originName;
+    }
+
+    private String replaceExtensionToPdf(String fileName) {
+        int dotIdx = fileName.lastIndexOf('.');
+        if (dotIdx < 0) {
+            return fileName + ".pdf";
+        }
+        return fileName.substring(0, dotIdx) + ".pdf";
+    }
+
+    private void deleteQuietly(Path path) {
+        if (path == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(path);
+        } catch (Exception e) {
+            log.debug("Temporary file cleanup skipped. path={}", path, e);
+        }
+    }
+
+    private String getPropertyOrDefault(String propertyName, String defaultValue) {
+        String value = PropertyUtil.getProperty(propertyName);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        return value.trim();
+    }
+
+    private int parseIntProperty(String propertyName, int defaultValue) {
+        String value = PropertyUtil.getProperty(propertyName);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            log.warn("Invalid number property. key={}, value={}, default={}", propertyName, value, defaultValue);
+            return defaultValue;
+        }
     }
 
     /**
@@ -153,6 +413,24 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
 
         URL url = s3Client.generatePresignedUrl(request);
         return url.toString();
+    }
+
+    private static class TextReadResult {
+        private final String content;
+        private final boolean truncated;
+
+        private TextReadResult(String content, boolean truncated) {
+            this.content = content;
+            this.truncated = truncated;
+        }
+
+        private String getContent() {
+            return content;
+        }
+
+        private boolean isTruncated() {
+            return truncated;
+        }
     }
 
     /**

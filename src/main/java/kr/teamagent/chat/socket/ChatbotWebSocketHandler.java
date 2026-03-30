@@ -249,12 +249,12 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             }
             
             @Override
-            public void onComplete(String content, String filePath, String page, List<Integer> viewPage, String responseThreadId, String logId, String tableData) {
+            public void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String responseThreadId, String logId, String tableData) {
                 // complete 메시지: 최종 내용과 threadId, logId 전송
                 JSONObject message = new JSONObject();
                 message.put("type", "complete");
                 message.put("content", content);
-                message.put("filePath", filePath);
+                message.put("docFileId", docFileId);
                 message.put("page", page);
                 message.put("threadId", responseThreadId != null ? responseThreadId : "");
                 if (viewPage != null && !viewPage.isEmpty()) {
@@ -327,7 +327,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
      */
     public interface ChatbotStreamingCallback {
         void onChunk(String content, String accumulated);
-        void onComplete(String content, String filePath, String page, List<Integer> viewPage, String threadId, String logId, String tableData);
+        void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData);
         void onError(String error);
     }
 }

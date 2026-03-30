@@ -42,7 +42,8 @@ public class DatasetVO {
     private String wspNormYn;
     private String specChrRmYn;
     private String singleCellText;
-
+    private String chunkOptJson;
+    
     private String htmlRmYn;
     private String stopwordRmYn;
     private String codeKeepYn;

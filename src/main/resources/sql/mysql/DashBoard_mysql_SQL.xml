@@ -84,15 +84,21 @@
         /* 대시보드 공지 요약 목록 dashboard.selectDashboardNoticeList */
         SELECT
             A.NOTICE_ID
-            , A.TITLE
+            , CONCAT('[', C.CODE_NM, '] ', A.TITLE) AS TITLE
             , A.FEATURED_YN
             , A.CRTR_ID
             , A.CREATE_DT
             , A.MODIFY_DT
         FROM TB_NOTICE A
+            LEFT JOIN TB_CODE C 
+                ON A.NOTICE_TYPE_CD = C.CODE_ID 
+                AND C.CODE_GRP_ID = 'NT000001'
         WHERE 1=1
             AND A.USE_YN = 'Y'
-        ORDER BY A.CREATE_DT DESC
+        ORDER BY 
+            A.FEATURED_YN DESC
+            , A.CREATE_DT DESC
+        LIMIT 4
     </select>
 
     <select id="selectTokenUsageList" resultMap="tokenUsageResult">
@@ -137,19 +143,19 @@
     <select id="selectVisitorTrendList" resultMap="visitorTrendResult">
         /* 대시보드 사용자 추이 dashboard.selectVisitorTrendList */
         WITH RECURSIVE DAYS AS (
-            SELECT DATE_SUB(CURDATE(), INTERVAL 9 DAY) AS DT
+            SELECT DATE_SUB(CURDATE(), INTERVAL 10 DAY) AS DT
             UNION ALL
             SELECT DATE_ADD(DT, INTERVAL 1 DAY)
             FROM DAYS
-            WHERE DT <![CDATA[<]]> CURDATE()
+            WHERE DT <![CDATA[<]]> DATE_SUB(CURDATE(), INTERVAL 1 DAY)
         )
         , LOGIN_SUM AS (
             SELECT
                 A.STAT_DATE
                 , SUM(IFNULL(A.SUCCESS_CNT, 0)) AS SUCCESS_CNT
             FROM TB_AUDIT_LOGIN_DAILY_STAT A
-            WHERE A.STAT_DATE <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 9 DAY), '%Y%m%d')
-                AND A.STAT_DATE <![CDATA[<=]]> DATE_FORMAT(CURDATE(), '%Y%m%d')
+            WHERE A.STAT_DATE <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 10 DAY), '%Y%m%d')
+                AND A.STAT_DATE <![CDATA[<=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
             GROUP BY A.STAT_DATE
         )
         SELECT
