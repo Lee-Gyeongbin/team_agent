@@ -73,6 +73,9 @@
             <when test='searchSort == "name"'>
                 ORDER BY TITLE
             </when>
+            <when test='searchSort == "pin"'>
+                ORDER BY PIN_YN DESC, SORT_ORD
+            </when>
             <otherwise>
                 ORDER BY SORT_ORD
             </otherwise>
