@@ -46,7 +46,6 @@
             , A.CHUNK_ALGO_CD
             , A.CHUNK_SIZE
             , A.CHUNK_OVERLAP
-            , A.MIN_CHUNK_SZ
             , A.HDR_INCL_CD
             , A.DATASET_BUILD_STATUS_CD
             , A.EMBED_MODEL_CD

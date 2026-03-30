@@ -45,8 +45,7 @@
             D.SRCH_QUAL,
             D.CHUNK_SIZE,
             D.CHUNK_OVERLAP,
-            D.MIN_CHUNK_SZ,
-
+            D.CHUNK_OPT_JSON,
             COALESCE(DOC_CNT.DOC_CNT, 0) AS DOC_CNT,
             COALESCE(URL_CNT.URL_CNT, 0) AS URL_CNT,
 
@@ -108,7 +107,7 @@
             D.CHUNK_ALGO_CD,
             D.CHUNK_SIZE,
             D.CHUNK_OVERLAP,
-            D.MIN_CHUNK_SZ,
+            D.CHUNK_OPT_JSON,
             D.HDR_INCL_CD,
             D.DATASET_BUILD_STATUS_CD,
             D.EMBED_MODEL_CD,
@@ -225,7 +224,6 @@
             , CHUNK_OPT_JSON
             , CHUNK_SIZE
             , CHUNK_OVERLAP
-            , MIN_CHUNK_SZ
             , HDR_INCL_CD
             , DATASET_BUILD_STATUS_CD
             , EMBED_MODEL_CD
@@ -247,7 +245,6 @@
             , #{chunkOptJson, jdbcType=VARCHAR}
             , #{chunkSize, jdbcType=INTEGER}
             , #{chunkOverlap, jdbcType=INTEGER}
-            , #{minChunkSz, jdbcType=INTEGER}
             , #{hdrInclCd, jdbcType=VARCHAR}
             , #{datasetBuildStatusCd, jdbcType=VARCHAR}
             , #{embedModelCd, jdbcType=VARCHAR}
@@ -269,7 +266,6 @@
             , CHUNK_OPT_JSON = VALUES(CHUNK_OPT_JSON)
             , CHUNK_SIZE = VALUES(CHUNK_SIZE)
             , CHUNK_OVERLAP = VALUES(CHUNK_OVERLAP)
-            , MIN_CHUNK_SZ = VALUES(MIN_CHUNK_SZ)
             , HDR_INCL_CD = VALUES(HDR_INCL_CD)
             , DATASET_BUILD_STATUS_CD = VALUES(DATASET_BUILD_STATUS_CD)
             , EMBED_MODEL_CD = VALUES(EMBED_MODEL_CD)
