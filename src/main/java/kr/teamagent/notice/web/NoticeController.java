@@ -20,12 +20,21 @@ public class NoticeController extends BaseController<Object> {
     @Autowired
     private NoticeServiceImpl noticeService;
 
-    /* 공지사항 목록 조회 */
+    /* 공지사항 일반 목록 조회 (PIN_YN = 'N') — notice.selectNoticeListNormal */
     @RequestMapping(value = "/list.do")
     @ResponseBody
     public ModelAndView list(NoticeVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", noticeService.selectNoticeList(searchVO));
+        resultMap.put("dataList", noticeService.selectNoticeListNormal(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /* 공지사항 고정(상단) 목록 조회 (PIN_YN = 'Y') — notice.selectNoticeListPinned */
+    @RequestMapping(value = "/pinnedList.do")
+    @ResponseBody
+    public ModelAndView pinnedList(NoticeVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", noticeService.selectNoticeListPinned(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 

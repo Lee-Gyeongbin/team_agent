@@ -10,8 +10,12 @@ import kr.teamagent.notice.service.NoticeVO;
 @Repository
 public class NoticeDAO extends EgovComAbstractDAO {
 
-    public List<NoticeVO> selectNoticeList(NoticeVO searchVO) throws Exception {
-        return selectList("notice.selectNoticeList", searchVO);
+    public List<NoticeVO> selectNoticeListNormal(NoticeVO searchVO) throws Exception {
+        return selectList("notice.selectNoticeListNormal", searchVO);
+    }
+
+    public List<NoticeVO> selectNoticeListPinned(NoticeVO searchVO) throws Exception {
+        return selectList("notice.selectNoticeListPinned", searchVO);
     }
 
     public NoticeVO selectNoticeDetail(NoticeVO searchVO) throws Exception {

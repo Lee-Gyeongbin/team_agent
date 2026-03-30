@@ -20,8 +20,12 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
     @Autowired
     private KeyGenerate keyGenerate;
 
-    public List<NoticeVO> selectNoticeList(NoticeVO searchVO) throws Exception {
-        return noticeDAO.selectNoticeList(searchVO);
+    public List<NoticeVO> selectNoticeListNormal(NoticeVO searchVO) throws Exception {
+        return noticeDAO.selectNoticeListNormal(searchVO);
+    }
+
+    public List<NoticeVO> selectNoticeListPinned(NoticeVO searchVO) throws Exception {
+        return noticeDAO.selectNoticeListPinned(searchVO);
     }
 
     public NoticeVO selectNoticeDetail(NoticeVO searchVO) throws Exception {
