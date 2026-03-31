@@ -765,11 +765,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         chatbotVO.setCardId(keyGenerate.generateTableKey("KD", "TB_KNOW_CARD", "CARD_ID"));
 
-        Integer maxSortOrd = chatbotDAO.selectMaxSortOrd(chatbotVO);
-        chatbotVO.setSortOrd(maxSortOrd != null ? maxSortOrd + 1 : 1);
+        chatbotDAO.updateKnowledgeSortOrdForPrepend(chatbotVO);
+        chatbotVO.setSortOrd(1);
 
         chatbotVO.setSvcTy(chatLog.getSvcTy());
-        chatbotVO.setTitle(generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()));
+        chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getRoomTitle()) ? generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()) : chatLog.getRoomTitle());
         chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent()));
         chatbotVO.setPinYn("N");
         chatbotVO.setArchiveYn("N");

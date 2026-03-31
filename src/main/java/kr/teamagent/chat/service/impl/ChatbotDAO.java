@@ -161,6 +161,10 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return selectOne("ai.chatbot.selectMaxSortOrd", searchVO);
     }
 
+    public int updateKnowledgeSortOrdForPrepend(ChatbotVO dataVO) throws Exception {
+        return update("ai.chatbot.updateKnowledgeSortOrdForPrepend", dataVO);
+    }
+
     public int insertKnowledgeCard(ChatbotVO dataVO) throws Exception {
         return insert("ai.chatbot.insertKnowledgeCard", dataVO);
     }

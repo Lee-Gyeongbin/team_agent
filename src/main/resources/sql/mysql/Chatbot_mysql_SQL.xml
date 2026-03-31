@@ -285,6 +285,7 @@
         SELECT
             A.LOG_ID
             , A.ROOM_ID
+            , B.ROOM_TITLE
             , A.SVC_TY
             , A.REF_ID
             , A.Q_CONTENT
@@ -294,6 +295,7 @@
             , A.CREATE_USER_ID  AS USER_ID
             , A.CREATE_DT
         FROM TB_CHAT_LOG A
+            LEFT JOIN TB_CHAT_ROOM B ON A.ROOM_ID = B.ROOM_ID 
         WHERE 1=1
             AND A.LOG_ID = #{logId}
     </select>
@@ -305,6 +307,15 @@
         WHERE A.USER_ID = #{userId}
           AND A.CATEGORY_ID = #{categoryId}
     </select>
+
+    <update id="updateKnowledgeSortOrdForPrepend" parameterType="chatbotVO">
+        /* 지식 카드 맨 앞 등록을 위한 정렬 순서 증가 ai.chatbot.updateKnowledgeSortOrdForPrepend */
+        UPDATE TB_KNOW_CARD
+        SET SORT_ORD = SORT_ORD + 1
+            , MODIFY_DT = NOW()
+        WHERE USER_ID = #{userId}
+          AND CATEGORY_ID = #{categoryId}
+    </update>
 
     <insert id="insertKnowledgeCard" parameterType="chatbotVO">
         /* 지식 카드 등록 ai.chatbot.insertKnowledgeCard */
