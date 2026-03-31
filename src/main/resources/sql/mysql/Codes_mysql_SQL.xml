@@ -33,9 +33,7 @@
         <if test="codeGrpId != null and codeGrpId != ''">
             AND CODE_GRP_ID = #{codeGrpId}
         </if>
-        <if test="useYn != null and useYn != ''">
-            AND USE_YN = #{useYn}
-        </if>
+            AND USE_YN = 'Y'
         ORDER BY CODE_GRP_ID, SORT_ORD, CODE_ID
     </select>
 

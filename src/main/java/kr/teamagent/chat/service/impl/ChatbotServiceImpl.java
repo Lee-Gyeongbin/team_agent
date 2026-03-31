@@ -216,6 +216,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("query", query);
         params.put("user_id", userId != null ? userId : "");
         params.put("threadId", threadId != null ? threadId : "string");
+        params.put("dataset_id", refId != null ? refId : "");
         params.put("room_id", threadId != null ? threadId : "string");
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setUserId(userId);

@@ -213,6 +213,17 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
 
+            // TB_DOC_FILE 저장 후 AI 연동: pre_processing/download는 doc_file_id로 DB 메타를 조회하는 경우가 많아,
+            // INSERT 전에 호출하면 저장 완료 처리 없이 done만 오는 현상이 난다.
+            if (!fileRowsToSave.isEmpty()) {
+                for (RepositoryVO fileRow : fileRowsToSave) {
+                    int fileResult = repositoryDAO.saveDocumentFile(fileRow);
+                    if (fileResult > 0) {
+                        savedFileCount++;
+                    }
+                }
+            }
+
             String aiApiUrl = PropertyUtil.getProperty("Globals.dataset.fileDownload.apiUrl");
             if (StringUtils.isNotBlank(aiApiUrl) && (!savedDocFileIds.isEmpty() || !validDeleteFileIds.isEmpty())) {
                 Map<String, Object> aiSendResult = sendDocumentFileIdsToAiServer(aiApiUrl, savedDocFileIds, validDeleteFileIds);
@@ -228,15 +239,6 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                 deleteVo.setDocId(searchVO.getDocId());
                 deleteVo.setDeleteFileIds(validDeleteFileIds);
                 deletedFileCount = repositoryDAO.deleteDocumentFileByIds(deleteVo);
-            }
-
-            if (!fileRowsToSave.isEmpty()) {
-                for (RepositoryVO fileRow : fileRowsToSave) {
-                    int fileResult = repositoryDAO.saveDocumentFile(fileRow);
-                    if (fileResult > 0) {
-                        savedFileCount++;
-                    }
-                }
             }
 
             resultMap.put("successYn", true);

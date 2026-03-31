@@ -371,7 +371,7 @@
         UPDATE
             TB_DS
         SET
-            <if test="useYn != null and useYn != ''">
+            <if test="useYn != null or useYn != ''">
                 USE_YN = #{useYn, jdbcType=VARCHAR},
             </if>
             <if test="datasetBuildStatusCd != null and datasetBuildStatusCd != ''">
