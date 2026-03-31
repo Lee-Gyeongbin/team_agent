@@ -175,6 +175,39 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         result += datasetDAO.deleteDataset(datasetVO);
         // 데이터셋 전처리 삭제
         result += datasetDAO.deleteDatasetPreproc(datasetVO);
+
+        // 데이터셋 삭제 API 호출
+        String apiUrl = PropertyUtil.getProperty("Globals.dataset.delete.apiUrl");
+        if (CommonUtil.isNotEmpty(apiUrl) && datasetVO != null && CommonUtil.isNotEmpty(datasetVO.getDatasetId())) {
+            String datasetId = datasetVO.getDatasetId();
+
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(60, TimeUnit.SECONDS)
+                    .build();
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("dataset_id", datasetId);
+
+            String jsonBody = new com.google.gson.Gson().toJson(params);
+            RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .build();
+
+            // DB 삭제는 이미 수행되었으므로, 외부 API 실패는 예외로 전체 트랜잭션을 깨지 않도록 로그만 남긴다.
+            try (okhttp3.Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    logger.warn("dataset delete API 호출 실패 - datasetId={}, apiUrl={}, status={}", datasetId, apiUrl, response.code());
+                }
+            } catch (Exception e) {
+                logger.warn("dataset delete API 호출 오류 - datasetId={}, message={}", datasetId, e.getMessage());
+            }
+        }
         return result;
     }
 

@@ -111,6 +111,7 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
 
         try {
             int result = repositoryDAO.deleteDocument(searchVO);
+            result += repositoryDAO.deleteDocumentFile(searchVO);
             if (result > 0) {
                 resultMap.put("successYn", true);
                 resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
