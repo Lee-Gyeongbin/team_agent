@@ -43,6 +43,9 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
         if ("Y".equals(noticeVO.getFeaturedYn())) {
             noticeDAO.resetNoticeFeaturedYn(noticeVO);
         }
+        if ("Y".equals(noticeVO.getPinYn())) {
+            noticeDAO.resetOldestPinnedNotice(noticeVO);
+        }
         return noticeDAO.insertNotice(noticeVO);
     }
 
@@ -50,6 +53,9 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
     public int updateNotice(NoticeVO noticeVO) throws Exception {
         if ("Y".equals(noticeVO.getFeaturedYn())) {
             noticeDAO.resetNoticeFeaturedYn(noticeVO);
+        }
+        if ("Y".equals(noticeVO.getPinYn())) {
+            noticeDAO.resetOldestPinnedNotice(noticeVO);
         }
         return noticeDAO.updateNotice(noticeVO);
     }

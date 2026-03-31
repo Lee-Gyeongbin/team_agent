@@ -10,6 +10,7 @@
             , NOTICE_TYPE_CD
             , TITLE
             , PIN_YN
+            , PIN_DT
             , VIEW_CNT
             , FEATURED_YN
             , USE_YN
@@ -31,6 +32,7 @@
             , NOTICE_TYPE_CD
             , TITLE
             , PIN_YN
+            , PIN_DT
             , VIEW_CNT
             , FEATURED_YN
             , USE_YN
@@ -41,7 +43,7 @@
         WHERE 1 = 1
             AND USE_YN = 'Y'
             AND PIN_YN = 'Y'
-        ORDER BY CREATE_DT DESC
+        ORDER BY IFNULL(PIN_DT, CREATE_DT) DESC, CREATE_DT DESC
     </select>
 
     <select id="selectNoticeDetail" parameterType="noticeVO" resultType="noticeVO">
@@ -52,6 +54,7 @@
             , TITLE
             , CONTENT
             , PIN_YN
+            , PIN_DT
             , VIEW_CNT
             , USE_YN
             , CRTR_ID
@@ -82,6 +85,43 @@
         </if>
     </update>
 
+    <update id="resetOldestPinnedNotice" parameterType="noticeVO">
+        /* 고정 공지 5개 제한: 가장 오래된 PIN 해제 notice.resetOldestPinnedNotice */
+        UPDATE TB_NOTICE
+        SET
+            PIN_YN = 'N'
+            , PIN_DT = NULL
+            , MODIFY_DT = NOW()
+        WHERE NOTICE_ID = (
+            SELECT T.NOTICE_ID
+            FROM (
+                SELECT NOTICE_ID
+                FROM TB_NOTICE
+                WHERE 1 = 1
+                    AND USE_YN = 'Y'
+                    AND PIN_YN = 'Y'
+                <if test="noticeId != null and noticeId != ''">
+                    AND NOTICE_ID != #{noticeId}
+                </if>
+                ORDER BY IFNULL(PIN_DT, CREATE_DT) ASC, CREATE_DT ASC
+                LIMIT 1
+            ) T
+        )
+        AND (
+            SELECT CNT.C
+            FROM (
+                SELECT COUNT(1) AS C
+                FROM TB_NOTICE
+                WHERE 1 = 1
+                    AND USE_YN = 'Y'
+                    AND PIN_YN = 'Y'
+                <if test="noticeId != null and noticeId != ''">
+                    AND NOTICE_ID != #{noticeId}
+                </if>
+            ) AS CNT
+        ) >= 5
+    </update>
+
     <insert id="insertNotice" parameterType="noticeVO">
         /* 공지사항 등록 notice.insertNotice */
         INSERT INTO TB_NOTICE (
@@ -90,6 +130,7 @@
             , TITLE
             , CONTENT
             , PIN_YN
+            , PIN_DT
             , VIEW_CNT
             , FEATURED_YN
             , USE_YN
@@ -98,9 +139,11 @@
         )
         VALUES (
             #{noticeId}
+            , #{noticeTypeCd}
             , #{title}
             , #{content}
             , IFNULL(#{pinYn}, 'N')
+            , CASE WHEN IFNULL(#{pinYn}, 'N') = 'Y' THEN NOW() ELSE NULL END
             , IFNULL(#{viewCnt}, 0)
             , IFNULL(#{featuredYn}, 'N')
             , IFNULL(#{useYn}, 'Y')
@@ -117,6 +160,7 @@
             , TITLE = #{title}
             , CONTENT = #{content}
             , PIN_YN = IFNULL(#{pinYn}, 'N')
+            , PIN_DT = CASE WHEN IFNULL(#{pinYn}, 'N') = 'Y' THEN NOW() ELSE NULL END
             , FEATURED_YN = IFNULL(#{featuredYn}, 'N')
             , USE_YN = IFNULL(#{useYn}, 'Y')
             , MODIFY_DT = NOW()
