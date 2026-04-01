@@ -99,14 +99,24 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         String ext = resolveFileExtension(doc);
 
         if ("txt".equals(ext)) {
+            if (!doesStorageObjectExist(key)) {
+                return createDownloadFallbackResponse(doc, "STORAGE_OBJECT_MISSING");
+            }
             return createTextViewResponse(doc, key);
         }
 
         if ("pdf".equals(ext)) {
+            if (!doesStorageObjectExist(key)) {
+                return createDownloadFallbackResponse(doc, "STORAGE_OBJECT_MISSING");
+            }
             return createPdfViewResponse(doc, key);
         }
 
         if (isConvertibleByLibreOffice(ext)) {
+            String convertedKey = key + ".view.pdf";
+            if (!doesStorageObjectExist(convertedKey) && !doesStorageObjectExist(key)) {
+                return createDownloadFallbackResponse(doc, "STORAGE_OBJECT_MISSING");
+            }
             try {
                 String convertedPdfKey = ensureConvertedPdfObject(doc);
                 return createPdfViewResponse(doc, convertedPdfKey);
@@ -147,8 +157,23 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
             result.put("downloadUrl", "");
             return result;
         }
+        if ("STORAGE_OBJECT_MISSING".equals(reason)) {
+            result.put("downloadUrl", "");
+            return result;
+        }
         result.put("downloadUrl", createDownloadUrlByFile(doc));
         return result;
+    }
+
+    /**
+     * NCP 오브젝트 스토리지에 해당 키의 객체가 있는지 확인한다.
+     * Presigned URL 생성 전에 호출해 DB와 스토리지 불일치를 감지한다.
+     */
+    private boolean doesStorageObjectExist(String key) {
+        if (key == null || key.trim().isEmpty()) {
+            return false;
+        }
+        return s3Client.doesObjectExist(getBucketName(), key.trim());
     }
 
     private String createViewUrlByKey(String key) {
