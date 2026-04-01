@@ -24,6 +24,10 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
         return noticeDAO.selectNoticeListNormal(searchVO);
     }
 
+    public Integer selectNoticeListNormalCnt(NoticeVO searchVO) throws Exception {
+        return noticeDAO.selectNoticeListNormalCnt(searchVO);
+    }
+
     public List<NoticeVO> selectNoticeListPinned(NoticeVO searchVO) throws Exception {
         return noticeDAO.selectNoticeListPinned(searchVO);
     }
@@ -34,7 +38,7 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public int insertNotice(NoticeVO noticeVO) throws Exception {
+    public int upsertNotice(NoticeVO noticeVO) throws Exception {
         if (noticeVO.getNoticeId() == null || noticeVO.getNoticeId().trim().isEmpty()) {
             noticeVO.setNoticeId(keyGenerate.generateTableKey("NT", "TB_NOTICE", "NOTICE_ID"));
         }
@@ -46,18 +50,7 @@ public class NoticeServiceImpl extends EgovAbstractServiceImpl {
         if ("Y".equals(noticeVO.getPinYn())) {
             noticeDAO.resetOldestPinnedNotice(noticeVO);
         }
-        return noticeDAO.insertNotice(noticeVO);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public int updateNotice(NoticeVO noticeVO) throws Exception {
-        if ("Y".equals(noticeVO.getFeaturedYn())) {
-            noticeDAO.resetNoticeFeaturedYn(noticeVO);
-        }
-        if ("Y".equals(noticeVO.getPinYn())) {
-            noticeDAO.resetOldestPinnedNotice(noticeVO);
-        }
-        return noticeDAO.updateNotice(noticeVO);
+        return noticeDAO.upsertNotice(noticeVO);
     }
 
     public int deleteNotice(NoticeVO noticeVO) throws Exception {

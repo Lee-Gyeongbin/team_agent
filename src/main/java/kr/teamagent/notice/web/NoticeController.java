@@ -21,11 +21,27 @@ public class NoticeController extends BaseController<Object> {
     private NoticeServiceImpl noticeService;
 
     /* 공지사항 일반 목록 조회 (PIN_YN = 'N') — notice.selectNoticeListNormal */
-    @RequestMapping(value = "/list.do")
+    @RequestMapping(value = "/list.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView list(NoticeVO searchVO) throws Exception {
+    public ModelAndView list(@RequestBody NoticeVO searchVO) throws Exception {
+        final int pageSizeTotal = 15;
+
+        int pageIndex = searchVO.getPageIndex() > 0 ? searchVO.getPageIndex() : 1;
+
+        int pinnedCnt = noticeService.selectNoticeListPinned(searchVO).size();
+
+        int normalPageSize = pageSizeTotal - pinnedCnt;
+        if (normalPageSize < 0) {
+            normalPageSize = 0;
+        }
+
+        int firstIndex = (pageIndex - 1) * normalPageSize;
+        searchVO.setFirstIndex(firstIndex);
+        searchVO.setRecordCountPerPage(normalPageSize);
+
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", noticeService.selectNoticeListNormal(searchVO));
+        resultMap.put("totalCnt", noticeService.selectNoticeListNormalCnt(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -47,18 +63,11 @@ public class NoticeController extends BaseController<Object> {
         return new ModelAndView("jsonView", resultMap);
     }
 
-    /* 공지사항 등록 */
-    @RequestMapping(value = "/insert.do", method = RequestMethod.POST)
+    /* 공지사항 등록/수정 */
+    @RequestMapping(value = {"/insert.do", "/update.do"}, method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView insert(@RequestBody NoticeVO searchVO) throws Exception {
-        return makeJsonDataByResultCnt(noticeService.insertNotice(searchVO));
-    }
-
-    /* 공지사항 수정 */
-    @RequestMapping(value = "/update.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView update(@RequestBody NoticeVO searchVO) throws Exception {
-        return makeJsonDataByResultCnt(noticeService.updateNotice(searchVO));
+        return makeJsonDataByResultCnt(noticeService.upsertNotice(searchVO));
     }
 
     /* 공지사항 삭제 */

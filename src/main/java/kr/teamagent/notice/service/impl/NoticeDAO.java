@@ -34,15 +34,15 @@ public class NoticeDAO extends EgovComAbstractDAO {
         return update("notice.resetOldestPinnedNotice", noticeVO);
     }
 
-    public int insertNotice(NoticeVO noticeVO) throws Exception {
-        return insert("notice.insertNotice", noticeVO);
-    }
-
-    public int updateNotice(NoticeVO noticeVO) throws Exception {
-        return update("notice.updateNotice", noticeVO);
+    public int upsertNotice(NoticeVO noticeVO) throws Exception {
+        return insert("notice.upsertNotice", noticeVO);
     }
 
     public int deleteNotice(NoticeVO noticeVO) throws Exception {
         return update("notice.deleteNotice", noticeVO);
+    }
+
+    public Integer selectNoticeListNormalCnt(NoticeVO searchVO) throws Exception {
+        return selectOne("notice.selectNoticeListNormalCnt", searchVO);
     }
 }

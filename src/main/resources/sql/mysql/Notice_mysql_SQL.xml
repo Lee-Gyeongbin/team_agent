@@ -21,7 +21,33 @@
         WHERE 1 = 1
             AND USE_YN = 'Y'
             AND PIN_YN = 'N'
+            <if test="searchKeyword != null and searchKeyword != ''">
+                AND (
+                    TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
+                )
+            </if>
         ORDER BY CREATE_DT DESC
+        <if test="firstIndex != null and recordCountPerPage != null">
+            LIMIT #{firstIndex}, #{recordCountPerPage}
+        </if>
+    </select>
+
+    <!-- 공지사항 일반 목록 건수 조회 -->
+    <select id="selectNoticeListNormalCnt" parameterType="noticeVO" resultType="int">
+        /* 공지사항 일반 목록 건수 조회 notice.selectNoticeListNormalCnt */
+        SELECT
+            COUNT(1)
+        FROM TB_NOTICE
+        WHERE 1 = 1
+            AND USE_YN = 'Y'
+            AND PIN_YN = 'N'
+            <if test="searchKeyword != null and searchKeyword != ''">
+                AND (
+                    TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
+                )
+            </if>
     </select>
 
     <!-- 공지사항 고정 목록 조회 -->
@@ -43,6 +69,12 @@
         WHERE 1 = 1
             AND USE_YN = 'Y'
             AND PIN_YN = 'Y'
+            <if test="searchKeyword != null and searchKeyword != ''">
+                AND (
+                    TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
+                )
+            </if>
         ORDER BY IFNULL(PIN_DT, CREATE_DT) DESC, CREATE_DT DESC
     </select>
 
@@ -122,8 +154,8 @@
         ) >= 5
     </update>
 
-    <insert id="insertNotice" parameterType="noticeVO">
-        /* 공지사항 등록 notice.insertNotice */
+        <insert id="upsertNotice" parameterType="noticeVO">
+        /* 공지사항 등록/수정 notice.upsertNotice */
         INSERT INTO TB_NOTICE (
             NOTICE_ID
             , NOTICE_TYPE_CD
@@ -150,22 +182,16 @@
             , #{crtrId}
             , NOW()
         )
-    </insert>
-
-    <update id="updateNotice" parameterType="noticeVO">
-        /* 공지사항 수정 notice.updateNotice */
-        UPDATE TB_NOTICE
-        SET
-            NOTICE_TYPE_CD = #{noticeTypeCd}
-            , TITLE = #{title}
-            , CONTENT = #{content}
-            , PIN_YN = IFNULL(#{pinYn}, 'N')
-            , PIN_DT = CASE WHEN IFNULL(#{pinYn}, 'N') = 'Y' THEN NOW() ELSE NULL END
-            , FEATURED_YN = IFNULL(#{featuredYn}, 'N')
-            , USE_YN = IFNULL(#{useYn}, 'Y')
+        ON DUPLICATE KEY UPDATE
+            NOTICE_TYPE_CD = VALUES(NOTICE_TYPE_CD)
+            , TITLE = VALUES(TITLE)
+            , CONTENT = VALUES(CONTENT)
+            , PIN_YN = VALUES(PIN_YN)
+            , PIN_DT = VALUES(PIN_DT)
+            , FEATURED_YN = VALUES(FEATURED_YN)
+            , USE_YN = VALUES(USE_YN)
             , MODIFY_DT = NOW()
-        WHERE NOTICE_ID = #{noticeId}
-    </update>
+    </insert>
 
     <update id="deleteNotice" parameterType="noticeVO">
         /* 공지사항 삭제 notice.deleteNotice */
