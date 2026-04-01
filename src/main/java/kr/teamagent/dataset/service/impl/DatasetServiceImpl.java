@@ -284,7 +284,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @param datasetId 저장된 데이터셋 ID
      * @return SseEmitter
      */
-    public SseEmitter streamDatasetBuild(String datasetId) {
+    public SseEmitter streamDatasetBuild(String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds) {
         // sse 초기화
         SseEmitter emitter = new SseEmitter(0L);
         // API URL 조회
@@ -311,7 +311,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         emitter.onCompletion(() -> logger.info("dataset build SSE complete - datasetId={}", datasetId));
 
         // 데이터셋 구축 스트림 중계
-        DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, emitter));
+        DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, updateType, addDocIds, deleteDocIds, emitter));
         return emitter;
     }
 
@@ -321,7 +321,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @param datasetId 데이터셋 ID
      * @param emitter SSE emitter
      */
-    private void relayDatasetBuildStream(String apiUrl, String datasetId, SseEmitter emitter) {
+    private void relayDatasetBuildStream(String apiUrl, String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds, SseEmitter emitter) {
         // OkHttpClient 초기화
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
@@ -330,7 +330,9 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
 
         Map<String, Object> params = new HashMap<>();
         params.put("dataset_id", datasetId);
-
+        params.put("update_type", updateType);
+        params.put("add_doc_ids", addDocIds);
+        params.put("delete_doc_ids", deleteDocIds);
         com.google.gson.Gson gson = new com.google.gson.Gson();
         String jsonBody = gson.toJson(params);
         RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
