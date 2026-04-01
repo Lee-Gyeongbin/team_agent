@@ -27,6 +27,9 @@
                     OR CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
                 )
             </if>
+            <if test="noticeTypeCd != null and noticeTypeCd != ''">
+                AND NOTICE_TYPE_CD = #{noticeTypeCd}
+            </if>
         ORDER BY CREATE_DT DESC
         <if test="firstIndex != null and recordCountPerPage != null">
             LIMIT #{firstIndex}, #{recordCountPerPage}
@@ -47,6 +50,9 @@
                     TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
                     OR CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
                 )
+            </if>
+            <if test="noticeTypeCd != null and noticeTypeCd != ''">
+                AND NOTICE_TYPE_CD = #{noticeTypeCd}
             </if>
     </select>
 
@@ -74,6 +80,9 @@
                     TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
                     OR CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
                 )
+            </if>
+            <if test="noticeTypeCd != null and noticeTypeCd != ''">
+                AND NOTICE_TYPE_CD = #{noticeTypeCd}
             </if>
         ORDER BY IFNULL(PIN_DT, CREATE_DT) DESC, CREATE_DT DESC
     </select>

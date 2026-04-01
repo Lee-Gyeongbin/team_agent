@@ -46,9 +46,9 @@ public class NoticeController extends BaseController<Object> {
     }
 
     /* 공지사항 고정(상단) 목록 조회 (PIN_YN = 'Y') — notice.selectNoticeListPinned */
-    @RequestMapping(value = "/pinnedList.do")
+    @RequestMapping(value = "/pinnedList.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView pinnedList(NoticeVO searchVO) throws Exception {
+    public ModelAndView pinnedList(@RequestBody NoticeVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", noticeService.selectNoticeListPinned(searchVO));
         return new ModelAndView("jsonView", resultMap);
