@@ -825,7 +825,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return "";
         }
 
-        String prompt = "다음 대화에서 핵심 키워드를 최대 5개 추출해줘. 쉼표(,)로 구분해서 키워드만 출력해. 부연 설명 없이 키워드만.각 키워드는 5글자 이내로 하고, 반드시 최대 5개까지만 추출해줘."
+        String prompt = "다음 대화에서 핵심 키워드를 최대 5개 추출해줘. 쉼표(,)로 구분해서 키워드만 출력해. 부연 설명 없이 키워드만.각 키워드는 10글자 이내로 하고, 반드시 최대 5개까지만 추출해줘. 쉼표(,)뒤에는 공백이 없도록 출력해줘."
                 + "질문: " + truncateTitle(qContent, 200)
                 + " 답변: " + truncateTitle(rContent, 500);
 
