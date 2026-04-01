@@ -34,6 +34,7 @@
         <typeAlias alias="repositoryVO"                      type="kr.teamagent.repository.service.RepositoryVO"/>
         <typeAlias alias="agentVO"                           type="kr.teamagent.agent.service.AgentVO"/>
         <typeAlias alias="noticeVO"                          type="kr.teamagent.notice.service.NoticeVO"/>
+        <typeAlias alias="myPageVO"                          type="kr.teamagent.mypage.service.MyPageVO"/>
     </typeAliases>
 
     <typeHandlers>
