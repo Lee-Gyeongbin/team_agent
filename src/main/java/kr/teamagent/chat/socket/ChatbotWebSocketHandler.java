@@ -156,6 +156,11 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             String threadId = toStr(messageObj.get("threadId"));
             String svcTy = toStr(messageObj.get("svcTy"));
             String refId = toStr(messageObj.get("refId"));
+            String modelId = toStr(messageObj.get("modelId"));
+            if (modelId == null || modelId.isEmpty()) {
+                sendMessage(session, createMessage("error", "모델 ID가 지정되지 않았습니다.", null));
+                return;
+            }
             if (refId == null || refId.isEmpty()) {
                 sendMessage(session, createMessage("error", "참조 문서 ID가 지정되지 않았습니다.", null));
                 return;
@@ -202,7 +207,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             getExecutorService().execute(() -> {
                 try {
                     // 해당 작업을 execute가 스레드 풀에 던져서 실행하게 함.(스레드가 다 차 있을 경우엔 큐에 대기)
-                    streamResponse(session, query, threadId, userId, svcTy, refId);
+                    streamResponse(session, query, threadId, userId, svcTy, modelId, refId);
                 } catch (Exception e) {
                     logger.error("스트리밍 응답 처리 중 오류", e);
                     sendMessage(session, createMessage("error", "응답 처리 중 오류가 발생했습니다.", null));
@@ -218,7 +223,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
     /**
      * 스트리밍 응답 처리
      */
-    private void streamResponse(WebSocketSession session, String query, String threadId, String userId, String svcTy, String refId) throws Exception {
+    private void streamResponse(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId) throws Exception {
 
         /**
          * 스트리밍 응답 처리를 위한 콜백 인터페이스
@@ -278,7 +283,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
         };
         
         // ChatbotService를 통해 스트리밍 응답 받기
-        chatbotService.streamAiResponseWebSocket(session, query, threadId, userId, svcTy, refId, callback);
+        chatbotService.streamAiResponseWebSocket(session, query, threadId, userId, svcTy, modelId, refId, callback);
     }
     
     /**

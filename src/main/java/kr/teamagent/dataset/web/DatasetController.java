@@ -1,13 +1,16 @@
 package kr.teamagent.dataset.web;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -103,8 +106,20 @@ public class DatasetController extends BaseController {
      */
     @RequestMapping(value = "/buildStream.do", method = RequestMethod.GET, produces = "text/event-stream")
     @ResponseBody
-    public SseEmitter buildStream(@RequestParam("datasetId") String datasetId) throws Exception {
-        return docDatasetService.streamDatasetBuild(datasetId);
+    public SseEmitter buildStream(
+          @RequestParam("datasetId") String datasetId,
+          @RequestParam(value = "update_type", required = false, defaultValue = "init") String updateType,
+          @RequestParam(value = "add_doc_ids", required = false) List<String> addDocIds,
+          @RequestParam(value = "delete_doc_ids", required = false) List<String> deleteDocIds
+    ) throws Exception {
+      List<String> safeAddDocIds = addDocIds != null ? addDocIds : Collections.emptyList();
+      List<String> safeDeleteDocIds = deleteDocIds != null ? deleteDocIds : Collections.emptyList();
+      // 유효성 검증(권장)
+      Set<String> allowed = Set.of("init", "add", "replace_all", "delete_some");
+      if (!allowed.contains(updateType)) {
+          throw new IllegalArgumentException("지원하지 않는 update_type: " + updateType);
+      }
+      return docDatasetService.streamDatasetBuild(datasetId, updateType, safeAddDocIds, safeDeleteDocIds);
     }
 
     /**
