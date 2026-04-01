@@ -33,6 +33,8 @@
             , A.MODIFY_DT
         FROM
             TB_LLM_MDL A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
         ORDER BY A.SORT_ORDER 
     </select>
 
@@ -104,6 +106,7 @@
             ROOM_ID,
             SVC_TY,
             REF_ID,
+            MODEL_ID,
             Q_CONTENT,
             R_CONTENT,
             IN_TOKENS,
@@ -120,6 +123,7 @@
             #{roomId},
             #{svcTy},
             #{refId},
+            #{modelId},
             #{qContent},
             #{rContent},
             #{inTokens},
