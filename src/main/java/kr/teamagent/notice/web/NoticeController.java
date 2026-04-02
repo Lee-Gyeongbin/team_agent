@@ -64,9 +64,9 @@ public class NoticeController extends BaseController<Object> {
     }
 
     /* 공지사항 등록/수정 */
-    @RequestMapping(value = {"/insert.do", "/update.do"}, method = RequestMethod.POST)
+    @RequestMapping(value = "/save.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView insert(@RequestBody NoticeVO searchVO) throws Exception {
+    public ModelAndView save(@RequestBody NoticeVO searchVO) throws Exception {
         return makeJsonDataByResultCnt(noticeService.upsertNotice(searchVO));
     }
 
