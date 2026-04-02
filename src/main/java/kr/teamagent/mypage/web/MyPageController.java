@@ -30,9 +30,9 @@ public class MyPageController extends BaseController<Object> {
     /**
      * 마이페이지 정보 조회
      */
-    @RequestMapping(value = "/myPageList.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/list.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView myPageList(@RequestBody MyPageVO searchVO) throws Exception {
+    public ModelAndView list(@RequestBody MyPageVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", myPageService.selectMyPageList(searchVO));
         return new ModelAndView("jsonView", resultMap);
@@ -41,32 +41,25 @@ public class MyPageController extends BaseController<Object> {
     /**
      * 마이페이지 기본 정보 수정
      */
-    @RequestMapping(value = "/updateMyPage.do", method = RequestMethod.GET)
+    @RequestMapping(value = "/update.do", method = RequestMethod.POST)
     @ResponseBody
-    public Map<String, Object> updateMyPage(@RequestBody MyPageVO myPageVO) throws Exception {
-        Map<String, Object> resultMap = new HashMap<>();
-        try {
-            int resultCnt = myPageService.updateMyPage(myPageVO);
-            resultMap.put("successYn", resultCnt > 0);
-            resultMap.put("data", resultCnt);
-        } catch (Exception e) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
-        }
-        return resultMap;
+    public ModelAndView updateMyPage(@RequestBody MyPageVO myPageVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", myPageService.updateMyPage(myPageVO));
+        return new ModelAndView("jsonView", resultMap);
     }
 
     /**
      * 마이페이지 비밀번호 수정
      * @return Map (successYn, returnMsg, data: 변경된 행 수)
      */
-    @RequestMapping(value = "/updateMyPagePassword.do", method = RequestMethod.GET)
+    @RequestMapping(value = "/changePassword.do", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> updateMyPagePassword(@RequestBody MyPagePasswordChangeVO passwordChangeVO) {
         Map<String, Object> resultMap = new HashMap<>();
         try {
-            String currentPasswd = passwordChangeVO.getCurrentPasswd();
-            String newPasswd = passwordChangeVO.getNewPasswd();
+            String currentPasswd = passwordChangeVO.getOldPassword();
+            String newPasswd = passwordChangeVO.getNewPassword();
 
             // 현재 로그인 사용자 기준으로 userId 설정 (요청 바디의 userId는 신뢰하지 않음)
             String loginUserId = kr.teamagent.common.util.SessionUtil.getUserId();

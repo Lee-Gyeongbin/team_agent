@@ -10,9 +10,8 @@ public class MyPagePasswordChangeVO extends CommonVO {
     private static final long serialVersionUID = 1L;
 
     private String userId;
-    private String currentPasswd;
-    private String newPasswd;
-    private String newPasswdConfirm;
+    private String oldPassword;
+    private String newPassword;
+    private String newPasswordConfirm;
     private String passwd;
 }
-
