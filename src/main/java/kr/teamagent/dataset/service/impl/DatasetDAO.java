@@ -203,7 +203,4 @@ public class DatasetDAO extends EgovComAbstractDAO {
         return insert("dataset.insertDocDatasetHistory", searchVO);
     }
 
-    public List<PromptVO> selectPromptList() throws Exception {
-        return selectList("dataset.selectPromptList");
-    }
 }

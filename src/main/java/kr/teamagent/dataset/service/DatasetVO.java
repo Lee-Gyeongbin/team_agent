@@ -3,6 +3,8 @@ package kr.teamagent.dataset.service;
 import java.math.BigDecimal;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -11,6 +13,7 @@ import lombok.Setter;
 public class DatasetVO {
 
     /** 공통 */
+    @JsonAlias({ "dataset_id" })
     private String datasetId;
     private String dsNm;
     private String description;
@@ -110,6 +113,13 @@ public class DatasetVO {
     private Integer pageSize;
     private Integer offset;
     private Integer totalCnt;
+
+    /** 데이터셋 검색 테스트 API (외부 query_test) */
+    private String query;
+    @JsonAlias({ "top_k", "topK" })
+    private Integer topK;
+    @JsonAlias({ "sml_threshold", "smlThreshold" })
+    private BigDecimal smlThreshold;
 
     /**
      * TB_DS_DOC 매핑용 DTO

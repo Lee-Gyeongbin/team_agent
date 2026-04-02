@@ -110,7 +110,8 @@ public class DatasetController extends BaseController {
           @RequestParam("datasetId") String datasetId,
           @RequestParam(value = "update_type", required = false, defaultValue = "init") String updateType,
           @RequestParam(value = "add_doc_ids", required = false) List<String> addDocIds,
-          @RequestParam(value = "delete_doc_ids", required = false) List<String> deleteDocIds
+          @RequestParam(value = "delete_doc_ids", required = false) List<String> deleteDocIds,
+          @RequestParam(value = "vector_diff_yn", required = false) String vectorDiffYn
     ) throws Exception {
       List<String> safeAddDocIds = addDocIds != null ? addDocIds : Collections.emptyList();
       List<String> safeDeleteDocIds = deleteDocIds != null ? deleteDocIds : Collections.emptyList();
@@ -119,7 +120,7 @@ public class DatasetController extends BaseController {
       if (!allowed.contains(updateType)) {
           throw new IllegalArgumentException("지원하지 않는 update_type: " + updateType);
       }
-      return docDatasetService.streamDatasetBuild(datasetId, updateType, safeAddDocIds, safeDeleteDocIds);
+      return docDatasetService.streamDatasetBuild(datasetId, updateType, safeAddDocIds, safeDeleteDocIds, vectorDiffYn);
     }
 
     /**
@@ -197,28 +198,28 @@ public class DatasetController extends BaseController {
     }
 
     /**
-     * 데이터셋 테스트 API
-     * @return { data: DatasetVO }
+     * 데이터셋 검색 테스트 API (외부 query_test 결과를 그대로 화면에 전달)
+     * 요청 본문 예: { "datasetId"|"dataset_id", "query", "topK"|"top_k"(선택), "smlThreshold"|"sml_threshold"(선택) }
+     * @return { data: [ { sort, score, text, metadata }, ... ] }
      * @throws Exception
      */
     @RequestMapping(value = "/testDataSet.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView testDataSet(@RequestBody DatasetVO datasetVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", docDatasetService.testDataSet(datasetVO));
-        return new ModelAndView("jsonView", resultMap);
+        if (datasetVO == null || datasetVO.getDatasetId() == null || datasetVO.getDatasetId().trim().isEmpty()) {
+            return makeFailJsonData("데이터셋ID가 없습니다.");
+        }
+        if (datasetVO.getQuery() == null || datasetVO.getQuery().trim().isEmpty()) {
+            return makeFailJsonData("질의(query)가 없습니다.");
+        }
+        try {
+            HashMap<String, Object> resultMap = new HashMap<>();
+            resultMap.put("data", docDatasetService.testDataSet(datasetVO));
+            return new ModelAndView("jsonView", resultMap);
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            return makeFailJsonData(msg != null && !msg.isEmpty() ? msg : "dataset test 호출에 실패했습니다.");
+        }
     }
 
-    /**
-     * 프롬프트 목록 조회 API
-     * @return { dataList: PromptVO[] }
-     * @throws Exception
-     */
-    @RequestMapping(value = "/selectPromptList.do")
-    @ResponseBody
-    public ModelAndView selectPromptList() throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", docDatasetService.selectPromptList());
-        return new ModelAndView("jsonView", resultMap);
-    }
 }

@@ -2,6 +2,8 @@ package kr.teamagent.dataset.service.impl;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.lang.reflect.Type;
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +29,9 @@ import kr.teamagent.prompt.service.PromptVO;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 @Service
 public class DatasetServiceImpl extends EgovAbstractServiceImpl {
@@ -268,15 +273,57 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 데이터셋 테스트
-     * @param datasetVO
-     * @return
-     * @throws Exception
+     * 데이터셋 검색 테스트 (외부 query_test API 호출)
+     * @param datasetVO datasetId, query, topK(선택), smlThreshold(선택)
+     * @return 파싱된 검색 결과 목록 (JSON 배열)
+     * @throws Exception URL 미설정·HTTP 실패·응답 파싱 실패 시
      */
-    public int testDataSet(DatasetVO datasetVO) throws Exception {
-        int result = 0;
-        // TODO 데이터셋 테스트 AI API 개발 완료 시 개발 필요
-        return result;
+    public List<Map<String, Object>> testDataSet(DatasetVO datasetVO) throws Exception {
+        String apiUrl = PropertyUtil.getProperty("Globals.dataset.test.apiUrl");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            throw new IllegalStateException("dataset test API URL이 설정되지 않았습니다.");
+        }
+        if (datasetVO == null || CommonUtil.isEmpty(datasetVO.getDatasetId())) {
+            throw new IllegalArgumentException("datasetId가 없습니다.");
+        }
+        if (CommonUtil.isEmpty(datasetVO.getQuery())) {
+            throw new IllegalArgumentException("query가 없습니다.");
+        }
+
+        int topK = datasetVO.getTopK() != null ? datasetVO.getTopK() : 5;
+        BigDecimal sml = datasetVO.getSmlThreshold() != null ? datasetVO.getSmlThreshold() : new BigDecimal("0.05");
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("dataset_id", datasetVO.getDatasetId());
+        params.put("query", datasetVO.getQuery());
+        params.put("top_k", topK);
+        params.put("sml_threshold", sml);
+
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
+                .build();
+
+        String jsonBody = new Gson().toJson(params);
+        RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+        Request request = new Request.Builder()
+                .url(apiUrl)
+                .post(body)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .build();
+
+        try (okhttp3.Response response = client.newCall(request).execute()) {
+            okhttp3.ResponseBody respBody = response.body();
+            String respStr = respBody != null ? respBody.string() : "";
+            if (!response.isSuccessful()) {
+                logger.warn("dataset test API 실패 - datasetId={}, status={}, body={}", datasetVO.getDatasetId(), response.code(), respStr);
+                throw new Exception("dataset test API 호출 실패: HTTP " + response.code());
+            }
+            Type listType = new TypeToken<List<Map<String, Object>>>() {
+            }.getType();
+            return new Gson().fromJson(respStr, listType);
+        }
     }
 
     /**
@@ -284,7 +331,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @param datasetId 저장된 데이터셋 ID
      * @return SseEmitter
      */
-    public SseEmitter streamDatasetBuild(String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds) {
+    public SseEmitter streamDatasetBuild(String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds, String vectorDiffYn) {
         // sse 초기화
         SseEmitter emitter = new SseEmitter(0L);
         // API URL 조회
@@ -311,7 +358,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         emitter.onCompletion(() -> logger.info("dataset build SSE complete - datasetId={}", datasetId));
 
         // 데이터셋 구축 스트림 중계
-        DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, updateType, addDocIds, deleteDocIds, emitter));
+        DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, updateType, addDocIds, deleteDocIds, vectorDiffYn, emitter));
         return emitter;
     }
 
@@ -321,7 +368,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @param datasetId 데이터셋 ID
      * @param emitter SSE emitter
      */
-    private void relayDatasetBuildStream(String apiUrl, String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds, SseEmitter emitter) {
+    private void relayDatasetBuildStream(String apiUrl, String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds, String vectorDiffYn, SseEmitter emitter) {
         // OkHttpClient 초기화
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
@@ -333,6 +380,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         params.put("update_type", updateType);
         params.put("add_doc_ids", addDocIds);
         params.put("delete_doc_ids", deleteDocIds);
+        params.put("vector_diff_yn", vectorDiffYn != null ? vectorDiffYn : "N");
         com.google.gson.Gson gson = new com.google.gson.Gson();
         String jsonBody = gson.toJson(params);
         RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
@@ -408,9 +456,5 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         errorData.put("status", "error");
         errorData.put("message", message);
         return new com.google.gson.Gson().toJson(errorData);
-    }
-
-    public List<PromptVO> selectPromptList() throws Exception {
-        return datasetDAO.selectPromptList();
     }
 }
