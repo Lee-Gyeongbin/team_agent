@@ -29,6 +29,7 @@ public class LibraryVO {
     private String archiveYn;
     private String archiveDt;
     private String sqlCode;
+    private String newYn;
     private String useYn;
     private String modifyDt;
     private String searchTitle;
@@ -96,6 +97,7 @@ public class LibraryVO {
         private String archiveDt;
         private Integer sortOrd;
         private String sqlCode;
+        private String newYn;
         private String useYn;
         private String createDt;
         private String modifyDt;

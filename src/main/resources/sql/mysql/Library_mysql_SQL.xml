@@ -42,6 +42,7 @@
             , ARCHIVE_DT
             , SORT_ORD
             , SQL_CODE
+            , NEW_YN
             , USE_YN
             , CREATE_DT
             , MODIFY_DT
@@ -125,6 +126,7 @@
             , A.ARCHIVE_DT
             , A.SORT_ORD
             , A.SQL_CODE
+            , A.NEW_YN
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -158,6 +160,7 @@
             , A.ARCHIVE_DT
             , A.SORT_ORD
             , A.SQL_CODE
+            , A.NEW_YN
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -189,6 +192,7 @@
             , A.ARCHIVE_DT
             , A.SORT_ORD
             , A.SQL_CODE
+            , A.NEW_YN
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -231,6 +235,7 @@
                 </if>
             </if>
             , SORT_ORD = #{sortOrd, jdbcType=INTEGER}
+            , NEW_YN = #{newYn}
             , USE_YN = #{useYn}
             , MODIFY_DT = NOW()
         WHERE CARD_ID = #{cardId}
