@@ -159,7 +159,7 @@
             GROUP BY A.STAT_DATE
         )
         SELECT
-            DATE_FORMAT(D.DT, '%m월 %d일') AS STAT_DATE
+            DATE_FORMAT(D.DT, '%c/%e') AS STAT_DATE
             , IFNULL(L.SUCCESS_CNT, 0) AS SUCCESS_CNT
         FROM DAYS D
             LEFT JOIN LOGIN_SUM L
