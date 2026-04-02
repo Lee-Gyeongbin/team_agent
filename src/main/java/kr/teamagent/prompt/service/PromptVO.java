@@ -13,11 +13,7 @@ public class PromptVO {
     private String promptId;
     private String promptTypeCd;
     private String content;
-    private Double temperature;
-    private Double topP;
     private String applyLlmYn;
-    private String applyRagYn;
-    private String applySqlYn;
     private String useYn;
     private String createDt;
     private String modifyDt;
@@ -75,6 +71,29 @@ public class PromptVO {
         private Integer retryCnt;
         private String streamYn;
         private String modifyDt;
+    }
+
+    /** TB_AGENT */
+    @Getter
+    @Setter
+    public static class AgentVO {
+        private String agentId;
+        private String agentNm;
+    }
+
+    /** 프롬프트 적용 에이전트 목록 */
+    @Getter
+    @Setter
+    public static class PromptAppAgtVO extends AgentVO {
+        private String promptId;
+        private String applyYn;
+    }
+
+    /** 시스템 프롬프트 저장 폼 (PromptVO + 적용 에이전트 목록) */
+    @Getter
+    @Setter
+    public static class SaveFormVO extends PromptVO {
+        private List<PromptAppAgtVO> promptAppAgtList;
     }
 
 }

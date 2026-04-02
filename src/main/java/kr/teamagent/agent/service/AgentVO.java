@@ -14,6 +14,10 @@ public class AgentVO {
     private String agentNm;
     private String agentTypeCd;
     private String agentTypeCdNm;
+    private String temperature;
+    private String tempDefaultYn;
+    private String topP;
+    private String topPDefaultYn;
     private String description;
     private Integer sortOrd;
     private String useYn;

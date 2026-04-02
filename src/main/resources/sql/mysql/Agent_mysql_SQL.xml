@@ -14,6 +14,10 @@
             , A.AGENT_NM
             , A.AGENT_TYPE_CD
             , CC.CODE_NM        AS AGENT_TYPE_CD_NM
+            , A.TEMPERATURE
+            , A.TEMP_DEFAULT_YN
+            , A.TOP_P
+            , A.TOP_P_DEFAULT_YN
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
@@ -42,6 +46,10 @@
             A.AGENT_ID
             , A.AGENT_NM
             , A.AGENT_TYPE_CD
+            , A.TEMPERATURE
+            , A.TEMP_DEFAULT_YN
+            , A.TOP_P
+            , A.TOP_P_DEFAULT_YN
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
@@ -157,6 +165,10 @@
             AGENT_ID
             , AGENT_NM
             , AGENT_TYPE_CD
+            , TEMPERATURE
+            , TEMP_DEFAULT_YN
+            , TOP_P
+            , TOP_P_DEFAULT_YN
             , DESCRIPTION
             , SORT_ORD
             , USE_YN
@@ -167,6 +179,10 @@
             #{agentId}
             , #{agentNm, jdbcType=VARCHAR}
             , #{agentTypeCd, jdbcType=VARCHAR}
+            , #{temperature, jdbcType=VARCHAR}
+            , #{tempDefaultYn, jdbcType=VARCHAR}
+            , #{topP, jdbcType=VARCHAR}
+            , #{topPDefaultYn, jdbcType=VARCHAR}
             , #{description, jdbcType=VARCHAR}
             , #{sortOrd, jdbcType=INTEGER}
             , IFNULL(#{useYn, jdbcType=VARCHAR}, 'Y')
@@ -176,6 +192,10 @@
         )
         ON DUPLICATE KEY UPDATE
             AGENT_NM = VALUES(AGENT_NM)
+            , TEMPERATURE = VALUES(TEMPERATURE)
+            , TEMP_DEFAULT_YN = VALUES(TEMP_DEFAULT_YN)
+            , TOP_P = VALUES(TOP_P)
+            , TOP_P_DEFAULT_YN = VALUES(TOP_P_DEFAULT_YN)
             , DESCRIPTION = VALUES(DESCRIPTION)
             , SORT_ORD = VALUES(SORT_ORD)
             , LAST_MDF_DT = NOW()

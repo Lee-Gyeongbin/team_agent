@@ -2,8 +2,6 @@ package kr.teamagent.prompt.web;
 
 import java.util.HashMap;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,14 +18,12 @@ import kr.teamagent.prompt.service.impl.PromptServiceImpl;
 @RequestMapping("/prompt")
 public class PromptController extends BaseController {
 
-    private static final Logger log = LoggerFactory.getLogger(PromptController.class);
-
     @Autowired
     private PromptServiceImpl promptService;
 
     /**
      * 시스템 프롬프트 목록 조회
-     * @return { dataList: PromptVO[] }
+     * @return { dataList: PromptVO[], agentList: PromptVO.AgentVO[] }
      * @throws Exception
      */
     @RequestMapping(value = "/system/list.do")
@@ -35,6 +31,8 @@ public class PromptController extends BaseController {
     public ModelAndView systemList() throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("dataList", promptService.selectSystemPromptList());
+        resultMap.put("agentList", promptService.selectAgentList());
+        resultMap.put("promptAppAgtList", promptService.selectPromptAppAgtList());
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -46,7 +44,7 @@ public class PromptController extends BaseController {
      */
     @RequestMapping(value = "/system/save.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView systemSave(@RequestBody PromptVO searchVO) throws Exception {
+    public ModelAndView systemSave(@RequestBody PromptVO.SaveFormVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", promptService.saveSystemPrompt(searchVO));
         return new ModelAndView("jsonView", resultMap);

@@ -5,10 +5,13 @@
     <resultMap id="banWordMap" type="kr.teamagent.prompt.service.PromptVO$BanWordVO" autoMapping="true"/>
     <resultMap id="policyMap" type="kr.teamagent.prompt.service.PromptVO$PolicyVO" autoMapping="true"/>
     <resultMap id="tokenLmtMap" type="kr.teamagent.prompt.service.PromptVO$TokenLmtVO" autoMapping="true"/>
+    <resultMap id="agentMap" type="kr.teamagent.prompt.service.PromptVO$AgentVO" autoMapping="true"/>
+    <resultMap id="promptAppAgtMap" type="kr.teamagent.prompt.service.PromptVO$PromptAppAgtVO" autoMapping="true"/>
 
     <parameterMap id="banWordParam" type="kr.teamagent.prompt.service.PromptVO$BanWordVO"/>
     <parameterMap id="policyParam" type="kr.teamagent.prompt.service.PromptVO$PolicyVO"/>
     <parameterMap id="tokenLmtParam" type="kr.teamagent.prompt.service.PromptVO$TokenLmtVO"/>
+    <parameterMap id="promptAppAgtParam" type="kr.teamagent.prompt.service.PromptVO$PromptAppAgtVO"/>
     
     <select id="selectSystemPromptList" resultType="promptVO">
         /* 시스템 프롬프트 목록 조회 prompt.selectSystemPromptList */
@@ -17,17 +20,35 @@
             , A.PROMPT_TYPE_CD
             , A.PROMPT_NAME
             , A.CONTENT
-            , A.TEMPERATURE
-            , A.TOP_P
             , A.APPLY_LLM_YN
-            , A.APPLY_RAG_YN
-            , A.APPLY_SQL_YN
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
         FROM TB_PROMPT A
         WHERE 1 = 1
         ORDER BY A.PROMPT_ID
+    </select>
+
+    <select id="selectAgentList" resultMap="agentMap">
+        /* 에이전트 목록 조회 prompt.selectAgentList */
+        SELECT
+              A.AGENT_ID
+            , A.AGENT_NM
+        FROM TB_AGT A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+        ORDER BY A.SORT_ORD
+    </select>
+
+    <select id="selectPromptAppAgtList" resultMap="promptAppAgtMap">
+        /* 프롬프트 적용 에이전트 목록 조회 prompt.selectPromptAppAgtList */
+        SELECT 
+              A.PROMPT_ID 
+            , A.AGENT_ID
+            , A.APPLY_YN 
+        FROM TB_PROMPT_APPLY_AGT A
+        WHERE 1=1
+        ORDER BY A.PROMPT_ID 
     </select>
 
     <insert id="insertSystemPrompt" parameterType="promptVO">
@@ -37,11 +58,7 @@
             , PROMPT_TYPE_CD
             , PROMPT_NAME
             , CONTENT
-            , TEMPERATURE
-            , TOP_P
             , APPLY_LLM_YN
-            , APPLY_RAG_YN
-            , APPLY_SQL_YN
             , USE_YN
             , CREATE_DT
             , MODIFY_DT
@@ -50,11 +67,7 @@
             , #{promptTypeCd, jdbcType=VARCHAR}
             , #{promptName, jdbcType=VARCHAR}
             , #{content, jdbcType=VARCHAR}
-            , #{temperature, jdbcType=DOUBLE}
-            , #{topP, jdbcType=DOUBLE}
             , #{applyLlmYn, jdbcType=VARCHAR}
-            , #{applyRagYn, jdbcType=VARCHAR}
-            , #{applySqlYn, jdbcType=VARCHAR}
             , #{useYn, jdbcType=VARCHAR}
             , NOW()
             , NOW()
@@ -63,14 +76,31 @@
             PROMPT_TYPE_CD = VALUES(PROMPT_TYPE_CD)
             , PROMPT_NAME = VALUES(PROMPT_NAME)
             , CONTENT = VALUES(CONTENT)
-            , TEMPERATURE = VALUES(TEMPERATURE)
-            , TOP_P = VALUES(TOP_P)
             , APPLY_LLM_YN = VALUES(APPLY_LLM_YN)
-            , APPLY_RAG_YN = VALUES(APPLY_RAG_YN)
-            , APPLY_SQL_YN = VALUES(APPLY_SQL_YN)
             , USE_YN = VALUES(USE_YN)
             , MODIFY_DT = NOW()
     </insert>
+
+    <insert id="insertPromptAppAgt" parameterMap="promptAppAgtParam">
+        /* 프롬프트 적용 에이전트 저장 prompt.insertPromptAppAgt */
+        INSERT INTO TB_PROMPT_APPLY_AGT (
+              PROMPT_ID
+            , AGENT_ID
+            , APPLY_YN
+        ) VALUES (
+              #{promptId}
+            , #{agentId}
+            , #{applyYn}
+        )
+        ON DUPLICATE KEY UPDATE
+            APPLY_YN = VALUES(APPLY_YN)
+    </insert>
+
+    <delete id="deletePromptAppAgtByPromptId" parameterType="promptVO">
+        /* 프롬프트 적용 에이전트 삭제 prompt.deletePromptAppAgtByPromptId */
+        DELETE FROM TB_PROMPT_APPLY_AGT
+        WHERE PROMPT_ID = #{promptId}
+    </delete>
 
     <delete id="deleteSystemPrompt" parameterType="promptVO">
         /* 시스템 프롬프트 삭제 prompt.deleteSystemPrompt */

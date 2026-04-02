@@ -5,8 +5,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,8 +14,6 @@ import kr.teamagent.prompt.service.PromptVO;
 
 @Service
 public class PromptServiceImpl extends EgovAbstractServiceImpl {
-
-    private static final Logger logger = LoggerFactory.getLogger(PromptServiceImpl.class);
 
     @Autowired
     PromptDAO promptDAO;
@@ -40,7 +36,7 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
      * @return 저장된 PromptVO
      * @throws Exception
      */
-    public PromptVO saveSystemPrompt(PromptVO searchVO) throws Exception {
+    public PromptVO saveSystemPrompt(PromptVO.SaveFormVO searchVO) throws Exception {
         if (searchVO.getPromptId() == null || searchVO.getPromptId().trim().isEmpty()) {
             searchVO.setPromptId(keyGenerate.generateTableKey("PI", "TB_PROMPT", "PROMPT_ID"));
         }
@@ -48,7 +44,33 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
             searchVO.setUseYn("Y");
         }
         promptDAO.insertSystemPrompt(searchVO);
+        savePromptAppAgtList(searchVO);
         return searchVO;
+    }
+
+    /**
+     * 프롬프트 적용 에이전트 목록 저장
+     * - null: 변경 없음(기존 유지)
+     * - empty list: 해당 PROMPT_ID의 적용 에이전트 전체 삭제
+     */
+    @Transactional(rollbackFor = Exception.class)
+    protected void savePromptAppAgtList(PromptVO.SaveFormVO searchVO) throws Exception {
+        if (searchVO == null || searchVO.getPromptId() == null || searchVO.getPromptId().trim().isEmpty()) {
+            return;
+        }
+        if (searchVO.getPromptAppAgtList() == null) {
+            return;
+        }
+
+        for (PromptVO.PromptAppAgtVO item : searchVO.getPromptAppAgtList()) {
+            if (item == null) {
+                continue;
+            }
+            if(item.getPromptId() == null || item.getPromptId().trim().isEmpty()) {
+                item.setPromptId(searchVO.getPromptId());
+            }
+            promptDAO.insertPromptAppAgt(item);
+        }
     }
 
     /**
@@ -56,7 +78,9 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
      * @param searchVO promptId 필수
      * @throws Exception
      */
+    @Transactional(rollbackFor = Exception.class)
     public void deleteSystemPrompt(PromptVO searchVO) throws Exception {
+        promptDAO.deletePromptAppAgtByPromptId(searchVO);
         promptDAO.deleteSystemPrompt(searchVO);
     }
 
@@ -127,6 +151,24 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
                 promptDAO.updatePolicyApplyYn(vo);
             }
         }
+    }
+
+    /**
+     * 에이전트 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<PromptVO.AgentVO> selectAgentList() throws Exception {
+        return promptDAO.selectAgentList();
+    }
+
+    /**
+     * 프롬프트 적용 에이전트 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<PromptVO.PromptAppAgtVO> selectPromptAppAgtList() throws Exception {
+        return promptDAO.selectPromptAppAgtList();
     }
 
 }

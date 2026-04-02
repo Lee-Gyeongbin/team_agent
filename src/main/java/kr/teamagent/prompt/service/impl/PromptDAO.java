@@ -29,6 +29,25 @@ public class PromptDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 프롬프트 적용 에이전트 저장 (ON DUPLICATE KEY UPDATE)
+     * @param vo PromptAppAgtVO (promptId, agentId, applyYn)
+     * @throws Exception
+     */
+    public void insertPromptAppAgt(PromptVO.PromptAppAgtVO vo) throws Exception {
+        insert("prompt.insertPromptAppAgt", vo);
+    }
+
+    /**
+     * 시스템 프롬프트 적용 에이전트 삭제 (PROMPT_ID 기준)
+     * @param vo promptId 필수
+     * @return 삭제 행 수
+     * @throws Exception
+     */
+    public int deletePromptAppAgtByPromptId(PromptVO vo) throws Exception {
+        return delete("prompt.deletePromptAppAgtByPromptId", vo);
+    }
+
+    /**
      * 시스템 프롬프트 삭제
      * @param vo promptId 필수
      * @return 삭제 행 수
@@ -99,6 +118,24 @@ public class PromptDAO extends EgovComAbstractDAO {
      */
     public void insertTokenLmt(PromptVO.TokenLmtVO vo) throws Exception {
         insert("prompt.insertTokenLmt", vo);
+    }
+
+    /**
+     * 에이전트 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<PromptVO.AgentVO> selectAgentList() throws Exception {
+        return selectList("prompt.selectAgentList");
+    }
+
+    /**
+     * 프롬프트 적용 에이전트 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<PromptVO.PromptAppAgtVO> selectPromptAppAgtList() throws Exception {
+        return selectList("prompt.selectPromptAppAgtList");
     }
 
 }
