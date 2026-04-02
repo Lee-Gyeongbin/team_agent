@@ -5,17 +5,22 @@
     <select id="selectMyPageList" parameterType="myPageVO" resultType="myPageVO">
         /* 마이페이지 목록 조회 */
         SELECT
-            USER_ID,
-            USER_NM,
-            EMAIL,
-            PHONE,
-            ORG_ID,
-            USE_YN,
-            LAST_LOGIN_DT,
-            PWD_CHG_DT,
-            LOGIN_FAIL_CNT
-        FROM TB_USER
-        WHERE USER_ID = #{userId}
+            U.USER_ID,
+            U.USER_NM,
+            U.EMAIL,
+            U.PHONE,
+            U.ORG_ID,
+            U.USE_YN,
+            U.LAST_LOGIN_DT,
+            U.PWD_CHG_DT,
+            U.LOGIN_FAIL_CNT,
+            U.ACCT_STATUS_CD,
+            C.DESCRIPTION AS ACCT_STATUS_DESC
+        FROM TB_USER U
+            LEFT JOIN TB_CODE C
+                ON U.ACCT_STATUS_CD = C.CODE_ID
+                AND C.CODE_GRP_ID = 'CG000001'
+        WHERE U.USER_ID = #{userId}
     </select>
 
     <update id="updateMyPage" parameterType="myPageVO">

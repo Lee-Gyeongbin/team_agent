@@ -18,4 +18,6 @@ public class MyPageVO extends CommonVO {
     private String lastLoginDt;
     private String pwdChgDt;
     private String loginFailCnt;
+    private String acctStatusCd;
+    private String acctStatusDesc;
 }

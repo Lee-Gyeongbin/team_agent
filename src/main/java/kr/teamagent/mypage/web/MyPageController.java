@@ -61,11 +61,9 @@ public class MyPageController extends BaseController<Object> {
             String currentPasswd = passwordChangeVO.getOldPassword();
             String newPasswd = passwordChangeVO.getNewPassword();
 
-            // 현재 로그인 사용자 기준으로 userId 설정 (요청 바디의 userId는 신뢰하지 않음)
             String loginUserId = kr.teamagent.common.util.SessionUtil.getUserId();
             passwordChangeVO.setUserId(loginUserId);
 
-            // DB에 저장된 암호화된 비밀번호 조회
             String encodedPassword = myPageService.selectUserPassword(passwordChangeVO);
             if (encodedPassword == null || !passwordEncoder.matches(currentPasswd, encodedPassword)) {
                 resultMap.put("successYn", false);
@@ -73,7 +71,6 @@ public class MyPageController extends BaseController<Object> {
                 return resultMap;
             }
 
-            // 기존 SQL 매핑 유지를 위해 신규 비밀번호를 암호화하여 passwd 필드에 세팅
             passwordChangeVO.setPasswd(passwordEncoder.encode(newPasswd));
 
             int updatedRows = myPageService.updateMyPagePassword(passwordChangeVO);
