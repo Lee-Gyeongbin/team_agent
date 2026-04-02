@@ -23,6 +23,7 @@ public class ChatbotVO extends CommonVO {
     private String docExist;
     // 테이블 데이터 존재 여부
     private String tableExist;
+    private String satisCd;
 
     // LLM 모델 정보(TB_LLM_MDL)
     // 모델 ID

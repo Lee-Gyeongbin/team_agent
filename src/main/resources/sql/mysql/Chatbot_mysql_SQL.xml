@@ -178,6 +178,7 @@
             , A.SATIS_YN
             , A.SATIS_CONTENT 
             , A.SATIS_DT 
+            , A.SATIS_CD
             , A.TABLE_DATA 
             , A.TTSQ
             , A.REASK_CNT
@@ -245,6 +246,7 @@
         UPDATE TB_CHAT_LOG
         SET SATIS_YN = #{satisYn}
             , SATIS_CONTENT = #{satisContent}
+            , SATIS_CD = #{satisCd}
             , SATIS_DT = NOW()
         WHERE LOG_ID = #{logId}
     </update>
