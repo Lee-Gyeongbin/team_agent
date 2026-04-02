@@ -51,8 +51,7 @@
 
             EM.CODE_NM  AS EMBED_MODEL_NM,
             VDB.CODE_NM AS VECTOR_DB_NM,
-            CA.CODE_NM  AS CHUNK_ALGO_NM,
-            HI.CODE_NM  AS HDR_INCL_NM
+            CA.CODE_NM  AS CHUNK_ALGO_NM
 
         FROM TB_DS D
 
@@ -89,11 +88,6 @@
             ON CA.CODE_GRP_ID = 'RG000002'
         AND CA.CODE_ID = D.CHUNK_ALGO_CD
 
-        /* 헤더 포함 여부 코드 */
-        LEFT JOIN TB_CODE HI
-            ON HI.CODE_GRP_ID = 'RG000003'
-        AND HI.CODE_ID = D.HDR_INCL_CD
-
         ORDER BY D.CREATE_DT DESC
     </select>
 
@@ -108,13 +102,9 @@
             D.CHUNK_SIZE,
             D.CHUNK_OVERLAP,
             D.CHUNK_OPT_JSON,
-            D.HDR_INCL_CD,
             D.DATASET_BUILD_STATUS_CD,
             D.EMBED_MODEL_CD,
             D.VECTOR_DB_CD,
-            D.EMBED_NORM_CD,
-            D.POOL_STRAT_CD,
-            D.DIM_REDUC_CD,
             D.CHUNK_CNT,
             D.SRCH_QUAL,
             D.USE_YN,
@@ -122,9 +112,7 @@
             P.LOWERCASE_YN,
             P.WSP_NORM_YN,
             P.SPEC_CHR_RM_YN,
-            P.SINGLE_CELL_TEXT,
-            P.SENT_SPLIT_ALGO_CD,
-            P.LANG_DETECT_CD
+            P.SINGLE_CELL_TEXT
         FROM TB_DS D
         LEFT JOIN TB_DS_PREPROC P
             ON D.DATASET_ID = P.DATASET_ID
@@ -224,13 +212,9 @@
             , CHUNK_OPT_JSON
             , CHUNK_SIZE
             , CHUNK_OVERLAP
-            , HDR_INCL_CD
             , DATASET_BUILD_STATUS_CD
             , EMBED_MODEL_CD
             , VECTOR_DB_CD
-            , EMBED_NORM_CD
-            , POOL_STRAT_CD
-            , DIM_REDUC_CD
             , CHUNK_CNT
             , SRCH_QUAL
             , USE_YN
@@ -245,13 +229,9 @@
             , #{chunkOptJson, jdbcType=VARCHAR}
             , #{chunkSize, jdbcType=INTEGER}
             , #{chunkOverlap, jdbcType=INTEGER}
-            , #{hdrInclCd, jdbcType=VARCHAR}
             , #{datasetBuildStatusCd, jdbcType=VARCHAR}
             , #{embedModelCd, jdbcType=VARCHAR}
             , #{vectorDbCd, jdbcType=VARCHAR}
-            , #{embedNormCd, jdbcType=VARCHAR}
-            , #{poolStratCd, jdbcType=VARCHAR}
-            , #{dimReducCd, jdbcType=VARCHAR}
             , #{chunkCnt, jdbcType=INTEGER}
             , #{srchQual, jdbcType=DECIMAL}
             , #{useYn, jdbcType=VARCHAR}
@@ -266,13 +246,9 @@
             , CHUNK_OPT_JSON = VALUES(CHUNK_OPT_JSON)
             , CHUNK_SIZE = VALUES(CHUNK_SIZE)
             , CHUNK_OVERLAP = VALUES(CHUNK_OVERLAP)
-            , HDR_INCL_CD = VALUES(HDR_INCL_CD)
             , DATASET_BUILD_STATUS_CD = VALUES(DATASET_BUILD_STATUS_CD)
             , EMBED_MODEL_CD = VALUES(EMBED_MODEL_CD)
             , VECTOR_DB_CD = VALUES(VECTOR_DB_CD)
-            , EMBED_NORM_CD = VALUES(EMBED_NORM_CD)
-            , POOL_STRAT_CD = VALUES(POOL_STRAT_CD)
-            , DIM_REDUC_CD = VALUES(DIM_REDUC_CD)
             , USE_YN = VALUES(USE_YN)
             , MODIFY_DT = NOW()
     </insert>
@@ -285,8 +261,6 @@
             , WSP_NORM_YN
             , SPEC_CHR_RM_YN
             , SINGLE_CELL_TEXT
-            , SENT_SPLIT_ALGO_CD
-            , LANG_DETECT_CD
             , CREATE_DT
             , MODIFY_DT
         ) VALUES (
@@ -295,8 +269,6 @@
             , #{wspNormYn, jdbcType=VARCHAR}
             , #{specChrRmYn, jdbcType=VARCHAR}
             , #{singleCellText, jdbcType=VARCHAR}
-            , #{sentSplitAlgoCd, jdbcType=VARCHAR}
-            , #{langDetectCd, jdbcType=VARCHAR}
             , NOW()
             , NOW()
         )
@@ -305,8 +277,6 @@
             , WSP_NORM_YN = VALUES(WSP_NORM_YN)
             , SPEC_CHR_RM_YN = VALUES(SPEC_CHR_RM_YN)
             , SINGLE_CELL_TEXT = VALUES(SINGLE_CELL_TEXT)
-            , SENT_SPLIT_ALGO_CD = VALUES(SENT_SPLIT_ALGO_CD)
-            , LANG_DETECT_CD = VALUES(LANG_DETECT_CD)
             , MODIFY_DT = NOW()
     </insert>
 
