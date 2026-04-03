@@ -218,7 +218,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("threadId", threadId != null ? threadId : "string");
         params.put("dataset_id", refId != null ? refId : "");
         params.put("room_id", threadId != null ? threadId : "string");
-        params.put("model_id", modelId != null ? modelId : "");
+        if(modelId != null && modelId.equals("gpt-5.3-chat-latest")){
+            params.put("model_id", "GPT-5.3-Chat");
+        }else{
+            params.put("model_id", modelId != null ? modelId : "");
+        }
+        
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setUserId(userId);
         // 통계질의일 경우 지역권한코드도 같이 넘겨주기
