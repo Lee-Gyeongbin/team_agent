@@ -54,8 +54,6 @@ public class MyPageController extends BaseController<Object> {
         HashMap<String, Object> resultMap = new HashMap<>();
         int auth = applySessionUserId(searchVO);
         if (auth != MYPAGE_AUTH_OK) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "로그인이 필요합니다.");
             resultMap.put("dataList", Collections.emptyList());
             return new ModelAndView("jsonView", resultMap);
         }
@@ -72,8 +70,6 @@ public class MyPageController extends BaseController<Object> {
         HashMap<String, Object> resultMap = new HashMap<>();
         int auth = applySessionUserId(myPageVO);
         if (auth != MYPAGE_AUTH_OK) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "로그인이 필요합니다.");
             resultMap.put("data", 0);
             return new ModelAndView("jsonView", resultMap);
         }
