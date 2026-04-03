@@ -2,4 +2,43 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="tmpl">
 
+    <resultMap id="tmplFieldMap" type="kr.teamagent.tmpl.service.TmplVO$TmplFieldVO" autoMapping="true"/>
+
+    <select id="selectTmplList" resultType="tmplVO">
+        /* 사용자 문서 템플릿 목록 조회 tmpl.selectTmplList */
+        SELECT
+              A.TMPL_ID
+            , A.TMPL_NM
+            , A.TMPL_TYPE
+            , A.DESCRIPTION
+            , A.LLM_PROMPT_SMRY
+            , A.LLM_PROMPT
+            , A.SYS_TMPL_YN
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM TB_TMPL A
+        WHERE 1 = 1
+            AND A.USE_YN = 'Y'
+        ORDER BY A.CREATE_DT
+    </select>
+
+    <select id="selectTmplFieldListForTypeT" resultMap="tmplFieldMap">
+        /* 사용 중인 'T' 유형 템플릿의 필드 목록 tmpl.selectTmplFieldListForTypeT */
+        SELECT
+              A.FIELD_ID
+            , A.TMPL_ID
+            , A.JSON_KEY
+            , A.FIELD_NM
+            , A.MULTILINE_YN
+            , A.SORT_ORD
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM TB_TMPL_FIELD A
+        WHERE 1 = 1
+            AND A.USE_YN = 'Y'
+        ORDER BY A.TMPL_ID, A.SORT_ORD
+    </select>
+
 </mapper>
