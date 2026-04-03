@@ -29,6 +29,7 @@ public class RepositoryVO {
     private String depth;
     /** 총 문서 개수 */
     private Integer totalCount;
+    private String dsNmList;
 
     /** TB_DOC */
     /** RAG 지식원천 문서 마스터 */

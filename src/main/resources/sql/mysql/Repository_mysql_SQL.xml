@@ -75,6 +75,16 @@
                 WHERE
                     F.DOC_ID = A.DOC_ID
             ) AS DOC_FILE_ID_LIST
+            , (
+                SELECT
+                    GROUP_CONCAT(C.DS_NM ORDER BY F.DATASET_ID SEPARATOR ', ')
+                FROM
+                    TB_DS_DOC F
+                INNER JOIN TB_DS C
+                    ON C.DATASET_ID = F.DATASET_ID
+                WHERE
+                    F.DOC_ID = A.DOC_ID
+            ) AS DS_NM_LIST
         FROM
             TB_DOC A
         INNER JOIN TB_CONTENT_CAT B

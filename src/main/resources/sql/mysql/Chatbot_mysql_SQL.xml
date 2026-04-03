@@ -41,25 +41,35 @@
     <select id="selectRagDsList" resultType="chatbotVO">
         /* RAG 데이터 목록 조회 ai.chatbot.selectRagDsList */
         SELECT
-            A.DATASET_ID 		AS VALUE
-            , B.DS_NM 			AS LABEL
+            B.DATASET_ID    AS VALUE
+            , C.DS_NM         AS LABEL
         FROM
-            TB_AGT_DS A
-        INNER JOIN TB_DS B
-            ON B.DATASET_ID = A.DATASET_ID
-        GROUP BY A.DATASET_ID
+            TB_AGT A
+        LEFT OUTER JOIN TB_AGT_DS B
+            ON B.AGENT_ID = A.AGENT_ID 
+        INNER JOIN TB_DS C 
+            ON C.DATASET_ID = B.DATASET_ID 
+        WHERE 1 = 1
+            AND A.USE_YN = 'Y'
+            AND A.AGENT_TYPE_CD = '001'
+        GROUP BY B.DATASET_ID
     </select>
 
     <select id="selectDmList" resultType="chatbotVO">
         /* 데이터마트 조회 ai.chatbot.selectDmList */
         SELECT
-            A.DATAMART_ID		AS VALUE
-            , B.DM_NM			AS LABEL
+            B.DATAMART_ID    AS VALUE
+            , C.DM_NM         AS LABEL
         FROM
-            TB_AGT_DM A
-        INNER JOIN TB_DM B
-            ON B.DATAMART_ID = A.DATAMART_ID
-        GROUP BY A.DATAMART_ID
+            TB_AGT A
+        LEFT OUTER JOIN TB_AGT_DM B
+            ON B.AGENT_ID = A.AGENT_ID
+        INNER JOIN TB_DM C
+            ON C.DATAMART_ID = B.DATAMART_ID
+        WHERE 1 = 1
+            AND A.USE_YN = 'Y'
+            AND A.AGENT_TYPE_CD = '002'
+        GROUP BY B.DATAMART_ID
     </select>
 
     <insert id="insertChatRoom" parameterType="chatbotVO"
