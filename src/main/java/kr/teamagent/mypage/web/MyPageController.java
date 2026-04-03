@@ -1,5 +1,6 @@
 package kr.teamagent.mypage.web;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -12,7 +13,10 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
+import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.web.BaseController;
+import kr.teamagent.mypage.service.MyPageLoginHistoryVO;
 import kr.teamagent.mypage.service.MyPagePasswordChangeVO;
 import kr.teamagent.mypage.service.MyPageVO;
 import kr.teamagent.mypage.service.impl.MyPageServiceImpl;
@@ -27,13 +31,34 @@ public class MyPageController extends BaseController<Object> {
     @SuppressWarnings("deprecation")
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
 
+    /** 세션 기준 userId 적용 성공 */
+    private static final int MYPAGE_AUTH_OK = 0;
+    /** 비로그인 또는 세션에 userId 없음 */
+    private static final int MYPAGE_AUTH_NO_SESSION = 1;
+
+    private int applySessionUserId(MyPageVO vo) {
+        String loginUserId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(loginUserId)) {
+            return MYPAGE_AUTH_NO_SESSION;
+        }
+        vo.setUserId(loginUserId);
+        return MYPAGE_AUTH_OK;
+    }
+
     /**
      * 마이페이지 정보 조회
      */
-    @RequestMapping(value = "/list.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/list.do", method = RequestMethod.GET)
     @ResponseBody
-    public ModelAndView list(@RequestBody MyPageVO searchVO) throws Exception {
+    public ModelAndView list(MyPageVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
+        int auth = applySessionUserId(searchVO);
+        if (auth != MYPAGE_AUTH_OK) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            resultMap.put("dataList", Collections.emptyList());
+            return new ModelAndView("jsonView", resultMap);
+        }
         resultMap.put("dataList", myPageService.selectMyPageList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
@@ -45,6 +70,13 @@ public class MyPageController extends BaseController<Object> {
     @ResponseBody
     public ModelAndView updateMyPage(@RequestBody MyPageVO myPageVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
+        int auth = applySessionUserId(myPageVO);
+        if (auth != MYPAGE_AUTH_OK) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            resultMap.put("data", 0);
+            return new ModelAndView("jsonView", resultMap);
+        }
         resultMap.put("data", myPageService.updateMyPage(myPageVO));
         return new ModelAndView("jsonView", resultMap);
     }
@@ -61,7 +93,7 @@ public class MyPageController extends BaseController<Object> {
             String currentPasswd = passwordChangeVO.getOldPassword();
             String newPasswd = passwordChangeVO.getNewPassword();
 
-            String loginUserId = kr.teamagent.common.util.SessionUtil.getUserId();
+            String loginUserId = SessionUtil.getUserId();
             passwordChangeVO.setUserId(loginUserId);
 
             String encodedPassword = myPageService.selectUserPassword(passwordChangeVO);
@@ -88,4 +120,16 @@ public class MyPageController extends BaseController<Object> {
         return resultMap;
     }
 
+    /**
+     * 사용자 로그인 이력 조회 (세션 사용자 기준, 본문 없음)
+     */
+    @RequestMapping(value = "/selectUserLoginHistory.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectUserLoginHistory() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        MyPageLoginHistoryVO searchVO = new MyPageLoginHistoryVO();
+        searchVO.setUserId(SessionUtil.getUserId());
+        resultMap.put("dataList", myPageService.selectUserLoginHistory(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

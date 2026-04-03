@@ -55,4 +55,17 @@
         WHERE USER_ID = #{userId}
     </select>
 
+    <select id="selectUserLoginHistory" parameterType="kr.teamagent.mypage.service.MyPageLoginHistoryVO" resultType="kr.teamagent.mypage.service.MyPageLoginHistoryVO">
+        /* 마이페이지 로그인 이력 조회 mypage.selectUserLoginHistory */
+        SELECT
+            A.IP_ADDR,
+            A.USER_AGENT,
+            A.RESULT,
+            A.FAIL_RSON,
+            A.CREATE_DT
+        FROM TB_AUDIT_LOGIN A
+        WHERE A.USER_ID = #{userId}
+        ORDER BY A.CREATE_DT DESC
+    </select>
+    
 </mapper>

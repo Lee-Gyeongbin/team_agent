@@ -6,6 +6,7 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import kr.teamagent.mypage.service.MyPageLoginHistoryVO;
 import kr.teamagent.mypage.service.MyPagePasswordChangeVO;
 import kr.teamagent.mypage.service.MyPageVO;
 
@@ -53,5 +54,15 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
      */
     public String selectUserPassword(MyPagePasswordChangeVO passwordChangeVO) throws Exception {
         return myPageDAO.selectUserPassword(passwordChangeVO);
+    }
+
+    /**
+     * 사용자 로그인 이력 조회
+     * @param searchVO userId가 설정된 조회 조건
+     * @return
+     * @throws Exception
+     */
+    public List<MyPageLoginHistoryVO> selectUserLoginHistory(MyPageLoginHistoryVO searchVO) throws Exception {
+        return myPageDAO.selectUserLoginHistory(searchVO);
     }
 }
