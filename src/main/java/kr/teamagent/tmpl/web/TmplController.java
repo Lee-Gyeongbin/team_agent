@@ -1,21 +1,37 @@
 package kr.teamagent.tmpl.web;
 
+import java.util.HashMap;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.servlet.ModelAndView;
 
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.tmpl.service.impl.TmplServiceImpl;
 
 /**
- * 템플릿 도메인 컨트롤러 (API는 필요 시 추가)
+ * 템플릿 도메인 컨트롤러
  */
 @Controller
 @RequestMapping("/tmpl")
 public class TmplController extends BaseController {
 
-    @SuppressWarnings("unused")
     @Autowired
     private TmplServiceImpl tmplService;
+
+    /**
+     * 사용자 문서 템플릿 목록 조회
+     * @return { dataList: TmplVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/list.do")
+    @ResponseBody
+    public ModelAndView list() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", tmplService.selectTmplList());
+        return new ModelAndView("jsonView", resultMap);
+    }
 
 }
