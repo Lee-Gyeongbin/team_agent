@@ -135,7 +135,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String apiUrl = "";
         switch (svcTy) {
             case "C":
-                apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
+                // TODO 추후 삭제 (지금은 8888 포트로 테스트용 챗봇 서버 구동)
+                apiUrl = PropertyUtil.getProperty("Globals.chatbot.chatTest.apiUrl");
                 break;
             case "M":
                 apiUrl = PropertyUtil.getProperty("Globals.chatbot.manual.apiUrl");
@@ -219,6 +220,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("dataset_id", refId != null ? refId : "");
         params.put("room_id", threadId != null ? threadId : "string");
         params.put("model_id", modelId != null ? modelId : "");
+        // TODO 추후 삭제
+        params.put("model_name", modelId != null ? modelId : "");
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setUserId(userId);
         // 통계질의일 경우 지역권한코드도 같이 넘겨주기
