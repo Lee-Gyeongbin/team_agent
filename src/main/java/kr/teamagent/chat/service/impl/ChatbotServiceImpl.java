@@ -948,7 +948,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         StringBuilder prompt = new StringBuilder();
-        prompt.append("다음 대화를 요약한 지식 카드에 어울리는 썸네일 이미지를 만들어줘. 텍스트는 포함하지말고 이미지만 생성해주고 썸네일 이미지답게 단순한 이미지로 생성해줘.");
+        prompt.append("다음 대화를 요약한 지식 카드에 어울리는 썸네일 이미지를 만들어줘. 텍스트는 포함하지말고 이미지만 생성해주고 썸네일 이미지답게 단순한 이미지로 생성해줘. 이미지 크기는 270px x 80px 정도로 맞춰줘.");
         if (CommonUtil.isNotEmpty(qContent)) {
             prompt.append("질문: ").append(truncateTitle(qContent, 200)).append(' ');
         }
@@ -1040,8 +1040,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             return null;
                         }
                         String normalized = stripDataUrlBase64Prefix(image);
-                        logger.info("AI 썸네일 이미지 수신 완료 (base64 길이: {})",
-                                normalized != null ? normalized.length() : 0);
                         return normalized;
                     } catch (Exception e) {
                         logger.warn("AI 썸네일 이미지 응답 파싱 오류: {}", e.getMessage());
