@@ -43,6 +43,7 @@
             , SORT_ORD
             , SQL_CODE
             , NEW_YN
+            , THUMB_IMG
             , USE_YN
             , CREATE_DT
             , MODIFY_DT
