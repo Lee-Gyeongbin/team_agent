@@ -141,4 +141,14 @@ public class LibraryVO {
         private String detailItemNm;
     }
 
+    /** AI 문서 생성 API 요청 */
+    private String tmplId;
+
+    @Getter
+    @Setter
+    public static class TmplFieldItem {
+        private String jsonKey;
+        private String fieldNm;
+    }
+
 }

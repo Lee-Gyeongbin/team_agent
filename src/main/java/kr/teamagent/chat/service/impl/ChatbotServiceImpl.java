@@ -876,7 +876,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @param purpose 로깅용 호출 목적 (title, tags 등)
      * @return AI 응답 텍스트, 실패 시 null
      */
-    private String callAiSummary(String prompt, String purpose) {
+    public String callAiSummary(String prompt, String purpose) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.summary.apiUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("{} 생성 실패 - GPT API URL 미설정", purpose);
