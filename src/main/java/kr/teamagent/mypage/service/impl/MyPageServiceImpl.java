@@ -6,8 +6,6 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import kr.teamagent.mypage.service.MyPageLoginHistoryVO;
-import kr.teamagent.mypage.service.MyPagePasswordChangeVO;
 import kr.teamagent.mypage.service.MyPageVO;
 
 @Service
@@ -42,7 +40,7 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
      * @return
      * @throws Exception
      */
-    public int updateMyPagePassword(MyPagePasswordChangeVO passwordChangeVO) throws Exception {
+    public int updateMyPagePassword(MyPageVO.PasswordChangeVO passwordChangeVO) throws Exception {
         return myPageDAO.updateMyPagePassword(passwordChangeVO);
     }
 
@@ -52,7 +50,7 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
      * @return 암호화된 비밀번호
      * @throws Exception
      */
-    public String selectUserPassword(MyPagePasswordChangeVO passwordChangeVO) throws Exception {
+    public String selectUserPassword(MyPageVO.PasswordChangeVO passwordChangeVO) throws Exception {
         return myPageDAO.selectUserPassword(passwordChangeVO);
     }
 
@@ -62,7 +60,7 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
      * @return
      * @throws Exception
      */
-    public List<MyPageLoginHistoryVO> selectUserLoginHistory(MyPageLoginHistoryVO searchVO) throws Exception {
+    public List<MyPageVO.LoginHistoryVO> selectUserLoginHistory(MyPageVO.LoginHistoryVO searchVO) throws Exception {
         return myPageDAO.selectUserLoginHistory(searchVO);
     }
 }

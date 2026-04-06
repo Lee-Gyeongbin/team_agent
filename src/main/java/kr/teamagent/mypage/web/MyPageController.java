@@ -16,8 +16,6 @@ import org.springframework.web.servlet.ModelAndView;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.web.BaseController;
-import kr.teamagent.mypage.service.MyPageLoginHistoryVO;
-import kr.teamagent.mypage.service.MyPagePasswordChangeVO;
 import kr.teamagent.mypage.service.MyPageVO;
 import kr.teamagent.mypage.service.impl.MyPageServiceImpl;
 
@@ -83,7 +81,7 @@ public class MyPageController extends BaseController<Object> {
      */
     @RequestMapping(value = "/changePassword.do", method = RequestMethod.POST)
     @ResponseBody
-    public Map<String, Object> updateMyPagePassword(@RequestBody MyPagePasswordChangeVO passwordChangeVO) {
+    public Map<String, Object> updateMyPagePassword(@RequestBody MyPageVO.PasswordChangeVO passwordChangeVO) {
         Map<String, Object> resultMap = new HashMap<>();
         try {
             String currentPasswd = passwordChangeVO.getOldPassword();
@@ -121,10 +119,10 @@ public class MyPageController extends BaseController<Object> {
      */
     @RequestMapping(value = "/selectUserLoginHistory.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView selectUserLoginHistory(@RequestBody(required = false) MyPageLoginHistoryVO searchVO) throws Exception {
+    public ModelAndView selectUserLoginHistory(@RequestBody(required = false) MyPageVO.LoginHistoryVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         if (searchVO == null) {
-            searchVO = new MyPageLoginHistoryVO();
+            searchVO = new MyPageVO.LoginHistoryVO();
         }
         String loginUserId = SessionUtil.getUserId();
         if (CommonUtil.isEmpty(loginUserId)) {

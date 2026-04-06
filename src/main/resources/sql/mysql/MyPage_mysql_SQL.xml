@@ -36,7 +36,7 @@
         WHERE USER_ID = #{userId}
     </update>
 
-    <update id="updateMyPagePassword" parameterType="kr.teamagent.mypage.service.MyPagePasswordChangeVO">
+    <update id="updateMyPagePassword" parameterType="kr.teamagent.mypage.service.MyPageVO$PasswordChangeVO">
         /* 마이페이지 비밀번호 변경 */
         UPDATE TB_USER
         SET
@@ -48,14 +48,14 @@
         WHERE USER_ID = #{userId}
     </update>
 
-    <select id="selectUserPassword" parameterType="kr.teamagent.mypage.service.MyPagePasswordChangeVO" resultType="string">
+    <select id="selectUserPassword" parameterType="kr.teamagent.mypage.service.MyPageVO$PasswordChangeVO" resultType="string">
         /* 마이페이지 비밀번호 변경 시 현재 비밀번호 확인용 */
         SELECT PASSWD
         FROM TB_USER
         WHERE USER_ID = #{userId}
     </select>
 
-    <select id="selectUserLoginHistory" parameterType="kr.teamagent.mypage.service.MyPageLoginHistoryVO" resultType="kr.teamagent.mypage.service.MyPageLoginHistoryVO">
+    <select id="selectUserLoginHistory" parameterType="kr.teamagent.mypage.service.MyPageVO$LoginHistoryVO" resultType="kr.teamagent.mypage.service.MyPageVO$LoginHistoryVO">
         /* 마이페이지 로그인 이력 조회 mypage.selectUserLoginHistory */
         SELECT
             A.IP_ADDR,
@@ -79,5 +79,5 @@
         </if>
         ORDER BY A.CREATE_DT DESC
     </select>
-    
+
 </mapper>
