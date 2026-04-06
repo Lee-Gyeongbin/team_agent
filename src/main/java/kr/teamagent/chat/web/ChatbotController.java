@@ -271,4 +271,52 @@ public class ChatbotController extends BaseController {
         HashMap<String, Object> resultMap = new HashMap<>(chatbotService.selectSharedChatLogList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
+
+    @RequestMapping("/ai/chatbot/saveChatFile.do")
+    public @ResponseBody Map<String, Object> saveChatFile(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            // 유효성 검사
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+                return resultMap;
+            }
+
+            resultMap = chatbotService.saveChatFile(dataVO);
+
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * 채팅 파일 orphan 처리
+     * - NCP 업로드 + DB 저장은 성공했으나 ws 전송 실패로 LOG_ID가 연결되지 못한 파일을
+     *   EXPIRE_DT를 현재 시각으로 갱신해 배치 삭제 대상으로 표시한다.
+     */
+    @RequestMapping("/ai/chatbot/markChatFileOrphan.do")
+    public @ResponseBody Map<String, Object> markChatFileOrphan(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+                return resultMap;
+            }
+
+            resultMap = chatbotService.markChatFileOrphan(dataVO);
+
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+
+        return resultMap;
+    }
 }

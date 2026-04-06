@@ -124,6 +124,8 @@
             SATIS_YN,
             TTSQ,
             TABLE_DATA,
+            MAIN_DOC_FILE_ID,
+            MAIN_PAGE,
             REASK_CNT,
             CREATE_USER_ID,
             CREATE_DT
@@ -141,6 +143,8 @@
             #{satisYn},
             #{sql},
             #{tableData},
+            #{mainDocFileId},
+            #{mainPage},
             #{reaskCnt},
             #{userId},
             NOW()
@@ -219,6 +223,24 @@
             , A.FILE_PATH 
             , B.MAIN_PAGE_NO 
             , B.RELATED_PAGES 
+            , (
+                SELECT
+                    B.MAIN_DOC_FILE_ID
+                FROM
+                    TB_CHAT_LOG B
+                WHERE
+                    1 = 1
+                    AND B.LOG_ID = #{logId}
+                )	AS SHOW_DOC_FILE_ID
+            , (
+                SELECT
+                    B.MAIN_PAGE 
+                FROM
+                    TB_CHAT_LOG B
+                WHERE
+                    1 = 1
+                    AND B.LOG_ID = #{logId}
+                )	AS SHOW_PAGE_NO
         FROM
             TB_DOC_FILE A
         INNER JOIN TB_CHAT_REF B
@@ -387,4 +409,60 @@
             AND A.USER_ID = #{userId}
         ORDER BY A.SORT_ORD
     </select>
+
+    <update id="updateChatFileLogId" parameterType="chatbotVO">
+        /* 첨부파일 LOG_ID 연결 + EXPIRE_DT 해제 ai.chatbot.updateChatFileLogId */
+        UPDATE TB_CHAT_FILE
+        SET LOG_ID    = #{logId},
+            EXPIRE_DT = NULL
+        WHERE CHAT_FILE_ID IN
+        <foreach collection="chatFileIdList" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        AND LOG_ID IS NULL
+    </update>
+
+    <update id="updateChatFileOrphan" parameterType="chatbotVO">
+        /* 채팅 파일 orphan 처리 ai.chatbot.updateChatFileOrphan */
+        UPDATE TB_CHAT_FILE
+        SET EXPIRE_DT = NOW()
+        WHERE CHAT_FILE_ID IN
+        <foreach collection="chatFileIdList" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        AND LOG_ID IS NULL
+    </update>
+
+    <insert id="insertChatFile" parameterType="chatbotVO"
+        useGeneratedKeys="true" keyProperty="chatFileId">
+        /* 채팅 파일 저장 ai.chatbot.insertChatFile */
+        INSERT INTO TB_CHAT_FILE
+        (
+            ROOM_ID,
+            LOG_ID,
+            FILE_NAME,
+            STORE_FILE_NAME,
+            FILE_PATH,
+            FILE_SIZE,
+            FILE_TYPE,
+            FILE_EXIST_YN,
+            EXPIRE_DT,
+            FILE_DEL_DT,
+            CREATE_USER_ID
+        )
+        VALUES
+        (
+            #{roomId},
+            #{logId},
+            #{fileName},
+            #{storeFileName},
+            #{filePath},
+            #{fileSize},
+            #{fileType},
+            'Y',
+            NOW() + INTERVAL 1 DAY,
+            #{fileDelDt},
+            #{userId}
+        )
+    </insert>
 </mapper>

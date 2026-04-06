@@ -36,4 +36,16 @@ public class FileVO extends CommonVO {
     private String ragUseCnt;
     private String createDt;
     private String modifyDt;
+
+    /** tb_chat_file 채팅 시 첨부파일 */
+    // 저장 파일명
+    private String storeFileName;
+    // 저장 경로
+    private String storeFilePath;
+    // 스토리지 파일 존재 여부
+    private String fileExistYn;
+    // 삭제 예정일시
+    private String expireDt;
+    // 스토리지 파일 삭제일시
+    private String fileDelDt;
 }

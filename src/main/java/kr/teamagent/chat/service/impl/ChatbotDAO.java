@@ -190,4 +190,34 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         Integer cnt = selectOne("ai.chatbot.countShareTokenByToken", searchVO);
         return cnt != null ? cnt : 0;
     }
+
+    /**
+     * 채팅 파일 저장
+     * @param chatbotVO
+     * @return
+     * @throws Exception
+     */
+    public int saveChatFile(ChatbotVO chatbotVO) throws Exception {
+        return insert("ai.chatbot.insertChatFile", chatbotVO);
+    }
+
+    /**
+     * 채팅 파일 orphan 처리 (EXPIRE_DT = NOW()로 갱신 → 배치 삭제 대상)
+     * @param chatbotVO chatFileIdList 필수
+     * @return 처리된 행 수
+     * @throws Exception
+     */
+    public int markChatFileOrphan(ChatbotVO chatbotVO) throws Exception {
+        return update("ai.chatbot.updateChatFileOrphan", chatbotVO);
+    }
+
+    /**
+     * 첨부파일에 LOG_ID 연결 + EXPIRE_DT 해제 (로그 저장 성공 시 호출)
+     * @param chatbotVO chatFileIdList + logId 필수
+     * @return 처리된 행 수
+     * @throws Exception
+     */
+    public int linkChatFilesToLog(ChatbotVO chatbotVO) throws Exception {
+        return update("ai.chatbot.updateChatFileLogId", chatbotVO);
+    }
 }

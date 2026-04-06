@@ -1,5 +1,6 @@
 package kr.teamagent.chat.service;
 
+import java.util.List;
 import kr.teamagent.common.CommonVO;
 import lombok.Getter;
 import lombok.Setter;
@@ -104,6 +105,8 @@ public class ChatbotVO extends CommonVO {
 
     // 관리자 유무 체크
     private String authFlag;
+    private String mainDocFileId;
+    private String mainPage;
 
     // 채팅 답변별 참조 문서 및 페이지 상세(TB_CHAT_REF)
     // 문서 고유 ID 
@@ -119,6 +122,10 @@ public class ChatbotVO extends CommonVO {
     private String mainPageNo;
     // 관련 페이지 번호
     private String relatedPages;
+    /** 조회 시 메인 문서 파일 ID */
+    private String showDocFileId;
+    /** 조회 시 메인 페이지 번호 */
+    private String showPageNo;
 
     private String statId;
     private String statNm;
@@ -154,4 +161,14 @@ public class ChatbotVO extends CommonVO {
     private String shareToken;
     /** TB_SHARE_TOKEN.EXPIRED_DT (조회 시 매핑, INSERT는 쿼리에서 DATE_ADD) */
     private String expiredDt;
+
+    /** TB_CHAT_FILE 채팅 첨부파일 */
+    private Long chatFileId;
+    /** orphan 처리 대상 chatFileId 목록 */
+    private List<Long> chatFileIdList;
+    private String storeFileName;
+    private Long fileSize;
+    private String fileType;
+    private String expireDt;
+    private String fileDelDt;
 }

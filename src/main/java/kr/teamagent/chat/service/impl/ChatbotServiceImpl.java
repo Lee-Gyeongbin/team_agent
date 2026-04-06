@@ -113,17 +113,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public List<ChatbotVO> selectTableDataList(ChatbotVO searchVO) throws Exception {
         return chatbotDAO.selectTableDataList(searchVO);
     }
-    public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+    public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
         logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
-        
+
         if (CommonUtil.isEmpty(apiUrl)) {
             callback.onError("API URL이 설정되지 않았습니다.");
             return;
         }
 
-        callAiApiStreamingWebSocket(session, apiUrl, query, threadId, userId, svcTy, modelId, refId, callback);
+        callAiApiStreamingWebSocket(session, apiUrl, query, threadId, userId, svcTy, modelId, refId, attachmentFileIds, callback);
     }
 
     /**
@@ -210,7 +210,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * WebSocket 방식으로 실제 AI API를 호출하고 스트리밍 응답을 처리
      */
-    private void callAiApiStreamingWebSocket(WebSocketSession session, String apiUrl, String query, String threadId, String userId, String svcTy, String modelId, String refId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+    private void callAiApiStreamingWebSocket(WebSocketSession session, String apiUrl, String query, String threadId, String userId, String svcTy, String modelId, String refId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
         // 요청 파라미터 구성 (JSON body)
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
@@ -218,10 +218,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("threadId", threadId != null ? threadId : "string");
         params.put("dataset_id", refId != null ? refId : "");
         params.put("room_id", threadId != null ? threadId : "string");
-        if(modelId != null && modelId.equals("gpt-5.3-chat-latest")){
-            params.put("model_id", "GPT-5.3-Chat");
-        }else{
-            params.put("model_id", modelId != null ? modelId : "");
+        params.put("model_id", modelId != null ? modelId : "");
+        if(CommonUtil.isNotEmpty(attachmentFileIds) && !attachmentFileIds.isEmpty()){
+            params.put("attachment_file_ids", attachmentFileIds);
         }
         
         ChatbotVO chatbotVO = new ChatbotVO();
@@ -337,7 +336,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                          * - 스트리밍 종료 시 callback.onComplete()
                          를 호출한다.
                          */
-                        processStreamingResponseWebSocket(responseBody, query, svcTy, modelId, refId, userId, threadId, callback);
+                        processStreamingResponseWebSocket(responseBody, query, svcTy, modelId, refId, userId, threadId, attachmentFileIds, callback);
                     } catch (Exception e) {
                         logger.error("스트리밍 응답 처리 중 오류: {}", e.getMessage(), e);
                         callback.onError("스트리밍 처리 오류: " + e.getMessage());
@@ -356,7 +355,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * SSE 형식: event: answer_delta, data: {"text": "..."}
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
-    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String modelId, String refId, String userId, String threadId, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
+    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String modelId, String refId, String userId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
@@ -370,6 +369,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         int inputTokens = 0;
         int outputTokens = 0;
+        String mainDocFileId = "";
+        String mainPage = "";
         String savedLogId = "";
         String tableData = "";
         String sql = "";
@@ -409,6 +410,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             accumulatedContent = new StringBuilder(answer);
                         }
 
+                        mainDocFileId = getString(data.get("docFileId"));
+                        mainPage = getString(data.get("page"));
                         inputTokens = parseTokenCount(data.get("input_token"));
                         outputTokens = parseTokenCount(data.get("output_token"));
                         tableData = toJsonIfExists(data.get("table_data"));
@@ -441,9 +444,25 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 userId,
                                 tableData,
                                 sql,
+                                mainDocFileId,
+                                mainPage,
                                 chatRefItems);
 
                         this.updateChatRoomLastChatDt(responseThreadId);
+
+                        // 첨부파일 LOG_ID 연결 + EXPIRE_DT 해제
+                        if (CommonUtil.isNotEmpty(savedLogId)
+                                && attachmentFileIds != null
+                                && !attachmentFileIds.isEmpty()) {
+                            try {
+                                ChatbotVO fileVO = new ChatbotVO();
+                                fileVO.setChatFileIdList(attachmentFileIds);
+                                fileVO.setLogId(Long.parseLong(savedLogId));
+                                chatbotDAO.linkChatFilesToLog(fileVO);
+                            } catch (Exception e) {
+                                logger.warn("첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
+                            }
+                        }
                     } catch (Exception e) {
                         logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
                     }
@@ -452,8 +471,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 if (!hasStreamError && !isCompleteCalled && accumulatedContent.length() > 0) {
                     ChatRefItem firstRef = !chatRefItems.isEmpty() ? chatRefItems.get(0) : null;
 
-                    String docFileId = firstRef != null ? nvl(firstRef.docFileId) : "";
-                    String mainPageNo = firstRef != null ? nvl(firstRef.mainPageNo) : "";
                     List<Integer> relatedPageNos = firstRef != null ? new ArrayList<>(firstRef.relatedPageNos) : new ArrayList<>();
                     String fallbackThreadId = responseThreadId != null
                             ? responseThreadId
@@ -461,8 +478,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                     callback.onComplete(
                             accumulatedContent.toString(),
-                            docFileId,
-                            mainPageNo,
+                            mainDocFileId,
+                            mainPage,
                             relatedPageNos,
                             fallbackThreadId,
                             CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
@@ -637,6 +654,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             String userId,
             String tableData,
             String sql,
+            String mainDocFileId,
+            String mainPage,
             List<ChatRefItem> chatRefItems) throws Exception {
 
         ChatbotVO chatbotVO = new ChatbotVO();
@@ -651,6 +670,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setUserId(userId);
         chatbotVO.setTableData(CommonUtil.isNotEmpty(tableData) ? tableData : null);
         chatbotVO.setSql(CommonUtil.isNotEmpty(sql) ? sql : null);
+        chatbotVO.setMainDocFileId(CommonUtil.isNotEmpty(mainDocFileId) ? mainDocFileId : null);
+        chatbotVO.setMainPage(CommonUtil.isNotEmpty(mainPage) ? mainPage : null);
 
         chatbotDAO.insertChatLog(chatbotVO);
 
@@ -1022,6 +1043,70 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             resultMap.put("returnMsg", "유효하지 않은 공유 링크입니다.");
         }
         resultMap.put("list", new ArrayList<ChatbotVO>());
+        return resultMap;
+    }
+
+    /**
+     * 채팅 파일 저장
+     * @param chatbotVO
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> saveChatFile(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            chatbotVO.setUserId(SessionUtil.getUserId());
+            /**
+             * 업로드 직후 insert
+                LOG_ID = NULL
+                FILE_EXIST_YN = 'Y'
+                EXPIRE_DT = NOW() + INTERVAL 1 DAY (또는 3시간/24시간 정책)
+
+                CASE 1. ws 전송 성공 + onComplete에서 로그 저장 완료 시
+                해당 파일들 LOG_ID = savedLogId로 업데이트
+                EXPIRE_DT = NULL로 해제
+
+                CASE 2. ws 전송 실패(또는 일정 시간 내 LOG_ID 미연결) 시
+                그대로 LOG_ID IS NULL + EXPIRE_DT <= NOW() 대상이 배치 삭제 후보
+                배치 작업
+             */
+            int result = chatbotDAO.saveChatFile(chatbotVO);
+            if (result > 0) {
+                resultMap.put("successYn", true);
+                resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+                resultMap.put("chatFileId", chatbotVO.getChatFileId());
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * 채팅 파일 orphan 처리
+     * ws 전송 실패 등으로 LOG_ID가 연결되지 못한 파일의 EXPIRE_DT를 현재 시각으로 갱신해
+     * 배치 삭제 대상으로 표시한다.
+     */
+    public Map<String, Object> markChatFileOrphan(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (chatbotVO.getChatFileIdList() == null || chatbotVO.getChatFileIdList().isEmpty()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "처리할 파일 ID가 없습니다.");
+            return resultMap;
+        }
+
+        int result = chatbotDAO.markChatFileOrphan(chatbotVO);
+        if (result > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+        }
+
         return resultMap;
     }
 

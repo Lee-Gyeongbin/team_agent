@@ -1,6 +1,7 @@
 package kr.teamagent.chat.socket;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -178,10 +179,28 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             
             // 사용자 ID 가져오기
             String userId = (String) session.getAttributes().get("userId");
-            
-            logger.info("질문 수신: query={}, threadId={}, svcTy={}, refId={}, userId={}", 
-                    query, threadId, svcTy, refId, userId);
-            
+
+            // 첨부파일 chatFileId 목록 파싱
+            List<Long> attachmentFileIds = new ArrayList<>();
+            Object attachmentsObj = messageObj.get("attachments");
+            if (attachmentsObj instanceof JSONArray) {
+                for (Object item : (JSONArray) attachmentsObj) {
+                    if (item instanceof JSONObject) {
+                        Object fileIdObj = ((JSONObject) item).get("chatFileId");
+                        if (fileIdObj instanceof Number) {
+                            attachmentFileIds.add(((Number) fileIdObj).longValue());
+                        } else if (fileIdObj instanceof String) {
+                            try {
+                                attachmentFileIds.add(Long.parseLong((String) fileIdObj));
+                            } catch (NumberFormatException ignored) {}
+                        }
+                    }
+                }
+            }
+
+            logger.info("질문 수신: query={}, threadId={}, svcTy={}, refId={}, userId={}, attachments={}",
+                    query, threadId, svcTy, refId, userId, attachmentFileIds.size());
+
             // 질문 수신 확인 메시지 전송
             sendMessage(session, createMessage("question_received", "질문을 받았습니다.", null));
 
@@ -204,10 +223,11 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
              * AI API 요청 및 응답 스트리밍을 별도의 Thread Pool에서 처리하고,
              * 해당 결과를 WebSocket을 통해 비동기적으로 클라이언트에 전송한다.
              */
+            final List<Long> finalAttachmentFileIds = attachmentFileIds;
             getExecutorService().execute(() -> {
                 try {
                     // 해당 작업을 execute가 스레드 풀에 던져서 실행하게 함.(스레드가 다 차 있을 경우엔 큐에 대기)
-                    streamResponse(session, query, threadId, userId, svcTy, modelId, refId);
+                    streamResponse(session, query, threadId, userId, svcTy, modelId, refId, finalAttachmentFileIds);
                 } catch (Exception e) {
                     logger.error("스트리밍 응답 처리 중 오류", e);
                     sendMessage(session, createMessage("error", "응답 처리 중 오류가 발생했습니다.", null));
@@ -223,7 +243,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
     /**
      * 스트리밍 응답 처리
      */
-    private void streamResponse(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId) throws Exception {
+    private void streamResponse(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, List<Long> attachmentFileIds) throws Exception {
 
         /**
          * 스트리밍 응답 처리를 위한 콜백 인터페이스
@@ -283,7 +303,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
         };
         
         // ChatbotService를 통해 스트리밍 응답 받기
-        chatbotService.streamAiResponseWebSocket(session, query, threadId, userId, svcTy, modelId, refId, callback);
+        chatbotService.streamAiResponseWebSocket(session, query, threadId, userId, svcTy, modelId, refId, attachmentFileIds, callback);
     }
     
     /**

@@ -54,8 +54,14 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
 
     public Map<String, Object> createUploadPresignedUrl(FileVO req) {
 
-        String key = req.getCategoryId() + "/" + req.getFileName();
+        String key = "";
         Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
+
+        if(!req.getStoreFileName().isEmpty() || !req.getStoreFilePath().isEmpty()) {
+            key = req.getStoreFilePath();
+        }else {
+            key = req.getCategoryId() + "/" + req.getFileName();
+        }
 
         log.debug("Upload presigned URL request. key={}", key);
 
