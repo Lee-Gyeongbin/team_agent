@@ -9,6 +9,8 @@ import lombok.Setter;
 public class MyPageLoginHistoryVO extends CommonVO {
     private static final long serialVersionUID = 1L;
 
+    private String fromDt;
+    private String toDt;
     private String ipAddr;
     private String userAgent;
     private String result;

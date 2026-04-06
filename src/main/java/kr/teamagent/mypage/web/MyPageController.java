@@ -117,14 +117,21 @@ public class MyPageController extends BaseController<Object> {
     }
 
     /**
-     * 사용자 로그인 이력 조회 (세션 사용자 기준, 본문 없음)
+     * 사용자 로그인 이력 조회 (세션 사용자 기준, 본문: fromDt, toDt, ipAddr, result — 빈 문자열은 미적용)
      */
-    @RequestMapping(value = "/selectUserLoginHistory.do", method = RequestMethod.GET)
+    @RequestMapping(value = "/selectUserLoginHistory.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView selectUserLoginHistory() throws Exception {
+    public ModelAndView selectUserLoginHistory(@RequestBody(required = false) MyPageLoginHistoryVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        MyPageLoginHistoryVO searchVO = new MyPageLoginHistoryVO();
-        searchVO.setUserId(SessionUtil.getUserId());
+        if (searchVO == null) {
+            searchVO = new MyPageLoginHistoryVO();
+        }
+        String loginUserId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(loginUserId)) {
+            resultMap.put("dataList", Collections.emptyList());
+            return new ModelAndView("jsonView", resultMap);
+        }
+        searchVO.setUserId(loginUserId);
         resultMap.put("dataList", myPageService.selectUserLoginHistory(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }

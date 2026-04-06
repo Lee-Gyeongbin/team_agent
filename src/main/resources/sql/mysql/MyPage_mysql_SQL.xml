@@ -65,6 +65,18 @@
             A.CREATE_DT
         FROM TB_AUDIT_LOGIN A
         WHERE A.USER_ID = #{userId}
+        <if test="fromDt != null and fromDt != ''">
+            AND DATE(A.CREATE_DT) <![CDATA[>=]]> #{fromDt}
+        </if>
+        <if test="toDt != null and toDt != ''">
+            AND DATE(A.CREATE_DT) <![CDATA[<=]]> #{toDt}
+        </if>
+        <if test="ipAddr != null and ipAddr != ''">
+            AND A.IP_ADDR LIKE CONCAT('%', #{ipAddr}, '%')
+        </if>
+        <if test="result != null and result != ''">
+            AND A.RESULT = #{result}
+        </if>
         ORDER BY A.CREATE_DT DESC
     </select>
     
