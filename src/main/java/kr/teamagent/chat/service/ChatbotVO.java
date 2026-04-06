@@ -142,6 +142,8 @@ public class ChatbotVO extends CommonVO {
     private String archiveDt;
     private Integer sortOrd;
     private String sqlCode;
+    private String thumbImg;
+
 
     @Getter
     @Setter

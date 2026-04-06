@@ -20,4 +20,32 @@ public class MyPageVO extends CommonVO {
     private String loginFailCnt;
     private String acctStatusCd;
     private String acctStatusDesc;
+
+    /** 로그인 이력 조회 조건·결과 행 */
+    @Getter
+    @Setter
+    public static class LoginHistoryVO extends CommonVO {
+        private static final long serialVersionUID = 1L;
+
+        private String fromDt;
+        private String toDt;
+        private String ipAddr;
+        private String userAgent;
+        private String result;
+        private String failRson;
+        private String createDt;
+    }
+
+    /** 비밀번호 변경 요청 */
+    @Getter
+    @Setter
+    public static class PasswordChangeVO extends CommonVO {
+        private static final long serialVersionUID = 1L;
+
+        private String userId;
+        private String oldPassword;
+        private String newPassword;
+        private String newPasswordConfirm;
+        private String passwd;
+    }
 }

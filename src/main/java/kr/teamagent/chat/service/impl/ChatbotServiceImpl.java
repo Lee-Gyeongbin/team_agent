@@ -801,6 +801,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setSvcTy(chatLog.getSvcTy());
         chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getRoomTitle()) ? generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()) : chatLog.getRoomTitle());
         chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent()));
+
+        chatbotVO.setThumbImg(generateSummaryThumbImg(chatLog.getQContent(), chatLog.getRContent()));
+
         chatbotVO.setPinYn("N");
         chatbotVO.setArchiveYn("N");
         chatbotVO.setUseYn("Y");
@@ -874,7 +877,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @return AI 응답 텍스트, 실패 시 null
      */
     private String callAiSummary(String prompt, String purpose) {
-        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.summary.apiUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("{} 생성 실패 - GPT API URL 미설정", purpose);
             return null;
@@ -882,8 +885,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", prompt);
-        params.put("user_id", "");
-        params.put("threadId", "string");
+        params.put("room_id", "");
 
         try {
             OkHttpClient client = new OkHttpClient.Builder()
@@ -899,7 +901,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     .url(apiUrl)
                     .post(body)
                     .addHeader("Content-Type", "application/json")
-                    .addHeader("Accept", "text/event-stream")
+                    .addHeader("Accept", "application/json")
                     .build();
 
             logger.info("AI {} 생성 호출 시작 - url: {}", purpose, apiUrl);
@@ -911,46 +913,42 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 }
 
                 try (okhttp3.ResponseBody responseBody = response.body()) {
-                    java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
-
-                    String line;
-                    StringBuilder accumulated = new StringBuilder();
-                    String currentEvent = null;
-
-                    while ((line = reader.readLine()) != null) {
-                        if (line.startsWith("event: ")) {
-                            currentEvent = line.substring(7).trim();
-                            continue;
-                        }
-                        if (line.startsWith("data: ")) {
-                            String jsonStr = line.substring(6).trim();
-                            try {
-                                JSONParser jsonParser = new JSONParser();
-                                JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
-
-                                if ("answer_delta".equals(currentEvent)) {
-                                    String text = (String) data.get("text");
-                                    if (text != null && !text.isEmpty()) {
-                                        accumulated.append(text);
-                                    }
-                                } else if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
-                                    String answer = (String) data.get("answer");
-                                    if (answer != null && !answer.isEmpty()) {
-                                        accumulated = new StringBuilder(answer);
-                                    }
-                                    break;
-                                }
-                            } catch (Exception e) {
-                                logger.warn("AI {} SSE 파싱 오류 (무시): {}", purpose, e.getMessage());
-                            }
+                    String raw = responseBody.string();
+                    if (CommonUtil.isEmpty(raw)) {
+                        return null;
+                    }
+                    String trimmed = raw.trim();
+                    String jsonStr = trimmed;
+                    if (trimmed.startsWith("data: ")) {
+                        jsonStr = trimmed.substring(6).trim();
+                        int nl = jsonStr.indexOf('\n');
+                        if (nl >= 0) {
+                            jsonStr = jsonStr.substring(0, nl).trim();
                         }
                     }
+                    try {
+                        JSONParser jsonParser = new JSONParser();
+                        JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
 
-                    if (accumulated.length() > 0) {
-                        String result = accumulated.toString().trim();
-                        logger.info("AI {} 생성 완료: {}", purpose, result);
-                        return result;
+                        Object errCodeObj = data.get("errorCode");
+                        if (errCodeObj != null) {
+                            String errorCode = String.valueOf(errCodeObj).trim();
+                            if (!errorCode.isEmpty() && !"None".equalsIgnoreCase(errorCode)) {
+                                Object errContentObj = data.get("errorContent");
+                                String errorContent = errContentObj != null ? String.valueOf(errContentObj) : "";
+                                logger.warn("AI {} API 오류 응답: {} - {}", purpose, errorCode, errorContent);
+                                return null;
+                            }
+                        }
+
+                        String answer = (String) data.get("answer");
+                        if (CommonUtil.isNotEmpty(answer)) {
+                            String result = answer.trim();
+                            logger.info("AI {} 생성 완료", purpose);
+                            return result;
+                        }
+                    } catch (Exception e) {
+                        logger.warn("AI {} 응답 파싱 오류: {}", purpose, e.getMessage());
                     }
                 }
             }
@@ -959,6 +957,134 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         return null;
+    }
+
+    /**
+     * AI 이미지 API를 호출해 지식 카드 썸네일용 base64 이미지 문자열을 반환한다.
+     * 실패 시 null.
+     */
+    private String generateSummaryThumbImg(String qContent, String rContent) {
+        if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
+            return null;
+        }
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("다음 대화를 요약한 지식 카드에 어울리는 썸네일 이미지를 만들어줘. 텍스트는 포함하지말고 이미지만 생성해주고 썸네일 이미지답게 단순한 이미지로 생성해줘. 이미지 크기는 270px x 80px 정도로 맞춰줘.");
+        if (CommonUtil.isNotEmpty(qContent)) {
+            prompt.append("질문: ").append(truncateTitle(qContent, 200)).append(' ');
+        }
+        if (CommonUtil.isNotEmpty(rContent)) {
+            prompt.append("답변: ").append(truncateTitle(rContent, 500));
+        }
+
+        return callAiImageApi(prompt.toString());
+    }
+
+    /**
+     * Globals.chatbot.image.apiUrl 동기 호출. 응답 JSON의 image 필드(base64)를 반환한다.
+     * data:image/...;base64, 접두사가 있으면 제거한 순수 base64만 저장한다.
+     */
+    private String callAiImageApi(String query) {
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.image.apiUrl");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            logger.warn("썸네일 이미지 생성 실패 - image API URL 미설정");
+            return null;
+        }
+        if (CommonUtil.isEmpty(query)) {
+            return null;
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", query);
+        params.put("room_id", "");
+
+        try {
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build();
+
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            String jsonBody = gson.toJson(params);
+            RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .build();
+
+            logger.info("AI 썸네일 이미지 호출 시작 - url: {}", apiUrl);
+
+            try (okhttp3.Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("AI 썸네일 이미지 응답 오류: {}", response.code());
+                    return null;
+                }
+
+                try (okhttp3.ResponseBody responseBody = response.body()) {
+                    String raw = responseBody.string();
+                    if (CommonUtil.isEmpty(raw)) {
+                        return null;
+                    }
+                    String trimmed = raw.trim();
+                    String jsonStr = trimmed;
+                    if (trimmed.startsWith("data: ")) {
+                        jsonStr = trimmed.substring(6).trim();
+                        int nl = jsonStr.indexOf('\n');
+                        if (nl >= 0) {
+                            jsonStr = jsonStr.substring(0, nl).trim();
+                        }
+                    }
+                    try {
+                        JSONParser jsonParser = new JSONParser();
+                        JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
+
+                        Object errCodeObj = data.get("errorCode");
+                        if (errCodeObj != null) {
+                            String errorCode = String.valueOf(errCodeObj).trim();
+                            if (!errorCode.isEmpty() && !"None".equalsIgnoreCase(errorCode)) {
+                                Object errContentObj = data.get("errorContent");
+                                String errorContent = errContentObj != null ? String.valueOf(errContentObj) : "";
+                                logger.warn("AI 썸네일 이미지 API 오류: {} - {}", errorCode, errorContent);
+                                return null;
+                            }
+                        }
+
+                        Object imageObj = data.get("image");
+                        if (imageObj == null) {
+                            return null;
+                        }
+                        String image = String.valueOf(imageObj).trim();
+                        if (CommonUtil.isEmpty(image)) {
+                            return null;
+                        }
+                        String normalized = stripDataUrlBase64Prefix(image);
+                        return normalized;
+                    } catch (Exception e) {
+                        logger.warn("AI 썸네일 이미지 응답 파싱 오류: {}", e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("AI 썸네일 이미지 호출 중 오류: {}", e.getMessage());
+        }
+
+        return null;
+    }
+
+    /** data:image/png;base64, 접두사 제거 후 순수 base64만 반환 */
+    private static String stripDataUrlBase64Prefix(String image) {
+        if (image == null) {
+            return null;
+        }
+        String s = image.trim();
+        int comma = s.indexOf("base64,");
+        if (comma >= 0) {
+            return s.substring(comma + "base64,".length()).trim();
+        }
+        return s;
     }
 
     /**

@@ -30,6 +30,7 @@ public class LibraryVO {
     private String archiveDt;
     private String sqlCode;
     private String newYn;
+    private String thumbImg;
     private String useYn;
     private String modifyDt;
     private String searchTitle;
