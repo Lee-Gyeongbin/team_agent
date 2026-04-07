@@ -1,6 +1,9 @@
 package kr.teamagent.library.service.impl;
 
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
+import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.library.service.LibraryVO;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
@@ -309,14 +313,36 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         }
         List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
 
-        String prompt = "다음 내용을 보고서 형식으로 정리해 주세요. "
-                + "질문: " + (cardContent.getQContent() == null ? "" : cardContent.getQContent())
-                + " 답변: " + (cardContent.getRContent() == null ? "" : cardContent.getRContent())
-                + "\n반드시 JSON 형식으로만 응답하세요. JSON 외 다른 텍스트, 마크다운, 코드블록은 절대 포함하지 마세요. 모든 value는 완전한 HTML 문자열이어야 합니다. 모든 태그는 반드시 열고 닫을 것(<p>...</p>, <li>...</li>). 허용 태그: h3, p, ul, ol, li, strong만 사용. 응답 전 태그가 모두 정상적으로 닫혔는지 검증 후 출력할 것."
-                + "\n예시 출력 형식:\n{\"title_label\":\"제목\",\"title\":\"채용절차 프로세스 보고서\",\"overview_label\":\"개요\",\"overview\":\"<p>...</p>\", ...}\n"
-                + "\n출력 형식은 반드시 위와 같이 출력하세요.";
+        List<String> multilineJsonKeys = new ArrayList<>();
+        if (tmplFieldList != null) {
+            for (LibraryVO.TmplFieldItem fieldItem : tmplFieldList) {
+                if (fieldItem == null || CommonUtil.isEmpty(fieldItem.getJsonKey())) {
+                    continue;
+                }
+                if ("Y".equals(fieldItem.getMultilineYn())) {
+                    multilineJsonKeys.add(fieldItem.getJsonKey());
+                }
+            }
+        }
 
-        StringBuilder promptBuilder = new StringBuilder(prompt);
+        UserVO userVO = SessionUtil.getUserVO();
+        String userNm = userVO != null ? CommonUtil.nullToBlank(userVO.getUserNm()) : "";
+        String today = new SimpleDateFormat("yyyy-MM-dd").format(new Date());
+
+        StringBuilder promptBuilder = new StringBuilder();
+        promptBuilder.append("다음 내용을 보고서 형식으로 정리해 주세요. ")
+                .append("\n질문: ").append(cardContent.getQContent() == null ? "" : cardContent.getQContent())
+                .append("\n답변: ").append(cardContent.getRContent() == null ? "" : cardContent.getRContent())
+                .append("\n반드시 JSON 형식으로만 응답하세요. JSON 외 다른 텍스트, 마크다운, 코드블록은 절대 포함하지 마세요.");
+        if (!multilineJsonKeys.isEmpty()) {
+            promptBuilder.append(" key가 다음인 필드의 value는 완전한 HTML 문자열이어야 합니다: ")
+                    .append(String.join(", ", multilineJsonKeys))
+                    .append(". 모든 태그는 반드시 열고 닫을 것(<p>...</p>, <li>...</li>). 허용 태그: h3, p, ul, ol, li, strong만 사용. 응답 전 해당 필드의 태그가 모두 정상적으로 닫혔는지 검증 후 출력할 것.");
+        }
+        promptBuilder.append("\n예시 출력 형식:\n{\"title_label\":\"제목\",\"title\":\"채용절차 프로세스 보고서\",\"overview_label\":\"개요\",\"overview\":\"<p>...</p>\", ...}\n")
+                .append("\n출력 형식은 반드시 위와 같이 출력하세요.")
+                .append("\nkey가 date 필드의 값은 오늘 날짜로 ").append(today).append("이어야 합니다.")
+                .append("\nkey가 author 필드의 값은 ").append(userNm).append("이어야 합니다.");
         if (tmplFieldList != null) {
             for (LibraryVO.TmplFieldItem fieldItem : tmplFieldList) {
                 if (fieldItem == null || CommonUtil.isEmpty(fieldItem.getJsonKey())) {
@@ -325,13 +351,12 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                 String jsonKey = fieldItem.getJsonKey();
                 String fieldNm = CommonUtil.isEmpty(fieldItem.getFieldNm()) ? jsonKey : fieldItem.getFieldNm();
 
-                promptBuilder.append("key : ").append(jsonKey).append("_label (").append(jsonKey).append("의 라벨명)");
+                promptBuilder.append("\nkey : ").append(jsonKey).append("_label (").append(jsonKey).append("의 라벨명)");
                 promptBuilder.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm).append(")");
             }
         }
 
-        prompt = promptBuilder.toString();
-
+        String prompt = promptBuilder.toString();
 
         logger.info("prompt: {}", prompt);
         String res = chatbotService.callAiSummary(prompt, "createDoc");

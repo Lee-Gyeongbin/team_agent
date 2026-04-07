@@ -63,16 +63,20 @@ public class SessionUtil {
 
 	/**
 	 * 로그인 유저VO
+	 * <p>Spring Security principal이 {@link UserVO}인 경우(폼 로그인 등)에는 SecurityContext에서 조회하고,
+	 * REST 로그인({@code ApiLoginController})처럼 세션에만 {@code loginVO}를 두는 경우에는 세션에서 조회한다.</p>
 	 * @return	UserVO
-	 * @throws Exception
 	 */
 	public static UserVO getUserVO() {
 		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-		if(authentication.getPrincipal() instanceof UserVO) {
-			return (UserVO)SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-		} else {
-			return null;
+		if (authentication != null && authentication.getPrincipal() instanceof UserVO) {
+			return (UserVO) authentication.getPrincipal();
 		}
+		Object loginVO = getAttribute("loginVO");
+		if (loginVO instanceof UserVO) {
+			return (UserVO) loginVO;
+		}
+		return null;
 	}
 
 	/**

@@ -149,6 +149,7 @@ public class LibraryVO {
     public static class TmplFieldItem {
         private String jsonKey;
         private String fieldNm;
+        private String multilineYn;
     }
 
 }
