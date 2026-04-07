@@ -31,6 +31,7 @@ import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.ResponseHeaderOverrides;
 import com.amazonaws.services.s3.model.S3Object;
 
+import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.service.FileVO;
 
@@ -57,9 +58,9 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         String key = "";
         Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
 
-        if(!req.getStoreFileName().isEmpty() || !req.getStoreFilePath().isEmpty()) {
+        if (CommonUtil.isNotEmpty(req.getStoreFilePath()) || CommonUtil.isNotEmpty(req.getStoreFileName())) {
             key = req.getStoreFilePath();
-        }else {
+        } else {
             key = req.getCategoryId() + "/" + req.getFileName();
         }
 
