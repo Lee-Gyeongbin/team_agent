@@ -207,6 +207,21 @@
             	WHEN A.TTSQ IS NOT NULL AND A.TABLE_DATA IS NOT NULL THEN 'Y'
             	ELSE 'N'
             	END AS TABLE_EXIST
+            , IFNULL((
+                SELECT JSON_ARRAYAGG(agg.jobj)
+                FROM (
+                    SELECT JSON_OBJECT(
+                        'chatFileId', CAST(F.CHAT_FILE_ID AS CHAR),
+                        'fileName', IFNULL(F.FILE_NAME, ''),
+                        'filePath', IFNULL(F.FILE_PATH, ''),
+                        'mimeType', ''
+                    ) AS jobj
+                    FROM TB_CHAT_FILE F
+                    WHERE F.LOG_ID = A.LOG_ID
+                      AND IFNULL(F.FILE_EXIST_YN, 'Y') = 'Y'
+                    ORDER BY F.CHAT_FILE_ID
+                ) AS agg
+            ), JSON_ARRAY()) AS chatAttachmentList
         FROM
             TB_CHAT_LOG A
         WHERE 1=1
@@ -467,4 +482,17 @@
             #{userId}
         )
     </insert>
+
+    <select id="selectChatFileOwnedByUser" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 채팅 첨부 단건 조회 (대화방 소유자 검증) ai.chatbot.selectChatFileOwnedByUser */
+        SELECT
+            F.CHAT_FILE_ID AS chatFileId,
+            F.FILE_PATH AS filePath,
+            F.FILE_NAME AS fileName,
+            F.FILE_TYPE AS fileType
+        FROM TB_CHAT_FILE F
+        INNER JOIN TB_CHAT_ROOM R ON F.ROOM_ID = R.ROOM_ID
+        WHERE F.CHAT_FILE_ID = #{chatFileId}
+          AND R.CREATE_USER_ID = #{userId}
+    </select>
 </mapper>

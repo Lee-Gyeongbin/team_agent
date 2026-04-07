@@ -22,6 +22,8 @@ import org.springframework.web.socket.WebSocketSession;
 
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.socket.ChatbotWebSocketHandler;
+import kr.teamagent.common.system.service.impl.FileServiceImpl;
+import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
@@ -47,6 +49,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     KeyGenerate keyGenerate;
+
+    @Autowired
+    FileServiceImpl fileService;
 
     /**
      * 모델 목록 조회
@@ -1206,6 +1211,27 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         return resultMap;
+    }
+
+    /**
+     * 채팅 첨부 미리보기 (본인 대화방 파일만, FileService 스토리지 뷰와 동일 규칙)
+     */
+    public Map<String, Object> viewChatFile(ChatbotVO searchVO) throws Exception {
+        searchVO.setUserId(SessionUtil.getUserId());
+        ChatbotVO row = chatbotDAO.selectChatFileOwnedByUser(searchVO);
+        if (row == null || row.getFilePath() == null || row.getFilePath().trim().isEmpty()) {
+            Map<String, Object> notFound = new HashMap<>();
+            notFound.put("viewType", "DOWNLOAD");
+            notFound.put("reason", "FILE_NOT_FOUND");
+            notFound.put("fileName", "");
+            notFound.put("downloadUrl", "");
+            return notFound;
+        }
+        FileVO fileVo = new FileVO();
+        fileVo.setFilePath(row.getFilePath());
+        fileVo.setFileName(row.getFileName());
+        fileVo.setFileType(row.getFileType());
+        return fileService.createViewPresignedUrlForStorageObject(fileVo);
     }
 
     /**
