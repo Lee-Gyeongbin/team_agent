@@ -1,7 +1,9 @@
 package kr.teamagent.library.service.impl;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -9,6 +11,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
 import kr.teamagent.library.service.LibraryVO;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
@@ -24,6 +28,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     KeyGenerate keyGenerate;
+
+    @Autowired
+    ChatbotServiceImpl chatbotService;
 
     /**
      * 카테고리 목록 조회 (세션 userId 자동 설정)
@@ -280,6 +287,67 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      */
     public List<LibraryVO.ChartDetailCdItem> selectChartDetailCdList(LibraryVO searchVO) throws Exception {
         return libraryDAO.selectChartDetailCdList(searchVO);
+    }
+
+    /**
+     * AI 문서 생성 (요청: cardId, tmplId)
+     * DAO·DB·외부 연동 등 이후 흐름은 미구현 — 응답 객체만 반환한다.
+     *
+     * @param requestVO cardId, tmplId 필수
+     * @return 생성 결과 DTO (현재는 빈 객체)
+     * @throws Exception
+     */
+    public Map<String, Object> createDoc(LibraryVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getCardId()) || CommonUtil.isEmpty(searchVO.getTmplId())) {
+            return resultMap;
+        }
+
+        LibraryVO cardContent = libraryDAO.selectCardChatContent(searchVO);
+        if (cardContent == null) {
+            return resultMap;
+        }
+        List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
+
+        String prompt = "다음 내용을 보고서 형식으로 정리해 주세요. "
+                + "질문: " + (cardContent.getQContent() == null ? "" : cardContent.getQContent())
+                + " 답변: " + (cardContent.getRContent() == null ? "" : cardContent.getRContent())
+                + "\n반드시 JSON 형식으로만 응답하세요. JSON 외 다른 텍스트, 마크다운, 코드블록은 절대 포함하지 마세요. 모든 value는 완전한 HTML 문자열이어야 합니다. 모든 태그는 반드시 열고 닫을 것(<p>...</p>, <li>...</li>). 허용 태그: h3, p, ul, ol, li, strong만 사용. 응답 전 태그가 모두 정상적으로 닫혔는지 검증 후 출력할 것."
+                + "\n예시 출력 형식:\n{\"title_label\":\"제목\",\"title\":\"채용절차 프로세스 보고서\",\"overview_label\":\"개요\",\"overview\":\"<p>...</p>\", ...}\n"
+                + "\n출력 형식은 반드시 위와 같이 출력하세요.";
+
+        StringBuilder promptBuilder = new StringBuilder(prompt);
+        if (tmplFieldList != null) {
+            for (LibraryVO.TmplFieldItem fieldItem : tmplFieldList) {
+                if (fieldItem == null || CommonUtil.isEmpty(fieldItem.getJsonKey())) {
+                    continue;
+                }
+                String jsonKey = fieldItem.getJsonKey();
+                String fieldNm = CommonUtil.isEmpty(fieldItem.getFieldNm()) ? jsonKey : fieldItem.getFieldNm();
+
+                promptBuilder.append("key : ").append(jsonKey).append("_label (").append(jsonKey).append("의 라벨명)");
+                promptBuilder.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm).append(")");
+            }
+        }
+
+        prompt = promptBuilder.toString();
+
+
+        logger.info("prompt: {}", prompt);
+        String res = chatbotService.callAiSummary(prompt, "createDoc");
+
+        if (CommonUtil.isEmpty(res)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "AI 문서 생성 실패");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+        
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "AI 문서 생성 성공");
+        resultMap.put("data", res);
+
+        return resultMap;
     }
 
 }

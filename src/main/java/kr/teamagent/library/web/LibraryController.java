@@ -258,4 +258,17 @@ public class LibraryController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * AI 문서 생성 API
+     * @param searchVO body: { cardId, tmplId }
+     * @return jsonView successYn, returnMsg, data: CreateDocItem (서비스 스텁, 이후 DAO 등 연동 예정)
+     * @throws Exception
+     */
+    @RequestMapping(value = "/createDoc.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView createDoc(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(libraryService.createDoc(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }
