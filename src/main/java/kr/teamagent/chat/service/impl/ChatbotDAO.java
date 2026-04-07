@@ -220,4 +220,11 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public int linkChatFilesToLog(ChatbotVO chatbotVO) throws Exception {
         return update("ai.chatbot.updateChatFileLogId", chatbotVO);
     }
+
+    /**
+     * 채팅 첨부 단건 조회 (대화방 소유자와 일치할 때만)
+     */
+    public ChatbotVO selectChatFileOwnedByUser(ChatbotVO searchVO) throws Exception {
+        return selectOne("ai.chatbot.selectChatFileOwnedByUser", searchVO);
+    }
 }

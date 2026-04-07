@@ -173,4 +173,7 @@ public class ChatbotVO extends CommonVO {
     private String fileType;
     private String expireDt;
     private String fileDelDt;
+
+    /** selectChatLogList: 질문(LOG)별 TB_CHAT_FILE JSON 배열 문자열 */
+    private String chatAttachmentList;
 }

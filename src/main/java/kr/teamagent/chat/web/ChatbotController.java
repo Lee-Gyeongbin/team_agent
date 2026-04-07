@@ -299,6 +299,34 @@ public class ChatbotController extends BaseController {
      * - NCP 업로드 + DB 저장은 성공했으나 ws 전송 실패로 LOG_ID가 연결되지 못한 파일을
      *   EXPIRE_DT를 현재 시각으로 갱신해 배치 삭제 대상으로 표시한다.
      */
+    /**
+     * 채팅 첨부 미리보기 (TB_CHAT_FILE + 대화방 소유자 검증 후 Presigned URL 등 반환)
+     */
+    @RequestMapping("/ai/chatbot/viewChatFile.do")
+    public @ResponseBody Map<String, Object> viewChatFile(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "INVALID");
+                return resultMap;
+            }
+            if (dataVO.getChatFileId() == null) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "MISSING_CHAT_FILE_ID");
+                return resultMap;
+            }
+            resultMap = chatbotService.viewChatFile(dataVO);
+        } catch (Exception e) {
+            log.error("viewChatFile failed", e);
+            resultMap.put("viewType", "DOWNLOAD");
+            resultMap.put("reason", "ERROR");
+        }
+
+        return resultMap;
+    }
+
     @RequestMapping("/ai/chatbot/markChatFileOrphan.do")
     public @ResponseBody Map<String, Object> markChatFileOrphan(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();

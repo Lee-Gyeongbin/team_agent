@@ -100,9 +100,33 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         if (doc == null || doc.getFilePath() == null || doc.getFilePath().trim().isEmpty()) {
             return createDownloadFallbackResponse(doc, "FILE_NOT_FOUND");
         }
+        return buildViewPresignedUrlForDoc(doc);
+    }
 
+    /**
+     * TB_DOC 없이 스토리지 키·파일명만으로 뷰 응답 생성 (채팅 첨부 TB_CHAT_FILE 등)
+     */
+    public Map<String, Object> createViewPresignedUrlForStorageObject(FileVO doc) throws Exception {
+        if (doc == null || doc.getFilePath() == null || doc.getFilePath().trim().isEmpty()) {
+            return createDownloadFallbackResponse(null, "FILE_NOT_FOUND");
+        }
+        return buildViewPresignedUrlForDoc(doc);
+    }
+
+    private Map<String, Object> buildViewPresignedUrlForDoc(FileVO doc) throws Exception {
         String key = doc.getFilePath();
         String ext = resolveFileExtension(doc);
+
+        if (isImageExtension(ext)) {
+            if (!doesStorageObjectExist(key)) {
+                return createDownloadFallbackResponse(doc, "STORAGE_OBJECT_MISSING");
+            }
+            Map<String, Object> imageResult = new HashMap<>();
+            imageResult.put("viewType", "IMAGE");
+            imageResult.put("url", createViewUrlByKey(key));
+            imageResult.put("fileName", doc.getFileName());
+            return imageResult;
+        }
 
         if ("txt".equals(ext)) {
             if (!doesStorageObjectExist(key)) {
@@ -133,6 +157,17 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         }
 
         return createDownloadFallbackResponse(doc, "UNSUPPORTED_VIEW_TYPE");
+    }
+
+    private boolean isImageExtension(String ext) {
+        if (ext == null) {
+            return false;
+        }
+        return "png".equals(ext)
+                || "jpg".equals(ext)
+                || "jpeg".equals(ext)
+                || "webp".equals(ext)
+                || "gif".equals(ext);
     }
 
     private Map<String, Object> createPdfViewResponse(FileVO doc, String key) {
