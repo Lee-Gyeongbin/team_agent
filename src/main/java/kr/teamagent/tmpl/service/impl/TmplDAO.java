@@ -32,4 +32,34 @@ public class TmplDAO extends EgovComAbstractDAO {
         return selectList("tmpl.selectTmplFieldListForTypeT");
     }
 
+    /**
+     * 템플릿 저장 (PK 기준 upsert)
+     * @param tmplVO
+     * @throws Exception
+     */
+    public void upsertTmpl(TmplVO tmplVO) throws Exception {
+        insert("tmpl.upsertTmpl", tmplVO);
+    }
+
+    /**
+     * 템플릿 필드 전체 삭제 (tmplId 기준)
+     * @param tmplId
+     * @throws Exception
+     */
+    public void deleteTmplFieldByTmplId(String tmplId) throws Exception {
+        delete("tmpl.deleteTmplFieldByTmplId", tmplId);
+    }
+
+    /**
+     * 템플릿 필드 목록 등록
+     * @param fieldList
+     * @throws Exception
+     */
+    public void insertTmplFieldList(List<TmplFieldVO> fieldList) throws Exception {
+        if (fieldList == null || fieldList.isEmpty()) {
+            return;
+        }
+        insert("tmpl.insertTmplFieldList", fieldList);
+    }
+
 }

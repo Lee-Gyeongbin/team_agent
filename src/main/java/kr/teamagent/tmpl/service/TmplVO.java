@@ -25,6 +25,12 @@ public class TmplVO {
     private String modifyDt;
     private List<TmplFieldVO> fields;
 
+    /** 템플릿 저장 요청 폼 (TB_TMPL + TB_TMPL_FIELD) */
+    @Getter
+    @Setter
+    public static class SaveFormVO extends TmplVO {
+    }
+
     /** TB_TMPL_FIELD */
     @Getter
     @Setter

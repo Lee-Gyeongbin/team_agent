@@ -41,4 +41,78 @@
         ORDER BY A.TMPL_ID, A.SORT_ORD
     </select>
 
+    <insert id="upsertTmpl" parameterType="tmplVO">
+        /* 템플릿 저장 (upsert) tmpl.upsertTmpl */
+        INSERT INTO TB_TMPL (
+              TMPL_ID
+            , TMPL_NM
+            , TMPL_TYPE
+            , DESCRIPTION
+            , LLM_PROMPT_SMRY
+            , LLM_PROMPT
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+              #{tmplId}
+            , #{tmplNm, jdbcType=VARCHAR}
+            , #{tmplType, jdbcType=VARCHAR}
+            , #{description, jdbcType=VARCHAR}
+            , #{llmPromptSmry, jdbcType=VARCHAR}
+            , #{llmPrompt, jdbcType=VARCHAR}
+            , #{useYn, jdbcType=VARCHAR}
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+              TMPL_NM = VALUES(TMPL_NM)
+            , TMPL_TYPE = VALUES(TMPL_TYPE)
+            , DESCRIPTION = VALUES(DESCRIPTION)
+            , LLM_PROMPT_SMRY = VALUES(LLM_PROMPT_SMRY)
+            , LLM_PROMPT = VALUES(LLM_PROMPT)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
+
+    <delete id="deleteTmplFieldByTmplId" parameterType="String">
+        /* 템플릿 필드 전체 삭제 tmpl.deleteTmplFieldByTmplId */
+        DELETE FROM TB_TMPL_FIELD
+        WHERE TMPL_ID = #{value}
+    </delete>
+
+    <insert id="insertTmplFieldList" parameterType="java.util.List">
+        /* 템플릿 필드 목록 등록 tmpl.insertTmplFieldList */
+        INSERT INTO TB_TMPL_FIELD (
+              FIELD_ID
+            , TMPL_ID
+            , JSON_KEY
+            , FIELD_NM
+            , MULTILINE_YN
+            , SORT_ORD
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES
+        <foreach collection="list" item="f" separator=",">
+            (
+                  #{f.fieldId}
+                , #{f.tmplId}
+                , #{f.jsonKey, jdbcType=VARCHAR}
+                , #{f.fieldNm, jdbcType=VARCHAR}
+                , #{f.multilineYn, jdbcType=VARCHAR}
+                , #{f.sortOrd, jdbcType=INTEGER}
+                , #{f.useYn, jdbcType=VARCHAR}
+                , NOW()
+                , NOW()
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+              JSON_KEY = VALUES(JSON_KEY)
+            , FIELD_NM = VALUES(FIELD_NM)
+            , MULTILINE_YN = VALUES(MULTILINE_YN)
+            , SORT_ORD = VALUES(SORT_ORD)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
+
 </mapper>

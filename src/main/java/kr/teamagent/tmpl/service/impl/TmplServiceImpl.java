@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import kr.teamagent.tmpl.service.TmplVO;
 import kr.teamagent.tmpl.service.TmplVO.TmplFieldVO;
+import kr.teamagent.tmpl.service.TmplVO.SaveFormVO;
 
 /**
  * 템플릿 도메인 서비스 구현 (비즈니스 로직은 필요 시 추가)
@@ -46,6 +47,34 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
             }
         }
         return list;
+    }
+
+    /**
+     * 템플릿 저장 (TB_TMPL upsert + TB_TMPL_FIELD 전량 재등록)
+     * @param formVO
+     * @return 저장된 템플릿 정보 (요청값 기준)
+     * @throws Exception
+     */
+    public TmplVO saveTmpl(SaveFormVO formVO) throws Exception {
+        if (formVO == null || formVO.getTmplId() == null || formVO.getTmplId().trim().isEmpty()) {
+            throw new IllegalArgumentException("tmplId is required");
+        }
+
+        tmplDAO.upsertTmpl(formVO);
+
+        tmplDAO.deleteTmplFieldByTmplId(formVO.getTmplId());
+        if (formVO.getFields() != null && !formVO.getFields().isEmpty()) {
+            for (TmplFieldVO f : formVO.getFields()) {
+                if (f == null) {
+                    continue;
+                }
+                if (f.getTmplId() == null || f.getTmplId().trim().isEmpty()) {
+                    f.setTmplId(formVO.getTmplId());
+                }
+            }
+            tmplDAO.insertTmplFieldList(formVO.getFields());
+        }
+        return formVO;
     }
 
 }
