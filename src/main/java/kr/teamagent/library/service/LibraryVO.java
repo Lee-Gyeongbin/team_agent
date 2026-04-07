@@ -152,4 +152,11 @@ public class LibraryVO {
         private String multilineYn;
     }
 
+    @Getter
+    @Setter
+    public static class TmplItem {
+        private String tmplType;
+        private String llmPrompt;
+    }
+
 }
