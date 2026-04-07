@@ -219,9 +219,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("dataset_id", refId != null ? refId : "");
         params.put("room_id", threadId != null ? threadId : "string");
         params.put("model_id", modelId != null ? modelId : "");
-        if(CommonUtil.isNotEmpty(attachmentFileIds) && !attachmentFileIds.isEmpty()){
-            params.put("attachment_file_ids", attachmentFileIds);
-        }
+        params.put("attachment_file_ids", attachmentFileIds);
         
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setUserId(userId);
