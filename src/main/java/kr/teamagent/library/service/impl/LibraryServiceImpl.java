@@ -392,7 +392,40 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("data", res);
 
         }else{
-            // TODO : 자유형식
+
+            // STEP1 : DB에서 가져온 LLM_PROMPT 템플릿 조회
+            String promptTemplate = CommonUtil.nullToBlank(tmpl.getLlmPrompt());
+
+            if (CommonUtil.isEmpty(promptTemplate)) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "프롬프트 템플릿이 없습니다.");
+                resultMap.put("data", null);
+                return resultMap;
+            }
+
+            // STEP2 : 플레이스홀더 치환 (필드 관련 변수는 사용하지 않으므로 공백 처리)
+            String qContent = cardContent.getQContent() == null ? "" : cardContent.getQContent();
+            String rContent = cardContent.getRContent() == null ? "" : cardContent.getRContent();
+            String prompt = promptTemplate
+                    .replace("{{Q_CONTENT}}", qContent)
+                    .replace("{{R_CONTENT}}", rContent)
+                    .replace("{{TODAY}}", today)
+                    .replace("{{USER_NM}}", userNm);
+
+            // STEP3 : AI 호출
+            logger.info("prompt: {}", prompt);
+            String res = chatbotService.callAiSummary(prompt, "createDoc");
+
+            if (CommonUtil.isEmpty(res)) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "AI 문서 생성 실패");
+                resultMap.put("data", null);
+                return resultMap;
+            }
+
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "AI 문서 생성 성공");
+            resultMap.put("data", res);
         }
 
         return resultMap;

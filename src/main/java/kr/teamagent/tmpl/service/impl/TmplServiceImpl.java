@@ -9,6 +9,7 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
 import kr.teamagent.tmpl.service.TmplVO;
 import kr.teamagent.tmpl.service.TmplVO.TmplFieldVO;
 import kr.teamagent.tmpl.service.TmplVO.SaveFormVO;
@@ -21,6 +22,9 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private TmplDAO tmplDAO;
+
+    @Autowired
+    private ChatbotServiceImpl chatbotService;
 
     /**
      * 사용자 문서 템플릿 목록 조회
@@ -60,6 +64,18 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
             throw new IllegalArgumentException("tmplId is required");
         }
 
+        String llmPrompt = formVO.getLlmPrompt();
+        if (llmPrompt != null && !llmPrompt.trim().isEmpty()) {
+            String prompt = ""
+                    + "다음 LLM 프롬프트를 200자 이내로 한 줄 요약해줘. 요약만 출력해.\n"
+                    + "LLM 프롬프트:\n"
+                    + truncate(llmPrompt.trim(), 4000);
+            String smry = chatbotService.callAiSummary(prompt, "tmplPromptSmry");
+            if (smry != null && !smry.trim().isEmpty()) {
+                formVO.setLlmPromptSmry(truncate(smry.trim(), 500));
+            }
+        }
+
         tmplDAO.upsertTmpl(formVO);
 
         tmplDAO.deleteTmplFieldByTmplId(formVO.getTmplId());
@@ -75,6 +91,19 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
             tmplDAO.insertTmplFieldList(formVO.getFields());
         }
         return formVO;
+    }
+
+    private String truncate(String s, int maxLen) {
+        if (s == null) {
+            return null;
+        }
+        if (maxLen < 0) {
+            return s;
+        }
+        if (s.length() <= maxLen) {
+            return s;
+        }
+        return s.substring(0, maxLen);
     }
 
 }
