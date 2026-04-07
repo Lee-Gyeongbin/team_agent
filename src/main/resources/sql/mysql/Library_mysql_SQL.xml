@@ -9,6 +9,7 @@
     <resultMap id="chartStatItemResult" type="kr.teamagent.library.service.LibraryVO$ChartStatItem" autoMapping="true"/>
     <resultMap id="chartDetailCdItemResult" type="kr.teamagent.library.service.LibraryVO$ChartDetailCdItem" autoMapping="true"/>
     <resultMap id="tmplFieldItemResult" type="kr.teamagent.library.service.LibraryVO$TmplFieldItem" autoMapping="true"/>
+    <resultMap id="tmplItemResult" type="kr.teamagent.library.service.LibraryVO$TmplItem" autoMapping="true"/>
 
     <select id="selectCategoryList" resultType="libraryVO">
         /* 카테고리 목록 조회 library.selectCategoryList */
@@ -388,6 +389,16 @@
            ON A.LOG_ID = B.LOG_ID
         WHERE 1=1
             AND B.CARD_ID = #{cardId}
+    </select>
+
+    <select id="selectTmpl" parameterType="libraryVO" resultMap="tmplItemResult">
+        /* 템플릿 정보 조회 library.selectTmpl */
+        SELECT
+            A.TMPL_TYPE
+            , A.LLM_PROMPT
+        FROM TB_TMPL A
+        WHERE 1=1
+            AND A.TMPL_ID = #{tmplId}
     </select>
 
     <select id="selectTmplFieldList" parameterType="libraryVO" resultMap="tmplFieldItemResult">

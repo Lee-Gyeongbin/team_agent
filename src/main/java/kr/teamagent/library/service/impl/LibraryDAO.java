@@ -201,6 +201,16 @@ public class LibraryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 템플릿 정보 조회 (TMPL_ID 기준)
+     * @param searchVO tmplId 필수
+     * @return
+     * @throws Exception
+     */
+    public LibraryVO.TmplItem selectTmpl(LibraryVO searchVO) throws Exception {
+        return (LibraryVO.TmplItem) selectOne("library.selectTmpl", searchVO);
+    }
+
+    /**
      * 템플릿 필드 목록 조회 (TMPL_ID 기준)
      * @param searchVO tmplId 필수
      * @return
