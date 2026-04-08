@@ -413,4 +413,50 @@
         ORDER BY A.SORT_ORD
     </select>
 
+    <select id="selectLastReportChatLog" parameterType="libraryVO" resultType="libraryVO">
+        /* 동일 방의 최신 리포트 채팅 로그 library.selectLastReportChatLog */
+        SELECT
+            REPORT_DATA AS reportData
+            , IDX_NO AS idxNo
+        FROM TB_REPORT_CHAT_LOG
+        WHERE ROOM_ID = #{roomId}
+        ORDER BY IDX_NO DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertReportChatRoom" parameterType="libraryVO"
+        useGeneratedKeys="true" keyProperty="roomId" keyColumn="ROOM_ID">
+        /* 리포트 채팅방 생성 library.insertReportChatRoom */
+        INSERT INTO TB_REPORT_CHAT_ROOM (
+            CREATE_USER_ID
+            , CREATE_DT
+            , UPDATE_DT
+        ) VALUES (
+            #{userId}
+            , NOW()
+            , NOW()
+        )
+    </insert>
+
+    <insert id="insertReportChatLog" parameterType="libraryVO">
+        /* 리포트 채팅 로그 등록 library.insertReportChatLog */
+        INSERT INTO TB_REPORT_CHAT_LOG (
+            ROOM_ID
+            , IDX_NO
+            , REPORT_DATA
+            , ASK_QUERY
+            , CREATE_USER_ID
+            , CREATE_DT
+            , UPDATE_DT
+        ) VALUES (
+            #{roomId}
+            , #{idxNo, jdbcType=INTEGER}
+            , #{reportData}
+            , #{askQuery, jdbcType=VARCHAR}
+            , #{userId}
+            , NOW()
+            , NOW()
+        )
+    </insert>
+
 </mapper>

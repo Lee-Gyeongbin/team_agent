@@ -144,6 +144,21 @@ public class LibraryVO {
     /** AI 문서 생성 API 요청 */
     private String tmplId;
 
+    /** 리포트 채팅방 ID */
+    private String roomId;
+
+    /** TB_REPORT_CHAT_LOG.REPORT_DATA */
+    private String reportData;
+
+    /** reAskReport API 요청: 화면에서 전달된 이전 보고서 JSON (객체/문자열 모두 허용) */
+    private Object generatedReport;
+
+    /** TB_REPORT_CHAT_LOG.ASK_QUERY */
+    private String askQuery;
+
+    /** TB_REPORT_CHAT_LOG.IDX_NO */
+    private Integer idxNo;
+
     @Getter
     @Setter
     public static class TmplFieldItem {
