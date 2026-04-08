@@ -64,8 +64,12 @@ public class RepositoryVO {
     private String useYn;
     /** 생성 일시 */
     private String createDt;
+    /** 등록자 ID */
+    private String createUserId;
     /** 수정 일시 */
     private String modifyDt;
+    /** 수정자 ID */
+    private String modifyUserId;
     /** 데이터셋 문서 개수 */
     private String dsDocCnt;
 

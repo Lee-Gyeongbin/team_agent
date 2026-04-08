@@ -20,6 +20,8 @@ import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
+import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.repository.service.RepositoryVO;
 import kr.teamagent.repository.service.RepositoryVO.RepositoryFileItem;
 import okhttp3.MediaType;
@@ -143,6 +145,9 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> resultMap = new HashMap<>();
 
         try {
+            UserVO loginUser = SessionUtil.getUserVO();
+            String loginUserId = loginUser != null ? loginUser.getUserId() : null;
+
             boolean isUpdate = StringUtils.isNotBlank(searchVO.getDocId());
             List<RepositoryFileItem> fileList = searchVO.getFile();
             List<String> deleteFileIds = searchVO.getDeleteFileIds();
@@ -151,6 +156,7 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             if (!isUpdate) {
                 searchVO.setDocId(keyGenerate.generateTableKey("DC", "TB_DOC", "DOC_ID"));
                 searchVO.setUseYn("Y");
+                searchVO.setCreateUserId(loginUserId);
                 int result = repositoryDAO.saveDocument(searchVO);
                 if (result <= 0) {
                     resultMap.put("successYn", false);
@@ -159,6 +165,7 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                 }
             } else {
                 searchVO.setUseYn("Y");
+                searchVO.setModifyUserId(loginUserId);
                 int result = repositoryDAO.updateDocument(searchVO);
                 if (result <= 0) {
                     resultMap.put("successYn", false);
