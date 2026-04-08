@@ -273,7 +273,7 @@ public class LibraryController extends BaseController {
 
     /**
      * 보고서 보완 요청 API (이전 REPORT_DATA + 사용자 askQuery로 AI 재호출)
-     * @param searchVO body: { roomId, askQuery }
+     * @param searchVO body: { roomId, askQuery, generatedReport }
      * @return jsonView successYn, returnMsg, data
      * @throws Exception
      */

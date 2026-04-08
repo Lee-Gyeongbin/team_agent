@@ -150,6 +150,9 @@ public class LibraryVO {
     /** TB_REPORT_CHAT_LOG.REPORT_DATA */
     private String reportData;
 
+    /** reAskReport API 요청: 화면에서 전달된 이전 보고서 JSON (객체/문자열 모두 허용) */
+    private Object generatedReport;
+
     /** TB_REPORT_CHAT_LOG.ASK_QUERY */
     private String askQuery;
 
