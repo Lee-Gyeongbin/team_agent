@@ -276,6 +276,11 @@
 			<artifactId>commons-lang3</artifactId>
 			<version>3.14.0</version>
 		</dependency>
+		<dependency>
+			<groupId>org.passay</groupId>
+			<artifactId>passay</artifactId>
+			<version>1.6.6</version>
+		</dependency>
 
 		<!-- AWS S3 (Presigned URL 등) -->
 		<dependency>

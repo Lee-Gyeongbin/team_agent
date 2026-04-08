@@ -20,6 +20,8 @@ public class MyPageVO extends CommonVO {
     private String loginFailCnt;
     private String acctStatusCd;
     private String acctStatusDesc;
+    private String profileImgNm;
+    private String profileImgPath;
 
     /** 로그인 이력 조회 조건·결과 행 */
     @Getter

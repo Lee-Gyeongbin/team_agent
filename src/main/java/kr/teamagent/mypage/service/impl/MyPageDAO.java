@@ -29,4 +29,12 @@ public class MyPageDAO extends EgovComAbstractDAO {
     public List<MyPageVO.LoginHistoryVO> selectUserLoginHistory(MyPageVO.LoginHistoryVO searchVO) throws Exception {
         return selectList("mypage.selectUserLoginHistory", searchVO);
     }
+
+    public MyPageVO selectUserProfileImg(MyPageVO myPageVO) throws Exception {
+        return selectOne("mypage.selectUserProfileImg", myPageVO);
+    }
+
+    public int updateUserProfileImg(MyPageVO myPageVO) throws Exception {
+        return update("mypage.updateUserProfileImg", myPageVO);
+    }
 }

@@ -6,7 +6,6 @@ import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
-import org.springframework.security.crypto.password.StandardPasswordEncoder;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -25,9 +24,6 @@ public class MyPageController extends BaseController<Object> {
 
     @Autowired
     private MyPageServiceImpl myPageService;
-
-    @SuppressWarnings("deprecation")
-    private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
 
     /** 세션 기준 userId 적용 성공 */
     private static final int MYPAGE_AUTH_OK = 0;
@@ -82,36 +78,14 @@ public class MyPageController extends BaseController<Object> {
     @RequestMapping(value = "/changePassword.do", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> updateMyPagePassword(@RequestBody MyPageVO.PasswordChangeVO passwordChangeVO) {
-        Map<String, Object> resultMap = new HashMap<>();
         try {
-            String currentPasswd = passwordChangeVO.getOldPassword();
-            String newPasswd = passwordChangeVO.getNewPassword();
-
-            String loginUserId = SessionUtil.getUserId();
-            passwordChangeVO.setUserId(loginUserId);
-
-            String encodedPassword = myPageService.selectUserPassword(passwordChangeVO);
-            if (encodedPassword == null || !passwordEncoder.matches(currentPasswd, encodedPassword)) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "현재 비밀번호가 일치하지 않습니다.");
-                return resultMap;
-            }
-
-            passwordChangeVO.setPasswd(passwordEncoder.encode(newPasswd));
-
-            int updatedRows = myPageService.updateMyPagePassword(passwordChangeVO);
-
-            resultMap.put("successYn", updatedRows > 0);
-            if (updatedRows > 0) {
-                resultMap.put("data", updatedRows);
-            } else {
-                resultMap.put("returnMsg", "해당 userId의 사용자를 찾을 수 없습니다.");
-            }
+            return myPageService.changePassword(passwordChangeVO);
         } catch (Exception e) {
+            Map<String, Object> resultMap = new HashMap<>();
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
+            return resultMap;
         }
-        return resultMap;
     }
 
     /**
@@ -133,4 +107,55 @@ public class MyPageController extends BaseController<Object> {
         resultMap.put("dataList", myPageService.selectUserLoginHistory(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
+
+    /**
+     * 프로필 이미지 업로드용 presigned URL 발급
+     */
+    @RequestMapping(value = "/prepareProfileImageUpload.do", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> prepareProfileImageUpload(@RequestBody MyPageVO myPageVO) {
+        try {
+            return myPageService.prepareProfileImageUpload(myPageVO);
+        } catch (Exception e) {
+            Map<String, Object> resultMap = new HashMap<>();
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
+            return resultMap;
+        }
+    }
+
+    /**
+     * 프로필 이미지 경로 저장
+     */
+    @RequestMapping(value = "/updateUserProfileImg.do", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> updateUserProfileImg(@RequestBody MyPageVO myPageVO) {
+        try {
+            return myPageService.updateUserProfileImg(myPageVO);
+        } catch (Exception e) {
+            Map<String, Object> resultMap = new HashMap<>();
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", e.getMessage() != null ? e.getMessage() : "요청사항을 실패하였습니다.");
+            return resultMap;
+        }
+    }
+
+    /**
+     * 프로필 이미지 미리보기 URL 조회
+     */
+    @RequestMapping(value = "/viewUserProfileImg.do", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> viewUserProfileImg(@RequestBody(required = false) MyPageVO searchVO) {
+        try {
+            return myPageService.viewUserProfileImg(searchVO == null ? new MyPageVO() : searchVO);
+        } catch (Exception e) {
+            Map<String, Object> resultMap = new HashMap<>();
+            resultMap.put("viewType", "DOWNLOAD");
+            resultMap.put("reason", "ERROR");
+            resultMap.put("fileName", "");
+            resultMap.put("downloadUrl", "");
+            return resultMap;
+        }
+    }
+
 }

@@ -9,6 +9,8 @@
             U.USER_NM,
             U.EMAIL,
             U.PHONE,
+            U.PROFILE_IMG_NM,
+            U.PROFILE_IMG_PATH,
             U.ORG_ID,
             U.USE_YN,
             U.LAST_LOGIN_DT,
@@ -79,5 +81,25 @@
         </if>
         ORDER BY A.CREATE_DT DESC
     </select>
+
+    <select id="selectUserProfileImg" parameterType="kr.teamagent.mypage.service.MyPageVO" resultType="kr.teamagent.mypage.service.MyPageVO">
+        /* 마이페이지 사진 조회 mypage.selectUserProfileImg */
+        SELECT
+            PROFILE_IMG_NM,
+            PROFILE_IMG_PATH
+        FROM TB_USER
+        WHERE USER_ID = #{userId}
+    </select>
+
+    <update id="updateUserProfileImg" parameterType="kr.teamagent.mypage.service.MyPageVO">
+        /* 마이페이지 사진 업로드 mypage.updateUserProfileImg */
+        UPDATE TB_USER
+        SET
+            PROFILE_IMG_NM = #{profileImgNm},
+            PROFILE_IMG_PATH = #{profileImgPath},
+            MODIFY_DT = NOW(),
+            MDFR_ID = #{userId}
+        WHERE USER_ID = #{userId}
+    </update>
 
 </mapper>
