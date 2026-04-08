@@ -513,10 +513,16 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         StringBuilder sb = new StringBuilder();
         sb.append("이전 응답 내용을 바탕으로 수정하되, 수정 지침에 명시된 범위만 반영할 것.\n");
         sb.append("명시되지 않은 필드의 키와 값은 절대 변경하지 말고 이전 응답과 동일하게 유지할 것.\n\n");
+        sb.append("단, 수정 지침에 순서 변경이 명시된 경우 key의 순서는 요청대로 변경하되, key 이름과 value는 유지할 것.\n\n");
         sb.append("이전 응답:\n");
         sb.append(previousReportData);
         sb.append("\n\n수정 지침:\n");
         sb.append(askQuery);
+        sb.append("\n\n[새 항목 추가 규칙]-아래 규칙은 신규 항목 추가 시에만 적용됨\n");
+        sb.append("1. 새 항목은 반드시 '{항목명}_label'과 '{항목명}' key를 쌍으로 생성할 것.\n");
+        sb.append("   예시: '개요' 추가 시 → \"overview_label\": \"개요\", \"overview\": \"<p>내용</p>\"\n");
+        sb.append("2. 신규 key는 기존 key 목록의 맨 뒤에 추가할 것.\n");
+        sb.append("3. 신규 key 추가 시, 기존 key의 이름과 value는 절대 변경하지 말 것.\n\n");
         sb.append("\n\n반드시 JSON 형식으로만 응답할 것. JSON 외 다른 텍스트, 마크다운, 코드블록은 절대 포함하지 마세요.");
         return sb.toString();
     }
