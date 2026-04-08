@@ -220,4 +220,20 @@ public class LibraryDAO extends EgovComAbstractDAO {
         return selectList("library.selectTmplFieldList", searchVO);
     }
 
+    /**
+     * 동일 ROOM_ID 기준 최신 TB_REPORT_CHAT_LOG 1건 (REPORT_DATA, IDX_NO)
+     * @param searchVO roomId 필수
+     */
+    public LibraryVO selectLastReportChatLog(LibraryVO searchVO) throws Exception {
+        return selectOne("library.selectLastReportChatLog", searchVO);
+    }
+
+    public int insertReportChatRoom(LibraryVO searchVO) throws Exception {
+        return insert("library.insertReportChatRoom", searchVO);
+    }
+
+    public int insertReportChatLog(LibraryVO searchVO) throws Exception {
+        return insert("library.insertReportChatLog", searchVO);
+    }
+
 }

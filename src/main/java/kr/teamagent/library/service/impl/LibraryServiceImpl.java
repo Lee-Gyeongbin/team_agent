@@ -341,7 +341,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                         + String.join(", ", multilineJsonKeys)
                         + ". 모든 태그는 반드시 열고 닫을 것(<p>...</p>, <li>...</li>)."
                         + " 허용 태그: h3, p, ul, ol, li, strong만 사용."
-                        + " 응답 전 해당 필드의 태그가 모두 정상적으로 닫혔는지 검증 후 출력할 것.";
+                        + " 응답 전 해당 필드의 태그가 모두 정상적으로 닫혔는지 검증 후 출력할 것."
+                        + " 응답 JSON의 키(key) 순서는 본 프롬프트에 제시된 필드 목록에 나온 key 나열 순서와 동일하게 유지할 것."
+                        + " 요청·명세에 정의된 필드 순서를 바꾸거나 뒤섞지 말고, 동일한 순서로 출력할 것.";
             }
 
             // STEP3 : {{FIELD_LIST}} 치환값 생성
@@ -390,6 +392,15 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "AI 문서 생성 성공");
             resultMap.put("data", res);
+            if (!CommonUtil.isEmpty(searchVO.getRoomId())) {
+                LibraryVO reportLog = new LibraryVO();
+                reportLog.setRoomId(searchVO.getRoomId());
+                reportLog.setIdxNo(searchVO.getIdxNo() != null ? searchVO.getIdxNo() : 1);
+                reportLog.setUserId(SessionUtil.getUserId());
+                reportLog.setReportData(res);
+                reportLog.setAskQuery(searchVO.getAskQuery());
+                libraryDAO.insertReportChatLog(reportLog);
+            }
 
         }else{
 
@@ -426,8 +437,101 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "AI 문서 생성 성공");
             resultMap.put("data", res);
+            if (!CommonUtil.isEmpty(searchVO.getRoomId())) {
+                LibraryVO reportLog = new LibraryVO();
+                reportLog.setRoomId(searchVO.getRoomId());
+                reportLog.setIdxNo(searchVO.getIdxNo() != null ? searchVO.getIdxNo() : 1);
+                reportLog.setUserId(SessionUtil.getUserId());
+                reportLog.setReportData(res);
+                reportLog.setAskQuery(searchVO.getAskQuery());
+                libraryDAO.insertReportChatLog(reportLog);
+            }
         }
 
+        return resultMap;
+    }
+
+    /**
+     * 보고서 보완 요청: 동일 방의 최신 REPORT_DATA를 포함해 AI에 재요청하고 로그를 IDX_NO+1로 적재한다.
+     *
+     * @param searchVO roomId, askQuery 필수
+     * @return successYn, returnMsg, data (AI 응답 문자열)
+     * @throws Exception
+     */
+    public Map<String, Object> reAskReport(LibraryVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getRoomId()) || CommonUtil.isEmpty(searchVO.getAskQuery())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "roomId와 askQuery가 필요합니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+
+        LibraryVO lastLog = libraryDAO.selectLastReportChatLog(searchVO);
+        if (lastLog == null || CommonUtil.isEmpty(lastLog.getReportData())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "이전 보고서 데이터가 없습니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+
+        String previousJson = lastLog.getReportData();
+        Integer lastIdx = lastLog.getIdxNo();
+        if (lastIdx == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "이전 보고서 로그 정보가 올바르지 않습니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+
+        String prompt = buildReAskReportPrompt(previousJson, searchVO.getAskQuery());
+        logger.info("reAskReport prompt: {}", prompt != null ? prompt : "");
+        String res = chatbotService.callAiSummary(prompt, "reAskReport");
+
+        if (CommonUtil.isEmpty(res)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "AI 보고서 보완 요청 실패");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+
+        LibraryVO reportLog = new LibraryVO();
+        reportLog.setRoomId(searchVO.getRoomId());
+        reportLog.setIdxNo(lastIdx + 1);
+        reportLog.setUserId(SessionUtil.getUserId());
+        reportLog.setReportData(res);
+        reportLog.setAskQuery(searchVO.getAskQuery());
+        libraryDAO.insertReportChatLog(reportLog);
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "AI 보고서 보완 요청 성공");
+        resultMap.put("data", res);
+        return resultMap;
+    }
+
+    private String buildReAskReportPrompt(String previousReportData, String askQuery) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("이전 응답 내용을 바탕으로 수정하되, 수정 지침에 명시된 범위만 반영할 것.\n");
+        sb.append("명시되지 않은 필드의 키와 값은 절대 변경하지 말고 이전 응답과 동일하게 유지할 것.\n\n");
+        sb.append("이전 응답:\n");
+        sb.append(previousReportData);
+        sb.append("\n\n수정 지침:\n");
+        sb.append(askQuery);
+        sb.append("\n\n반드시 JSON 형식으로만 응답할 것. JSON 외 다른 텍스트, 마크다운, 코드블록은 절대 포함하지 마세요.");
+        return sb.toString();
+    }
+
+    /**
+     * 리포트 채팅방 생성
+     * @return
+     * @throws Exception
+     */
+    public HashMap<String, Object> createReportChatRoom() throws Exception {
+        LibraryVO vo = new LibraryVO();
+        vo.setUserId(SessionUtil.getUserId());
+        libraryDAO.insertReportChatRoom(vo);
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("roomId", vo.getRoomId());
         return resultMap;
     }
 

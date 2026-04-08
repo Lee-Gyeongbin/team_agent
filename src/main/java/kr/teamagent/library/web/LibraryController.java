@@ -271,4 +271,29 @@ public class LibraryController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 보고서 보완 요청 API (이전 REPORT_DATA + 사용자 askQuery로 AI 재호출)
+     * @param searchVO body: { roomId, askQuery }
+     * @return jsonView successYn, returnMsg, data
+     * @throws Exception
+     */
+    @RequestMapping(value = "/reAskReport.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView reAskReport(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(libraryService.reAskReport(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 리포트 채팅방 생성
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/createReportChatRoom.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView createReportChatRoom() throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(libraryService.createReportChatRoom());
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }
