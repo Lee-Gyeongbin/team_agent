@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import com.amazonaws.HttpMethod;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
+import org.passay.AllowedCharacterRule;
 import org.passay.CharacterData;
 import org.passay.CharacterRule;
 import org.passay.EnglishCharacterData;
@@ -49,6 +50,16 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
             return "!@#$%^&*()_-+=";
         }
     };
+
+    /** 영문 + 숫자 + {@link #PASSWORD_SPECIAL_CHAR_DATA} (AllowedCharacterRule은 char[] 만 지원해 문자열을 합쳐 구성) */
+    private static final char[] PASSWORD_ALLOWED_CHARS = (
+            EnglishCharacterData.Alphabetical.getCharacters()
+                    + EnglishCharacterData.Digit.getCharacters()
+                    + PASSWORD_SPECIAL_CHAR_DATA.getCharacters()
+    ).toCharArray();
+
+    private static final PasswordValidator PASSWORD_ALLOWED_VALIDATOR = new PasswordValidator(
+            java.util.Arrays.asList(new AllowedCharacterRule(PASSWORD_ALLOWED_CHARS)));
 
     private static final PasswordValidator PASSWORD_PATTERN_VALIDATOR = new PasswordValidator(java.util.Arrays.asList(
             new IllegalSequenceRule(EnglishSequenceData.Numerical, 4, false),
@@ -113,17 +124,20 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("returnMsg", "비밀번호를 입력해주세요.");
             return resultMap;
         }
-        if (newPasswd.length() < 8) {
+        RuleResult allowedRuleResult = PASSWORD_ALLOWED_VALIDATOR.validate(new PasswordData(newPasswd));
+        if (!allowedRuleResult.isValid()) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "8자 이상이어야합니다");
+            resultMap.put("returnMsg", "허용되지 않은 특수문자가 포함되어 있습니다.");
             return resultMap;
         }
+        
         RuleResult compositionRuleResult = PASSWORD_COMPOSITION_VALIDATOR.validate(new PasswordData(newPasswd));
         if (!compositionRuleResult.isValid()) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "문자 숫자 특수문자를 모두 포함해야 합니다");
+            resultMap.put("returnMsg", "문자 숫자 특수문자를 모두 포함해야 합니다.");
             return resultMap;
         }
+
         RuleResult passwordRuleResult = PASSWORD_PATTERN_VALIDATOR.validate(new PasswordData(newPasswd));
         if (!passwordRuleResult.isValid()) {
             resultMap.put("successYn", false);
