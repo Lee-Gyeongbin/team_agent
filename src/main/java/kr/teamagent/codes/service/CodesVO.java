@@ -2,8 +2,6 @@ package kr.teamagent.codes.service;
 
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
 import lombok.Getter;
 import lombok.Setter;
 
@@ -26,6 +24,8 @@ public class CodesVO {
     private String codeId;
     private String codeNm;
     private Integer sortOrd;
+    private String etc1;
+    private String etc2;
 
     private List<CodesSortOrderItem> items;
 
