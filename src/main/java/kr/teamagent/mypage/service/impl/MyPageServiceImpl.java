@@ -453,18 +453,6 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
         return PROFILE_STORAGE_PREFIX + "/" + userId.trim() + "/" + safeFileName;
     }
 
-    private static boolean isValidProfileStoragePath(String userId, String path) {
-        if (CommonUtil.isEmpty(path) || CommonUtil.isEmpty(userId)) {
-            return false;
-        }
-        String p = path.trim();
-        if (p.contains("..")) {
-            return false;
-        }
-        String prefix = PROFILE_STORAGE_PREFIX + "/" + userId.trim() + "/";
-        return p.startsWith(prefix) && p.length() > prefix.length();
-    }
-
     private static boolean isImageFileName(String fileName) {
         if (CommonUtil.isEmpty(fileName)) {
             return false;
