@@ -12,23 +12,25 @@
         SELECT
             A.AGENT_ID
             , A.AGENT_NM
-            , A.AGENT_TYPE_CD
-            , CC.CODE_NM        AS AGENT_TYPE_CD_NM
+            , A.SVC_TY
+            , CC.CODE_NM        AS SVC_TY_NM
             , A.TEMPERATURE
             , A.TEMP_DEFAULT_YN
             , A.TOP_P
             , A.TOP_P_DEFAULT_YN
+            , A.PORT_NO
+            , A.ENDPOINT_URL
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
             , A.LAST_MDF_DT
             , A.CREATE_DT
             , A.MODIFY_DT
-            , CASE WHEN A.AGENT_TYPE_CD = '001' THEN (SELECT count(B.DATASET_ID) FROM TB_AGT_DS B WHERE A.AGENT_ID = B.AGENT_ID)
-                WHEN A.AGENT_TYPE_CD = '002' THEN (SELECT count(C.DATAMART_ID) FROM TB_AGT_DM C WHERE A.AGENT_ID = C.AGENT_ID)
+            , CASE WHEN A.SVC_TY = '001' THEN (SELECT count(B.DATASET_ID) FROM TB_AGT_DS B WHERE A.AGENT_ID = B.AGENT_ID)
+                WHEN A.SVC_TY = '002' THEN (SELECT count(C.DATAMART_ID) FROM TB_AGT_DM C WHERE A.AGENT_ID = C.AGENT_ID)
                 ELSE 0 END AS CONN_COUNT
         FROM TB_AGT A
-            LEFT JOIN TB_CODE CC ON A.AGENT_TYPE_CD = CC.CODE_ID AND CC.CODE_GRP_ID = 'AT000001'
+            LEFT JOIN TB_CODE CC ON A.SVC_TY = CC.CODE_ID AND CC.CODE_GRP_ID = 'AT000001'
         WHERE 1=1
         ORDER BY A.SORT_ORD, A.AGENT_ID
     </select>
@@ -45,11 +47,13 @@
         SELECT
             A.AGENT_ID
             , A.AGENT_NM
-            , A.AGENT_TYPE_CD
+            , A.SVC_TY
             , A.TEMPERATURE
             , A.TEMP_DEFAULT_YN
             , A.TOP_P
             , A.TOP_P_DEFAULT_YN
+            , A.PORT_NO
+            , A.ENDPOINT_URL
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
@@ -58,10 +62,10 @@
             , A.MODIFY_DT
             ${dynamicQuery}
         FROM TB_AGT A
-            <if test="agentTypeCd == '001'">
+            <if test='svcTy == "M"'>
                 LEFT JOIN TB_AGT_RAG_CFG B ON A.AGENT_ID = B.AGENT_ID
             </if>
-            <if test="agentTypeCd == '002'">
+            <if test='svcTy == "S"'>
                 LEFT JOIN TB_AGT_SQL_CFG B ON A.AGENT_ID = B.AGENT_ID
             </if>
         WHERE 1=1 
@@ -164,11 +168,13 @@
         INSERT INTO TB_AGT (
             AGENT_ID
             , AGENT_NM
-            , AGENT_TYPE_CD
+            , SVC_TY
             , TEMPERATURE
             , TEMP_DEFAULT_YN
             , TOP_P
             , TOP_P_DEFAULT_YN
+            , PORT_NO
+            , ENDPOINT_URL
             , DESCRIPTION
             , SORT_ORD
             , USE_YN
@@ -178,11 +184,13 @@
         ) VALUES (
             #{agentId}
             , #{agentNm, jdbcType=VARCHAR}
-            , #{agentTypeCd, jdbcType=VARCHAR}
+            , #{svcTy, jdbcType=VARCHAR}
             , #{temperature, jdbcType=VARCHAR}
             , #{tempDefaultYn, jdbcType=VARCHAR}
             , #{topP, jdbcType=VARCHAR}
             , #{topPDefaultYn, jdbcType=VARCHAR}
+            , #{portNo, jdbcType=VARCHAR}
+            , #{endpointUrl, jdbcType=VARCHAR}
             , #{description, jdbcType=VARCHAR}
             , #{sortOrd, jdbcType=INTEGER}
             , IFNULL(#{useYn, jdbcType=VARCHAR}, 'Y')
@@ -196,6 +204,8 @@
             , TEMP_DEFAULT_YN = VALUES(TEMP_DEFAULT_YN)
             , TOP_P = VALUES(TOP_P)
             , TOP_P_DEFAULT_YN = VALUES(TOP_P_DEFAULT_YN)
+            , PORT_NO = VALUES(PORT_NO)
+            , ENDPOINT_URL = VALUES(ENDPOINT_URL)
             , DESCRIPTION = VALUES(DESCRIPTION)
             , SORT_ORD = VALUES(SORT_ORD)
             , LAST_MDF_DT = NOW()
@@ -229,13 +239,11 @@
         INSERT INTO TB_AGT_DS (
             AGENT_ID
             , DATASET_ID
-            , SORT_ORD
         ) VALUES
         <foreach collection="datasetList" item="item" separator=",">
             (
                 #{agentId}
                 , #{item.datasetId}
-                , #{item.sortOrd}
             )
         </foreach>
     </insert>

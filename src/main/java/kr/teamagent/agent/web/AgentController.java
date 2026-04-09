@@ -52,7 +52,7 @@ public class AgentController extends BaseController {
 
     /**
      * 에이전트 저장 API
-     * @param formVO { agentId, agentTypeCd, agentNm, ..., datasetList }
+     * @param formVO { agentId, svcTy, agentNm, ..., datasetList }
      * @return { data: AgentVO }
      * @throws Exception
      */
@@ -111,22 +111,22 @@ public class AgentController extends BaseController {
 
     /**
      * 에이전트 삭제 API
-     * @param searchVO { agentId, agentTypeCd }
+     * @param searchVO { agentId, svcTy }
      * @return
      * @throws Exception
      */
     @RequestMapping(value = "/delete.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView delete(@RequestBody AgentVO searchVO) throws Exception {
-        if (searchVO != null && searchVO.getAgentId() != null && searchVO.getAgentTypeCd() != null) {
+        if (searchVO != null && searchVO.getAgentId() != null && searchVO.getSvcTy() != null) {
             agentService.deleteAgent(searchVO);
         }
         return makeSuccessJsonData();
     }
 
     /**
-     * 에이전트 상세 데이터 목록 조회 API (agentTypeCd 001: 데이터셋, 002: 데이터마트)
-     * @param searchVO { agentId, agentTypeCd }
+     * 에이전트 상세 데이터 목록 조회 API (svcTy M: 데이터셋, S: 데이터마트)
+     * @param searchVO { agentId, svcTy }
      * @return { dataList: DsVO[] | DmVO[] }
      * @throws Exception
      */

@@ -12,12 +12,14 @@ public class AgentVO {
     /** TB_AGT */
     private String agentId;
     private String agentNm;
-    private String agentTypeCd;
-    private String agentTypeCdNm;
+    private String svcTy;
+    private String svcTyNm;
     private String temperature;
     private String tempDefaultYn;
     private String topP;
     private String topPDefaultYn;
+    private String portNo;
+    private String endpointUrl;
     private String description;
     private Integer sortOrd;
     private String useYn;
@@ -52,7 +54,6 @@ public class AgentVO {
         private String datasetId;
         private String dsNm;
         private String connYn;
-        private Integer sortOrd;
         private String description;
         private Integer docCount;
         private Integer chunkSize;
