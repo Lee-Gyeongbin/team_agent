@@ -21,6 +21,8 @@
             , A.TOP_P
             , A.TOP_P_DEFAULT_YN
             , A.API_URL_CD
+            , A.ICON_ID
+            , A.COLOR_ID
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
@@ -54,6 +56,8 @@
             , A.TOP_P
             , A.TOP_P_DEFAULT_YN
             , A.API_URL_CD
+            , A.ICON_ID
+            , A.COLOR_ID
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
@@ -203,6 +207,8 @@
             , TOP_P
             , TOP_P_DEFAULT_YN
             , API_URL_CD
+            , ICON_ID
+            , COLOR_ID
             , DESCRIPTION
             , SORT_ORD
             , USE_YN
@@ -218,6 +224,8 @@
             , #{topP, jdbcType=VARCHAR}
             , #{topPDefaultYn, jdbcType=VARCHAR}
             , #{apiUrlCd, jdbcType=VARCHAR}
+            , #{iconId, jdbcType=VARCHAR}
+            , #{colorId, jdbcType=VARCHAR}
             , #{description, jdbcType=VARCHAR}
             , #{sortOrd, jdbcType=INTEGER}
             , IFNULL(#{useYn, jdbcType=VARCHAR}, 'Y')
@@ -232,6 +240,8 @@
             , TOP_P = VALUES(TOP_P)
             , TOP_P_DEFAULT_YN = VALUES(TOP_P_DEFAULT_YN)
             , API_URL_CD = VALUES(API_URL_CD)
+            , ICON_ID = VALUES(ICON_ID)
+            , COLOR_ID = VALUES(COLOR_ID)
             , DESCRIPTION = VALUES(DESCRIPTION)
             , SORT_ORD = VALUES(SORT_ORD)
             , LAST_MDF_DT = NOW()

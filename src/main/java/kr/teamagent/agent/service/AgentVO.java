@@ -19,6 +19,8 @@ public class AgentVO {
     private String topP;
     private String topPDefaultYn;
     private String apiUrlCd;
+    private String iconId;
+    private String colorId;
     private String description;
     private Integer sortOrd;
     private String useYn;
