@@ -93,9 +93,18 @@ public class MyPageController extends BaseController<Object> {
     /**
      * 프로필 이미지 미리보기 URL 조회
      */
-    @RequestMapping(value = "/viewUserProfileImg.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/viewUserProfileImg.do", method = RequestMethod.GET)
     @ResponseBody
     public Map<String, Object> viewUserProfileImg(@RequestBody(required = false) MyPageVO searchVO) {
         return myPageService.viewUserProfileImg(searchVO == null ? new MyPageVO() : searchVO);
+    }
+
+    /**
+     * 프로필 이미지 삭제
+     */
+    @RequestMapping(value = "/deleteUserProfileImg.do", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> deleteUserProfileImg(@RequestBody(required = false) MyPageVO myPageVO) {
+        return myPageService.deleteUserProfileImg(myPageVO == null ? new MyPageVO() : myPageVO);
     }
 }

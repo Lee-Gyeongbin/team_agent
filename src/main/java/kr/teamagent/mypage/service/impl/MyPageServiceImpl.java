@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 import com.amazonaws.HttpMethod;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
+import com.amazonaws.services.s3.model.DeleteObjectRequest;
+
 import org.passay.AllowedCharacterRule;
 import org.passay.CharacterData;
 import org.passay.CharacterRule;
@@ -297,12 +299,47 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
         }
 
         try {
-            if (!isValidProfileStoragePath(myPageVO.getUserId(), myPageVO.getProfileImgPath())) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "올바른 프로필 이미지 경로가 아닙니다.");
-                return resultMap;
-            }
             int result = myPageDAO.updateUserProfileImg(myPageVO);
+            if (result > 0) {
+                resultMap.put("successYn", true);
+                resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            } else {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+            }
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * 프로필 이미지 삭제 (스토리지 객체 삭제 후 TB_USER 경로/이름 NULL 처리)
+     */
+    public Map<String, Object> deleteUserProfileImg(MyPageVO myPageVO) {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (myPageVO == null) {
+            myPageVO = new MyPageVO();
+        }
+        if (!applySessionUserId(myPageVO)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            return resultMap;
+        }
+
+        try {
+            MyPageVO row = myPageDAO.selectUserProfileImg(myPageVO);
+            String path = (row == null || CommonUtil.isEmpty(row.getProfileImgPath())) ? "" : row.getProfileImgPath().trim();
+
+            if (!path.isEmpty()) {
+                DeleteObjectRequest request = new DeleteObjectRequest(getBucketName(), path);
+                s3Client.deleteObject(request);
+            }
+
+            int result = myPageDAO.deleteUserProfileImg(myPageVO);
             if (result > 0) {
                 resultMap.put("successYn", true);
                 resultMap.put("returnMsg", "요청사항을 성공하였습니다.");

@@ -37,4 +37,8 @@ public class MyPageDAO extends EgovComAbstractDAO {
     public int updateUserProfileImg(MyPageVO myPageVO) throws Exception {
         return update("mypage.updateUserProfileImg", myPageVO);
     }
+
+    public int deleteUserProfileImg(MyPageVO myPageVO) throws Exception {
+        return update("mypage.deleteUserProfileImg", myPageVO);
+    }
 }
