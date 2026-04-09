@@ -18,6 +18,8 @@
             , A.TEMP_DEFAULT_YN
             , A.TOP_P
             , A.TOP_P_DEFAULT_YN
+            , A.PORT_NO
+            , A.ENDPOINT_URL
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
@@ -50,6 +52,8 @@
             , A.TEMP_DEFAULT_YN
             , A.TOP_P
             , A.TOP_P_DEFAULT_YN
+            , A.PORT_NO
+            , A.ENDPOINT_URL
             , A.DESCRIPTION
             , A.SORT_ORD
             , A.USE_YN
@@ -169,6 +173,8 @@
             , TEMP_DEFAULT_YN
             , TOP_P
             , TOP_P_DEFAULT_YN
+            , PORT_NO
+            , ENDPOINT_URL
             , DESCRIPTION
             , SORT_ORD
             , USE_YN
@@ -183,6 +189,8 @@
             , #{tempDefaultYn, jdbcType=VARCHAR}
             , #{topP, jdbcType=VARCHAR}
             , #{topPDefaultYn, jdbcType=VARCHAR}
+            , #{portNo, jdbcType=VARCHAR}
+            , #{endpointUrl, jdbcType=VARCHAR}
             , #{description, jdbcType=VARCHAR}
             , #{sortOrd, jdbcType=INTEGER}
             , IFNULL(#{useYn, jdbcType=VARCHAR}, 'Y')
@@ -196,6 +204,8 @@
             , TEMP_DEFAULT_YN = VALUES(TEMP_DEFAULT_YN)
             , TOP_P = VALUES(TOP_P)
             , TOP_P_DEFAULT_YN = VALUES(TOP_P_DEFAULT_YN)
+            , PORT_NO = VALUES(PORT_NO)
+            , ENDPOINT_URL = VALUES(ENDPOINT_URL)
             , DESCRIPTION = VALUES(DESCRIPTION)
             , SORT_ORD = VALUES(SORT_ORD)
             , LAST_MDF_DT = NOW()

@@ -18,6 +18,8 @@ public class AgentVO {
     private String tempDefaultYn;
     private String topP;
     private String topPDefaultYn;
+    private String portNo;
+    private String endpointUrl;
     private String description;
     private Integer sortOrd;
     private String useYn;
