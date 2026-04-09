@@ -2,6 +2,32 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ai.chatbot">
 
+    <select id="selectAgentListForChat" resultType="chatbotVO">
+        /* 채팅 에이전트 목록 조회 ai.chatbot.selectAgentListForChat */
+        SELECT
+            A.AGENT_ID			AS AGENT_ID
+            , A.AGENT_NM		AS AGENT_NM
+            , A.SVC_TY			AS SVC_TY
+            , B.CODE_NM         AS SVC_TY_NM
+            , A.DESCRIPTION 	AS DESCRIPTION
+            , C.ETC1		    AS API_PORT
+            , C.ETC2		    AS API_ENDPOINT
+            , A.API_URL_CD		AS API_URL_CD
+            , A.SORT_ORD		AS SORT_ORD
+            , A.USE_YN			AS USE_YN
+        FROM TB_AGT A
+        LEFT JOIN TB_CODE B 
+            ON A.SVC_TY = B.CODE_ID 
+            AND B.CODE_GRP_ID = 'AT000001'
+        LEFT OUTER JOIN TB_CODE C
+            ON C.CODE_GRP_ID = 'AA000001'
+            AND C.USE_YN = 'Y'
+            AND C.CODE_ID = A.API_URL_CD 
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+        ORDER BY A.SORT_ORD, A.AGENT_ID
+    </select>
+
     <select id="selectChatRoomList" resultType="chatbotVO">
         /* CHAT 대화방 목록 조회 ai.chatbot.selectChatRoomList */
         SELECT
@@ -52,6 +78,7 @@
         WHERE 1 = 1
             AND A.USE_YN = 'Y'
             AND A.SVC_TY = 'M'
+            AND A.AGENT_ID = #{agentId}
         GROUP BY B.DATASET_ID
     </select>
 
@@ -69,6 +96,7 @@
         WHERE 1 = 1
             AND A.USE_YN = 'Y'
             AND A.SVC_TY = 'S'
+            AND A.AGENT_ID = #{agentId}
         GROUP BY B.DATAMART_ID
     </select>
 
@@ -114,6 +142,7 @@
         INSERT INTO TB_CHAT_LOG
         (
             ROOM_ID,
+            AGENT_ID,
             SVC_TY,
             REF_ID,
             MODEL_ID,
@@ -133,6 +162,7 @@
         VALUES
         (
             #{roomId},
+            #{agentId},
             #{svcTy},
             #{refId},
             #{modelId},
@@ -184,6 +214,7 @@
             A.LOG_ID
             , A.ROOM_ID
             , A.SVC_TY
+            , A.AGENT_ID
             , A.REF_ID
             , A.Q_CONTENT
             , A.R_CONTENT

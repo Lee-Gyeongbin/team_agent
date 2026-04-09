@@ -9,6 +9,12 @@ import lombok.Setter;
 @Setter
 public class ChatbotVO extends CommonVO {
 
+    // 에이전트 정보(TB_AGT)
+    private String agentNm;
+    private String apiPort;
+    private String apiEndpoint;
+    private String apiUrlCd;
+
     // CHAT 대화방 정보(TB_CHAT_ROOM)
     // 대화방 ID
     private Long roomId;
@@ -52,6 +58,7 @@ public class ChatbotVO extends CommonVO {
 
     /* AI 챗봇 질문/응답 로그 */
     private Long logId;
+    private String agentId;
     // AI 서비스 타입
     private String svcTy;
     private String svcTyNm;

@@ -27,7 +27,19 @@ public class ChatbotController extends BaseController {
     @Autowired
     private ChatbotServiceImpl chatbotService;
 
-    
+    /**
+     * 채팅 에이전트 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value="/ai/chatbot/selectAgentListForChat.do")
+    @ResponseBody
+    public ModelAndView selectAgentListForChat(ChatbotVO searchVO)throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("agentList", chatbotService.selectAgentListForChat(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 
     /**
      * 모델 목록 조회

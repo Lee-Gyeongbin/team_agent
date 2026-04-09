@@ -11,6 +11,16 @@ import kr.teamagent.chat.service.ChatbotVO;
 public class ChatbotDAO extends EgovComAbstractDAO {
 
     /**
+     * 채팅 에이전트 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectAgentListForChat(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectAgentListForChat", searchVO);
+    }
+
+    /**
      * CHAT 대화방 목록 조회
      * @param searchVO
      * @return

@@ -54,6 +54,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     FileServiceImpl fileService;
 
     /**
+     * 채팅 에이전트 목록 조회
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectAgentListForChat(ChatbotVO searchVO) throws Exception {
+        return chatbotDAO.selectAgentListForChat(searchVO);
+    }
+    
+    /**
      * 모델 목록 조회
      * @param searchVO
      * @return
@@ -118,7 +128,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public List<ChatbotVO> selectTableDataList(ChatbotVO searchVO) throws Exception {
         return chatbotDAO.selectTableDataList(searchVO);
     }
-    public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+    public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
         String apiUrl = this.getApiUrl(svcTy);
         logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
@@ -128,7 +138,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return;
         }
 
-        callAiApiStreamingWebSocket(session, apiUrl, query, threadId, userId, svcTy, modelId, refId, attachmentFileIds, callback);
+        callAiApiStreamingWebSocket(session, apiUrl, query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
     }
 
     /**
@@ -215,7 +225,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * WebSocket 방식으로 실제 AI API를 호출하고 스트리밍 응답을 처리
      */
-    private void callAiApiStreamingWebSocket(WebSocketSession session, String apiUrl, String query, String threadId, String userId, String svcTy, String modelId, String refId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+    private void callAiApiStreamingWebSocket(WebSocketSession session, String apiUrl, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
         // 요청 파라미터 구성 (JSON body)
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
@@ -224,6 +234,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("dataset_id", refId != null ? refId : "");
         params.put("room_id", threadId != null ? threadId : "string");
         params.put("model_id", modelId != null ? modelId : "");
+        params.put("agent_id", agentId != null ? agentId : "");
         params.put("attachment_file_ids", attachmentFileIds);
         
         ChatbotVO chatbotVO = new ChatbotVO();
@@ -266,7 +277,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             com.google.gson.Gson gson = new com.google.gson.Gson();
             String jsonBody = gson.toJson(params);
             logger.info("AI API request ready - url: {}, svcTy: {}, userId: {}, refId: {}, modelId: {}, threadId: {}, body: {}",
-                    apiUrl, svcTy, userId, refId, modelId, threadId, jsonBody);
+                    apiUrl, svcTy, userId, refId, modelId, agentId, threadId, jsonBody);
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
             
             // Request Builder
@@ -279,7 +290,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             
             Request request = requestBuilder.build();
             
-            logger.info("AI API 호출 시작 (WebSocket): {} - query: {}, threadId: {}", apiUrl, query, threadId);
+            logger.info("AI API 호출 시작 (WebSocket): {} - query: {}, agentId: {}, threadId: {}", apiUrl, query, agentId, threadId);
 
             /**
              * OkHttp를 이용한 AI API 비동기 스트리밍 호출
@@ -339,7 +350,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                          * - 스트리밍 종료 시 callback.onComplete()
                          를 호출한다.
                          */
-                        processStreamingResponseWebSocket(responseBody, query, svcTy, modelId, refId, userId, threadId, attachmentFileIds, callback);
+                        processStreamingResponseWebSocket(responseBody, query, svcTy, modelId, refId, userId, agentId, threadId, attachmentFileIds, callback);
                     } catch (Exception e) {
                         logger.error("스트리밍 응답 처리 중 오류: {}", e.getMessage(), e);
                         callback.onError("스트리밍 처리 오류: " + e.getMessage());
@@ -358,7 +369,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * SSE 형식: event: answer_delta, data: {"text": "..."}
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
-    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String modelId, String refId, String userId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
+    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
@@ -437,6 +448,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     try {
                         savedLogId = this.doInsertAiLog(
                                 responseThreadId,
+                                agentId,
                                 query,
                                 accumulatedContent.toString(),
                                 inputTokens,
@@ -647,6 +659,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     private String doInsertAiLog(
             String responseThreadId,
+            String agentId,
             String query,
             String answer,
             int inputTokens,
@@ -663,6 +676,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setRoomId(Long.parseLong(responseThreadId));
+        chatbotVO.setAgentId(agentId);
         chatbotVO.setSvcTy(svcTy);
         chatbotVO.setRefId(refId);
         chatbotVO.setQContent(query);
