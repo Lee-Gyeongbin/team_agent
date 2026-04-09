@@ -62,6 +62,24 @@ public class AgentDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 테마 컬러 옵션 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<AgentVO.ColorVO> selectColorList() throws Exception {
+        return selectList("agent.selectColorList");
+    }
+
+    /**
+     * 테마 아이콘 옵션 목록 조회
+     * @return
+     * @throws Exception
+     */
+    public List<AgentVO.IconVO> selectIconList() throws Exception {
+        return selectList("agent.selectIconList");
+    }
+
+    /**
      * 에이전트 데이터셋 목록 조회
      * @param searchVO agentId
      * @return

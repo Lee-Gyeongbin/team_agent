@@ -51,6 +51,17 @@ public class AgentController extends BaseController {
     }
 
     /**
+     * 테마 옵션 목록 조회 API
+     * @return { iconList: IconVO[], colorList: ColorVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/themeOptions.do")
+    @ResponseBody
+    public ModelAndView themeOptions() throws Exception {
+        return new ModelAndView("jsonView", agentService.selectThemeOptions());
+    }
+
+    /**
      * 에이전트 저장 API
      * @param formVO { agentId, svcTy, agentNm, ..., datasetList }
      * @return { data: AgentVO }
