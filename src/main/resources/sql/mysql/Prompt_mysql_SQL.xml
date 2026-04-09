@@ -21,6 +21,8 @@
             , A.PROMPT_NAME
             , A.CONTENT
             , A.APPLY_LLM_YN
+            , A.SYS_PT_YN
+            , A.PRIORITY
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT

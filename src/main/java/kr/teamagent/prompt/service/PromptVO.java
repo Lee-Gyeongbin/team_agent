@@ -14,9 +14,12 @@ public class PromptVO {
     private String promptTypeCd;
     private String content;
     private String applyLlmYn;
+    private String sysPtYn;
+    private Integer priority;
     private String useYn;
     private String createDt;
     private String modifyDt;
+
 
     /** TB_CODE 조인 (PR000001) */
     private String promptName;
