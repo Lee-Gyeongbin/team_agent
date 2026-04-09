@@ -28,6 +28,8 @@
             , SORT_ORD
             , USE_YN
             , DESCRIPTION
+            , ETC1
+            , ETC2
         FROM TB_CODE
         WHERE 1=1
         <if test="codeGrpId != null and codeGrpId != ''">
@@ -74,6 +76,8 @@
             , SORT_ORD
             , USE_YN
             , DESCRIPTION
+            , ETC1
+            , ETC2
         ) VALUES (
             #{codeGrpId}
             , #{codeId}
@@ -81,11 +85,15 @@
             , #{sortOrd, jdbcType=INTEGER}
             , #{useYn, jdbcType=VARCHAR}
             , #{description}
+            , #{etc1, jdbcType=VARCHAR}
+            , #{etc2, jdbcType=VARCHAR}
         )
         ON DUPLICATE KEY UPDATE
             CODE_NM = VALUES(CODE_NM)
             , USE_YN = VALUES(USE_YN)
             , DESCRIPTION = VALUES(DESCRIPTION)
+            , ETC1 = VALUES(ETC1)
+            , ETC2 = VALUES(ETC2)
     </insert>
 
     <update id="updateSortOrder">
