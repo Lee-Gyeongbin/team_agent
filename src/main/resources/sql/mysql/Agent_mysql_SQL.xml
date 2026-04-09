@@ -229,13 +229,11 @@
         INSERT INTO TB_AGT_DS (
             AGENT_ID
             , DATASET_ID
-            , SORT_ORD
         ) VALUES
         <foreach collection="datasetList" item="item" separator=",">
             (
                 #{agentId}
                 , #{item.datasetId}
-                , #{item.sortOrd}
             )
         </foreach>
     </insert>

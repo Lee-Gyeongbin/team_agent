@@ -52,7 +52,6 @@ public class AgentVO {
         private String datasetId;
         private String dsNm;
         private String connYn;
-        private Integer sortOrd;
         private String description;
         private Integer docCount;
         private Integer chunkSize;
