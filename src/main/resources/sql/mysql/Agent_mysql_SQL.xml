@@ -5,8 +5,6 @@
     <resultMap id="agtDsResultMap" type="kr.teamagent.agent.service.AgentVO$DsVO" autoMapping="true"/>
     <resultMap id="agtDmResultMap" type="kr.teamagent.agent.service.AgentVO$DmVO" autoMapping="true"/>
     <resultMap id="modelResultMap" type="kr.teamagent.agent.service.AgentVO$ModelVO" autoMapping="true"/>
-    <resultMap id="colorResultMap" type="kr.teamagent.agent.service.AgentVO$ColorVO" autoMapping="true"/>
-    <resultMap id="iconResultMap" type="kr.teamagent.agent.service.AgentVO$IconVO" autoMapping="true"/>
     <parameterMap id="saveFormParamMap" type="kr.teamagent.agent.service.AgentVO$SaveFormVO"/>
 
     <select id="selectAgentList" resultType="agentVO">
@@ -85,35 +83,6 @@
         WHERE 1=1
             AND A.USE_YN = 'Y'
         ORDER BY SORT_ORDER
-    </select>
-
-    <select id="selectColorList" resultMap="colorResultMap">
-        /* 테마 컬러 옵션 조회 agent.selectColorList */
-        SELECT
-            A.COLOR_ID
-            , A.COLOR_NM
-            , A.COLOR_KEY
-            , A.COLOR_HEX
-            , A.USE_YN
-            , A.CREATE_DT
-            , A.MODIFY_DT
-        FROM TB_COLOR A
-        ORDER BY A.COLOR_ID
-    </select>
-
-    <select id="selectIconList" resultMap="iconResultMap">
-        /* 테마 아이콘 옵션 조회 agent.selectIconList */
-        SELECT
-            A.ICON_ID
-            , A.ICON_NM
-            , A.ICON_CLASS_NM
-            , A.ICON_FILE_NM
-            , A.ICON_FILE_PATH
-            , A.USE_YN
-            , A.CREATE_DT
-            , A.MODIFY_DT
-        FROM TB_ICON A
-        ORDER BY A.ICON_ID
     </select>
 
     <select id="selectAgentDsList" parameterType="agentVO" resultMap="agtDsResultMap">

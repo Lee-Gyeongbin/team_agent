@@ -40,6 +40,16 @@ public class CommonDAO extends EgovComAbstractDAO {
 		return (List<EgovMap>) list("common.selectMenuTreeList", null);
 	}
 
+	@SuppressWarnings("unchecked")
+	public List<CommonVO.ColorVO> comSelectColorList() throws Exception {
+		return (List<CommonVO.ColorVO>) list("common.comSelectColorList", null);
+	}
+
+	@SuppressWarnings("unchecked")
+	public List<CommonVO.IconVO> comSelectIconList() throws Exception {
+		return (List<CommonVO.IconVO>) list("common.comSelectIconList", null);
+	}
+
 	/**
 	 * 테이블 마지막 ID 조회
 	 * @param tableName 테이블명 (예: TB_KNOW_CAT)

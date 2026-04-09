@@ -1,7 +1,6 @@
 package kr.teamagent.agent.service.impl;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -56,18 +55,6 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
      */
     public List<AgentVO.ModelVO> selectModelList() throws Exception {
         return agentDAO.selectModelList();
-    }
-
-    /**
-     * 테마 옵션 목록 조회
-     * @return
-     * @throws Exception
-     */
-    public HashMap<String, Object> selectThemeOptions() throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("iconList", agentDAO.selectIconList());
-        resultMap.put("colorList", agentDAO.selectColorList());
-        return resultMap;
     }
 
     /**

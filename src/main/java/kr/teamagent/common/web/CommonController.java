@@ -112,4 +112,14 @@ public class CommonController extends BaseController {
 		resultMap.put("list", commonService.selectMenuTreeList());
 		return new ModelAndView("jsonView", resultMap);
 	}
+
+	/**
+	 * 테마 옵션 조회
+	 * @return
+	 * @throws Exception
+	 */
+	@RequestMapping("/comThemeOptions.do")
+	public ModelAndView comThemeOptions() throws Exception {
+		return new ModelAndView("jsonView", commonService.comSelectThemeOptions());
+	}
 }

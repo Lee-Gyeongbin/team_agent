@@ -3,6 +3,9 @@
 
 <mapper namespace="common">
 
+    <resultMap id="comColorResultMap" type="kr.teamagent.common.CommonVO$ColorVO" autoMapping="true"/>
+    <resultMap id="comIconResultMap" type="kr.teamagent.common.CommonVO$IconVO" autoMapping="true"/>
+
     <select id="selectDbList" resultType="commonVO">
         /* DB 목록 조회 common.selectDbList */
         SELECT
@@ -95,6 +98,35 @@
             , DESCRIPTION
         FROM MENU_TREE
         ORDER BY SORT_PATH
+    </select>
+
+    <select id="comSelectColorList" resultMap="comColorResultMap">
+        /* 테마 컬러 옵션 조회 common.comSelectColorList */
+        SELECT
+            A.COLOR_ID
+            , A.COLOR_NM
+            , A.COLOR_KEY
+            , A.COLOR_HEX
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM TB_COLOR A
+        ORDER BY A.COLOR_ID
+    </select>
+
+    <select id="comSelectIconList" resultMap="comIconResultMap">
+        /* 테마 아이콘 옵션 조회 common.comSelectIconList */
+        SELECT
+            A.ICON_ID
+            , A.ICON_NM
+            , A.ICON_CLASS_NM
+            , A.ICON_FILE_NM
+            , A.ICON_FILE_PATH
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM TB_ICON A
+        ORDER BY A.ICON_ID
     </select>
 
     <select id="selectMaxId" resultType="java.lang.String">

@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,18 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	public List<EgovMap> selectMenuTreeList() throws Exception {
 		List<EgovMap> flatList = commonDAO.selectMenuTreeList();
 		return buildMenuTree(flatList);
+	}
+
+	/**
+	 * 테마 옵션 조회
+	 * @return
+	 * @throws Exception
+	 */
+	public HashMap<String, Object> comSelectThemeOptions() throws Exception {
+		HashMap<String, Object> resultMap = new HashMap<>();
+		resultMap.put("iconList", commonDAO.comSelectIconList());
+		resultMap.put("colorList", commonDAO.comSelectColorList());
+		return resultMap;
 	}
 
 	/**
