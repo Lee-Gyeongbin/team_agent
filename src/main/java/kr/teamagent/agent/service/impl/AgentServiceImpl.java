@@ -69,22 +69,22 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 에이전트 상세 데이터 목록 조회 (agentTypeCd 분기)
-     * @param searchVO agentId, agentTypeCd
+     * 에이전트 상세 데이터 목록 조회 (svcTy 분기)
+     * @param searchVO agentId, svcTy
      * @return DsVO 또는 DmVO 리스트
      * @throws Exception
      */
     public List<?> selectAgentDetailDataList(AgentVO searchVO) throws Exception {
-        if ("001".equals(searchVO.getAgentTypeCd())) {
+        if ("M".equals(searchVO.getSvcTy())) {
             return agentDAO.selectAgentDsList(searchVO);
-        } else if ("002".equals(searchVO.getAgentTypeCd())) {
+        } else if ("S".equals(searchVO.getSvcTy())) {
             return agentDAO.selectAgentDmList(searchVO);
         }
         return new ArrayList<>();
     }
 
     /**
-     * 에이전트 저장 (agentTypeCd 분기)
+     * 에이전트 저장 (svcTy 분기)
      * @param formVO 저장 폼
      * @return 저장된 에이전트 상세
      * @throws Exception
@@ -98,7 +98,7 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
 
         agentDAO.saveAgent(formVO);
 
-        if ("001".equals(formVO.getAgentTypeCd())) {
+        if ("M".equals(formVO.getSvcTy())) {
             agentDAO.saveAgentRagCfg(formVO);
 
             agentDAO.deleteAgentDs(formVO);
@@ -111,7 +111,7 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
                     agentDAO.insertAgentDs(formVO);
                 }
             }
-        } else if ("002".equals(formVO.getAgentTypeCd())) {
+        } else if ("S".equals(formVO.getSvcTy())) {
             agentDAO.saveAgentSqlCfg(formVO);
 
             agentDAO.deleteAgentDm(formVO);
@@ -128,23 +128,23 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
 
         AgentVO result = new AgentVO();
         result.setAgentId(formVO.getAgentId());
-        result.setAgentTypeCd(formVO.getAgentTypeCd());
+        result.setSvcTy(formVO.getSvcTy());
         return selectAgent(result);
     }
 
     /**
-     * 에이전트 삭제 (agentTypeCd 분기)
+     * 에이전트 삭제 (svcTy 분기)
      * 001: TB_AGT_DS → TB_AGT_RAG_CFG → TB_AGT
      * 002: TB_AGT_DM → TB_AGT_SQL_CFG → TB_AGT
-     * @param searchVO agentId, agentTypeCd
+     * @param searchVO agentId, svcTy
      * @throws Exception
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteAgent(AgentVO searchVO) throws Exception {
-        if ("001".equals(searchVO.getAgentTypeCd())) {
+        if ("M".equals(searchVO.getSvcTy())) {
             agentDAO.deleteAgentDs(searchVO);
             agentDAO.deleteAgentRagCfg(searchVO);
-        } else if ("002".equals(searchVO.getAgentTypeCd())) {
+        } else if ("S".equals(searchVO.getSvcTy())) {
             agentDAO.deleteAgentDm(searchVO);
             agentDAO.deleteAgentSqlCfg(searchVO);
         }
@@ -159,14 +159,14 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
      */
     private String buildDynamicQuery(AgentVO searchVO) throws Exception {
         StringBuffer sb = new StringBuffer();
-        if(searchVO == null || searchVO.getAgentTypeCd() == null || searchVO.getAgentTypeCd().isEmpty()){
+        if(searchVO == null || searchVO.getSvcTy() == null || searchVO.getSvcTy().isEmpty()){
             return "";
         }
-        if(searchVO.getAgentTypeCd().equals("001")){ // RAG 에이전트
+        if(searchVO.getSvcTy().equals("M")){ // RAG 에이전트
             sb.append(", B.SIM_THRESH\n");
             sb.append(", B.MAX_SRCH_RSLT");
         }
-        if(searchVO.getAgentTypeCd().equals("002")){ // SQL 에이전트
+        if(searchVO.getSvcTy().equals("S")){ // SQL 에이전트
             sb.append(", B.MODEL_ID\n");
             sb.append(", B.MAX_QRY_SEC\n");
             sb.append(", B.SQL_VALID_YN\n");

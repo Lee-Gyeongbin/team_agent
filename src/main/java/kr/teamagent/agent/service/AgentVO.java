@@ -12,8 +12,8 @@ public class AgentVO {
     /** TB_AGT */
     private String agentId;
     private String agentNm;
-    private String agentTypeCd;
-    private String agentTypeCdNm;
+    private String svcTy;
+    private String svcTyNm;
     private String temperature;
     private String tempDefaultYn;
     private String topP;
