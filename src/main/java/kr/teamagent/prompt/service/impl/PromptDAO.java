@@ -1,6 +1,7 @@
 package kr.teamagent.prompt.service.impl;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Repository;
 
@@ -17,6 +18,16 @@ public class PromptDAO extends EgovComAbstractDAO {
      */
     public List<PromptVO> selectSystemPromptList() throws Exception {
         return selectList("prompt.selectSystemPromptList");
+    }
+
+    /**
+     * 시스템 프롬프트 본문 조회
+     * @param param promptId, sysPtYn
+     * @return CONTENT
+     * @throws Exception
+     */
+    public String selectPromptContent(Map<String, Object> param) throws Exception {
+        return selectOne("prompt.selectPromptContent", param);
     }
 
     /**

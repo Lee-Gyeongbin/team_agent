@@ -22,6 +22,7 @@ import kr.teamagent.library.service.LibraryVO;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.prompt.service.impl.PromptServiceImpl;
 
 @Service
 public class LibraryServiceImpl extends EgovAbstractServiceImpl {
@@ -37,6 +38,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     ChatbotServiceImpl chatbotService;
+
+    @Autowired
+    PromptServiceImpl promptService;
 
     /**
      * 카테고리 목록 조회 (세션 userId 자동 설정)
@@ -519,21 +523,25 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         return resultMap;
     }
 
-    private String buildReAskReportPrompt(String previousReportData, String askQuery) {
+    /**
+     * 보고서 보완 요청 프롬프트 생성
+     * @param previousReportData
+     * @param askQuery
+     * @return
+     * @throws Exception
+     */
+    private String buildReAskReportPrompt(String previousReportData, String askQuery) throws Exception {
         StringBuilder sb = new StringBuilder();
-        sb.append("이전 응답 내용을 바탕으로 수정하되, 수정 지침에 명시된 범위만 반영할 것.\n");
-        sb.append("명시되지 않은 필드의 키와 값, 순서는 절대 변경하지 말고 이전 응답과 동일하게 유지할 것.\n\n");
+        String promptContent = promptService.getPrompt("PI000017", "Y"); // 보고서 재요청 프롬프트
+        if (!CommonUtil.isEmpty(promptContent)) {
+            sb.append(promptContent);
+            sb.append("\n");
+        }
         sb.append("이전 응답:\n");
         sb.append(previousReportData);
         sb.append("\n\n수정 지침:\n");
         sb.append(askQuery);
-        sb.append("\n\n[수정 지침 처리 규칙]\n");
-        sb.append("- 내용 수정 요청: 해당 key의 value만 변경하고, key 이름과 순서는 그대로 유지할 것.\n");
-        sb.append("- 순서 변경 요청: 'A를 B 위(앞)로' → A를 B 바로 앞에 배치. 'A를 B 아래(뒤)로' → A를 B 바로 뒤에 배치. 나머지 key 순서는 유지할 것.\n");
-        sb.append("- 항목 추가 요청: '{항목명}' key와 '{항목명}_label' key를 쌍으로 생성하여 기존 key 목록 맨 뒤에 추가할 것.\n");
-        sb.append("  예시: '개요' 추가 시 → \"overview\": \"<p>내용</p>\", \"overview_label\": \"개요\"\n\n");
-        sb.append("- 항목 삭제 요청: '{항목명}' key와 '{항목명}_label' key를 쌍으로 삭제할 것.\n");
-        sb.append("반드시 JSON 형식으로만 응답할 것. JSON 외 다른 텍스트, 마크다운, 코드블록은 절대 포함하지 마세요.");
+        
         return sb.toString();
     }
 

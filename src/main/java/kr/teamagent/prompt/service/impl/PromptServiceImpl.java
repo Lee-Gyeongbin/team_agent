@@ -31,6 +31,20 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 프롬프트 본문 조회
+     * @param promptId PROMPT_ID
+     * @param sysPtYn SYS_PT_YN
+     * @return CONTENT
+     * @throws Exception
+     */
+    public String getPrompt(String promptId, String sysPtYn) throws Exception {
+        Map<String, Object> param = new HashMap<>();
+        param.put("promptId", promptId);
+        param.put("sysPtYn", sysPtYn);
+        return promptDAO.selectPromptContent(param);
+    }
+
+    /**
      * 시스템 프롬프트 등록/수정 (ON DUPLICATE KEY UPDATE)
      * @param searchVO promptId 없으면 PI prefix로 자동 생성
      * @return 저장된 PromptVO
