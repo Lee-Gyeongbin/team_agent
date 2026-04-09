@@ -53,6 +53,11 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         return PropertyUtil.getProperty("ncp.storage.bucket");
     }
 
+    /**
+     * NCP 업로드용 PUT presigned URL 발급 (uploadUrl, filePath).
+     * @param req
+     * @return
+     */
     public Map<String, Object> createUploadPresignedUrl(FileVO req) {
 
         String key = "";

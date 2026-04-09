@@ -1,5 +1,6 @@
 package kr.teamagent.mypage.service.impl;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ import org.passay.PasswordValidator;
 import org.passay.RepeatCharacterRegexRule;
 import org.passay.RuleResult;
 
+import kr.teamagent.common.CommonVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.util.CommonUtil;
@@ -85,9 +87,36 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
 
     /**
+     * 세션 {@code userId}. 비로그인이거나 공백이면 {@code null}.
+     */
+    private String resolveSessionUserId() {
+        String id = SessionUtil.getUserId();
+        return CommonUtil.isEmpty(id) ? null : id;
+    }
+
+    /**
+     * 세션 userId를 {@link CommonVO#userId}에 설정.
+     * {@link MyPageVO}, {@link MyPageVO.LoginHistoryVO} 등 CommonVO 계열에 공통 적용.
+     */
+    private boolean applySessionUserId(CommonVO vo) {
+        String id = resolveSessionUserId();
+        if (id == null) {
+            return false;
+        }
+        vo.setUserId(id);
+        return true;
+    }
+
+    /**
      * 마이페이지 목록 조회
      */
     public List<MyPageVO> selectMyPageList(MyPageVO searchVO) throws Exception {
+        if (searchVO == null) {
+            searchVO = new MyPageVO();
+        }
+        if (!applySessionUserId(searchVO)) {
+            return Collections.emptyList();
+        }
         return myPageDAO.selectMyPageList(searchVO);
     }
 
@@ -95,14 +124,20 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
      * 마이페이지 수정
      */
     public int updateMyPage(MyPageVO myPageVO) throws Exception {
+        if (myPageVO == null) {
+            myPageVO = new MyPageVO();
+        }
+        if (!applySessionUserId(myPageVO)) {
+            return 0;
+        }
         return myPageDAO.updateMyPage(myPageVO);
     }
 
     public Map<String, Object> changePassword(MyPageVO.PasswordChangeVO passwordChangeVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
 
-        String loginUserId = SessionUtil.getUserId();
-        if (CommonUtil.isEmpty(loginUserId)) {
+        String loginUserId = resolveSessionUserId();
+        if (loginUserId == null) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "로그인이 필요합니다.");
             return resultMap;
@@ -130,7 +165,7 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("returnMsg", "허용되지 않은 특수문자가 포함되어 있습니다.");
             return resultMap;
         }
-        
+
         RuleResult compositionRuleResult = PASSWORD_COMPOSITION_VALIDATOR.validate(new PasswordData(newPasswd));
         if (!compositionRuleResult.isValid()) {
             resultMap.put("successYn", false);
@@ -183,23 +218,43 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
      * 사용자 로그인 이력 조회
      */
     public List<MyPageVO.LoginHistoryVO> selectUserLoginHistory(MyPageVO.LoginHistoryVO searchVO) throws Exception {
+        if (searchVO == null) {
+            searchVO = new MyPageVO.LoginHistoryVO();
+        }
+        if (!applySessionUserId(searchVO)) {
+            return Collections.emptyList();
+        }
         return myPageDAO.selectUserLoginHistory(searchVO);
     }
 
     /**
      * 사용자 프로필 이미지 메타 조회 (세션 userId 적용)
+     * @param myPageVO
+     * @return
+     * @throws Exception
      */
     public MyPageVO selectUserProfileImg(MyPageVO myPageVO) throws Exception {
-        myPageVO.setUserId(SessionUtil.getUserId());
+        if (myPageVO == null) {
+            myPageVO = new MyPageVO();
+        }
+        myPageVO.setUserId(resolveSessionUserId());
         return myPageDAO.selectUserProfileImg(myPageVO);
     }
 
     /**
-     * 프로필 이미지 업로드용 presigned URL (키: profiles/{userId}/파일명, 서버 생성)
-     * @param myPageVO profileImgNm: 로컬 파일명
+     * 프로필 이미지 업로드용 presigned URL
      */
-    public Map<String, Object> prepareProfileImageUpload(MyPageVO myPageVO) throws Exception {
+    public Map<String, Object> prepareProfileImageUpload(MyPageVO myPageVO) {
         Map<String, Object> resultMap = new HashMap<>();
+
+        if (myPageVO == null) {
+            myPageVO = new MyPageVO();
+        }
+        if (!applySessionUserId(myPageVO)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            return resultMap;
+        }
 
         try {
             String safeName = sanitizeProfileFileName(extractBaseFileName(myPageVO.getProfileImgNm()));
@@ -219,7 +274,8 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
         }
 
         return resultMap;
@@ -228,8 +284,17 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
     /**
      * TB_USER 프로필 이미지 경로·이름 저장.
      */
-    public Map<String, Object> updateUserProfileImg(MyPageVO myPageVO) throws Exception {
+    public Map<String, Object> updateUserProfileImg(MyPageVO myPageVO) {
         Map<String, Object> resultMap = new HashMap<>();
+
+        if (myPageVO == null) {
+            myPageVO = new MyPageVO();
+        }
+        if (!applySessionUserId(myPageVO)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            return resultMap;
+        }
 
         try {
             if (!isValidProfileStoragePath(myPageVO.getUserId(), myPageVO.getProfileImgPath())) {
@@ -246,7 +311,8 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
                 resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
             }
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
         }
 
         return resultMap;
@@ -255,27 +321,73 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 프로필 이미지 미리보기 URL 조회
      */
-    public Map<String, Object> viewUserProfileImg(MyPageVO searchVO) throws Exception {
-        searchVO.setUserId(SessionUtil.getUserId());
-        MyPageVO row = myPageDAO.selectUserProfileImg(searchVO);
-        if (row == null || row.getProfileImgPath() == null || row.getProfileImgPath().trim().isEmpty()) {
-            Map<String, Object> notFound = new HashMap<>();
-            notFound.put("viewType", "DOWNLOAD");
-            notFound.put("reason", "FILE_NOT_FOUND");
-            notFound.put("fileName", "");
-            notFound.put("downloadUrl", "");
-            return notFound;
+    public Map<String, Object> viewUserProfileImg(MyPageVO searchVO) {
+        try {
+            if (searchVO == null) {
+                searchVO = new MyPageVO();
+            }
+            if (resolveSessionUserId() == null) {
+                return profilePreviewResponse("", "", "LOGIN_REQUIRED");
+            }
+            MyPageVO row = selectUserProfileImg(searchVO);
+            String path = (row == null || row.getProfileImgPath() == null) ? "" : row.getProfileImgPath().trim();
+            if (path.isEmpty()) {
+                return profilePreviewResponse("", "", "FILE_NOT_FOUND");
+            }
+            Map<String, Object> raw = fileService.createViewPresignedUrlForStorageObject(profileRowToFileVo(row, path));
+            return toProfilePreviewOnlyResponse(raw);
+        } catch (Exception e) {
+            return profilePreviewResponse("", "", "ERROR");
         }
-        FileVO fileVo = new FileVO();
-        String path = row.getProfileImgPath().trim();
-        fileVo.setFilePath(path);
-        String name = row.getProfileImgNm();
-        if (CommonUtil.isEmpty(name)) {
-            int slash = path.lastIndexOf('/');
-            name = slash >= 0 ? path.substring(slash + 1) : path;
+    }
+
+    /**
+     * TB_USER 조회 행을 {@link FileServiceImpl#createViewPresignedUrlForStorageObject} 입력용 {@link FileVO} 로 변환한다.
+     */
+    private static FileVO profileRowToFileVo(MyPageVO row, String pathTrimmed) {
+        FileVO f = new FileVO();
+        f.setFilePath(pathTrimmed);
+        String nm = row.getProfileImgNm();
+        if (CommonUtil.isEmpty(nm)) {
+            int s = pathTrimmed.lastIndexOf('/');
+            nm = s >= 0 ? pathTrimmed.substring(s + 1) : pathTrimmed;
         }
-        fileVo.setFileName(name);
-        return fileService.createViewPresignedUrlForStorageObject(fileVo);
+        f.setFileName(nm);
+        return f;
+    }
+
+    /**
+     * 마이페이지 프로필 미리보기 응답 맵. {@code reason} 이 null 이면 해당 키를 넣지 않는다.
+     */
+    private static Map<String, Object> profilePreviewResponse(String url, String fileName, Object reason) {
+        Map<String, Object> m = new HashMap<>(4);
+        m.put("viewType", "IMAGE");
+        m.put("url", url == null ? "" : url);
+        m.put("fileName", fileName == null ? "" : fileName);
+        if (reason != null) {
+            m.put("reason", reason);
+        }
+        return m;
+    }
+
+    /**
+     * {@link FileServiceImpl#createViewPresignedUrlForStorageObject} 결과를 마이페이지 미리보기 형식으로 변환한다.
+     * viewType 이 DOWNLOAD 인 경우 downloadUrl 은 쓰지 않고 url·reason 만 맞춘다.
+     */
+    private static Map<String, Object> toProfilePreviewOnlyResponse(Map<String, Object> raw) {
+        if (raw == null) {
+            return profilePreviewResponse("", "", "ERROR");
+        }
+        String vt = raw.get("viewType") != null ? raw.get("viewType").toString() : "";
+        String fn = raw.get("fileName") != null ? raw.get("fileName").toString() : "";
+        if ("IMAGE".equals(vt)) {
+            String u = raw.get("url") != null ? raw.get("url").toString() : "";
+            return profilePreviewResponse(u, fn, null);
+        }
+        if ("DOWNLOAD".equals(vt)) {
+            return profilePreviewResponse("", fn, raw.get("reason"));
+        }
+        return profilePreviewResponse("", fn, "UNSUPPORTED_VIEW_TYPE");
     }
 
     private static String extractBaseFileName(String raw) {
@@ -342,7 +454,6 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
                         .withMethod(HttpMethod.PUT)
                         .withExpiration(expiration);
         URL url = s3Client.generatePresignedUrl(request);
-
         Map<String, Object> result = new HashMap<>();
         result.put("uploadUrl", url.toString());
         result.put("filePath", key);
@@ -352,4 +463,5 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
     private String getBucketName() {
         return PropertyUtil.getProperty("ncp.storage.bucket");
     }
+
 }
