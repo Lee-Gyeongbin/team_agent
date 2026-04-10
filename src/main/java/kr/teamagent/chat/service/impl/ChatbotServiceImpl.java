@@ -130,7 +130,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
-        String apiUrl = this.getApiUrl(svcTy);
+        String apiUrl = this.resolveStreamingApiUrl(svcTy, attachmentFileIds);
         logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
 
         if (CommonUtil.isEmpty(apiUrl)) {
@@ -167,6 +167,32 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
         logger.info("getApiUrl called - svcTy: {}, resolved apiUrl: {}", svcTy, apiUrl);
         return apiUrl;
+    }
+
+    /**
+     * 스트리밍 호출용 URL. svcTy=C 이고 첨부 파일 ID가 있으면 file_query 전용 URL(Globals.chatbot.gpt.apiFileUrl) 사용.
+     */
+    private String resolveStreamingApiUrl(String svcTy, List<Long> attachmentFileIds) {
+        if ("C".equals(svcTy) && hasNonNullAttachmentId(attachmentFileIds)) {
+            String fileUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiFileUrl");
+            if (CommonUtil.isNotEmpty(fileUrl)) {
+                logger.info("resolveStreamingApiUrl: svcTy=C with attachments → file_query URL");
+                return fileUrl;
+            }
+        }
+        return getApiUrl(svcTy);
+    }
+
+    private static boolean hasNonNullAttachmentId(List<Long> attachmentFileIds) {
+        if (attachmentFileIds == null || attachmentFileIds.isEmpty()) {
+            return false;
+        }
+        for (Long id : attachmentFileIds) {
+            if (id != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -231,11 +257,33 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("query", query);
         params.put("user_id", userId != null ? userId : "");
         params.put("threadId", threadId != null ? threadId : "string");
-        params.put("dataset_id", refId != null ? refId : "");
+        // M(관리): 프론트가 다중 dataset을 콤마 연결 문자열로 전달 → AI API는 dataset_id를 문자열 배열로 기대
+        if ("M".equals(svcTy)) {
+            List<String> datasetIds = new ArrayList<>();
+            if (refId != null && !refId.trim().isEmpty()) {
+                for (String part : refId.split(",")) {
+                    String trimmed = part.trim();
+                    if (!trimmed.isEmpty()) {
+                        datasetIds.add(trimmed);
+                    }
+                }
+            }
+            params.put("dataset_id", datasetIds);
+        } else {
+            params.put("dataset_id", refId != null ? refId : "");
+        }
         params.put("room_id", threadId != null ? threadId : "string");
         params.put("model_id", modelId != null ? modelId : "");
         params.put("agent_id", agentId != null ? agentId : "");
-        params.put("attachment_file_ids", attachmentFileIds);
+        List<String> attachmentFileIdStrs = new ArrayList<>();
+        if (attachmentFileIds != null) {
+            for (Long id : attachmentFileIds) {
+                if (id != null) {
+                    attachmentFileIdStrs.add(String.valueOf(id));
+                }
+            }
+        }
+        params.put("attachment_file_ids", attachmentFileIdStrs);
         
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setUserId(userId);

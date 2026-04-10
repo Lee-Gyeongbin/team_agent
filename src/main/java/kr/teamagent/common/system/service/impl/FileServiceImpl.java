@@ -42,6 +42,14 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     private static final long VIEW_URL_EXPIRE_MILLIS = 30 * 60 * 1000L;
     private static final int DEFAULT_TXT_MAX_BYTES = 1024 * 1024;
     private static final int DEFAULT_CONVERT_TIMEOUT_SEC = 60;
+    /** 동일 converted 키에 대한 LibreOffice 변환을 직렬화 (병렬 변환·업로드 경쟁 완화) */
+    private static final int PDF_CONVERT_LOCK_STRIPES = 64;
+    private static final Object[] PDF_CONVERT_LOCKS = new Object[PDF_CONVERT_LOCK_STRIPES];
+    static {
+        for (int i = 0; i < PDF_CONVERT_LOCKS.length; i++) {
+            PDF_CONVERT_LOCKS[i] = new Object();
+        }
+    }
 
     @Autowired
     private FileDAO fileDAO;
@@ -311,33 +319,58 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         String convertedKey = sourceKey + ".view.pdf";
         String bucket = getBucketName();
 
-        if (s3Client.doesObjectExist(bucket, convertedKey)) {
-            return convertedKey;
+        Object stripe = pdfConvertLockFor(convertedKey);
+        synchronized (stripe) {
+            if (s3Client.doesObjectExist(bucket, convertedKey)) {
+                return convertedKey;
+            }
+
+            Path workDir = createViewWorkDir();
+            String inputFileName = createSafeInputFileName(doc, sourceKey);
+            Path inputPath = workDir.resolve(inputFileName);
+            Path outputPath = workDir.resolve(replaceExtensionToPdf(inputFileName));
+
+            try {
+                try (S3Object sourceObject = s3Client.getObject(bucket, sourceKey);
+                     InputStream in = sourceObject.getObjectContent()) {
+                    Files.copy(in, inputPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+
+                runLibreOfficeConvert(inputPath, workDir);
+
+                if (!Files.exists(outputPath)) {
+                    throw new IOException("Converted PDF file not found: " + outputPath);
+                }
+                assertValidPdfFile(outputPath);
+
+                s3Client.putObject(bucket, convertedKey, outputPath.toFile());
+                return convertedKey;
+            } finally {
+                deleteQuietly(inputPath);
+                deleteQuietly(outputPath);
+                deleteQuietly(workDir);
+            }
         }
+    }
 
-        Path workDir = createViewWorkDir();
-        String inputFileName = createSafeInputFileName(doc, sourceKey);
-        Path inputPath = workDir.resolve(inputFileName);
-        Path outputPath = workDir.resolve(replaceExtensionToPdf(inputFileName));
+    private static Object pdfConvertLockFor(String convertedKey) {
+        int h = convertedKey != null ? convertedKey.hashCode() : 0;
+        int idx = (h & 0x7fffffff) % PDF_CONVERT_LOCK_STRIPES;
+        return PDF_CONVERT_LOCKS[idx];
+    }
 
-        try {
-            try (S3Object sourceObject = s3Client.getObject(bucket, sourceKey);
-                 InputStream in = sourceObject.getObjectContent()) {
-                Files.copy(in, inputPath, StandardCopyOption.REPLACE_EXISTING);
+    /** LibreOffice 출력이 PDF 매직 넘버로 시작하는지 확인 (불완전 파일 업로드 방지) */
+    private void assertValidPdfFile(Path outputPath) throws IOException {
+        byte[] header = new byte[5];
+        try (InputStream in = Files.newInputStream(outputPath)) {
+            int n = in.read(header);
+            if (n < 5
+                    || header[0] != '%'
+                    || header[1] != 'P'
+                    || header[2] != 'D'
+                    || header[3] != 'F') {
+                throw new IOException("Converted output is not a valid PDF (missing %PDF header): " + outputPath);
             }
-
-            runLibreOfficeConvert(inputPath, workDir);
-
-            if (!Files.exists(outputPath)) {
-                throw new IOException("Converted PDF file not found: " + outputPath);
-            }
-
-            s3Client.putObject(bucket, convertedKey, outputPath.toFile());
-            return convertedKey;
-        } finally {
-            deleteQuietly(inputPath);
-            deleteQuietly(outputPath);
-            deleteQuietly(workDir);
         }
     }
 
