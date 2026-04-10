@@ -45,4 +45,9 @@ public class NoticeDAO extends EgovComAbstractDAO {
     public Integer selectNoticeListNormalCnt(NoticeVO searchVO) throws Exception {
         return selectOne("notice.selectNoticeListNormalCnt", searchVO);
     }
+
+    /** 공지 목록 최대 3건 — notice.selectNoticeList */
+    public List<NoticeVO> selectNoticeList(NoticeVO searchVO) throws Exception {
+        return selectList("notice.selectNoticeList", searchVO);
+    }
 }

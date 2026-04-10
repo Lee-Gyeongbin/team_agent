@@ -76,4 +76,13 @@ public class NoticeController extends BaseController<Object> {
     public ModelAndView delete(@RequestBody NoticeVO searchVO) throws Exception {
         return makeJsonDataByResultCnt(noticeService.deleteNotice(searchVO));
     }
+
+    /* 로그인 화면 최상단 공지 최대 3건 — notice.selectNoticeList, GET */
+    @RequestMapping(value = "/selectNoticeList.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectNoticeList(NoticeVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", noticeService.selectNoticeList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 }
