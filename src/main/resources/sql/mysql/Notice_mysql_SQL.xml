@@ -8,7 +8,6 @@
             NOTICE_ID
             , NOTICE_TYPE_CD
             , TITLE
-            , CONTENT
             , PIN_YN
             , PIN_DT
             , VIEW_CNT
