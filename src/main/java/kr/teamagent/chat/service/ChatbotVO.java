@@ -14,6 +14,8 @@ public class ChatbotVO extends CommonVO {
     private String apiPort;
     private String apiEndpoint;
     private String apiUrlCd;
+    private String iconId;
+    private String colorId;
 
     // CHAT 대화방 정보(TB_CHAT_ROOM)
     // 대화방 ID
