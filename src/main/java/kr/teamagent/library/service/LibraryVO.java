@@ -40,6 +40,10 @@ public class LibraryVO {
     private String qContent;
     private String rContent;
     private String ttsq;
+    private String agentId;
+    private String agentNm;
+    private String iconClassNm;
+    private String colorHex;
 
     private CategoryItem category;
 
