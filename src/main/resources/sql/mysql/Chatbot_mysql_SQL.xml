@@ -153,6 +153,7 @@
             SATIS_YN,
             TTSQ,
             TABLE_DATA,
+            WEB_GROUNDING_JSON,
             MAIN_DOC_FILE_ID,
             MAIN_PAGE,
             REASK_CNT,
@@ -173,6 +174,7 @@
             #{satisYn},
             #{sql},
             #{tableData},
+            #{webGroundingJson},
             #{mainDocFileId},
             #{mainPage},
             #{reaskCnt},
@@ -225,6 +227,7 @@
             , A.SATIS_DT 
             , A.SATIS_CD
             , A.TABLE_DATA 
+            , A.WEB_GROUNDING_JSON
             , A.TTSQ
             , A.REASK_CNT
             , A.CREATE_USER_ID
@@ -376,6 +379,7 @@
             , A.R_CONTENT
             , A.TTSQ
             , A.TABLE_DATA
+            , A.WEB_GROUNDING_JSON
             , A.CREATE_USER_ID  AS USER_ID
             , A.CREATE_DT
         FROM TB_CHAT_LOG A

@@ -324,8 +324,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // JSON body 생성
             com.google.gson.Gson gson = new com.google.gson.Gson();
             String jsonBody = gson.toJson(params);
-            logger.info("AI API request ready - url: {}, svcTy: {}, userId: {}, refId: {}, modelId: {}, threadId: {}, body: {}",
-                    apiUrl, svcTy, userId, refId, modelId, agentId, threadId, jsonBody);
+            logger.info("AI API request ready - url: {}, svcTy: {}, dataset_id:{}, userId: {}, refId: {}, modelId: {}, threadId: {}, body: {}",
+                    apiUrl, svcTy, params.get("dataset_id"), userId, refId, modelId, agentId, threadId, jsonBody);
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
             
             // Request Builder
@@ -415,6 +415,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * WebSocket 방식으로 스트리밍 응답을 처리하여 클라이언트로 전달
      * SSE 형식: event: answer_delta, data: {"text": "..."}
+     * event: answer_source, data: {"items":[{"url":"...","title":"..."}, ...]} — 항목별 chunk 전달
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
     private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
@@ -437,6 +438,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String tableData = "";
         String sql = "";
         List<ChatRefItem> chatRefItems = new ArrayList<>();
+        /** answer_source 스트림에서 누적 — done.data.items 가 있으면 그쪽이 최종 우선 */
+        String webGroundingJson = "";
 
         try {
             while ((line = reader.readLine()) != null) {
@@ -458,7 +461,28 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         String text = (String) data.get("text");
                         if (text != null && text.length() > 0) {
                             accumulatedContent.append(text);
-                            callback.onChunk(text, accumulatedContent.toString());
+                            callback.onChunk(text, accumulatedContent.toString(), null);
+                        }
+                        continue;
+                    }
+
+                    if ("answer_source".equals(currentEvent)) {
+                        Object itemsObj = data.get("items");
+                        if (itemsObj instanceof JSONArray) {
+                            JSONArray items = (JSONArray) itemsObj;
+                            JSONObject fullPayload = new JSONObject();
+                            fullPayload.put("items", items);
+                            webGroundingJson = fullPayload.toJSONString();
+                            JSONArray accumulatedItems = new JSONArray();
+                            for (Object item : items) {
+                                accumulatedItems.add(item);
+                                JSONObject accPayload = new JSONObject();
+                                accPayload.put("items", accumulatedItems);
+                                String itemJson = item instanceof JSONObject
+                                        ? ((JSONObject) item).toJSONString()
+                                        : String.valueOf(item);
+                                callback.onChunk(itemJson, accPayload.toJSONString(), "answer_source");
+                            }
                         }
                         continue;
                     }
@@ -467,7 +491,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         String answer = getAnswerText(data);
                         if (CommonUtil.isNotEmpty(answer)) {
                             if (accumulatedContent.length() == 0) {
-                                callback.onChunk(answer, answer);
+                                callback.onChunk(answer, answer, null);
                             }
                             accumulatedContent = new StringBuilder(answer);
                         }
@@ -480,6 +504,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         sql = getString(data.get("sql"));
 
                         chatRefItems = extractChatRefItems(data);
+
+                        Object doneItems = data.get("items");
+                        if (doneItems instanceof JSONArray && ((JSONArray) doneItems).size() > 0) {
+                            JSONObject fullPayload = new JSONObject();
+                            fullPayload.put("items", (JSONArray) doneItems);
+                            webGroundingJson = fullPayload.toJSONString();
+                        }
 
                         break;
                     }
@@ -509,7 +540,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 sql,
                                 mainDocFileId,
                                 mainPage,
-                                chatRefItems);
+                                chatRefItems,
+                                webGroundingJson);
 
                         this.updateChatRoomLastChatDt(responseThreadId);
 
@@ -704,6 +736,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /**
      * TB_CHAT_LOG 저장 및 svcTy == M 이면 TB_CHAT_REF(chatRefItems) 반복 저장.
+     * webGroundingJson: answer_source 스트림 또는 done.data.items — JSON {@code {"items":[{url,title},...]}}.
      */
     private String doInsertAiLog(
             String responseThreadId,
@@ -720,7 +753,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             String sql,
             String mainDocFileId,
             String mainPage,
-            List<ChatRefItem> chatRefItems) throws Exception {
+            List<ChatRefItem> chatRefItems,
+            String webGroundingJson) throws Exception {
 
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setRoomId(Long.parseLong(responseThreadId));
@@ -735,6 +769,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setUserId(userId);
         chatbotVO.setTableData(CommonUtil.isNotEmpty(tableData) ? tableData : null);
         chatbotVO.setSql(CommonUtil.isNotEmpty(sql) ? sql : null);
+        chatbotVO.setWebGroundingJson(CommonUtil.isNotEmpty(webGroundingJson) ? webGroundingJson : null);
         chatbotVO.setMainDocFileId(CommonUtil.isNotEmpty(mainDocFileId) ? mainDocFileId : null);
         chatbotVO.setMainPage(CommonUtil.isNotEmpty(mainPage) ? mainPage : null);
 

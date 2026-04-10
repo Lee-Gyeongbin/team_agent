@@ -264,13 +264,17 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
          */
         ChatbotStreamingCallback callback = new ChatbotStreamingCallback() {
             @Override
-            public void onChunk(String content, String accumulated) {
+            public void onChunk(String content, String accumulated, String chunkEvent) {
                 // chunk 메시지: content는 새로 추가된 글자만 전송 (GPT처럼 한 글자씩 실시간 표시)
+                // chunkEvent가 있으면(예: answer_source) 구조화 청크 — 클라이언트가 본문과 분리 처리
                 JSONObject message = new JSONObject();
                 message.put("type", "chunk");
-                message.put("content", content); // 새로 추가된 글자만 전송 (누적된 전체가 아님)
-                String messageStr = message.toJSONString();
-                sendMessage(session, messageStr);
+                message.put("content", content);
+                if (chunkEvent != null && !chunkEvent.isEmpty()) {
+                    message.put("chunkEvent", chunkEvent);
+                    message.put("accumulated", accumulated);
+                }
+                sendMessage(session, message.toJSONString());
             }
             
             @Override
@@ -351,7 +355,10 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
      * 스트리밍 콜백 인터페이스
      */
     public interface ChatbotStreamingCallback {
-        void onChunk(String content, String accumulated);
+        /**
+         * @param chunkEvent null 또는 빈 문자열이면 답변 텍스트 델타(answer_delta). "answer_source" 등이면 구조화 청크.
+         */
+        void onChunk(String content, String accumulated, String chunkEvent);
         void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData);
         void onError(String error);
     }
