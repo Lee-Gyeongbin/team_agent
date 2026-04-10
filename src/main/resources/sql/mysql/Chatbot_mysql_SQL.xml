@@ -17,6 +17,8 @@
             , A.USE_YN			AS USE_YN
             , A.ICON_ID         AS ICON_ID
             , A.COLOR_ID        AS COLOR_ID
+            , D.ICON_CLASS_NM   AS ICON_CLASS_NM
+            , E.COLOR_HEX       AS COLOR_HEX
         FROM TB_AGT A
         LEFT JOIN TB_CODE B 
             ON A.SVC_TY = B.CODE_ID 
@@ -25,6 +27,10 @@
             ON C.CODE_GRP_ID = 'AA000001'
             AND C.USE_YN = 'Y'
             AND C.CODE_ID = A.API_URL_CD 
+        LEFT JOIN TB_ICON D
+            ON A.ICON_ID = D.ICON_ID
+        LEFT JOIN TB_COLOR E
+            ON A.COLOR_ID = E.COLOR_ID
         WHERE 1=1
             AND A.USE_YN = 'Y'
         ORDER BY A.SORT_ORD, A.AGENT_ID
