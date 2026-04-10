@@ -103,12 +103,23 @@
 
     <select id="selectTokenUsageList" resultMap="tokenUsageResult">
         /* 대시보드 토큰 사용량 목록 dashboard.selectTokenUsageList */
-        WITH RECURSIVE MONTHS AS (
-            SELECT DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 3 MONTH), '%Y-%m-01') AS YM
+        WITH RECURSIVE BASE_DT AS (
+            SELECT COALESCE(
+                CASE
+                    WHEN NULLIF(#{ym}, '') IS NULL THEN NULL
+                    ELSE STR_TO_DATE(CONCAT(#{ym}, '-01'), '%Y-%m-%d')
+                END,
+                CURDATE()
+            ) AS DT
+        )
+        , MONTHS AS (
+            SELECT DATE_FORMAT(DATE_SUB(B.DT, INTERVAL 3 MONTH), '%Y-%m-01') AS YM
+            FROM BASE_DT B
                 UNION ALL
             SELECT DATE_FORMAT(DATE_ADD(YM, INTERVAL 1 MONTH), '%Y-%m-01')
             FROM MONTHS
-            WHERE YM <![CDATA[<]]> DATE_FORMAT(CURDATE(), '%Y-%m-01')
+                CROSS JOIN BASE_DT B
+            WHERE YM <![CDATA[<]]> DATE_FORMAT(B.DT, '%Y-%m-01')
         )
         , TOKEN_LMT AS (
             SELECT
@@ -124,8 +135,9 @@
                 DATE_FORMAT(A.CREATE_DT, '%Y-%m-01') AS YM
                 , SUM(IFNULL(A.IN_TOKENS, 0) + IFNULL(A.OUT_TOKENS, 0)) AS TOKEN_USAGE
             FROM TB_CHAT_LOG A
-            WHERE A.CREATE_DT <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 3 MONTH), '%Y-%m-01')
-                AND A.CREATE_DT <![CDATA[<]]> DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-01')
+                CROSS JOIN BASE_DT B
+            WHERE A.CREATE_DT <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(B.DT, INTERVAL 3 MONTH), '%Y-%m-01')
+                AND A.CREATE_DT <![CDATA[<]]> DATE_FORMAT(DATE_ADD(B.DT, INTERVAL 1 MONTH), '%Y-%m-01')
             GROUP BY DATE_FORMAT(A.CREATE_DT, '%Y-%m-01')
         )
         SELECT

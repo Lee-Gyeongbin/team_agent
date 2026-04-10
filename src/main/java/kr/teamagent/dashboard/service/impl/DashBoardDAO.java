@@ -1,5 +1,6 @@
 package kr.teamagent.dashboard.service.impl;
 
+import java.util.HashMap;
 import java.util.List;
 
 import org.springframework.stereotype.Repository;
@@ -34,8 +35,10 @@ public class DashBoardDAO extends EgovComAbstractDAO {
     /**
      * 대시보드 토큰 사용량 목록 조회
      */
-    public List<DashBoardVO.TokenUsage> selectTokenUsageList() throws Exception {
-        return selectList("dashboard.selectTokenUsageList");
+    public List<DashBoardVO.TokenUsage> selectTokenUsageList(String ym) throws Exception {
+        HashMap<String, Object> paramMap = new HashMap<>();
+        paramMap.put("ym", ym);
+        return selectList("dashboard.selectTokenUsageList", paramMap);
     }
 
     /**

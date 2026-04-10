@@ -38,8 +38,8 @@ public class DashBoardServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 대시보드 토큰 사용량 조회
      */
-    public List<DashBoardVO.TokenUsage> selectTokenUsage() throws Exception {
-        return dashBoardDAO.selectTokenUsageList();
+    public List<DashBoardVO.TokenUsage> selectTokenUsage(String ym) throws Exception {
+        return dashBoardDAO.selectTokenUsageList(ym);
     }
 
     /**
