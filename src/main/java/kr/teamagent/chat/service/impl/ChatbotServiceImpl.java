@@ -1069,7 +1069,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         StringBuilder prompt = new StringBuilder();
-        prompt.append("다음 대화를 요약한 지식 카드에 어울리는 썸네일 이미지를 만들어줘. 텍스트는 포함하지말고 이미지만 생성해주고 썸네일 이미지답게 단순한 이미지로 생성해줘. 이미지 크기는 270px x 80px 정도로 맞춰줘.");
+        prompt.append("다음 대화를 요약한 지식 카드의 썸네일 이미지를 생성해줘.\n")
+            .append("[이미지 스타일 요구사항]\n")
+            .append("- 스타일: 플랫 디자인(Flat Design) 또는 미니멀 비즈니스 스타일\n")
+            .append("- 색상: 채도가 낮은 차분한 톤 (네이비, 슬레이트 블루, 차콜 그레이, 청록색 계열 권장)\n")
+            .append("- 분위기: 전문적이고 신뢰감 있는 느낌, 기업용 인포그래픽 스타일\n")
+            .append("- 구성: 대화 주제를 상징하는 단순한 아이콘 또는 기하학적 도형 1~2개 중심\n")
+            .append("- 텍스트 없음 (문자, 숫자, 라벨 일절 포함 금지)\n")
+            .append("- 배경: 단색 또는 그라디언트 (심플하게)\n")
+            .append("- 이미지 크기: 270px x 80px (가로형 와이드 배너 비율)");
         if (CommonUtil.isNotEmpty(qContent)) {
             prompt.append("질문: ").append(truncateTitle(qContent, 200)).append(' ');
         }
