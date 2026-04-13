@@ -28,6 +28,7 @@ import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.prompt.service.impl.PromptServiceImpl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -52,6 +53,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     FileServiceImpl fileService;
+
+    @Autowired
+    PromptServiceImpl promptService;
 
     /**
      * 채팅 에이전트 목록 조회
@@ -1063,29 +1067,21 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * AI 이미지 API를 호출해 지식 카드 썸네일용 base64 이미지 문자열을 반환한다.
      * 실패 시 null.
      */
-    private String generateSummaryThumbImg(String qContent, String rContent) {
+    private String generateSummaryThumbImg(String qContent, String rContent) throws Exception {
         if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
             return null;
         }
 
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("다음 대화를 요약한 지식 카드의 썸네일 이미지를 생성해줘.\n")
-            .append("[이미지 스타일 요구사항]\n")
-            .append("- 스타일: 플랫 디자인(Flat Design) 또는 미니멀 비즈니스 스타일\n")
-            .append("- 색상: 채도가 낮은 차분한 톤 (네이비, 슬레이트 블루, 차콜 그레이, 청록색 계열 권장)\n")
-            .append("- 분위기: 전문적이고 신뢰감 있는 느낌, 기업용 인포그래픽 스타일\n")
-            .append("- 구성: 대화 주제를 상징하는 단순한 아이콘 또는 기하학적 도형 1~2개 중심\n")
-            .append("- 텍스트 없음 (문자, 숫자, 라벨 일절 포함 금지)\n")
-            .append("- 배경: 단색 또는 그라디언트 (심플하게)\n")
-            .append("- 이미지 크기: 270px x 80px (가로형 와이드 배너 비율)");
+        String promptContent = promptService.getPrompt("PI000018", "Y"); // 썸네일 이미지생성 프롬프트트
+
         if (CommonUtil.isNotEmpty(qContent)) {
-            prompt.append("질문: ").append(truncateTitle(qContent, 200)).append(' ');
+            promptContent += "\n질문: " + truncateTitle(qContent, 200) + ' ';
         }
         if (CommonUtil.isNotEmpty(rContent)) {
-            prompt.append("답변: ").append(truncateTitle(rContent, 500));
+            promptContent += "\n답변: " + truncateTitle(rContent, 500);
         }
 
-        return callAiImageApi(prompt.toString());
+        return callAiImageApi(promptContent);
     }
 
     /**
@@ -1101,6 +1097,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         if (CommonUtil.isEmpty(query)) {
             return null;
         }
+
+        logger.info("AI 썸네일 이미지 호출 시작 - query: {}", query);
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
