@@ -1,7 +1,6 @@
 package kr.teamagent.dashboard.web;
 
 import java.util.HashMap;
-import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
@@ -38,11 +37,11 @@ public class DashBoardController extends BaseController {
      * 질의 비율
      * @return { data: DashBoardVO.QueryRatio }
      */
-    @RequestMapping(value = "/query-ratio.do")
+    @RequestMapping(value = "/query-ratio.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView queryRatio() throws Exception {
+    public ModelAndView queryRatio(@RequestBody DashBoardVO.QueryRatio searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", dashBoardService.selectQueryRatio());
+        resultMap.put("data", dashBoardService.selectQueryRatio(searchVO.getYm()));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -64,17 +63,10 @@ public class DashBoardController extends BaseController {
      */
     @RequestMapping(value = "/token-usage.do", method = RequestMethod.POST)
     @ResponseBody
-    public Map<String, Object> tokenUsage(@RequestBody DashBoardVO.TokenUsage searchVO) throws Exception {
-        Map<String, Object> resultMap = new HashMap<>();
-        try {
-            resultMap.put("successYn", true);
-            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
-            resultMap.put("dataList", dashBoardService.selectTokenUsage(searchVO.getYm()));
-        } catch (Exception e) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
-        }
-        return resultMap;
+    public ModelAndView tokenUsage(@RequestBody DashBoardVO.TokenUsage searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", dashBoardService.selectTokenUsage(searchVO.getYm()));
+        return new ModelAndView("jsonView", resultMap);
     }
 
     /**

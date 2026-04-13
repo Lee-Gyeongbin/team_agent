@@ -20,6 +20,7 @@ public class DashBoardVO {
     @Getter
     @Setter
     public static class QueryRatio {
+        private String ym;
         private Double llm;
         private Double rag;
         private Double textToSql;

@@ -24,8 +24,8 @@ public class DashBoardServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 대시보드 질의 비율 조회
      */
-    public DashBoardVO.QueryRatio selectQueryRatio() throws Exception {
-        return dashBoardDAO.selectQueryRatio();
+    public DashBoardVO.QueryRatio selectQueryRatio(String ym) throws Exception {
+        return dashBoardDAO.selectQueryRatio(ym);
     }
 
     /**

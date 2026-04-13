@@ -21,8 +21,10 @@ public class DashBoardDAO extends EgovComAbstractDAO {
     /**
      * 대시보드 질의 비율 조회
      */
-    public DashBoardVO.QueryRatio selectQueryRatio() throws Exception {
-        return selectOne("dashboard.selectQueryRatio");
+    public DashBoardVO.QueryRatio selectQueryRatio(String ym) throws Exception {
+        HashMap<String, Object> paramMap = new HashMap<>();
+        paramMap.put("ym", ym);
+        return selectOne("dashboard.selectQueryRatio", paramMap);
     }
 
     /**
