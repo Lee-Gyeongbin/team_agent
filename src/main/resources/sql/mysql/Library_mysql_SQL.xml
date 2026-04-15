@@ -97,15 +97,9 @@
     </select>
 
     <select id="selectDocList" parameterMap="cardItem" resultMap="docItemResult">
-        /* 참조 매뉴얼(문서) 목록 조회 library.selectDocList — DOC_ID는 TB_DOC_FILE_MAP 기준 */
+        /* 참조 매뉴얼(문서) 목록 조회 library.selectDocList */
         SELECT
-            (
-                SELECT MIN(M.DOC_ID)
-                FROM TB_DOC_FILE_MAP M
-                WHERE M.DOC_FILE_ID = B.DOC_FILE_ID
-                  AND M.USE_YN = 'Y'
-            ) AS DOC_ID
-            , B.DOC_FILE_ID
+            B.DOC_FILE_ID
 			, B.FILE_NAME
             , B.FILE_PATH
             , B.FILE_SIZE

@@ -29,12 +29,8 @@ public class RepositoryVO {
     private String depth;
     /** 총 문서 개수 */
     private Integer totalCount;
-    private String dsNmList;
 
-    /** TB_DOC */
-    /** RAG 지식원천 문서 마스터 */
-    /** 문서 ID */
-    private String docId;
+    /** TB_DOC_FILE */
     private String docFileId;
     /** 문서 파일 개수 */
     private String fileCnt;
@@ -44,8 +40,8 @@ public class RepositoryVO {
     private String author;
     /** 보안 레벨 */
     private String secLvl;
-    /** 문서 내용 */
-    private String content;
+    /** 문서 설명 */
+    private String docDesc;
     /** 파일 이름 */
     private String fileName;
     /** 파일 경로 */
@@ -58,8 +54,8 @@ public class RepositoryVO {
     private Integer fileOrd;
     /** 키워드 */
     private String keywords;
-    /** 참조 URL */
-    private String refUrl;
+    /** 문서 출처 URL */
+    private String docSrc;
     /** 사용 여부 */
     private String useYn;
     /** 생성 일시 */
@@ -70,47 +66,17 @@ public class RepositoryVO {
     private String modifyDt;
     /** 수정자 ID */
     private String modifyUserId;
-    /** 데이터셋 문서 개수 */
-    private String dsDocCnt;
+    /** 구축된 데이터셋 포함 개수 */
+    private Integer activeDsCnt;
+    /** 연결 데이터셋명 */
+    private String dsNm;
 
     /** 문서 파일 ID 목록 */
-    private String docFileIdList;
-
-    private List<RepositoryVO> docIdList;
-
-    /**
-     * 문서 저장 시 NCP 업로드 완료 후 파일 메타 배열 (JSON 키: "file")
-     */
-    private List<RepositoryFileItem> file;
-
-    /**
-     * 문서 수정 시 삭제할 파일 ID 배열 (JSON 키: "deleteFileIds")
-     */
-    private List<String> deleteFileIds;
-
-    /**
-     * (레거시) 파일 풀 연결용 ID 목록 — 저장 시 첨부 매핑은 orderedDocFileIds 만 사용한다.
-     */
-    private List<String> linkDocFileIds;
-
-    /**
-     * 문서 첨부 최종 목록 (DOC_FILE_ID 배열, 순서=FILE_ORD).
-     * JSON에 키가 있으면(빈 배열 포함) TB_DOC_FILE_MAP을 해당 목록으로 전체 교체한다. null이면 매핑·AI 동기화를 건너뛴다.
-     */
-    private List<String> orderedDocFileIds;
+    private List<String> docFileIdList;
 
     /** 파일 라이브러리 목록 페이징 (선택) */
     private Integer page;
     private Integer pageSize;
     /** MyBatis LIMIT offset — 서비스에서 page/pageSize로 계산 */
     private Integer startIndex;
-
-    @Getter
-    @Setter
-    public static class RepositoryFileItem {
-        private String fileName;
-        private String filePath;
-        private String fileSize;
-        private String fileType;
-    }
 }

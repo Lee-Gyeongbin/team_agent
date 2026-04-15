@@ -204,7 +204,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
                 String convertedPdfKey = ensureConvertedPdfObject(doc);
                 return createPdfViewResponse(doc, convertedPdfKey);
             } catch (Exception e) {
-                log.warn("File convert failed. docId={}, docFileId={}, ext={}", doc.getDocId(), doc.getDocFileId(), ext, e);
+                log.warn("File convert failed. docFileId={}, ext={}", doc.getDocFileId(), ext, e);
                 return createDownloadFallbackResponse(doc, "CONVERT_FAILED");
             }
         }

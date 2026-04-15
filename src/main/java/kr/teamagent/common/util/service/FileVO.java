@@ -10,8 +10,6 @@ import lombok.Setter;
 public class FileVO extends CommonVO {
     private static final long serialVersionUID = 1L;
 
-    private String docId;
-
     /** TB_DOC_FILE.PK */
     private String docFileId;
     /** 선택 삭제용 TB_DOC_FILE.PK 목록 */
@@ -19,8 +17,6 @@ public class FileVO extends CommonVO {
     /** TB_DOC_FILE.FILE_ORD */
     private Integer fileOrd;
 
-    /** NCP 객체 삭제 등, docId 다건 요청용 */
-    private List<String> docIdList;
     private String docTitle;
     private String categoryId;
     private String author;

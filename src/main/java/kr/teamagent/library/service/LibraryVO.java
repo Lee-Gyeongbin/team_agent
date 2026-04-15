@@ -116,11 +116,10 @@ public class LibraryVO {
         private String tableData;
     }
 
-    /** 참조 매뉴얼(문서) 목록 조회 API 응답 — TB_DOC 조회 결과 [TB_DOC] */
+    /** 참조 매뉴얼(문서) 목록 조회 API 응답 — TB_DOC_FILE 조회 결과 */
     @Getter
     @Setter
     public static class DocItem {
-        private String docId;
         private String docFileId;
         private String fileName;
         private String filePath;
