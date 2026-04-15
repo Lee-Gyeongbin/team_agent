@@ -99,8 +99,7 @@
     <select id="selectDocList" parameterMap="cardItem" resultMap="docItemResult">
         /* 참조 매뉴얼(문서) 목록 조회 library.selectDocList */
         SELECT
-            B.DOC_ID 
-            , B.DOC_FILE_ID 
+            B.DOC_FILE_ID
 			, B.FILE_NAME
             , B.FILE_PATH
             , B.FILE_SIZE
@@ -180,9 +179,19 @@
             , B.Q_CONTENT
             , B.R_CONTENT
             , B.TTSQ
+            , D.AGENT_ID 
+            , D.AGENT_NM 
+            , E.ICON_CLASS_NM 
+            , F.COLOR_HEX
         FROM TB_KNOW_CARD A
         LEFT JOIN TB_CHAT_LOG B
                ON A.LOG_ID = B.LOG_ID
+        LEFT JOIN TB_AGT D
+               ON B.AGENT_ID = D.AGENT_ID
+        LEFT JOIN TB_ICON E
+               ON D.ICON_ID = E.ICON_ID 
+        LEFT JOIN TB_COLOR F
+               ON D.COLOR_ID = F.COLOR_ID
         WHERE 1=1
             AND A.ARCHIVE_YN = 'Y'
             AND A.USE_YN = 'Y'
@@ -212,9 +221,19 @@
             , B.Q_CONTENT
             , B.R_CONTENT
             , B.TTSQ
+            , D.AGENT_ID 
+            , D.AGENT_NM 
+            , E.ICON_CLASS_NM 
+            , F.COLOR_HEX
         FROM TB_KNOW_CARD A
         LEFT JOIN TB_CHAT_LOG B
                ON A.LOG_ID = B.LOG_ID
+        LEFT JOIN TB_AGT D
+               ON B.AGENT_ID = D.AGENT_ID
+        LEFT JOIN TB_ICON E
+               ON D.ICON_ID = E.ICON_ID 
+        LEFT JOIN TB_COLOR F
+               ON D.COLOR_ID = F.COLOR_ID
         WHERE 1=1
             AND A.USE_YN = 'N'
             AND A.USER_ID = #{userId}

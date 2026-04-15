@@ -73,8 +73,6 @@ public class DatasetVO {
     private Integer totalUrlCount;
     
     /** TB_DS_DOC */
-    /** 문서 ID */
-    private String docId;
     private String docFileId;
     private String fileName;
     private String filePath;
@@ -92,8 +90,9 @@ public class DatasetVO {
     private String urlName;
     /** URL 주소 */
     private String urlAddr;
-    /** 문서 ID 목록 */
-    private List<DocIdItem> docIdList;
+    /** 문서 파일 ID 목록 */
+    @JsonAlias({ "docIdList" })
+    private List<DocIdItem> docFileIdList;
     /** URL ID 목록 */
     private List<UrlIdItem> urlIdList;
 
@@ -123,13 +122,13 @@ public class DatasetVO {
 
     /**
      * TB_DS_DOC 매핑용 DTO
-     * - 프론트에서 { "docId": "...", "datasetId": "..." } 형태로 내려오는 경우를 지원
+     * - 프론트에서 { "docFileId": "...", "datasetId": "..." } 형태로 내려옴
      */
     @Getter
     @Setter
     public static class DocIdItem {
         private String datasetId;
-        private String docId;
+        private String docFileId;
     }
 
     /**

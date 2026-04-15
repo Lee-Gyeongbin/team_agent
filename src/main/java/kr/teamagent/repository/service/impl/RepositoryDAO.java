@@ -19,132 +19,50 @@ public class RepositoryDAO extends EgovComAbstractDAO {
         return selectList("repository.selectCategoryList", searchVO);
     }
 
-    /**
-     * RAG 지식원천 문서 목록 조회
-     * @return
-     * @throws Exception
-     */
-    public List<RepositoryVO> selectDocRepositoryList(RepositoryVO searchVO) throws Exception {
-        return selectList("repository.selectDocRepositoryList", searchVO);
-    }
-    
-    /**
-     * RAG 지식원천 문서 목록 조회
-     * @return
-     * @throws Exception
-     */
-    public Integer selectDocRepositoryListCnt(RepositoryVO searchVO) throws Exception {
-        return selectOne("repository.selectDocRepositoryListCnt", searchVO);
+    public Integer selectDocFileLibraryListCnt(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectDocFileLibraryListCnt", searchVO);
     }
 
     /**
-     * 문서 상세 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 파일 라이브러리 목록
      */
-    public RepositoryVO selectDetailByDocId(RepositoryVO searchVO) throws Exception {
-        return selectOne("repository.selectDetailByDocId", searchVO);
+    public List<RepositoryVO> selectDocFileLibraryList(RepositoryVO searchVO) throws Exception {
+        return selectList("repository.selectDocFileLibraryList", searchVO);
     }
 
     /**
-     * 문서별 파일 목록 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 파일 메타 INSERT
      */
-    public List<RepositoryVO> selectDocFileListByDocId(RepositoryVO searchVO) throws Exception {
-        return selectList("repository.selectDocFileListByDocId", searchVO);
+    public int insertDocFilePool(RepositoryVO searchVO) throws Exception {
+        return insert("repository.insertDocFilePool", searchVO);
     }
 
     /**
-     * 문서 존재 여부 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 파일 메타데이터 수정
      */
-    public Integer selectDocExistCnt(RepositoryVO searchVO) throws Exception {
-        return selectOne("repository.selectDocExistCnt", searchVO);
+    public int updateDocFilePoolMeta(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateDocFilePoolMeta", searchVO);
     }
 
     /**
-     * 문서 삭제
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 파일 라이브러리 행 삭제
      */
-    public int deleteDocument(RepositoryVO searchVO) throws Exception {
-        return delete("repository.deleteDocument", searchVO);
+    public int deleteDocFilePoolById(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteDocFilePoolById", searchVO);
     }
 
     /**
-     * 문서 파일 삭제
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 파일 단건 조회
      */
-    public int deleteDocumentFile(RepositoryVO searchVO) throws Exception {
-        return delete("repository.deleteDocumentFile", searchVO);
-    }
-    
-    /**
-     * 문서 저장
-     * @param searchVO
-     * @return
-     * @throws Exception
-     */
-    public int saveDocument(RepositoryVO searchVO) throws Exception {
-        return insert("repository.saveDocument", searchVO);
+    public RepositoryVO selectDocFilePoolById(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectDocFilePoolById", searchVO);
     }
 
     /**
-     * 문서 수정
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 구축된 데이터셋(005)에 포함된 파일 건수
      */
-    public int updateDocument(RepositoryVO searchVO) throws Exception {
-        return update("repository.updateDocument", searchVO);
-    }
-
-    /**
-     * 문서 파일 저장
-     * @param searchVO
-     * @return
-     * @throws Exception
-     */
-    public int saveDocumentFile(RepositoryVO searchVO) throws Exception {
-        return insert("repository.saveDocumentFile", searchVO);
-    }
-
-    /**
-     * 문서 파일 삭제
-     * @param searchVO
-     * @return
-     * @throws Exception
-     */
-    public int deleteDocumentFileByDocId(RepositoryVO searchVO) throws Exception {
-        return delete("repository.deleteDocumentFileByDocId", searchVO);
-    }
-
-    /**
-     * 문서 파일 선택 삭제
-     * @param searchVO
-     * @return
-     * @throws Exception
-     */
-    public int deleteDocumentFileByIds(RepositoryVO searchVO) throws Exception {
-        return delete("repository.deleteDocumentFileByIds", searchVO);
-    }
-
-    /**
-     * 문서 파일 최대 순번 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
-     */
-    public Integer selectMaxFileOrdByDocId(RepositoryVO searchVO) throws Exception {
-        return selectOne("repository.selectMaxFileOrdByDocId", searchVO);
+    public Integer selectBuiltDatasetCountByDocFileId(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectBuiltDatasetCountByDocFileId", searchVO);
     }
 
     /**
@@ -165,16 +83,6 @@ public class RepositoryDAO extends EgovComAbstractDAO {
      */
     public int renameCategory(RepositoryVO searchVO) throws Exception {
         return update("repository.renameCategory", searchVO);
-    }
-
-    /**
-     * 문서 존재 여부 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
-     */
-    public Integer selectDocumentExistCnt(RepositoryVO searchVO) throws Exception {
-        return selectOne("repository.selectDocumentExistCnt", searchVO);
     }
 
     /**

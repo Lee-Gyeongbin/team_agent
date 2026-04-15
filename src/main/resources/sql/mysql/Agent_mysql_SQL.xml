@@ -104,7 +104,7 @@
             LEFT JOIN (
                 SELECT
                     DATASET_ID
-                    , COUNT(DOC_ID) AS DOC_COUNT
+                    , COUNT(DOC_FILE_ID) AS DOC_COUNT
                 FROM TB_DS_DOC
                 GROUP BY DATASET_ID
             ) DOC

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
+import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.repository.service.RepositoryVO;
 import kr.teamagent.repository.service.impl.RepositoryServiceImpl;
@@ -36,107 +37,101 @@ public class RepositoryController extends BaseController {
     }
 
     /**
-     * RAG 지식원천 문서 목록 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 파일 관리 탭 — 파일 목록
      */
-    @RequestMapping(value = "/selectDocRepositoryList.do")
+    @RequestMapping(value = "/selectDocFileLibraryList.do")
     @ResponseBody
-    public ModelAndView selectDocRepositoryList(@RequestBody RepositoryVO searchVO) throws Exception {
+    public ModelAndView selectDocFileLibraryList(@RequestBody RepositoryVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", repositoryService.selectDocRepositoryList(searchVO));
-        resultMap.put("totalCnt", repositoryService.selectDocRepositoryListCnt(searchVO));
+        resultMap.put("dataList", repositoryService.selectDocFileLibraryList(searchVO));
+        resultMap.put("totalCnt", repositoryService.selectDocFileLibraryListCnt(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
     /**
-     * 문서 상세 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 문서 등록 시와 동일 — NCP PUT presigned URL 발급 (프론트가 /repository 경로로 호출할 때)
      */
-    @RequestMapping(value = "/selectDocRepositoryDetail.do")
+    @RequestMapping(value = "/saveDocumentFile.do")
     @ResponseBody
-    public ModelAndView selectDetailByDocId(@RequestBody RepositoryVO searchVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", repositoryService.selectDetailByDocId(searchVO));
-        resultMap.put("fileList", repositoryService.selectDocFileListByDocId(searchVO));
-        return new ModelAndView("jsonView", resultMap);
+    public Map<String, Object> saveDocumentFile(@RequestBody FileVO req) {
+        return repositoryService.saveDocumentFile(req);
     }
 
     /**
-     * 문서 존재 여부 조회
-     * @param searchVO
-     * @return
-     * @throws Exception
+     * 문서 파일 뷰 URL 조회
      */
-    @RequestMapping(value = "/selectDocExistCnt.do")
+    @RequestMapping(value = "/viewDocumentFile.do")
     @ResponseBody
-    public ModelAndView selectDocExistCnt(@RequestBody RepositoryVO searchVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", repositoryService.selectDocExistCnt(searchVO));
-        return new ModelAndView("jsonView", resultMap);
+    public Map<String, Object> viewDocumentFile(@RequestBody FileVO req) throws Exception {
+        return repositoryService.viewDocumentFile(req);
     }
 
-    @RequestMapping("/deleteDocument.do")
-    public @ResponseBody Map<String, Object> deleteDocument(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
+    /**
+     * 문서 파일 다운로드 URL 조회
+     */
+    @RequestMapping(value = "/downloadDocumentFile.do")
+    @ResponseBody
+    public Map<String, Object> downloadDocumentFile(@RequestBody FileVO req) throws Exception {
+        return repositoryService.downloadDocumentFile(req);
+    }
+
+    /**
+     * 파일 관리 탭 — 업로드 완료 후 TB_DOC_FILE 풀 행 INSERT
+     */
+    @RequestMapping("/saveFileLibrary.do")
+    public @ResponseBody Map<String, Object> saveFileLibrary(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-
         try {
-            // 유효성 검사
             if (bindingResult.hasErrors()) {
                 resultMap.put("successYn", false);
                 resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
                 return resultMap;
             }
-
-            resultMap = repositoryService.deleteDocument(dataVO);
-
+            resultMap = repositoryService.saveFileLibrary(dataVO);
         } catch (Exception e) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
-
         return resultMap;
     }
-    
-    @RequestMapping("/saveDocument.do")
-    public @ResponseBody Map<String, Object> saveDocument(
-            @RequestBody RepositoryVO dataVO,
-            BindingResult bindingResult
-    ) throws Exception {
-        Map<String, Object> resultMap = new HashMap<>();
 
+    /**
+     * 파일 메타 수정
+     */
+    @RequestMapping("/updateFileLibrary.do")
+    public @ResponseBody Map<String, Object> updateFileLibrary(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
         try {
-            // 유효성 검사
             if (bindingResult.hasErrors()) {
                 resultMap.put("successYn", false);
                 resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
                 return resultMap;
             }
-
-            resultMap = repositoryService.saveDocument(dataVO);
-
+            resultMap = repositoryService.updateFileLibrary(dataVO);
         } catch (Exception e) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
-
         return resultMap;
     }
 
     /**
-     * 문서 존재 여부 조회
-     * @param dataVO
-     * @param bindingResult
-     * @return
-     * @throws Exception
+     * 파일 관리 탭 — 풀 파일 삭제 (스토리지 + DB)
      */
-    @RequestMapping("/selectDocumentExistCnt.do")
-    public @ResponseBody Map<String, Object> selectDocumentExistCnt(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
+    @RequestMapping("/deleteFileLibrary.do")
+    public @ResponseBody Map<String, Object> deleteFileLibrary(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", repositoryService.selectDocumentExistCnt(dataVO));
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+                return resultMap;
+            }
+            resultMap = repositoryService.deleteFileLibrary(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
         return resultMap;
     }
 

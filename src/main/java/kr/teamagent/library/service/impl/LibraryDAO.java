@@ -82,7 +82,7 @@ public class LibraryDAO extends EgovComAbstractDAO {
 
     /**
      * 참조 매뉴얼(문서) 목록 조회 — card.logId 필수
-     * @param card LOG_ID 기준 TB_CHAT_LOG·TB_DS_DOC·TB_DOC 조인
+     * @param card LOG_ID 기준 TB_CHAT_REF·TB_DOC_FILE 조인
      * @return
      * @throws Exception
      */

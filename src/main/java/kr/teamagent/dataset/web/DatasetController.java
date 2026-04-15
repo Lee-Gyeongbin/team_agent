@@ -109,18 +109,17 @@ public class DatasetController extends BaseController {
     public SseEmitter buildStream(
           @RequestParam("datasetId") String datasetId,
           @RequestParam(value = "update_type", required = false, defaultValue = "init") String updateType,
-          @RequestParam(value = "add_doc_ids", required = false) List<String> addDocIds,
-          @RequestParam(value = "delete_doc_ids", required = false) List<String> deleteDocIds,
+          @RequestParam(value = "add_doc_file_ids", required = false) List<String> addDocFileIds,
+          @RequestParam(value = "delete_doc_file_ids", required = false) List<String> deleteDocFileIds,
           @RequestParam(value = "vector_diff_yn", required = false) String vectorDiffYn
     ) throws Exception {
-      List<String> safeAddDocIds = addDocIds != null ? addDocIds : Collections.emptyList();
-      List<String> safeDeleteDocIds = deleteDocIds != null ? deleteDocIds : Collections.emptyList();
-      // 유효성 검증(권장)
+      List<String> safeAddDocFileIds = addDocFileIds != null ? addDocFileIds : Collections.emptyList();
+      List<String> safeDeleteDocFileIds = deleteDocFileIds != null ? deleteDocFileIds : Collections.emptyList();
       Set<String> allowed = Set.of("init", "add", "replace_all", "delete_some");
       if (!allowed.contains(updateType)) {
           throw new IllegalArgumentException("지원하지 않는 update_type: " + updateType);
       }
-      return docDatasetService.streamDatasetBuild(datasetId, updateType, safeAddDocIds, safeDeleteDocIds, vectorDiffYn);
+      return docDatasetService.streamDatasetBuild(datasetId, updateType, safeAddDocFileIds, safeDeleteDocFileIds, vectorDiffYn);
     }
 
     /**

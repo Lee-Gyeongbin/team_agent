@@ -18,6 +18,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
@@ -25,13 +28,9 @@ import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.dataset.service.DatasetVO;
 import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
 import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
-import kr.teamagent.prompt.service.PromptVO;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
-
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 
 @Service
 public class DatasetServiceImpl extends EgovAbstractServiceImpl {
@@ -145,7 +144,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         }
 
         // incoming 리스트가 비어있지 않을 때만 다시 저장
-        if (CommonUtil.isNotEmpty(datasetVO.getDocIdList())) {
+        if (CommonUtil.isNotEmpty(datasetVO.getDocFileIdList())) {
             datasetDAO.saveDsDoc(datasetVO);
         }
         if (CommonUtil.isNotEmpty(datasetVO.getUrlIdList())) {
@@ -331,14 +330,11 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @param datasetId 저장된 데이터셋 ID
      * @return SseEmitter
      */
-    public SseEmitter streamDatasetBuild(String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds, String vectorDiffYn) {
-        // sse 초기화
+    public SseEmitter streamDatasetBuild(String datasetId, String updateType, List<String> addDocFileIds, List<String> deleteDocFileIds, String vectorDiffYn) {
         SseEmitter emitter = new SseEmitter(0L);
-        // API URL 조회
         String apiUrl = PropertyUtil.getProperty("Globals.dataset.build.apiUrl");
 
         if (CommonUtil.isEmpty(datasetId)) {
-            // datasetId가 없으면 에러 발생
             sendSseEvent(emitter, "error", buildErrorData("datasetId가 없습니다."));
             emitter.complete();
             return emitter;
@@ -348,7 +344,6 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
             emitter.complete();
             return emitter;
         }
-        // 타임아웃 처리
         emitter.onTimeout(() -> {
             logger.warn("dataset build SSE timeout - datasetId={}", datasetId);
             sendSseEvent(emitter, "error", buildErrorData("dataset build stream timeout"));
@@ -357,8 +352,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         emitter.onError((e) -> logger.warn("dataset build SSE error - datasetId={}, message={}", datasetId, e.getMessage()));
         emitter.onCompletion(() -> logger.info("dataset build SSE complete - datasetId={}", datasetId));
 
-        // 데이터셋 구축 스트림 중계
-        DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, updateType, addDocIds, deleteDocIds, vectorDiffYn, emitter));
+        DATASET_BUILD_EXECUTOR.execute(() -> relayDatasetBuildStream(apiUrl, datasetId, updateType, addDocFileIds, deleteDocFileIds, vectorDiffYn, emitter));
         return emitter;
     }
 
@@ -368,8 +362,7 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      * @param datasetId 데이터셋 ID
      * @param emitter SSE emitter
      */
-    private void relayDatasetBuildStream(String apiUrl, String datasetId, String updateType, List<String> addDocIds, List<String> deleteDocIds, String vectorDiffYn, SseEmitter emitter) {
-        // OkHttpClient 초기화
+    private void relayDatasetBuildStream(String apiUrl, String datasetId, String updateType, List<String> addDocFileIds, List<String> deleteDocFileIds, String vectorDiffYn, SseEmitter emitter) {
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(300, TimeUnit.SECONDS)
@@ -378,8 +371,8 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> params = new HashMap<>();
         params.put("dataset_id", datasetId);
         params.put("update_type", updateType);
-        params.put("add_doc_ids", addDocIds);
-        params.put("delete_doc_ids", deleteDocIds);
+        params.put("add_doc_file_ids", addDocFileIds);
+        params.put("delete_doc_file_ids", deleteDocFileIds);
         params.put("vector_diff_yn", vectorDiffYn != null ? vectorDiffYn : "N");
         com.google.gson.Gson gson = new com.google.gson.Gson();
         String jsonBody = gson.toJson(params);
