@@ -52,11 +52,22 @@
 
     <select id="selectQueryRatio" resultMap="queryRatioResult">
         /* 대시보드 질의 비율 dashboard.selectQueryRatio */
-        WITH BASE AS (
+        WITH BASE_DT AS (
+            SELECT COALESCE(
+                CASE
+                    WHEN NULLIF(#{ym}, '') IS NULL THEN NULL
+                    ELSE STR_TO_DATE(CONCAT(#{ym}, '-01'), '%Y-%m-%d')
+                END,
+                CURDATE()
+            ) AS DT
+        )
+        , BASE AS (
             SELECT
                 A.SVC_TY
             FROM TB_CHAT_LOG A
-            WHERE 1=1
+                CROSS JOIN BASE_DT B
+            WHERE A.CREATE_DT <![CDATA[>=]]> DATE_FORMAT(B.DT, '%Y-%m-01')
+                AND A.CREATE_DT <![CDATA[<]]> DATE_ADD(DATE_FORMAT(B.DT, '%Y-%m-01'), INTERVAL 1 MONTH)
         )
         , DATA1 AS (
             SELECT

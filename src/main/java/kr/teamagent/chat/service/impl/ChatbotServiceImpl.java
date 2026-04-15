@@ -28,6 +28,7 @@ import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.prompt.service.impl.PromptServiceImpl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -52,6 +53,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     FileServiceImpl fileService;
+
+    @Autowired
+    PromptServiceImpl promptService;
 
     /**
      * 채팅 에이전트 목록 조회
@@ -1063,21 +1067,21 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * AI 이미지 API를 호출해 지식 카드 썸네일용 base64 이미지 문자열을 반환한다.
      * 실패 시 null.
      */
-    private String generateSummaryThumbImg(String qContent, String rContent) {
+    private String generateSummaryThumbImg(String qContent, String rContent) throws Exception {
         if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
             return null;
         }
 
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("다음 대화를 요약한 지식 카드에 어울리는 썸네일 이미지를 만들어줘. 텍스트는 포함하지말고 이미지만 생성해주고 썸네일 이미지답게 단순한 이미지로 생성해줘. 이미지 크기는 270px x 80px 정도로 맞춰줘.");
+        String promptContent = promptService.getPrompt("PI000018", "Y"); // 썸네일 이미지생성 프롬프트트
+
         if (CommonUtil.isNotEmpty(qContent)) {
-            prompt.append("질문: ").append(truncateTitle(qContent, 200)).append(' ');
+            promptContent += "\n질문: " + truncateTitle(qContent, 200) + ' ';
         }
         if (CommonUtil.isNotEmpty(rContent)) {
-            prompt.append("답변: ").append(truncateTitle(rContent, 500));
+            promptContent += "\n답변: " + truncateTitle(rContent, 500);
         }
 
-        return callAiImageApi(prompt.toString());
+        return callAiImageApi(promptContent);
     }
 
     /**
@@ -1093,6 +1097,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         if (CommonUtil.isEmpty(query)) {
             return null;
         }
+
+        logger.info("AI 썸네일 이미지 호출 시작 - query: {}", query);
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
