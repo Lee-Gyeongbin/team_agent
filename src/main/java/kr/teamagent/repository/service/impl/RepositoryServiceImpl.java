@@ -3,6 +3,7 @@ package kr.teamagent.repository.service.impl;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -13,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
@@ -22,7 +24,6 @@ import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.repository.service.RepositoryVO;
-import kr.teamagent.repository.service.RepositoryVO.RepositoryFileItem;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -111,8 +112,8 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> resultMap = new HashMap<>();
 
         try {
+            repositoryDAO.unlinkDocFilesByDocIdList(searchVO);
             int result = repositoryDAO.deleteDocument(searchVO);
-            result += repositoryDAO.deleteDocumentFile(searchVO);
             if (result > 0) {
                 resultMap.put("successYn", true);
                 resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
@@ -136,10 +137,14 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 문서 저장
+     * - TB_DOC INSERT/UPDATE 후, 첨부는 TB_DOC_FILE_MAP만 사용한다.
+     * - {@code orderedDocFileIds}가 null이 아니면(빈 배열 포함) 해당 DOC_FILE_ID 순서로 매핑을 전부 교체한다.
+     * - AI 연동 URL이 있으면, 교체 전·후 차이로 새로 붙인 ID / 빠진 ID만 전송한다.
      * @param searchVO
      * @return
      * @throws Exception
      */
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> saveDocument(RepositoryVO searchVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
 
@@ -148,10 +153,12 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             String loginUserId = loginUser != null ? loginUser.getUserId() : null;
 
             boolean isUpdate = StringUtils.isNotBlank(searchVO.getDocId());
-            List<RepositoryFileItem> fileList = searchVO.getFile();
-            List<String> deleteFileIds = searchVO.getDeleteFileIds();
-            List<String> validDeleteFileIds = new ArrayList<>();
-            List<String> savedDocFileIds = new ArrayList<>();
+            List<String> orderedRaw = searchVO.getOrderedDocFileIds();
+            int linkedFileCount = 0;
+            int unlinkedFileCount = 0;
+            List<String> savedDocFileIdsForAi = new ArrayList<>();
+            List<String> validDeleteFileIdsForAi = new ArrayList<>();
+
             if (!isUpdate) {
                 searchVO.setDocId(keyGenerate.generateTableKey("DC", "TB_DOC", "DOC_ID"));
                 searchVO.setUseYn("Y");
@@ -173,85 +180,65 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
 
-            int deletedFileCount = 0;
-            if (isUpdate && deleteFileIds != null && !deleteFileIds.isEmpty()) {
-                validDeleteFileIds = getValidDeleteFileIds(deleteFileIds);
-                if (!validDeleteFileIds.isEmpty()) {
-                    // NCP 삭제(=S3 오브젝트) 먼저 수행하고, 성공 시에만 DB 파일 삭제 수행
-                    FileVO ncpVo = new FileVO();
-                    ncpVo.setDocId(searchVO.getDocId());
-                    ncpVo.setDocFileIdList(validDeleteFileIds);
-                    Map<String, Object> ncpResult = fileService.deleteFilesByDocFileIds(ncpVo);
-                    if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
-                        resultMap.put("successYn", false);
-                        resultMap.put("returnMsg", "NCP 파일 삭제에 실패하였습니다. (" + ncpResult.get("returnMsg") + ")");
-                        return resultMap;
-                    }
-                }
-            }
-
-            int savedFileCount = 0;
-            List<RepositoryVO> fileRowsToSave = new ArrayList<>();
-            if (fileList != null) {
-                List<RepositoryFileItem> validFiles = getValidFileList(fileList);
-                if (!fileList.isEmpty() && validFiles.isEmpty()) {
-                    resultMap.put("successYn", false);
-                    resultMap.put("returnMsg", "파일 정보(filePath)가 없습니다.");
-                    return resultMap;
+            if (orderedRaw != null) {
+                List<String> newIds = normalizeOrderedDocFileIds(orderedRaw);
+                List<String> oldIds = repositoryDAO.selectDocFileIdsByDocId(searchVO);
+                if (oldIds == null) {
+                    oldIds = new ArrayList<>();
                 }
 
-                if (!validFiles.isEmpty()) {
-                    Integer maxFileOrd = repositoryDAO.selectMaxFileOrdByDocId(searchVO);
-                    int fileOrd = (maxFileOrd == null ? 0 : maxFileOrd) + 1;
-                    String nextDocFileId = null;
-                    for (RepositoryFileItem file : validFiles) {
-                        if (nextDocFileId == null) {
-                            nextDocFileId = keyGenerate.generateTableKey("DF", "TB_DOC_FILE", "DOC_FILE_ID");
-                        } else {
-                            nextDocFileId = CommonUtil.generateTableKey("DF", nextDocFileId);
-                        }
+                repositoryDAO.deleteDocumentFileByDocId(searchVO);
 
-                        RepositoryVO fileRow = buildDocFileRow(searchVO, file, fileOrd, nextDocFileId);
-                        fileRowsToSave.add(fileRow);
-                        savedDocFileIds.add(fileRow.getDocFileId());
-                        fileOrd++;
+                int ord = 1;
+                for (String docFileId : newIds) {
+                    RepositoryVO linkVo = new RepositoryVO();
+                    linkVo.setDocFileId(docFileId);
+                    linkVo.setDocId(searchVO.getDocId());
+                    linkVo.setFileOrd(ord++);
+                    repositoryDAO.updateDocFileLinkToDocument(linkVo);
+                }
+
+                Set<String> oldSet = new HashSet<>(oldIds);
+                Set<String> newSet = new HashSet<>(newIds);
+                for (String id : newIds) {
+                    if (!oldSet.contains(id)) {
+                        savedDocFileIdsForAi.add(id);
                     }
                 }
-            }
-
-            // TB_DOC_FILE 저장 후 AI 연동: pre_processing/download는 doc_file_id로 DB 메타를 조회하는 경우가 많아,
-            // INSERT 전에 호출하면 저장 완료 처리 없이 done만 오는 현상이 난다.
-            if (!fileRowsToSave.isEmpty()) {
-                for (RepositoryVO fileRow : fileRowsToSave) {
-                    int fileResult = repositoryDAO.saveDocumentFile(fileRow);
-                    if (fileResult > 0) {
-                        savedFileCount++;
+                for (String id : oldIds) {
+                    if (!newSet.contains(id)) {
+                        validDeleteFileIdsForAi.add(id);
                     }
+                }
+
+                linkedFileCount = newIds.size();
+                unlinkedFileCount = validDeleteFileIdsForAi.size();
+
+                // 문서 첨부(추가/삭제) 변경이 발생했고, ACTIVE(003) 데이터셋에 포함된 문서면
+                // 해당 데이터셋을 재구축 필요(005)로 전환하고 TB_DS_DOC 변경 플래그를 남긴다.
+                if (!savedDocFileIdsForAi.isEmpty() || !validDeleteFileIdsForAi.isEmpty()) {
+                    repositoryDAO.updateDatasetBuildStatusToRebuildRequiredByDocId(searchVO);
+                    repositoryDAO.updateDsDocFileChangedByDocId(searchVO);
                 }
             }
 
             String aiApiUrl = PropertyUtil.getProperty("Globals.dataset.fileDownload.apiUrl");
-            if (StringUtils.isNotBlank(aiApiUrl) && (!savedDocFileIds.isEmpty() || !validDeleteFileIds.isEmpty())) {
-                Map<String, Object> aiSendResult = sendDocumentFileIdsToAiServer(aiApiUrl, savedDocFileIds, validDeleteFileIds);
-                if (Boolean.FALSE.equals(aiSendResult.get("successYn"))) {
-                    resultMap.put("successYn", false);
-                    resultMap.put("returnMsg", aiSendResult.get("returnMsg"));
-                    return resultMap;
-                }
-            }
-
-            if (!validDeleteFileIds.isEmpty()) {
-                RepositoryVO deleteVo = new RepositoryVO();
-                deleteVo.setDocId(searchVO.getDocId());
-                deleteVo.setDeleteFileIds(validDeleteFileIds);
-                deletedFileCount = repositoryDAO.deleteDocumentFileByIds(deleteVo);
+            if (StringUtils.isNotBlank(aiApiUrl) && orderedRaw != null
+                    && (!savedDocFileIdsForAi.isEmpty() || !validDeleteFileIdsForAi.isEmpty())) {
+                // TODO 삭제 처리 필요
+                // Map<String, Object> aiSendResult = sendDocumentFileIdsToAiServer(aiApiUrl, savedDocFileIdsForAi, validDeleteFileIdsForAi);
+                // if (Boolean.FALSE.equals(aiSendResult.get("successYn"))) {
+                //     resultMap.put("successYn", false);
+                //     resultMap.put("returnMsg", aiSendResult.get("returnMsg"));
+                //     return resultMap;
+                // }
             }
 
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
             resultMap.put("savedCount", 1);
-            resultMap.put("savedFileCount", savedFileCount);
-            resultMap.put("deletedFileCount", deletedFileCount);
+            resultMap.put("linkedFileCount", linkedFileCount);
+            resultMap.put("unlinkedFileCount", unlinkedFileCount);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -259,50 +246,187 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         return resultMap;
     }
 
+    /** 공백 제거·앞쪽 순서 유지 중복 제거 */
+    private List<String> normalizeOrderedDocFileIds(List<String> raw) {
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        for (String id : raw) {
+            if (StringUtils.isNotBlank(id)) {
+                seen.add(id.trim());
+            }
+        }
+        return new ArrayList<>(seen);
+    }
+
     /**
-     * 요청 파일 배열에서 filePath가 있는 항목만 필터링
+     * 파일 라이브러리(DOC_ID IS NULL) 목록
      */
-    private List<RepositoryFileItem> getValidFileList(List<RepositoryFileItem> fileList) {
-        List<RepositoryFileItem> validFiles = new ArrayList<>();
-        Set<String> dedupPathSet = new HashSet<>();
-        for (RepositoryFileItem item : fileList) {
-            if (item != null && StringUtils.isNotBlank(item.getFilePath())) {
-                String normalizedPath = item.getFilePath().trim();
-                if (dedupPathSet.add(normalizedPath)) {
-                    validFiles.add(item);
+    public List<RepositoryVO> selectDocFileLibraryList(RepositoryVO searchVO) throws Exception {
+        int p = searchVO.getPage() == null || searchVO.getPage() < 1 ? 1 : searchVO.getPage();
+        int ps = searchVO.getPageSize() == null || searchVO.getPageSize() < 1 ? 10 : searchVO.getPageSize();
+        searchVO.setStartIndex((p - 1) * ps);
+        searchVO.setPageSize(ps);
+        return repositoryDAO.selectDocFileLibraryList(searchVO);
+    }
+
+    public Integer selectDocFileLibraryListCnt(RepositoryVO searchVO) throws Exception {
+        return repositoryDAO.selectDocFileLibraryListCnt(searchVO);
+    }
+
+    /**
+     * 문서 등록 시와 동일 — NCP PUT presigned URL 발급 (프론트가 /repository 경로로 호출할 때)
+     */
+    public Map<String, Object> saveDocumentFile(FileVO req) {
+        if(CommonUtil.isNotEmpty(req.getStoreFilePath())) {
+            req.setKey(req.getStoreFilePath());
+        }
+        return fileService.createUploadPresignedUrl(req);
+    }
+
+    /**
+     * 문서/파일 ID 기준 뷰 응답 생성 (스토리지 presigned URL 공통 서비스 사용)
+     */
+    public Map<String, Object> viewDocumentFile(FileVO req) throws Exception {
+        FileVO fileVO = resolveDocumentFile(req);
+        return fileService.createViewPresignedUrlForStorageObject(fileVO);
+    }
+
+    /**
+     * 문서/파일 ID 기준 다운로드 URL 생성.
+     * - docFileId가 없으면 docId 첨부 전체 URL 리스트 반환
+     * - docFileId가 있으면 단건 URL 반환
+     */
+    public Map<String, Object> downloadDocumentFile(FileVO req) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        boolean hasDocId = req != null && StringUtils.isNotBlank(req.getDocId());
+        boolean hasDocFileId = req != null && StringUtils.isNotBlank(req.getDocFileId());
+
+        if (hasDocId && !hasDocFileId) {
+            List<RepositoryVO> rows = selectRepositoryDocFileListByDocId(req.getDocId());
+            List<Map<String, String>> downloadList = new ArrayList<>();
+            for (RepositoryVO row : rows) {
+                FileVO fileVO = toFileVO(row);
+                Map<String, Object> raw = fileService.createDownloadPresignedUrlForStorageObject(fileVO);
+                String url = raw == null || raw.get("url") == null ? "" : raw.get("url").toString();
+                Map<String, String> item = new HashMap<>();
+                item.put("docFileId", fileVO.getDocFileId());
+                item.put("fileName", fileVO.getFileName());
+                item.put("url", url);
+                downloadList.add(item);
+            }
+            resultMap.put("downloadList", downloadList);
+            return resultMap;
+        }
+
+        FileVO fileVO = resolveDocumentFile(req);
+        if (fileVO == null) {
+            resultMap.put("url", "");
+            return resultMap;
+        }
+        return fileService.createDownloadPresignedUrlForStorageObject(fileVO);
+    }
+
+    private FileVO resolveDocumentFile(FileVO req) throws Exception {
+        if (req == null) {
+            return null;
+        }
+        if (StringUtils.isNotBlank(req.getDocId())) {
+            List<RepositoryVO> rows = selectRepositoryDocFileListByDocId(req.getDocId());
+            if (rows.isEmpty()) {
+                return null;
+            }
+            if (StringUtils.isBlank(req.getDocFileId())) {
+                return toFileVO(rows.get(0));
+            }
+            for (RepositoryVO row : rows) {
+                if (StringUtils.equals(req.getDocFileId(), row.getDocFileId())) {
+                    return toFileVO(row);
                 }
             }
+            return null;
         }
-        return validFiles;
+        if (StringUtils.isBlank(req.getDocFileId())) {
+            return null;
+        }
+        RepositoryVO searchVO = new RepositoryVO();
+        searchVO.setDocFileId(req.getDocFileId());
+        RepositoryVO row = repositoryDAO.selectDocFilePoolById(searchVO);
+        return toFileVO(row);
+    }
+
+    private List<RepositoryVO> selectRepositoryDocFileListByDocId(String docId) throws Exception {
+        RepositoryVO searchVO = new RepositoryVO();
+        searchVO.setDocId(docId);
+        List<RepositoryVO> rows = repositoryDAO.selectDocFileListByDocId(searchVO);
+        return rows == null ? new ArrayList<>() : rows;
+    }
+
+    private static FileVO toFileVO(RepositoryVO row) {
+        if (row == null) {
+            return null;
+        }
+        FileVO fileVO = new FileVO();
+        fileVO.setDocId(row.getDocId());
+        fileVO.setDocFileId(row.getDocFileId());
+        fileVO.setFileName(row.getFileName());
+        fileVO.setFilePath(row.getFilePath());
+        fileVO.setFileType(row.getFileType());
+        return fileVO;
     }
 
     /**
-     * 삭제 요청 파일 ID 배열에서 유효한 값만 필터링
+     * 파일 풀에 메타 저장 (업로드 완료 후). FILE_PATH는 S3 키(categoryId/파일명 등).
      */
-    private List<String> getValidDeleteFileIds(List<String> deleteFileIds) {
-        List<String> validDeleteFileIds = new ArrayList<>();
-        for (String deleteFileId : deleteFileIds) {
-            if (StringUtils.isNotBlank(deleteFileId)) {
-                validDeleteFileIds.add(deleteFileId);
-            }
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> saveFileLibrary(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        String docFileId = keyGenerate.generateTableKey("DF", "TB_DOC_FILE", "DOC_FILE_ID");
+        dataVO.setDocFileId(docFileId);
+        dataVO.setUseYn("Y");
+        int result = repositoryDAO.insertDocFilePool(dataVO);
+        if (result > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            resultMap.put("docFileId", docFileId);
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "동일 경로의 파일이 이미 등록되어 있습니다.");
         }
-        return validDeleteFileIds;
+        return resultMap;
     }
 
     /**
-     * TB_DOC_FILE 저장용 VO 생성
+     * 파일 풀 행 삭제 — NCP 객체 삭제 후 TB_DOC_FILE 행 삭제
      */
-    private RepositoryVO buildDocFileRow(RepositoryVO docMeta, RepositoryFileItem file, int fileOrd, String docFileId) throws Exception {
-        RepositoryVO row = new RepositoryVO();
-        row.setDocFileId(docFileId);
-        row.setDocId(docMeta.getDocId());
-        row.setFileName(file.getFileName());
-        row.setFilePath(file.getFilePath());
-        row.setFileSize(file.getFileSize());
-        row.setFileType(file.getFileType());
-        row.setFileOrd(fileOrd);
-        row.setUseYn("Y");
-        return row;
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> deleteFileLibrary(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        RepositoryVO row = repositoryDAO.selectDocFilePoolById(dataVO);
+        if (row == null || StringUtils.isBlank(row.getFilePath())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "삭제할 파일을 찾을 수 없습니다.");
+            return resultMap;
+        }
+        Integer mapCnt = repositoryDAO.selectCountDocFileMapByDocFileId(dataVO);
+        if (mapCnt != null && mapCnt.intValue() > 0) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "문서셋에 연결된 파일이 있어 삭제할 수 없습니다.");
+            return resultMap;
+        }
+        Map<String, Object> ncp = fileService.deleteStorageObjectByKey(row.getFilePath());
+        if (ncp != null && Boolean.FALSE.equals(ncp.get("successYn"))) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + ncp.get("returnMsg") + ")");
+            return resultMap;
+        }
+        int del = repositoryDAO.deleteDocFilePoolById(dataVO);
+        if (del > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "파일 삭제에 실패하였습니다.");
+        }
+        return resultMap;
     }
 
     /**

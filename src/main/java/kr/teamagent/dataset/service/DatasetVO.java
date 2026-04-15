@@ -82,6 +82,7 @@ public class DatasetVO {
     private String fileType;
     private String fileOrd;
     private String fileCount;
+    private String fileChangedYn;
     /** 문서 제목 */
     private String docTitle;
 

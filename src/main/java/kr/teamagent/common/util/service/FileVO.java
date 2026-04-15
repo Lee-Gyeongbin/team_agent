@@ -42,6 +42,10 @@ public class FileVO extends CommonVO {
     private String storeFileName;
     // 저장 경로
     private String storeFilePath;
+    /** 업로드 presigned URL용 storage key (있으면 storeFilePath/categoryId 조합보다 우선) */
+    private String key;
+    /** 업로드 presigned URL 만료시간(ms) — 현재 시각 기준 TTL, 미지정 시 서비스 기본값 사용 */
+    private Long expiration;
     // 스토리지 파일 존재 여부
     private String fileExistYn;
     // 삭제 예정일시

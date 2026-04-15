@@ -18,6 +18,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
@@ -25,13 +28,9 @@ import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.dataset.service.DatasetVO;
 import kr.teamagent.dataset.service.DatasetVO.DocIdItem;
 import kr.teamagent.dataset.service.DatasetVO.UrlIdItem;
-import kr.teamagent.prompt.service.PromptVO;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
-
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 
 @Service
 public class DatasetServiceImpl extends EgovAbstractServiceImpl {

@@ -1236,6 +1236,27 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
         return resultMap;
     }
+    
+    /**
+     * 채팅 첨부 업로드용 presigned URL 발급
+     * - 요청 filePath를 스토리지 키로 사용
+     */
+    public Map<String, Object> saveChatFileUploadUrl(ChatbotVO chatbotVO) {
+        FileVO req = new FileVO();
+        req.setFileName(chatbotVO.getFileName());
+        req.setFileType(chatbotVO.getFileType());
+        if (chatbotVO.getFileSize() != null) {
+            req.setFileSize(String.valueOf(chatbotVO.getFileSize()));
+        }
+        if (CommonUtil.isNotEmpty(chatbotVO.getFilePath())) {
+            req.setKey(chatbotVO.getFilePath());
+        }
+        if (CommonUtil.isNotEmpty(chatbotVO.getStoreFileName())) {
+            req.setStoreFileName(chatbotVO.getStoreFileName());
+        }
+        return fileService.createUploadPresignedUrl(req);
+    }
+
 
     /**
      * 공유 토큰으로 채팅 로그 목록 조회

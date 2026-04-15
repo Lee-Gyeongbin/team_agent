@@ -138,6 +138,104 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 문서에 연결된 파일을 풀(DOC_ID NULL)로 되돌림
+     */
+    public int unlinkDocFilesByDocIdAndFileIds(RepositoryVO searchVO) throws Exception {
+        return update("repository.unlinkDocFilesByDocIdAndFileIds", searchVO);
+    }
+
+    /**
+     * 문서 ID 목록에 해당하는 파일 연결 해제 (문서 삭제 등)
+     */
+    public int unlinkDocFilesByDocIdList(RepositoryVO searchVO) throws Exception {
+        return update("repository.unlinkDocFilesByDocIdList", searchVO);
+    }
+
+    /**
+     * 풀 파일을 문서에 연결 (DOC_ID, FILE_ORD 설정)
+     */
+    public int updateDocFileLinkToDocument(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateDocFileLinkToDocument", searchVO);
+    }
+
+    /**
+     * 문서 첨부 파일 순서 갱신
+     */
+    public int updateDocFileOrd(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateDocFileOrd", searchVO);
+    }
+
+    /**
+     * 링크 가능한 파일 행 존재 여부 (DOC_ID IS NULL 또는 동일 문서)
+     */
+    public Integer selectCountDocFileLinkable(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectCountDocFileLinkable", searchVO);
+    }
+
+    /**
+     * 문서에 연결된 DOC_FILE_ID 목록 (FILE_ORD 순)
+     */
+    public List<String> selectDocFileIdsByDocId(RepositoryVO searchVO) throws Exception {
+        return selectList("repository.selectDocFileIdsByDocId", searchVO);
+    }
+
+    /**
+     * 문서를 포함한 ACTIVE(003) 데이터셋 상태를 REBUILD_REQUIRED(005)로 변경
+     */
+    public int updateDatasetBuildStatusToRebuildRequiredByDocId(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateDatasetBuildStatusToRebuildRequiredByDocId", searchVO);
+    }
+
+    /**
+     * 문서가 매핑된 ACTIVE(003) 데이터셋의 TB_DS_DOC 변경 플래그 갱신
+     */
+    public int updateDsDocFileChangedByDocId(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateDsDocFileChangedByDocId", searchVO);
+    }
+
+    /**
+     * 해당 DOC_FILE_ID가 문서에 연결된 매핑 건수
+     */
+    public Integer selectCountDocFileMapByDocFileId(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectCountDocFileMapByDocFileId", searchVO);
+    }
+
+    /**
+     * 파일 라이브러리(DOC_ID IS NULL) 목록 건수
+     */
+    public Integer selectDocFileLibraryListCnt(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectDocFileLibraryListCnt", searchVO);
+    }
+
+    /**
+     * 파일 라이브러리(DOC_ID IS NULL) 목록
+     */
+    public List<RepositoryVO> selectDocFileLibraryList(RepositoryVO searchVO) throws Exception {
+        return selectList("repository.selectDocFileLibraryList", searchVO);
+    }
+
+    /**
+     * 풀 전용 파일 메타 INSERT (DOC_ID NULL)
+     */
+    public int insertDocFilePool(RepositoryVO searchVO) throws Exception {
+        return insert("repository.insertDocFilePool", searchVO);
+    }
+
+    /**
+     * 파일 라이브러리 행 삭제 (DOC_ID IS NULL인 행만)
+     */
+    public int deleteDocFilePoolById(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteDocFilePoolById", searchVO);
+    }
+
+    /**
+     * 파일 풀 행 조회 (DOC_ID IS NULL)
+     */
+    public RepositoryVO selectDocFilePoolById(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectDocFilePoolById", searchVO);
+    }
+
+    /**
      * 문서 파일 최대 순번 조회
      * @param searchVO
      * @return

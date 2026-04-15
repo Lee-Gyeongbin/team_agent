@@ -12,16 +12,15 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -38,11 +37,11 @@ import kr.teamagent.common.util.service.FileVO;
 @Service
 public class FileServiceImpl extends EgovAbstractServiceImpl {
 
-    private final Logger log = LoggerFactory.getLogger(this.getClass());
-    private static final long VIEW_URL_EXPIRE_MILLIS = 30 * 60 * 1000L;
+    private static final long DEFAULT_UPLOAD_EXPIRE_MILLIS = 10 * 60 * 1000L;
+    private static final long DEFAULT_VIEW_EXPIRE_MILLIS = 30 * 60 * 1000L;
+    private static final long DEFAULT_DOWNLOAD_EXPIRE_MILLIS = 10 * 60 * 1000L;
     private static final int DEFAULT_TXT_MAX_BYTES = 1024 * 1024;
     private static final int DEFAULT_CONVERT_TIMEOUT_SEC = 60;
-    /** 동일 converted 키에 대한 LibreOffice 변환을 직렬화 (병렬 변환·업로드 경쟁 완화) */
     private static final int PDF_CONVERT_LOCK_STRIPES = 64;
     private static final Object[] PDF_CONVERT_LOCKS = new Object[PDF_CONVERT_LOCK_STRIPES];
     static {
@@ -51,8 +50,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    @Autowired
-    private FileDAO fileDAO;
+    private final Logger log = LoggerFactory.getLogger(this.getClass());
 
     @Autowired
     protected AmazonS3 s3Client;
@@ -63,68 +61,109 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * NCP 업로드용 PUT presigned URL 발급 (uploadUrl, filePath).
-     * @param req
-     * @return
      */
     public Map<String, Object> createUploadPresignedUrl(FileVO req) {
-
-        String key = "";
-        Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
-
-        if (CommonUtil.isNotEmpty(req.getStoreFilePath()) || CommonUtil.isNotEmpty(req.getStoreFileName())) {
-            key = req.getStoreFilePath();
-        } else {
-            key = req.getCategoryId() + "/" + req.getFileName();
-        }
-
-        log.debug("Upload presigned URL request. key={}", key);
-
-        GeneratePresignedUrlRequest request =
-                new GeneratePresignedUrlRequest(getBucketName(), key)
-                        .withMethod(HttpMethod.PUT)
-                        .withExpiration(expiration);
-
-        URL url = s3Client.generatePresignedUrl(request);
+        String key = resolveStorageKey(req);
+        long expirationMs = resolveUploadExpireMillis(req);
+        URL url = createPresignedUrl(key, HttpMethod.PUT, expirationMs, null);
 
         Map<String, Object> result = new HashMap<>();
         result.put("uploadUrl", url.toString());
         result.put("filePath", key);
-
         return result;
     }
 
     /**
-     * 문서별 파일 상세 조회
-     * @param dataVO
-     * @return
-     * @throws Exception
+     * 스토리지 키 기준 뷰 URL 발급.
      */
-    public FileVO selectFileByDocId(FileVO dataVO) throws Exception {
-        return fileDAO.selectFileByDocId(dataVO);
+    public Map<String, Object> createViewPresignedUrlForStorageObject(FileVO fileVO) throws Exception {
+        if (fileVO == null || CommonUtil.isEmpty(fileVO.getFilePath())) {
+            return createDownloadFallbackResponse(fileVO, "FILE_NOT_FOUND");
+        }
+        fileVO.setFilePath(fileVO.getFilePath().trim());
+        return buildViewPresignedUrlForDoc(fileVO);
     }
 
     /**
-     * 문서별 파일 뷰 생성
-     * @param dataVO
-     * @return
-     * @throws Exception
+     * 스토리지 키 기준 다운로드용 GET presigned URL 발급.
      */
-    public Map<String, Object> createViewPresignedUrl(FileVO dataVO) throws Exception {
-        FileVO doc = selectFileByDocId(dataVO);
-        if (doc == null || doc.getFilePath() == null || doc.getFilePath().trim().isEmpty()) {
-            return createDownloadFallbackResponse(doc, "FILE_NOT_FOUND");
+    public Map<String, Object> createDownloadPresignedUrlForStorageObject(FileVO fileVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        if (fileVO == null || CommonUtil.isEmpty(fileVO.getFilePath())) {
+            result.put("url", "");
+            return result;
         }
-        return buildViewPresignedUrlForDoc(doc);
+        String key = fileVO.getFilePath().trim();
+        if (!doesStorageObjectExist(key)) {
+            result.put("url", "");
+            return result;
+        }
+
+        URL url = createPresignedUrl(
+                key,
+                HttpMethod.GET,
+                DEFAULT_DOWNLOAD_EXPIRE_MILLIS,
+                createDownloadHeader(fileVO.getFileName()));
+        result.put("url", url.toString());
+        return result;
     }
 
     /**
-     * TB_DOC 없이 스토리지 키·파일명만으로 뷰 응답 생성 (채팅 첨부 TB_CHAT_FILE 등)
+     * 저장소 객체 키(S3 key = FILE_PATH) 단건 삭제.
      */
-    public Map<String, Object> createViewPresignedUrlForStorageObject(FileVO doc) throws Exception {
-        if (doc == null || doc.getFilePath() == null || doc.getFilePath().trim().isEmpty()) {
-            return createDownloadFallbackResponse(null, "FILE_NOT_FOUND");
+    public Map<String, Object> deleteStorageObjectByKey(String filePath) {
+        Map<String, Object> result = new HashMap<>();
+        if (CommonUtil.isEmpty(filePath)) {
+            result.put("successYn", true);
+            return result;
         }
-        return buildViewPresignedUrlForDoc(doc);
+        try {
+            s3Client.deleteObject(getBucketName(), filePath.trim());
+            result.put("successYn", true);
+        } catch (Exception e) {
+            log.warn("NCP 객체 삭제 실패. key={}", filePath, e);
+            result.put("successYn", false);
+            result.put("returnMsg", e.getMessage());
+        }
+        return result;
+    }
+
+    private URL createPresignedUrl(String key, HttpMethod method, long expirationMs, ResponseHeaderOverrides headers) {
+        Date expiration = new Date(System.currentTimeMillis() + expirationMs);
+        GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(getBucketName(), key)
+                .withMethod(method)
+                .withExpiration(expiration);
+        if (headers != null) {
+            request.setResponseHeaders(headers);
+        }
+        return s3Client.generatePresignedUrl(request);
+    }
+
+    private String resolveStorageKey(FileVO req) {
+        if (req == null) {
+            return "";
+        }
+        if (CommonUtil.isNotEmpty(req.getKey())) {
+            return req.getKey().trim();
+        }
+        if (CommonUtil.isNotEmpty(req.getStoreFilePath())) {
+            return req.getStoreFilePath().trim();
+        }
+        return req.getFileName() == null ? "" : req.getFileName().trim();
+    }
+
+    private long resolveUploadExpireMillis(FileVO req) {
+        if (req != null && req.getExpiration() != null && req.getExpiration() > 0L) {
+            return req.getExpiration();
+        }
+        return DEFAULT_UPLOAD_EXPIRE_MILLIS;
+    }
+
+    private boolean doesStorageObjectExist(String key) {
+        if (CommonUtil.isEmpty(key)) {
+            return false;
+        }
+        return s3Client.doesObjectExist(getBucketName(), key.trim());
     }
 
     private Map<String, Object> buildViewPresignedUrlForDoc(FileVO doc) throws Exception {
@@ -203,67 +242,41 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
-    private Map<String, Object> createDownloadFallbackResponse(FileVO doc, String reason) throws Exception {
-        Map<String, Object> result = new HashMap<>();
-        result.put("viewType", "DOWNLOAD");
-        result.put("fileName", doc == null ? null : doc.getFileName());
-        result.put("reason", reason);
-        if (doc == null) {
-            result.put("downloadUrl", "");
-            return result;
-        }
-        if ("STORAGE_OBJECT_MISSING".equals(reason)) {
-            result.put("downloadUrl", "");
-            return result;
-        }
-        result.put("downloadUrl", createDownloadUrlByFile(doc));
-        return result;
-    }
-
-    /**
-     * NCP 오브젝트 스토리지에 해당 키의 객체가 있는지 확인한다.
-     * Presigned URL 생성 전에 호출해 DB와 스토리지 불일치를 감지한다.
-     */
-    private boolean doesStorageObjectExist(String key) {
-        if (key == null || key.trim().isEmpty()) {
-            return false;
-        }
-        return s3Client.doesObjectExist(getBucketName(), key.trim());
-    }
-
     private String createViewUrlByKey(String key) {
-        Date expiration = new Date(System.currentTimeMillis() + VIEW_URL_EXPIRE_MILLIS);
         log.debug("View presigned URL request. bucketName={}, key={}", getBucketName(), key);
-        GeneratePresignedUrlRequest request =
-                new GeneratePresignedUrlRequest(getBucketName(), key)
-                        .withMethod(HttpMethod.GET)
-                        .withExpiration(expiration);
-        URL url = s3Client.generatePresignedUrl(request);
-        return url.toString();
+        return createPresignedUrl(key, HttpMethod.GET, DEFAULT_VIEW_EXPIRE_MILLIS, null).toString();
     }
 
     private String resolveFileExtension(FileVO doc) {
         String fileName = doc == null ? null : doc.getFileName();
-        if (fileName != null) {
+        if (CommonUtil.isNotEmpty(fileName)) {
             int idx = fileName.lastIndexOf('.');
             if (idx >= 0 && idx < fileName.length() - 1) {
                 return fileName.substring(idx + 1).toLowerCase();
             }
         }
-
         String fileType = doc == null ? null : doc.getFileType();
-        if (fileType == null) {
+        if (CommonUtil.isEmpty(fileType)) {
             return "";
         }
         String normalized = fileType.trim().toLowerCase();
-        if (normalized.startsWith(".")) {
-            return normalized.substring(1);
-        }
         int slashIdx = normalized.lastIndexOf('/');
         if (slashIdx >= 0 && slashIdx < normalized.length() - 1) {
             return normalized.substring(slashIdx + 1);
         }
+        if (normalized.startsWith(".")) {
+            return normalized.substring(1);
+        }
         return normalized;
+    }
+
+    private ResponseHeaderOverrides createDownloadHeader(String fileName) throws Exception {
+        String encoded = URLEncoder.encode(
+                fileName == null ? "download" : fileName,
+                StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%20");
+        ResponseHeaderOverrides headers = new ResponseHeaderOverrides();
+        headers.setContentDisposition("attachment; filename*=UTF-8''" + encoded);
+        return headers;
     }
 
     private boolean isConvertibleByLibreOffice(String ext) {
@@ -359,7 +372,6 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         return PDF_CONVERT_LOCKS[idx];
     }
 
-    /** LibreOffice 출력이 PDF 매직 넘버로 시작하는지 확인 (불완전 파일 업로드 방지) */
     private void assertValidPdfFile(Path outputPath) throws IOException {
         byte[] header = new byte[5];
         try (InputStream in = Files.newInputStream(outputPath)) {
@@ -459,65 +471,17 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /**
-     * 문서별 파일 다운로드 생성
-     * @param dataVO
-     * @return
-     * @throws Exception
-     */
-    public Map<String, Object> createDownloadPresignedUrl(FileVO dataVO) throws Exception {
-        // docFileId가 없으면 문서의 첨부 전체를 순차 다운로드할 수 있도록 URL 리스트를 생성한다.
-        if (dataVO.getDocFileId() == null || dataVO.getDocFileId().trim().isEmpty()) {
-            List<FileVO> fileList = fileDAO.selectFileListByDocId(dataVO);
-            List<Map<String, String>> downloadList = new ArrayList<>();
-            if (fileList != null) {
-                for (FileVO file : fileList) {
-                    if (file == null) {
-                        continue;
-                    }
-                    String key = file.getFilePath();
-                    if (key == null || key.trim().isEmpty()) {
-                        continue;
-                    }
-                    String url = createDownloadUrlByFile(file);
-                    downloadList.add(Map.of(
-                            "docFileId", file.getDocFileId(),
-                            "fileName", file.getFileName(),
-                            "url", url
-                    ));
-                }
-            }
-            return Map.of("downloadList", downloadList);
+    private Map<String, Object> createDownloadFallbackResponse(FileVO fileVO, String reason) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        result.put("viewType", "DOWNLOAD");
+        result.put("fileName", fileVO == null ? null : fileVO.getFileName());
+        result.put("reason", reason);
+        if (fileVO == null || "STORAGE_OBJECT_MISSING".equals(reason)) {
+            result.put("downloadUrl", "");
+            return result;
         }
-
-        FileVO doc = selectFileByDocId(dataVO);
-        if (doc == null) {
-            return Map.of("url", "");
-        }
-        return Map.of("url", createDownloadUrlByFile(doc));
-    }
-
-    private String createDownloadUrlByFile(FileVO doc) throws Exception {
-        String key = doc.getFilePath();
-        Date expiration = new Date(System.currentTimeMillis() + 10 * 60 * 1000);
-
-        String originalFileName = doc.getFileName();
-        String encodedFileName = URLEncoder.encode(originalFileName, StandardCharsets.UTF_8.toString())
-                .replaceAll("\\+", "%20");
-
-        ResponseHeaderOverrides headers = new ResponseHeaderOverrides();
-        headers.setContentDisposition(
-                "attachment; filename=\"download.pdf\"; filename*=UTF-8''" + encodedFileName
-        );
-
-        GeneratePresignedUrlRequest request =
-                new GeneratePresignedUrlRequest(getBucketName(), key)
-                        .withMethod(HttpMethod.GET)
-                        .withExpiration(expiration);
-        request.setResponseHeaders(headers);
-
-        URL url = s3Client.generatePresignedUrl(request);
-        return url.toString();
+        result.put("downloadUrl", createDownloadPresignedUrlForStorageObject(fileVO).get("url"));
+        return result;
     }
 
     private static class TextReadResult {
@@ -536,111 +500,5 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         private boolean isTruncated() {
             return truncated;
         }
-    }
-
-    /**
-     * docId 목록에 해당하는 TB_DOC_FILE의 FILE_PATH(S3 키) 전건으로 NCP 오브젝트 스토리지 객체 삭제
-     *
-     * @param dataVO docIds(복수) 또는 docId(단건)
-     */
-    public Map<String, Object> deleteFilesByDocIds(FileVO dataVO) throws Exception {
-        Map<String, Object> result = new HashMap<>();
-        List<String> docIds = dataVO.getDocIdList();
-        if ((docIds == null || docIds.isEmpty()) && dataVO.getDocId() != null && !dataVO.getDocId().isEmpty()) {
-            docIds = Collections.singletonList(dataVO.getDocId());
-        }
-        if (docIds == null || docIds.isEmpty()) {
-            result.put("successYn", true);
-            return result;
-        }
-
-        String bucket = getBucketName();
-        List<String> errors = new ArrayList<>();
-
-        for (String docId : docIds) {
-            if (docId == null || docId.trim().isEmpty()) {
-                continue;
-            }
-            String id = docId.trim();
-            FileVO query = new FileVO();
-            query.setDocId(id);
-            try {
-                List<FileVO> files = fileDAO.selectFileListByDocId(query);
-                if (files == null || files.isEmpty()) {
-                    log.debug("Skip S3 delete, no TB_DOC_FILE rows. docId={}", id);
-                    continue;
-                }
-                for (FileVO f : files) {
-                    if (f == null) {
-                        continue;
-                    }
-                    String key = f.getFilePath();
-                    if (key == null || key.trim().isEmpty()) {
-                        log.debug("Skip S3 delete, empty filePath. docId={}, docFileId={}", id, f.getDocFileId());
-                        continue;
-                    }
-                    s3Client.deleteObject(bucket, key.trim());
-                    log.debug("Deleted object. bucket={}, key={}", bucket, key);
-                }
-            } catch (Exception e) {
-                log.warn("NCP 객체 삭제 실패. docId={}", id, e);
-                errors.add(id + ": " + e.getMessage());
-            }
-        }
-
-        result.put("successYn", errors.isEmpty());
-        if (!errors.isEmpty()) {
-            result.put("returnMsg", String.join("; ", errors));
-        }
-        return result;
-    }
-
-    /**
-     * docId 1건 기준, docFileIdList에 해당하는 TB_DOC_FILE FILE_PATH(S3 키) 전건으로 NCP 오브젝트 삭제
-     *
-     * @param dataVO docId(단건) + docFileIdList(복수)
-     */
-    public Map<String, Object> deleteFilesByDocFileIds(FileVO dataVO) throws Exception {
-        Map<String, Object> result = new HashMap<>();
-        if (dataVO == null) {
-            result.put("successYn", true);
-            return result;
-        }
-        if (dataVO.getDocId() == null || dataVO.getDocId().trim().isEmpty()) {
-            result.put("successYn", true);
-            return result;
-        }
-        if (dataVO.getDocFileIdList() == null || dataVO.getDocFileIdList().isEmpty()) {
-            result.put("successYn", true);
-            return result;
-        }
-
-        String bucket = getBucketName();
-        List<String> errors = new ArrayList<>();
-
-        try {
-            List<FileVO> files = fileDAO.selectFileListByDocIdAndDocFileIds(dataVO);
-            if (files != null) {
-                for (FileVO f : files) {
-                    if (f == null) {
-                        continue;
-                    }
-                    String key = f.getFilePath();
-                    if (key == null || key.trim().isEmpty()) {
-                        continue;
-                    }
-                    s3Client.deleteObject(bucket, key.trim());
-                }
-            }
-        } catch (Exception e) {
-            errors.add(e.getMessage());
-            log.warn("NCP 객체 삭제 실패. docId={}, err={}", dataVO.getDocId(), e.getMessage(), e);
-        }
-
-        result.put("successYn", errors.isEmpty());
-        if (!errors.isEmpty()) {
-            result.put("returnMsg", String.join("; ", errors));
-        }
-        return result;
     }
 }

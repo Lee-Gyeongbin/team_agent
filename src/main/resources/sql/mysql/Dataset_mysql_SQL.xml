@@ -171,18 +171,33 @@
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
+            , COALESCE(DD.FILE_CHANGED_YN, 'N') AS FILE_CHANGED_YN
             , (
                 SELECT
                     COUNT(*)
                 FROM
-                    TB_DOC_FILE B
+                    TB_DOC_FILE_MAP M
+                INNER JOIN TB_DOC_FILE F
+                    ON F.DOC_FILE_ID = M.DOC_FILE_ID
+                    AND F.USE_YN = 'Y'
                 WHERE
-                    1 = 1
-                    AND B.DOC_ID = A.DOC_ID
-                    AND B.USE_YN = 'Y'
+                    M.DOC_ID = A.DOC_ID
+                    AND M.USE_YN = 'Y'
                     AND A.USE_YN = 'Y') AS FILE_COUNT
         FROM
             TB_DOC A
+        LEFT JOIN (
+            SELECT
+                DOC_ID
+                , MAX(FILE_CHANGED_YN) AS FILE_CHANGED_YN
+            FROM
+                TB_DS_DOC
+            <if test="datasetId != null and datasetId != ''">
+                WHERE DATASET_ID = #{datasetId}
+            </if>
+            GROUP BY DOC_ID
+        ) DD
+            ON DD.DOC_ID = A.DOC_ID
         WHERE 1=1 
             AND A.USE_YN = 'Y'
     </select>

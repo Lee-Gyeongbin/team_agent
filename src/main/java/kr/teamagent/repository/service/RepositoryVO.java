@@ -88,6 +88,23 @@ public class RepositoryVO {
      */
     private List<String> deleteFileIds;
 
+    /**
+     * (레거시) 파일 풀 연결용 ID 목록 — 저장 시 첨부 매핑은 orderedDocFileIds 만 사용한다.
+     */
+    private List<String> linkDocFileIds;
+
+    /**
+     * 문서 첨부 최종 목록 (DOC_FILE_ID 배열, 순서=FILE_ORD).
+     * JSON에 키가 있으면(빈 배열 포함) TB_DOC_FILE_MAP을 해당 목록으로 전체 교체한다. null이면 매핑·AI 동기화를 건너뛴다.
+     */
+    private List<String> orderedDocFileIds;
+
+    /** 파일 라이브러리 목록 페이징 (선택) */
+    private Integer page;
+    private Integer pageSize;
+    /** MyBatis LIMIT offset — 서비스에서 page/pageSize로 계산 */
+    private Integer startIndex;
+
     @Getter
     @Setter
     public static class RepositoryFileItem {

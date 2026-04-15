@@ -307,6 +307,14 @@ public class ChatbotController extends BaseController {
     }
 
     /**
+     * 채팅 첨부 업로드 presigned URL 발급
+     */
+    @RequestMapping("/ai/chatbot/saveChatFileUploadUrl.do")
+    public @ResponseBody Map<String, Object> saveChatFileUploadUrl(@RequestBody ChatbotVO dataVO) {
+        return chatbotService.saveChatFileUploadUrl(dataVO);
+    }
+
+    /**
      * 채팅 파일 orphan 처리
      * - NCP 업로드 + DB 저장은 성공했으나 ws 전송 실패로 LOG_ID가 연결되지 못한 파일을
      *   EXPIRE_DT를 현재 시각으로 갱신해 배치 삭제 대상으로 표시한다.
