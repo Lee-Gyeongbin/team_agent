@@ -93,7 +93,6 @@
                     TB_DS_DOC B
                 INNER JOIN TB_DS C ON
                     C.DATASET_ID = B.DATASET_ID
-                    AND C.USE_YN = 'Y'
                 WHERE
                     1 = 1
                     AND B.DOC_FILE_ID = A.DOC_FILE_ID

@@ -85,6 +85,7 @@
             ON C.DATASET_ID = B.DATASET_ID 
         WHERE 1 = 1
             AND A.USE_YN = 'Y'
+            AND C.USE_YN = 'Y'
             AND A.SVC_TY = 'M'
             AND A.AGENT_ID = #{agentId}
         GROUP BY B.DATASET_ID, C.DS_NM
@@ -103,6 +104,7 @@
             ON C.DATAMART_ID = B.DATAMART_ID
         WHERE 1 = 1
             AND A.USE_YN = 'Y'
+            AND C.USE_YN = 'Y'
             AND A.SVC_TY = 'S'
             AND A.AGENT_ID = #{agentId}
         GROUP BY B.DATAMART_ID, C.DM_NM
