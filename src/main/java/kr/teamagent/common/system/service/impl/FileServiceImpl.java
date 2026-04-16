@@ -413,16 +413,16 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
 
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
-        processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
 
         Process process = processBuilder.start();
+        String output = new String(process.getInputStream().readAllBytes()); // 출력 캡처
         boolean finished = process.waitFor(timeoutSec, TimeUnit.SECONDS);
         if (!finished) {
             process.destroyForcibly();
-            throw new IOException("LibreOffice convert timeout. timeoutSec=" + timeoutSec);
+            throw new IOException("LibreOffice convert timeout. timeoutSec=" + timeoutSec + ", output=" + output);
         }
         if (process.exitValue() != 0) {
-            throw new IOException("LibreOffice convert exit code=" + process.exitValue());
+            throw new IOException("LibreOffice convert exit code=" + process.exitValue() + ", output=" + output);
         }
     }
 
