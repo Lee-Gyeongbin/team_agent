@@ -7,6 +7,7 @@
     <resultMap id="noticeItemResult" type="kr.teamagent.dashboard.service.DashBoardVO$NoticeItem" autoMapping="true"/>
     <resultMap id="tokenUsageResult" type="kr.teamagent.dashboard.service.DashBoardVO$TokenUsage" autoMapping="true"/>
     <resultMap id="visitorTrendResult" type="kr.teamagent.dashboard.service.DashBoardVO$VisitorTrend" autoMapping="true"/>
+    <resultMap id="categoryTrendResult" type="kr.teamagent.dashboard.service.DashBoardVO$CategoryTrend" autoMapping="true"/>
 
     <select id="selectStatSummary" resultMap="statSummaryResult">
         /* 대시보드 상단 통계 카드 dashboard.selectStatSummary */
@@ -190,4 +191,50 @@
         ORDER BY D.DT
     </select>
 
+    <select id="selectCategoryTrend" resultMap="categoryTrendResult">
+        /* 대시보드 카테고리 목록 조회 dashboard.selectCategoryTrend */
+        SELECT
+            CATEGORY_CD
+            , SUM(IFNULL(CATEGORY_CNT, 0)) AS CATEGORY_CNT
+        FROM TB_CHAT_CATEGORY_DAILY_STAT
+        WHERE STAT_DATE <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL #{dayCnt} DAY), '%Y%m%d')
+            AND STAT_DATE <![CDATA[<=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
+        GROUP BY CATEGORY_CD
+        ORDER BY CATEGORY_CNT DESC
+        LIMIT 5
+    </select>
+
+    <select id="selectYesterdayQContentList" resultType="string">
+        /* 배치용 어제 질문 목록 조회 dashboard.selectYesterdayQContentList */
+        SELECT
+            A.Q_CONTENT
+        FROM TB_CHAT_LOG A
+        WHERE A.CREATE_DT <![CDATA[>=]]> DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+            AND A.CREATE_DT <![CDATA[<]]> CURDATE()
+            AND NULLIF(TRIM(A.Q_CONTENT), '') IS NOT NULL
+    </select>
+
+    <delete id="deleteYesterdayCategoryTrend">
+        /* 배치용 어제 카테고리 통계 삭제 dashboard.deleteYesterdayCategoryTrend */
+        DELETE
+        FROM TB_CHAT_CATEGORY_DAILY_STAT
+        WHERE STAT_DATE = DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
+    </delete>
+
+    <insert id="insertCategoryTrend">
+        /* 대시보드 카테고리 목록 등록 dashboard.insertCategoryTrend */
+        INSERT INTO TB_CHAT_CATEGORY_DAILY_STAT (
+            STAT_DATE
+            , CATEGORY_CD
+            , CATEGORY_CNT
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
+            , #{categoryCd}
+            , #{categoryCnt}
+            , NOW()
+            , NULL
+        )
+    </insert>
 </mapper>

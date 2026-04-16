@@ -56,5 +56,13 @@ public class DashBoardVO {
         private Long successCnt;
     }
 
+    /** 카테고리 추이 (코드·건수) */
+    @Getter
+    @Setter
+    public static class CategoryTrend {
+        private Integer dayCnt;
+        private String qContent;
+        private String categoryCd;
+        private Integer categoryCnt;
+    }
 }
-
