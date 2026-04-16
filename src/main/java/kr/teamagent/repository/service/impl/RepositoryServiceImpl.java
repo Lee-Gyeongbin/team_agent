@@ -205,50 +205,19 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> deleteFileLibrary(RepositoryVO dataVO) throws Exception {
+    public Map<String, Object> saveUseYn(RepositoryVO dataVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        List<String> targetIds = collectTargetDocFileIds(dataVO);
-        if (targetIds.isEmpty()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "삭제할 파일을 선택해 주세요.");
-            return resultMap;
-        }
 
-        List<String> blockedFileNames = new ArrayList<>();
-        for (String targetId : targetIds) {
-            RepositoryVO targetVO = new RepositoryVO();
-            targetVO.setDocFileId(targetId);
-            Integer activeCnt = repositoryDAO.selectBuiltDatasetCountByDocFileId(targetVO);
-            if (activeCnt != null && activeCnt.intValue() > 0) {
-                RepositoryVO row = repositoryDAO.selectDocFilePoolById(targetVO);
-                blockedFileNames.add(row != null ? row.getFileName() : targetId);
-            }
-        }
-        if (!blockedFileNames.isEmpty()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "해당 파일이 구축된 RAG 데이터셋에 포함되어 있어 삭제할 수 없습니다. RAG 데이터셋에서 파일을 먼저 제거해 주세요.");
-            resultMap.put("blockedFileNames", blockedFileNames);
-            return resultMap;
-        }
+        UserVO loginUser = SessionUtil.getUserVO();
+        String loginUserId = loginUser != null ? loginUser.getUserId() : null;
+        dataVO.setUseYn("N");
+        dataVO.setModifyUserId(loginUserId);
 
-        int deletedCount = 0;
-        for (String targetId : targetIds) {
-            RepositoryVO targetVO = new RepositoryVO();
-            targetVO.setDocFileId(targetId);
-            RepositoryVO row = repositoryDAO.selectDocFilePoolById(targetVO);
-            if (row == null || StringUtils.isBlank(row.getFilePath())) {
-                continue;
-            }
-            Map<String, Object> ncp = fileService.deleteStorageObjectByKey(row.getFilePath());
-            if (ncp != null && Boolean.FALSE.equals(ncp.get("successYn"))) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + ncp.get("returnMsg") + ")");
-                return resultMap;
-            }
-            deletedCount += repositoryDAO.deleteDocFilePoolById(targetVO);
-        }
-
-        if (deletedCount > 0) {
+        // 파일 사용 여부 변경
+        int updated = repositoryDAO.updateDocFilePoolUseYn(dataVO);
+        // 데이터셋 구축 상태 변경
+        repositoryDAO.updateDatasetBuildStatusCd(dataVO);
+        if (updated > 0) {
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
             return resultMap;
@@ -258,23 +227,50 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         return resultMap;
     }
 
-    private List<String> collectTargetDocFileIds(RepositoryVO dataVO) {
-        List<String> targetIds = new ArrayList<>();
-        if (StringUtils.isNotBlank(dataVO.getDocFileId())) {
-            targetIds.add(dataVO.getDocFileId().trim());
-        }
-        if (dataVO.getDocFileIdList() != null) {
-            for (String id : dataVO.getDocFileIdList()) {
-                if (StringUtils.isBlank(id)) {
-                    continue;
-                }
-                String normalized = id.trim();
-                if (!targetIds.contains(normalized)) {
-                    targetIds.add(normalized);
-                }
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> deleteFileLibrary(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        List<String> targetIds = dataVO.getDocFileIdList();
+
+        String aiApiUrl = PropertyUtil.getProperty("Globals.dataset.fileDownload.apiUrl");
+        if (StringUtils.isNotBlank(aiApiUrl)) {
+            Map<String, Object> aiSendResult = sendDocumentFileIdsToAiServer(aiApiUrl, new ArrayList<>(), targetIds);
+            if (Boolean.FALSE.equals(aiSendResult.get("successYn"))) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", aiSendResult.get("returnMsg"));
+                return resultMap;
             }
         }
-        return targetIds;
+
+        for (String targetId : targetIds) {
+            RepositoryVO targetVO = new RepositoryVO();
+            targetVO.setDocFileId(targetId);
+            RepositoryVO row = repositoryDAO.selectDocFilePoolById(targetVO);
+            if (row == null || StringUtils.isBlank(row.getFilePath())) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "삭제 대상 파일 정보를 찾을 수 없습니다. (" + targetId + ")");
+                return resultMap;
+            }
+            Map<String, Object> ncp = fileService.deleteStorageObjectByKey(row.getFilePath());
+            if (ncp != null && Boolean.FALSE.equals(ncp.get("successYn"))) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + ncp.get("returnMsg") + ")");
+                return resultMap;
+            }
+        }
+
+        RepositoryVO deleteVO = new RepositoryVO();
+        deleteVO.setDocFileIdList(targetIds);
+        int deletedCount = repositoryDAO.deleteDocFilePoolByIdList(deleteVO);
+
+        if (deletedCount == targetIds.size()) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            return resultMap;
+        }
+        resultMap.put("successYn", false);
+        resultMap.put("returnMsg", "파일 DB 삭제에 실패하였습니다.");
+        return resultMap;
     }
 
     private void validateFileMeta(RepositoryVO dataVO) {

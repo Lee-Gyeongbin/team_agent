@@ -45,10 +45,22 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 파일 라이브러리 행 삭제
+     * 파일 사용 여부 변경
      */
-    public int deleteDocFilePoolById(RepositoryVO searchVO) throws Exception {
-        return delete("repository.deleteDocFilePoolById", searchVO);
+    public int updateDocFilePoolUseYn(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateDocFilePoolUseYn", searchVO);
+    }
+    /**
+     * 데이터셋 구축 상태 변경
+     */
+    public int updateDatasetBuildStatusCd(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateDatasetBuildStatusCd", searchVO);
+    }
+    /**
+     * 파일 라이브러리 행 배치 삭제
+     */
+    public int deleteDocFilePoolByIdList(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteDocFilePoolByIdList", searchVO);
     }
 
     /**
@@ -56,13 +68,6 @@ public class RepositoryDAO extends EgovComAbstractDAO {
      */
     public RepositoryVO selectDocFilePoolById(RepositoryVO searchVO) throws Exception {
         return selectOne("repository.selectDocFilePoolById", searchVO);
-    }
-
-    /**
-     * 구축된 데이터셋(005)에 포함된 파일 건수
-     */
-    public Integer selectBuiltDatasetCountByDocFileId(RepositoryVO searchVO) throws Exception {
-        return selectOne("repository.selectBuiltDatasetCountByDocFileId", searchVO);
     }
 
     /**

@@ -116,6 +116,26 @@ public class RepositoryController extends BaseController {
     }
 
     /**
+     * 파일 메타 수정
+     */
+    @RequestMapping("/saveUseYnN.do")
+    public @ResponseBody Map<String, Object> saveUseYnN(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+                return resultMap;
+            }
+            resultMap = repositoryService.saveUseYn(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
      * 파일 관리 탭 — 풀 파일 삭제 (스토리지 + DB)
      */
     @RequestMapping("/deleteFileLibrary.do")
