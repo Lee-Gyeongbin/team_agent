@@ -1,6 +1,7 @@
 package kr.teamagent.datamart.service.impl;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Repository;
 
@@ -65,6 +66,26 @@ public class DatamartDAO extends EgovComAbstractDAO {
      */
     public int deleteDatamart(DatamartVO datamartVO) throws Exception {
         return delete("datamart.deleteDatamart", datamartVO);
+    }
+
+    /**
+     * 데이터마트 테이블 사용 여부 조회
+     * @param paramMap datamartId, tblId
+     * @return useYn (기본값 N)
+     * @throws Exception
+     */
+    public String selectDmTblUseYn(Map<String, Object> paramMap) throws Exception {
+        return selectOne("datamart.selectDmTblUseYn", paramMap);
+    }
+
+    /**
+     * 데이터마트 메타 테이블 저장
+     * @param paramMap datamartId, tblId ...
+     * @return
+     * @throws Exception
+     */
+    public int saveMetaTable(DatamartVO.MetaTableSavePayloadVO payload) throws Exception {
+        return insert("datamart.saveMetaTable", payload);
     }
 
 }

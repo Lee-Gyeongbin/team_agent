@@ -29,7 +29,7 @@
         )
         SELECT *
         FROM CAT_TREE
-        ORDER BY SORT_PATH
+        ORDER BY CATEGORY_ID, SORT_PATH
     </select>
 
     <select id="selectDocFileLibraryListCnt" parameterType="repositoryVO" resultType="int">
@@ -84,7 +84,6 @@
                 FROM TB_DS_DOC DD
                 INNER JOIN TB_DS D ON D.DATASET_ID = DD.DATASET_ID
                 WHERE DD.DOC_FILE_ID = A.DOC_FILE_ID
-                  AND D.DATASET_BUILD_STATUS_CD = '005'
             ) AS ACTIVE_DS_CNT
             , (
                 SELECT
@@ -98,7 +97,7 @@
                     AND B.DOC_FILE_ID = A.DOC_FILE_ID
             ) AS DS_NM
         FROM TB_DOC_FILE A
-        WHERE A.USE_YN = 'Y'
+        WHERE A.USE_YN = #{useYn, jdbcType=CHAR}
         <if test="categoryId != null and categoryId != ''">
             AND A.CATEGORY_ID = #{categoryId}
         </if>
@@ -172,11 +171,39 @@
           AND USE_YN = 'Y'
     </update>
 
-    <delete id="deleteDocFilePoolById" parameterType="repositoryVO">
-        /* 파일 삭제 repository.deleteDocFilePoolById */
+    <update id="updateDocFilePoolUseYn" parameterType="repositoryVO">
+        /* 파일 USE_YN 변경 repository.updateDocFilePoolUseYn */
+        UPDATE TB_DOC_FILE
+        SET USE_YN = #{useYn, jdbcType=CHAR}
+            , MODIFY_USER_ID = #{modifyUserId, jdbcType=VARCHAR}
+            , MODIFY_DT = NOW()
+        WHERE DOC_FILE_ID IN
+        <foreach collection="docFileIdList" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <update id="updateDatasetBuildStatusCd" parameterType="repositoryVO">
+        /* 데이터셋 구축 상태 변경 repository.updateDatasetBuildStatusCd */
+        UPDATE TB_DS
+        SET DATASET_BUILD_STATUS_CD = '005'
+        WHERE DATASET_ID IN (
+            SELECT DATASET_ID
+            FROM TB_DS_DOC
+            WHERE DOC_FILE_ID IN
+            <foreach collection="docFileIdList" item="id" open="(" separator="," close=")">
+                #{id}
+            </foreach>
+        )
+    </update>
+
+    <delete id="deleteDocFilePoolByIdList" parameterType="repositoryVO">
+        /* 파일 배치 삭제 repository.deleteDocFilePoolByIdList */
         DELETE FROM TB_DOC_FILE
-        WHERE DOC_FILE_ID = #{docFileId, jdbcType=VARCHAR}
-          AND USE_YN = 'Y'
+        WHERE DOC_FILE_ID IN
+        <foreach collection="docFileIdList" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
     </delete>
 
     <select id="selectDocFilePoolById" parameterType="repositoryVO" resultType="repositoryVO">
@@ -199,17 +226,6 @@
             , MODIFY_DT
         FROM TB_DOC_FILE
         WHERE DOC_FILE_ID = #{docFileId, jdbcType=VARCHAR}
-          AND USE_YN = 'Y'
-    </select>
-
-    <select id="selectBuiltDatasetCountByDocFileId" parameterType="repositoryVO" resultType="int">
-        /* 구축된 데이터셋 포함 여부 repository.selectBuiltDatasetCountByDocFileId */
-        SELECT COUNT(*)
-        FROM TB_DS_DOC DD
-        INNER JOIN TB_DS D
-            ON D.DATASET_ID = DD.DATASET_ID
-        WHERE DD.DOC_FILE_ID = #{docFileId, jdbcType=VARCHAR}
-          AND D.DATASET_BUILD_STATUS_CD = '005'
     </select>
 
     <insert id="saveCategory" parameterType="repositoryVO">
