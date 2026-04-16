@@ -15,9 +15,15 @@ import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
+import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.repository.service.RepositoryVO;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 @Service
 public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
@@ -95,28 +101,79 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> saveFileLibrary(RepositoryVO dataVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        validateFileMeta(dataVO);
+        List<RepositoryVO> saveTargets = new ArrayList<>();
+        if (dataVO != null && dataVO.getDataList() != null && !dataVO.getDataList().isEmpty()) {
+            saveTargets.addAll(dataVO.getDataList());
+        } else if (dataVO != null) {
+            saveTargets.add(dataVO);
+        }
+        if (saveTargets.isEmpty()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "저장할 파일이 없습니다.");
+            return resultMap;
+        }
 
         UserVO loginUser = SessionUtil.getUserVO();
         String loginUserId = loginUser != null ? loginUser.getUserId() : null;
-        dataVO.setDocFileId(keyGenerate.generateTableKey("DF", "TB_DOC_FILE", "DOC_FILE_ID"));
-        dataVO.setUseYn("Y");
-        dataVO.setCreateUserId(loginUserId);
-        dataVO.setModifyUserId(loginUserId);
-        if (StringUtils.isBlank(dataVO.getSecLvl())) {
-            dataVO.setSecLvl("001");
+
+        int successCnt = 0;
+        String firstFailMessage = null;
+        List<String> savedDocFileIds = new ArrayList<>();
+        List<String> validDeleteFileIds = new ArrayList<>();
+
+        for (RepositoryVO targetVO : saveTargets) {
+            if (targetVO == null) {
+                if (firstFailMessage == null) {
+                    firstFailMessage = "요청 데이터가 올바르지 않습니다.";
+                }
+                continue;
+            }
+            validateFileMeta(targetVO);
+            targetVO.setDocFileId(keyGenerate.generateTableKey("DF", "TB_DOC_FILE", "DOC_FILE_ID"));
+            targetVO.setUseYn("Y");
+            targetVO.setCreateUserId(loginUserId);
+            targetVO.setModifyUserId(loginUserId);
+            if (StringUtils.isBlank(targetVO.getSecLvl())) {
+                targetVO.setSecLvl("001");
+            }
+
+            int result = repositoryDAO.insertDocFilePool(targetVO);
+            if (result > 0) {
+                successCnt++;
+                savedDocFileIds.add(targetVO.getDocFileId());
+                continue;
+            }
+            if (firstFailMessage == null) {
+                firstFailMessage = "동일 경로의 파일이 이미 등록되어 있습니다.";
+            }
         }
 
-        int result = repositoryDAO.insertDocFilePool(dataVO);
-        if (result > 0) {
+        String aiApiUrl = PropertyUtil.getProperty("Globals.dataset.fileDownload.apiUrl");
+        if (StringUtils.isNotBlank(aiApiUrl) && (!savedDocFileIds.isEmpty() || !validDeleteFileIds.isEmpty())) {
+            Map<String, Object> aiSendResult = sendDocumentFileIdsToAiServer(aiApiUrl, savedDocFileIds, validDeleteFileIds);
+            if (Boolean.FALSE.equals(aiSendResult.get("successYn"))) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", aiSendResult.get("returnMsg"));
+                return resultMap;
+            }
+        }
+
+        if (successCnt > 0) {
             resultMap.put("successYn", true);
-            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
-            resultMap.put("docFileId", dataVO.getDocFileId());
+            resultMap.put("successCnt", successCnt);
+            if (saveTargets.size() == 1) {
+                resultMap.put("docFileId", savedDocFileIds.get(0));
+            }
+            if (successCnt < saveTargets.size()) {
+                resultMap.put("returnMsg", StringUtils.defaultIfBlank(firstFailMessage, "일부 파일 저장에 실패하였습니다."));
+            } else {
+                resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            }
             return resultMap;
         }
 
         resultMap.put("successYn", false);
-        resultMap.put("returnMsg", "동일 경로의 파일이 이미 등록되어 있습니다.");
+        resultMap.put("returnMsg", StringUtils.defaultIfBlank(firstFailMessage, "동일 경로의 파일이 이미 등록되어 있습니다."));
         return resultMap;
     }
 
@@ -276,4 +333,58 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         }
         return resultMap;
     }
+
+    
+    /**
+     * 문서 파일 변경사항을 AI 서버에 전송
+     */
+    private Map<String, Object> sendDocumentFileIdsToAiServer(String apiUrl, List<String> docFileIdList, List<String> deleteFileIds) {
+        Map<String, Object> resultMap = new HashMap<>();
+        OkHttpClient client = new OkHttpClient();
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("doc_file_id", docFileIdList);
+            payload.put("delete_file_ids", deleteFileIds);
+
+            String jsonBody = new com.google.gson.Gson().toJson(payload);
+            RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json; charset=utf-8"));
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    resultMap.put("successYn", false);
+                    resultMap.put("returnMsg", "AI 서버 호출에 실패하였습니다. (HTTP " + response.code() + ")");
+                    return resultMap;
+                }
+
+                String responseBody = response.body().string();
+                com.google.gson.JsonObject jsonResponse = new com.google.gson.Gson().fromJson(responseBody, com.google.gson.JsonObject.class);
+                String status = jsonResponse.has("status") && !jsonResponse.get("status").isJsonNull()
+                        ? jsonResponse.get("status").getAsString()
+                        : "";
+                String errorContent = jsonResponse.has("error_content") && !jsonResponse.get("error_content").isJsonNull()
+                        ? jsonResponse.get("error_content").getAsString()
+                        : "";
+
+                if (!"done".equalsIgnoreCase(status) || (StringUtils.isNotBlank(errorContent) && !"None".equalsIgnoreCase(errorContent))) {
+                    resultMap.put("successYn", false);
+                    resultMap.put("returnMsg", "AI 서버 처리에 실패하였습니다. (" + responseBody + ")");
+                    return resultMap;
+                }
+            }
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "AI 서버 연동 중 오류가 발생하였습니다.");
+            return resultMap;
+        }
+
+        resultMap.put("successYn", true);
+        return resultMap;
+    }
+
 }
