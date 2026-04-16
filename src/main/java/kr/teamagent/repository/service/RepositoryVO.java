@@ -79,4 +79,6 @@ public class RepositoryVO {
     private Integer pageSize;
     /** MyBatis LIMIT offset — 서비스에서 page/pageSize로 계산 */
     private Integer startIndex;
+
+    private String mergeTest;
 }
