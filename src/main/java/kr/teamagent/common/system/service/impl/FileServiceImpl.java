@@ -397,6 +397,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         String libreOfficeExec = getPropertyOrDefault("fileView.libreOffice.exec", "soffice");
         int timeoutSec = parseIntProperty("fileView.convertTimeoutSec", DEFAULT_CONVERT_TIMEOUT_SEC);
 
+        // 요청마다 독립 프로파일 디렉토리 생성 (lock 충돌 방지) - 개발 서버 내 libreoffice 프로파일 경로 지정
         Path profileDir = outDir.resolve("lo-profile");
         Files.createDirectories(profileDir);
         String profileUri = profileDir.toUri().toString();
