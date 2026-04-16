@@ -194,12 +194,16 @@
     <select id="selectCategoryTrend" resultMap="categoryTrendResult">
         /* 대시보드 카테고리 목록 조회 dashboard.selectCategoryTrend */
         SELECT
-            CATEGORY_CD
-            , SUM(IFNULL(CATEGORY_CNT, 0)) AS CATEGORY_CNT
-        FROM TB_CHAT_CATEGORY_DAILY_STAT
-        WHERE STAT_DATE <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL #{dayCnt} DAY), '%Y%m%d')
-            AND STAT_DATE <![CDATA[<=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
-        GROUP BY CATEGORY_CD
+            C.CODE_NM AS CATEGORY_NM
+            , A.CATEGORY_CD
+            , SUM(IFNULL(A.CATEGORY_CNT, 0)) AS CATEGORY_CNT
+        FROM TB_CHAT_CATEGORY_DAILY_STAT A
+        LEFT JOIN TB_CODE C
+            ON A.CATEGORY_CD COLLATE utf8mb4_unicode_ci = C.CODE_ID COLLATE utf8mb4_unicode_ci
+            AND C.CODE_GRP_ID = 'UC000001'
+        WHERE A.STAT_DATE <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL #{dayCnt} DAY), '%Y%m%d')
+            AND A.STAT_DATE <![CDATA[<=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
+        GROUP BY A.CATEGORY_CD, C.CODE_ID
         ORDER BY CATEGORY_CNT DESC
         LIMIT 5
     </select>

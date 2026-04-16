@@ -61,7 +61,7 @@ public class DashBoardVO {
     @Setter
     public static class CategoryTrend {
         private Integer dayCnt;
-        private String qContent;
+        private String categoryNm;
         private String categoryCd;
         private Integer categoryCnt;
     }
