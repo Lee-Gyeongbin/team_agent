@@ -110,6 +110,25 @@
         GROUP BY B.DATAMART_ID, C.DM_NM
     </select>
 
+    <select id="selectApiUrlEndpoint" resultType="chatbotVO">
+        /* 에이전트 API URL 조회 ai.chatbot.selectApiUrlEndpoint */
+        SELECT
+            A.AGENT_ID
+            , A.AGENT_NM
+            , A.API_URL_CD
+            , B.ETC1 AS API_PORT
+            , B.ETC2 AS API_ENDPOINT
+        FROM
+            TB_AGT A
+        LEFT OUTER JOIN TB_CODE B 
+            ON B.CODE_GRP_ID = 'AA000001'
+            AND B.USE_YN = 'Y'
+            AND B.CODE_ID = A.API_URL_CD 
+        WHERE 1=1 
+            AND A.USE_YN = 'Y'
+            AND A.AGENT_ID = #{agentId}
+    </select>
+
     <insert id="insertChatRoom" parameterType="chatbotVO"
         useGeneratedKeys="true" keyProperty="roomId">
         /* CHAT 대화방 등록 ai.chatbot.insertChatRoom */

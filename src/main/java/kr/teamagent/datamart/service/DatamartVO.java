@@ -1,5 +1,7 @@
 package kr.teamagent.datamart.service;
 
+import java.util.List;
+
 import lombok.Getter;
 import lombok.Setter;
 
@@ -40,6 +42,25 @@ public class DatamartVO {
         private int dataSourceCount;
         private String lastScanDate;
         private String connectedSystems;
+    }
+
+    @Getter
+    @Setter
+    public static class MetaTableSavePayloadVO {
+        private String datamartId;
+        private List<MetaTableItemVO> tableList;
+    }
+
+    @Getter
+    @Setter
+    public static class MetaTableItemVO {
+        private String id;
+        private String physicalNm;
+        private String logicalNm;
+        private Integer colCnt;
+        private String useYn;
+        private String tableDescKo;
+        private String usageTy;
     }
 
 }

@@ -79,6 +79,32 @@ public class DatamartController extends BaseController {
     }
 
     /**
+     * 메타 테이블 목록 조회 API
+     * @param searchVO datamartId 필수
+     * @return { result, msg, dataList: DatamartMetaTableItem[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaTableList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaTableList(@RequestBody DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.selectMetaTableList(searchVO);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 메타 관리 > 테이블 저장 API
+     * @param payload datamartId, tableList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaTableSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaTableSave(@RequestBody DatamartVO.MetaTableSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.saveMetaTableList(payload);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 데이터마트 삭제 API
      * @param datamartVO datamartId 필수
      * @return { data: { datamartId: String } }

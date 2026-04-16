@@ -73,6 +73,8 @@ public class RepositoryVO {
 
     /** 문서 파일 ID 목록 */
     private List<String> docFileIdList;
+    /** 파일 라이브러리 저장 요청 목록 (배치) */
+    private List<RepositoryVO> dataList;
 
     /** 파일 라이브러리 목록 페이징 (선택) */
     private Integer page;

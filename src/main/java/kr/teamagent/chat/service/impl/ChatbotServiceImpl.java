@@ -134,7 +134,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
-        String apiUrl = this.resolveStreamingApiUrl(svcTy, attachmentFileIds);
+        String apiUrl = this.resolveStreamingApiUrl(svcTy, agentId, attachmentFileIds);
         logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
 
         if (CommonUtil.isEmpty(apiUrl)) {
@@ -156,12 +156,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             case "C":
                 apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
                 break;
-            case "M":
-                apiUrl = PropertyUtil.getProperty("Globals.chatbot.manual.apiUrl");
-                break;
-            case "S":
-                apiUrl = PropertyUtil.getProperty("Globals.chatbot.statQ.apiUrl");
-                break;
             case "llmTest":
                 // TODO 추후 AI 개발 완료 후 삭제
                 apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
@@ -176,12 +170,31 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * 스트리밍 호출용 URL. svcTy=C 이고 첨부 파일 ID가 있으면 file_query 전용 URL(Globals.chatbot.gpt.apiFileUrl) 사용.
      */
-    private String resolveStreamingApiUrl(String svcTy, List<Long> attachmentFileIds) {
+    private String resolveStreamingApiUrl(String svcTy, String agentId, List<Long> attachmentFileIds) {
         if ("C".equals(svcTy) && hasNonNullAttachmentId(attachmentFileIds)) {
+            // 첨부파일이 있는 일반채팅이라면
             String fileUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiFileUrl");
             if (CommonUtil.isNotEmpty(fileUrl)) {
                 logger.info("resolveStreamingApiUrl: svcTy=C with attachments → file_query URL");
                 return fileUrl;
+            }
+        }
+        // 에이전트 ID가 있으면 에이전트 API URL 조회
+        if(CommonUtil.isNotEmpty(agentId)){
+            ChatbotVO searchVO = new ChatbotVO();
+            searchVO.setAgentId(agentId);
+            try {
+                ChatbotVO agentVO = chatbotDAO.selectApiUrlEndpoint(searchVO);
+                if(agentVO != null){
+                    // 에이전트 API URL 세팅
+                    String apiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIp") + agentVO.getApiPort() + agentVO.getApiEndpoint();
+                    return apiUrl;
+                } else {
+                    return getApiUrl(svcTy);
+                }
+            } catch (Exception e) {
+                logger.error("API URL 조회 중 오류 발생: {}", e.getMessage(), e);
+                return getApiUrl(svcTy);
             }
         }
         return getApiUrl(svcTy);
