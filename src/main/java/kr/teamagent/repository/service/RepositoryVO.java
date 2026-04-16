@@ -9,7 +9,6 @@ import lombok.Setter;
 @Setter
 public class RepositoryVO {
     
-    private String mergeTest2;
     /** 검색 조건 */
     private String findContent;
 
@@ -80,6 +79,4 @@ public class RepositoryVO {
     private Integer pageSize;
     /** MyBatis LIMIT offset — 서비스에서 page/pageSize로 계산 */
     private Integer startIndex;
-
-    private String mergeTest;
 }
