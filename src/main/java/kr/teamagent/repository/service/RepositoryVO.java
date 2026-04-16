@@ -9,6 +9,7 @@ import lombok.Setter;
 @Setter
 public class RepositoryVO {
     
+    private String mergeTest2;
     /** 검색 조건 */
     private String findContent;
 
