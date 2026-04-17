@@ -79,6 +79,16 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 데이터마트 메타 컬럼 목록 (DATAMART_ID + TBL_ID)
+     * @param paramMap datamartId, tblId
+     * @return TB_DM_COL 행 목록
+     * @throws Exception
+     */
+    public List<DatamartVO.MetaColumnRowVO> selectDmColListByDatamartAndTbl(Map<String, Object> paramMap) throws Exception {
+        return selectList("datamart.selectDmColListByDatamartAndTbl", paramMap);
+    }
+
+    /**
      * 데이터마트 메타 테이블 저장
      * @param paramMap datamartId, tblId ...
      * @return
@@ -86,6 +96,26 @@ public class DatamartDAO extends EgovComAbstractDAO {
      */
     public int saveMetaTable(DatamartVO.MetaTableSavePayloadVO payload) throws Exception {
         return insert("datamart.saveMetaTable", payload);
+    }
+
+    /**
+     * 데이터마트 메타 컬럼 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
+     * @throws Exception
+     */
+    public int deleteDmColByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmColByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 메타 컬럼 일괄 등록
+     * @param payload datamartId, tableList(각 columns)
+     * @return 등록 건수
+     * @throws Exception
+     */
+    public int insertDmColBatch(DatamartVO.MetaColumnSavePayloadVO payload) throws Exception {
+        return insert("datamart.insertDmColBatch", payload);
     }
 
 }
