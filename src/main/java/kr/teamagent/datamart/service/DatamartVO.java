@@ -63,4 +63,47 @@ public class DatamartVO {
         private String usageTy;
     }
 
+    /**
+     * 메타 관리 > 컬럼 일괄 저장 요청 (datamartId + 테이블별 columns)
+     */
+    @Getter
+    @Setter
+    public static class MetaColumnSavePayloadVO {
+        private String datamartId;
+        private List<MetaColumnSaveTableItemVO> tableList;
+    }
+
+    /**
+     * 컬럼 저장 API용 테이블 항목 (TB_DM_COL.TBL_ID 매핑용 id + 저장 대상 columns)
+     */
+    @Getter
+    @Setter
+    public static class MetaColumnSaveTableItemVO {
+        private String id;
+        private List<MetaColumnRowVO> columns;
+    }
+
+    /**
+     * TB_DM_COL 저장용 컬럼 행 (프론트 DatamartMetaColumnRow 대응)
+     */
+    @Getter
+    @Setter
+    public static class MetaColumnRowVO {
+        private String colId;
+        private String colPhyNm;
+        private String colKorNm;
+        private String colDesc;
+        private String dataType;
+        private String dataLen;
+        private String pkYn;
+        private String fkYn;
+        private String nullableYn;
+        private String hasCodeYn;
+        private String aiHint;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
 }

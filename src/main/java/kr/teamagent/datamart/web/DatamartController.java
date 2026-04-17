@@ -105,6 +105,19 @@ public class DatamartController extends BaseController {
     }
 
     /**
+     * 메타 관리 > 컬럼 저장 API (datamartId 단위 전체 삭제 후 columns 재삽입)
+     * @param payload datamartId, tableList(각 테이블의 columns가 실제 저장 대상)
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaColumnSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaColumnSave(@RequestBody DatamartVO.MetaColumnSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.saveMetaColumnList(payload);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 데이터마트 삭제 API
      * @param datamartVO datamartId 필수
      * @return { data: { datamartId: String } }
