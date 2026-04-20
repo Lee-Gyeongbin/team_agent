@@ -79,4 +79,24 @@
 		</property>
 	</bean>
 
+	<!-- Dashboard category trend batch (Quartz) -->
+	<bean id="dashBoardCategoryTrendJobDetail" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
+		<property name="targetObject" ref="dashBoardServiceImpl"/>
+		<property name="targetMethod" value="buildYesterdayCategoryTrend"/>
+		<property name="concurrent" value="false"/>
+	</bean>
+
+	<bean id="dashBoardCategoryTrendTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
+		<property name="jobDetail" ref="dashBoardCategoryTrendJobDetail"/>
+		<property name="cronExpression" value="0 10 0 * * ?"/>
+	</bean>
+
+	<bean id="dashBoardScheduler" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
+		<property name="triggers">
+			<list>
+				<ref bean="dashBoardCategoryTrendTrigger"/>
+			</list>
+		</property>
+	</bean>
+
 </beans>
