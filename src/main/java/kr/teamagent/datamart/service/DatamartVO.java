@@ -116,6 +116,45 @@ public class DatamartVO {
     }
 
     /**
+     * 메타 관리 > 코드값 매핑 저장 요청 (datamartId + codeColumnMappingList)
+     */
+    @Getter
+    @Setter
+    public static class MetaCodeMappingSavePayloadVO {
+        private String datamartId;
+        private List<MetaCodeColumnMappingVO> codeColumnMappingList;
+    }
+
+    /**
+     * 코드성 컬럼별 매핑 묶음 (tblId + colId + entries)
+     */
+    @Getter
+    @Setter
+    public static class MetaCodeColumnMappingVO {
+        private String tblId;
+        private String colId;
+        private List<MetaCodeValueRowVO> entries;
+    }
+
+    /**
+     * TB_DM_COL_CODE 저장용 코드값 행
+     */
+    @Getter
+    @Setter
+    public static class MetaCodeValueRowVO {
+        private String datamartId;
+        private String tblId;
+        private String colId;
+        private String codeVal;
+        private String codeKorNm;
+        private String codeDesc;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
+    /**
      * TB_DM_REL 저장용 관계 행 (프론트 DatamartMetaRelationship 대응)
      */
     @Getter
