@@ -139,6 +139,36 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 데이터마트 코드값 매핑 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
+     * @throws Exception
+     */
+    public int deleteDmColCodeByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmColCodeByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 코드값 매핑 일괄 등록
+     * @param payload datamartId, codeColumnMappingList
+     * @return 등록 건수
+     * @throws Exception
+     */
+    public int insertDmColCodeBatch(DatamartVO.MetaCodeMappingSavePayloadVO payload) throws Exception {
+        return insert("datamart.insertDmColCodeBatch", payload);
+    }
+
+    /**
+     * 데이터마트 코드 매핑 목록 조회 (DATAMART_ID 기준 TB_DM_COL_CODE)
+     * @param searchVO datamartId
+     * @return 코드 매핑 행 목록
+     * @throws Exception
+     */
+    public List<DatamartVO.MetaCodeValueRowVO> selectMetaCodeMappingRows(DatamartVO searchVO) throws Exception {
+        return selectList("datamart.selectMetaCodeMappingRows", searchVO);
+    }
+
+    /**
      * 데이터마트 메타 관계 목록 (DATAMART_ID 기준 TB_DM_REL)
      * @param searchVO datamartId
      * @return 관계 행 목록

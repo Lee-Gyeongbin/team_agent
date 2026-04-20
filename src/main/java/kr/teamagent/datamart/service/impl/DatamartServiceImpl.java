@@ -9,6 +9,7 @@ import java.sql.SQLTimeoutException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -446,6 +447,127 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
         resultMap.put("result", "SUCCESS");
         resultMap.put("msg", "메타 관계 저장 성공");
+        return resultMap;
+    }
+
+    /**
+     * 메타 관리 > 코드값 매핑 저장 (TB_DM_COL_CODE 해당 DATAMART_ID 전체 삭제 후 INSERT)
+     * @param payload datamartId, codeColumnMappingList
+     * @return result, msg
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public HashMap<String, Object> saveMetaCodeMappingList(DatamartVO.MetaCodeMappingSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+
+        if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(payload.getDatamartId());
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        datamartDAO.deleteDmColCodeByDatamartId(dm);
+
+        List<DatamartVO.MetaCodeColumnMappingVO> mappings = payload.getCodeColumnMappingList();
+        List<DatamartVO.MetaCodeColumnMappingVO> toSaveMappings = new ArrayList<>();
+        if (mappings != null) {
+            for (DatamartVO.MetaCodeColumnMappingVO mapping : mappings) {
+                if (mapping == null || CommonUtil.isEmpty(mapping.getTblId()) || CommonUtil.isEmpty(mapping.getColId())) {
+                    continue;
+                }
+
+                List<DatamartVO.MetaCodeValueRowVO> entries = mapping.getEntries();
+                List<DatamartVO.MetaCodeValueRowVO> toSaveEntries = new ArrayList<>();
+                if (entries != null) {
+                    for (DatamartVO.MetaCodeValueRowVO entry : entries) {
+                        if (entry == null || CommonUtil.isEmpty(entry.getCodeVal())) {
+                            continue;
+                        }
+                        entry.setDatamartId(payload.getDatamartId());
+                        entry.setTblId(mapping.getTblId());
+                        entry.setColId(mapping.getColId());
+                        toSaveEntries.add(entry);
+                    }
+                }
+
+                if (!toSaveEntries.isEmpty()) {
+                    DatamartVO.MetaCodeColumnMappingVO toSaveMapping = new DatamartVO.MetaCodeColumnMappingVO();
+                    toSaveMapping.setTblId(mapping.getTblId());
+                    toSaveMapping.setColId(mapping.getColId());
+                    toSaveMapping.setEntries(toSaveEntries);
+                    toSaveMappings.add(toSaveMapping);
+                }
+            }
+        }
+
+        if (!toSaveMappings.isEmpty()) {
+            DatamartVO.MetaCodeMappingSavePayloadVO daoPayload = new DatamartVO.MetaCodeMappingSavePayloadVO();
+            daoPayload.setDatamartId(payload.getDatamartId());
+            daoPayload.setCodeColumnMappingList(toSaveMappings);
+            datamartDAO.insertDmColCodeBatch(daoPayload);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "메타 코드값 매핑 저장 성공");
+        return resultMap;
+    }
+
+    /**
+     * 메타 관리 > 코드 매핑 메타데이터 목록 조회 (TB_DM_COL_CODE, DATAMART_ID 기준)
+     * @param searchVO datamartId 필수
+     * @return { result, msg, dataList: MetaCodeColumnMappingVO[] }
+     * @throws Exception
+     */
+    public HashMap<String, Object> selectMetaCodeMappingList(DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(searchVO.getDatamartId());
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        List<DatamartVO.MetaCodeValueRowVO> rows = datamartDAO.selectMetaCodeMappingRows(searchVO);
+        if (rows == null) {
+            rows = new ArrayList<>();
+        }
+
+        Map<String, DatamartVO.MetaCodeColumnMappingVO> grouped = new LinkedHashMap<>();
+        for (DatamartVO.MetaCodeValueRowVO row : rows) {
+            if (row == null || CommonUtil.isEmpty(row.getTblId()) || CommonUtil.isEmpty(row.getColId())) {
+                continue;
+            }
+            String key = row.getTblId() + "||" + row.getColId();
+            DatamartVO.MetaCodeColumnMappingVO mapping = grouped.get(key);
+            if (mapping == null) {
+                mapping = new DatamartVO.MetaCodeColumnMappingVO();
+                mapping.setTblId(row.getTblId());
+                mapping.setColId(row.getColId());
+                mapping.setEntries(new ArrayList<DatamartVO.MetaCodeValueRowVO>());
+                grouped.put(key, mapping);
+            }
+            mapping.getEntries().add(row);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "메타 코드 매핑 목록 조회 성공");
+        resultMap.put("dataList", new ArrayList<>(grouped.values()));
         return resultMap;
     }
 

@@ -131,6 +131,32 @@ public class DatamartController extends BaseController {
     }
 
     /**
+     * 메타 관리 > 코드값 매핑 저장 API (TB_DM_COL_CODE DATAMART_ID 단위 전체 삭제 후 INSERT)
+     * @param payload datamartId, codeColumnMappingList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaCodeMappingSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaCodeMappingSave(@RequestBody DatamartVO.MetaCodeMappingSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.saveMetaCodeMappingList(payload);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 메타 관리 > 코드 매핑 메타데이터 목록 조회 API (TB_DM_COL_CODE)
+     * @param searchVO datamartId 필수
+     * @return { result, msg, dataList: MetaCodeColumnMappingVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaCodeMappingList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaCodeMappingList(@RequestBody DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.selectMetaCodeMappingList(searchVO);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 메타 관리 > 관계 메타데이터 목록 조회 API (TB_DM_REL)
      * @param searchVO datamartId 필수
      * @return { result, msg, dataList: MetaRelationshipRowVO[] }
