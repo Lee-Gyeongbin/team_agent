@@ -4,6 +4,7 @@
 
     <resultMap id="datamartSummaryMap" type="kr.teamagent.datamart.service.DatamartVO$SummaryVO" autoMapping="true"/>
     <parameterMap id="metaTableParamMap" type="kr.teamagent.datamart.service.DatamartVO$MetaTableSavePayloadVO"/>
+    <parameterMap id="metaColumnSaveParamMap" type="kr.teamagent.datamart.service.DatamartVO$MetaColumnSavePayloadVO"/>
 
     <select id="selectDatamartList" resultType="datamartVO">
         /* 데이터마트 목록 조회 datamart.selectDatamartList */
@@ -145,6 +146,30 @@
         ) AS USE_YN
     </select>
 
+    <select id="selectDmColListByDatamartAndTbl" parameterType="hashMap" resultType="kr.teamagent.datamart.service.DatamartVO$MetaColumnRowVO">
+        /* 메타 테이블 목록 조회 시 저장된 컬럼 메타 로드 datamart.selectDmColListByDatamartAndTbl */
+        SELECT
+            A.COL_ID AS colId
+            , A.COL_PHY_NM AS colPhyNm
+            , A.COL_KOR_NM AS colKorNm
+            , A.COL_DESC AS colDesc
+            , A.DATA_TYPE AS dataType
+            , CAST(A.DATA_LEN AS CHAR) AS dataLen
+            , A.PK_YN AS pkYn
+            , A.FK_YN AS fkYn
+            , A.NULLABLE_YN AS nullableYn
+            , A.HAS_CODE_YN AS hasCodeYn
+            , A.AI_HINT AS aiHint
+            , A.SORT_ORD AS sortOrd
+            , A.USE_YN AS useYn
+            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS createDt
+            , DATE_FORMAT(A.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS modifyDt
+        FROM TB_DM_COL A
+        WHERE A.DATAMART_ID = #{datamartId}
+        AND A.TBL_ID = #{tblId}
+        ORDER BY A.SORT_ORD, A.COL_PHY_NM
+    </select>
+
     <insert id="saveMetaTable" parameterMap="metaTableParamMap">
         /* 메타 관리 > 테이블 저장 datamart.saveMetaTable */
         INSERT INTO TB_DM_TBL (
@@ -182,6 +207,59 @@
             SORT_ORD = VALUES(SORT_ORD)
             , USE_YN = VALUES(USE_YN)
             , MODIFY_DT = NOW()
+    </insert>
+
+    <delete id="deleteDmColByDatamartId" parameterType="datamartVO">
+        /* 메타 관리 > 컬럼 저장 전 삭제 datamart.deleteDmColByDatamartId */
+        DELETE FROM TB_DM_COL
+        WHERE DATAMART_ID = #{datamartId}
+    </delete>
+
+    <insert id="insertDmColBatch" parameterMap="metaColumnSaveParamMap">
+        /* 메타 관리 > 컬럼 일괄 등록 datamart.insertDmColBatch */
+        INSERT INTO TB_DM_COL (
+            DATAMART_ID
+            , TBL_ID
+            , COL_ID
+            , COL_PHY_NM
+            , COL_KOR_NM
+            , COL_DESC
+            , DATA_TYPE
+            , DATA_LEN
+            , PK_YN
+            , FK_YN
+            , NULLABLE_YN
+            , HAS_CODE_YN
+            , AI_HINT
+            , SORT_ORD
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        )
+        VALUES
+        <foreach collection="tableList" item="table" separator=",">
+        <foreach collection="table.columns" item="col" separator=",">
+        (
+            #{datamartId}
+            , #{table.id}
+            , #{col.colId}
+            , #{col.colPhyNm}
+            , #{col.colKorNm}
+            , #{col.colDesc}
+            , #{col.dataType}
+            , #{col.dataLen}
+            , #{col.pkYn}
+            , #{col.fkYn}
+            , #{col.nullableYn}
+            , #{col.hasCodeYn}
+            , #{col.aiHint}
+            , #{col.sortOrd}
+            , #{col.useYn}
+            , NOW()
+            , NOW()
+        )
+        </foreach>
+        </foreach>
     </insert>
 
     <select id="selectDatamartSummary" resultMap="datamartSummaryMap">

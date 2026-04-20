@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
@@ -185,6 +186,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      * 메타 테이블 목록 조회 (외부 DB 접속하여 스키마 정보 조회)
      * @param searchVO datamartId 필수
      * @return { result, msg, dataList: [ { id, physicalNm, logicalNm, colCnt, useYn, tableDescKo, usageTy, columns: [...] } ] }
+     *         컬럼: TB_DM_COL에 해당 DATAMART_ID·TBL_ID 행이 하나라도 있으면 저장 데이터만으로 구성, 없으면 JDBC 스키마로 구성
      * @throws Exception
      */
     public HashMap<String, Object> selectMetaTableList(DatamartVO searchVO) throws Exception {
@@ -215,37 +217,63 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             while (tableRs.next()) {
                 String tableName = tableRs.getString("TABLE_NAME");
                 String tableRemarks = tableRs.getString("REMARKS");
-                String tableType = tableRs.getString("TABLE_TYPE");
+                String tableType = tableRs.getString("TABLE_TYPE").trim();
 
-                Set<String> pkColumns = new HashSet<>();
-                ResultSet pkRs = metaData.getPrimaryKeys(catalog, null, tableName);
-                while (pkRs.next()) {
-                    pkColumns.add(pkRs.getString("COLUMN_NAME"));
-                }
-                pkRs.close();
+                Map<String, Object> colParamMap = new HashMap<>();
+                colParamMap.put("datamartId", dm.getDatamartId());
+                colParamMap.put("tblId", tableName);
+                List<DatamartVO.MetaColumnRowVO> savedColList = datamartDAO.selectDmColListByDatamartAndTbl(colParamMap);
 
-                Set<String> fkColumns = new HashSet<>();
-                ResultSet fkRs = metaData.getImportedKeys(catalog, null, tableName);
-                while (fkRs.next()) {
-                    fkColumns.add(fkRs.getString("FKCOLUMN_NAME"));
-                }
-                fkRs.close();
+                List<DatamartVO.MetaColumnRowVO> columns = new ArrayList<>();
+                if (savedColList != null && !savedColList.isEmpty()) {
+                    for (DatamartVO.MetaColumnRowVO row : savedColList) {
+                        if (row != null) {
+                            columns.add(row);
+                        }
+                    }
+                } else {
+                    Set<String> pkColumns = new HashSet<>();
+                    ResultSet pkRs = metaData.getPrimaryKeys(catalog, null, tableName);
+                    while (pkRs.next()) {
+                        pkColumns.add(pkRs.getString("COLUMN_NAME"));
+                    }
+                    pkRs.close();
 
-                List<HashMap<String, Object>> columns = new ArrayList<>();
-                ResultSet colRs = metaData.getColumns(catalog, null, tableName, "%");
-                while (colRs.next()) {
-                    HashMap<String, Object> col = new HashMap<>();
-                    String colName = colRs.getString("COLUMN_NAME");
-                    col.put("id", colName);
-                    col.put("colName", colName);
-                    col.put("dataType", colRs.getString("TYPE_NAME"));
-                    col.put("isPk", pkColumns.contains(colName));
-                    col.put("isFk", fkColumns.contains(colName));
-                    col.put("descKo", colRs.getString("REMARKS") != null ? colRs.getString("REMARKS") : "");
-                    col.put("nullable", "YES".equals(colRs.getString("IS_NULLABLE")) ? "Y" : "N");
-                    columns.add(col);
+                    Set<String> fkColumns = new HashSet<>();
+                    ResultSet fkRs = metaData.getImportedKeys(catalog, null, tableName);
+                    while (fkRs.next()) {
+                        fkColumns.add(fkRs.getString("FKCOLUMN_NAME"));
+                    }
+                    fkRs.close();
+
+                    ResultSet colRs = metaData.getColumns(catalog, null, tableName, "%");
+                    while (colRs.next()) {
+                        String colPhyNm = colRs.getString("COLUMN_NAME");
+                        String remarks = colRs.getString("REMARKS");
+                        if (remarks == null) {
+                            remarks = "";
+                        }
+                        int columnSize = colRs.getInt("COLUMN_SIZE");
+                        Integer dataLenInt = colRs.wasNull() ? null : Integer.valueOf(columnSize);
+
+                        DatamartVO.MetaColumnRowVO col = new DatamartVO.MetaColumnRowVO();
+                        col.setColId(colPhyNm);
+                        col.setColPhyNm(colPhyNm);
+                        col.setColKorNm(remarks);
+                        col.setColDesc(remarks);
+                        col.setDataType(colRs.getString("TYPE_NAME"));
+                        col.setDataLen(dataLenInt != null ? String.valueOf(dataLenInt) : null);
+                        col.setPkYn(pkColumns.contains(colPhyNm) ? "Y" : "N");
+                        col.setFkYn(fkColumns.contains(colPhyNm) ? "Y" : "N");
+                        col.setNullableYn("YES".equalsIgnoreCase(colRs.getString("IS_NULLABLE")) ? "Y" : "N");
+                        col.setHasCodeYn("N");
+                        col.setAiHint("");
+                        col.setSortOrd(Integer.valueOf(colRs.getInt("ORDINAL_POSITION")));
+                        col.setUseYn("Y");
+                        columns.add(col);
+                    }
+                    colRs.close();
                 }
-                colRs.close();
 
                 HashMap<String, Object> table = new HashMap<>();
                 table.put("id", tableName);
@@ -322,6 +350,54 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
         resultMap.put("result", "SUCCESS");
         resultMap.put("msg", "메타 테이블 저장 성공");
+        return resultMap;
+    }
+
+    /**
+     * 메타 관리 > 컬럼 저장 (해당 DATAMART_ID의 TB_DM_COL 전부 삭제 후, 페이로드의 columns만큼 INSERT)
+     * @param payload datamartId, tableList(각 테이블의 columns)
+     * @return result, msg
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public HashMap<String, Object> saveMetaColumnList(DatamartVO.MetaColumnSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+
+        if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(payload.getDatamartId());
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        datamartDAO.deleteDmColByDatamartId(dm);
+
+        List<DatamartVO.MetaColumnSaveTableItemVO> tableList = payload.getTableList();
+        List<DatamartVO.MetaColumnSaveTableItemVO> tablesWithCols = new ArrayList<>();
+        if (tableList != null) {
+            for (DatamartVO.MetaColumnSaveTableItemVO table : tableList) {
+                if (table != null && table.getColumns() != null && !table.getColumns().isEmpty()) {
+                    tablesWithCols.add(table);
+                }
+            }
+        }
+
+        if (!tablesWithCols.isEmpty()) {
+            DatamartVO.MetaColumnSavePayloadVO insertPayload = new DatamartVO.MetaColumnSavePayloadVO();
+            insertPayload.setDatamartId(payload.getDatamartId());
+            insertPayload.setTableList(tablesWithCols);
+            datamartDAO.insertDmColBatch(insertPayload);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "메타 컬럼 저장 성공");
         return resultMap;
     }
 

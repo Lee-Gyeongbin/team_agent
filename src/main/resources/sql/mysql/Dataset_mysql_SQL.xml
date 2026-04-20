@@ -173,13 +173,11 @@
             , A.MODIFY_DT
             , A.FILE_NAME
             , A.FILE_PATH
-            , A.FILE_SIZE
+            , ROUND(A.FILE_SIZE / (1024 * 1024), 2) AS FILE_SIZE
             , A.FILE_TYPE
-            , 1 AS FILE_COUNT
         FROM
             TB_DOC_FILE A
-        WHERE 1=1 
-            AND A.USE_YN = 'Y'
+        WHERE 1=1
     </select>
 
     <select id="selectDatasetUrlList" parameterType="datasetVO" resultType="datasetVO">
@@ -241,7 +239,6 @@
             , CHUNK_OPT_JSON = VALUES(CHUNK_OPT_JSON)
             , CHUNK_SIZE = VALUES(CHUNK_SIZE)
             , CHUNK_OVERLAP = VALUES(CHUNK_OVERLAP)
-            , DATASET_BUILD_STATUS_CD = VALUES(DATASET_BUILD_STATUS_CD)
             , EMBED_MODEL_CD = VALUES(EMBED_MODEL_CD)
             , VECTOR_DB_CD = VALUES(VECTOR_DB_CD)
             , USE_YN = VALUES(USE_YN)
