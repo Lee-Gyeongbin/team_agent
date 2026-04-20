@@ -185,7 +185,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 메타 테이블 목록 조회 (외부 DB 접속하여 스키마 정보 조회)
      * @param searchVO datamartId 필수
-     * @return { result, msg, dataList: [ { id, physicalNm, logicalNm, colCnt, useYn, tableDescKo, usageTy, columns: [...] } ] }
+     * @return { result, msg, dataList: [ { id, physicalNm, logicalNm, colCnt, useYn, tableDescKo, columns: [...] } ] }
      *         컬럼: TB_DM_COL에 해당 DATAMART_ID·TBL_ID 행이 하나라도 있으면 저장 데이터만으로 구성, 없으면 JDBC 스키마로 구성
      * @throws Exception
      */
@@ -286,7 +286,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 String useYn = datamartDAO.selectDmTblUseYn(paramMap);
                 table.put("useYn", useYn);
                 table.put("tableDescKo", tableRemarks != null ? tableRemarks : "");
-                table.put("usageTy", tableType);
                 table.put("columns", columns);
                 dataList.add(table);
             }
@@ -399,6 +398,106 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         resultMap.put("result", "SUCCESS");
         resultMap.put("msg", "메타 컬럼 저장 성공");
         return resultMap;
+    }
+
+    /**
+     * 메타 관리 > 테이블 관계 저장 (TB_DM_REL 해당 DATAMART_ID 전체 삭제 후 INSERT)
+     * @param payload datamartId, relationshipList
+     * @return result, msg
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public HashMap<String, Object> saveMetaRelationshipList(DatamartVO.MetaRelationshipSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+
+        if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(payload.getDatamartId());
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        datamartDAO.deleteDmRelByDatamartId(dm);
+
+        List<DatamartVO.MetaRelationshipRowVO> rows = payload.getRelationshipList();
+        List<DatamartVO.MetaRelationshipRowVO> toSave = new ArrayList<>();
+        if (rows != null) {
+            for (DatamartVO.MetaRelationshipRowVO row : rows) {
+                if (row != null) {
+                    toSave.add(row);
+                }
+            }
+        }
+
+        if (!toSave.isEmpty()) {
+            assignRelIdsForInsertBatch(toSave);
+            DatamartVO.MetaRelationshipSavePayloadVO daoPayload = new DatamartVO.MetaRelationshipSavePayloadVO();
+            daoPayload.setDatamartId(payload.getDatamartId());
+            daoPayload.setRelationshipList(toSave);
+            datamartDAO.saveMetaRelationship(daoPayload);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "메타 관계 저장 성공");
+        return resultMap;
+    }
+
+    /**
+     * 메타 관리 > 관계 메타데이터 목록 조회 (TB_DM_REL, DATAMART_ID 기준)
+     * @param searchVO datamartId 필수
+     * @return { result, msg, dataList: MetaRelationshipRowVO[] }
+     * @throws Exception
+     */
+    public HashMap<String, Object> selectMetaRelationshipList(DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(searchVO.getDatamartId());
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        List<DatamartVO.MetaRelationshipRowVO> dataList = datamartDAO.selectMetaRelationshipList(searchVO);
+        if (dataList == null) {
+            dataList = new ArrayList<>();
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "메타 관계 목록 조회 성공");
+        resultMap.put("dataList", dataList);
+        return resultMap;
+    }
+
+    /**
+     * 동일 트랜잭션에서 {@link KeyGenerate#generateTableKey}를 행마다 호출하면 MAX 조회가 INSERT 반영 전에
+     * 반복되어 동일 REL_ID가 나올 수 있음. 첫 행만 DB 기준 시드를 받고 이후는 로컬 시퀀스로 채움.
+     */
+    private void assignRelIdsForInsertBatch(List<DatamartVO.MetaRelationshipRowVO> rows) throws Exception {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        String seedKey = keyGenerate.generateTableKey("DR", "tb_dm_rel", "REL_ID");
+        rows.get(0).setRelId(seedKey);
+        int nextSeq = Integer.parseInt(seedKey.substring(2));
+        for (int i = 1; i < rows.size(); i++) {
+            nextSeq++;
+            rows.get(i).setRelId("DR" + String.format("%06d", nextSeq));
+        }
     }
 
 }

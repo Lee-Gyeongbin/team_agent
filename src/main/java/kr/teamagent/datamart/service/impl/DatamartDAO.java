@@ -118,4 +118,34 @@ public class DatamartDAO extends EgovComAbstractDAO {
         return insert("datamart.insertDmColBatch", payload);
     }
 
+    /**
+     * 데이터마트 메타 관계 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
+     * @throws Exception
+     */
+    public int deleteDmRelByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmRelByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 메타 관계 일괄 등록
+     * @param payload datamartId, relationshipList
+     * @return 등록 건수
+     * @throws Exception
+     */
+    public int saveMetaRelationship(DatamartVO.MetaRelationshipSavePayloadVO payload) throws Exception {
+        return insert("datamart.saveMetaRelationship", payload);
+    }
+
+    /**
+     * 데이터마트 메타 관계 목록 (DATAMART_ID 기준 TB_DM_REL)
+     * @param searchVO datamartId
+     * @return 관계 행 목록
+     * @throws Exception
+     */
+    public List<DatamartVO.MetaRelationshipRowVO> selectMetaRelationshipList(DatamartVO searchVO) throws Exception {
+        return selectList("datamart.selectMetaRelationshipList", searchVO);
+    }
+
 }

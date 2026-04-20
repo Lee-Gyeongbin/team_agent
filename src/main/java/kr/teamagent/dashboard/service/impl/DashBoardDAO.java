@@ -50,4 +50,33 @@ public class DashBoardDAO extends EgovComAbstractDAO {
         return selectList("dashboard.selectVisitorTrendList");
     }
 
+    /**
+     * 대시보드 카테고리 목록 조회
+     */
+    public List<DashBoardVO.CategoryTrend> selectCategoryTrend(int dayCnt) throws Exception {
+        HashMap<String, Object> paramMap = new HashMap<>();
+        paramMap.put("dayCnt", dayCnt);
+        return selectList("dashboard.selectCategoryTrend", paramMap);
+    }
+
+    /**
+     * 대시보드 카테고리 목록 등록
+     */
+    public int insertCategoryTrend(DashBoardVO.CategoryTrend saveVO) throws Exception {
+        return insert("dashboard.insertCategoryTrend", saveVO);
+    }
+
+    /**
+     * 배치용 어제 질문 목록 조회
+     */
+    public List<String> selectYesterdayQContentList() throws Exception {
+        return selectList("dashboard.selectYesterdayQContentList");
+    }
+
+    /**
+     * 배치용 어제 카테고리 통계 삭제
+     */
+    public int deleteYesterdayCategoryTrend() throws Exception {
+        return delete("dashboard.deleteYesterdayCategoryTrend");
+    }
 }
