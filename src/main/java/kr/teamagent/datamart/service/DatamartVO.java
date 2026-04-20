@@ -106,4 +106,35 @@ public class DatamartVO {
         private String modifyDt;
     }
 
+    /**
+     * 메타 관리 > 관계(조인) 일괄 저장 요청 (datamartId + relationshipList)
+     */
+    @Getter
+    @Setter
+    public static class MetaRelationshipSavePayloadVO {
+        private String datamartId;
+        private List<MetaRelationshipRowVO> relationshipList;
+    }
+
+    /**
+     * TB_DM_REL 저장용 관계 행 (프론트 DatamartMetaRelationship 대응)
+     */
+    @Getter
+    @Setter
+    public static class MetaRelationshipRowVO {
+        private String datamartId;
+        private String relId;
+        private String fromTblId;
+        private String fromColId;
+        private String toTblId;
+        private String toColId;
+        private String cardinality;
+        private String joinType;
+        private String relDesc;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
 }

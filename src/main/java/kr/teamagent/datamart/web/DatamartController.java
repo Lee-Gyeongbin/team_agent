@@ -118,6 +118,32 @@ public class DatamartController extends BaseController {
     }
 
     /**
+     * 메타 관리 > 테이블 관계 저장 API (TB_DM_REL DATAMART_ID 단위 전체 삭제 후 INSERT)
+     * @param payload datamartId, relationshipList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaRelationshipSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaRelationshipSave(@RequestBody DatamartVO.MetaRelationshipSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.saveMetaRelationshipList(payload);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 메타 관리 > 관계 메타데이터 목록 조회 API (TB_DM_REL)
+     * @param searchVO datamartId 필수
+     * @return { result, msg, dataList: MetaRelationshipRowVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaRelationshipList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaRelationshipList(@RequestBody DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.selectMetaRelationshipList(searchVO);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 데이터마트 삭제 API
      * @param datamartVO datamartId 필수
      * @return { data: { datamartId: String } }
