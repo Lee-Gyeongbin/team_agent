@@ -60,7 +60,6 @@ public class DatamartVO {
         private Integer colCnt;
         private String useYn;
         private String tableDescKo;
-        private String usageTy;
     }
 
     /**

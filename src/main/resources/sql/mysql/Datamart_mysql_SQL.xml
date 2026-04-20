@@ -179,7 +179,6 @@
             , TBL_PHY_NM
             , TBL_KOR_NM
             , TBL_DESC
-            , TBL_CATG
             , COL_CNT
             , AI_HINT
             , SORT_ORD
@@ -195,7 +194,6 @@
             , #{item.physicalNm}
             , #{item.logicalNm}
             , #{item.tableDescKo}
-            , #{item.usageTy}
             , #{item.colCnt}
             , NULL
             , (#{idx} + 1)

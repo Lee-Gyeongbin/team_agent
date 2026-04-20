@@ -185,7 +185,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 메타 테이블 목록 조회 (외부 DB 접속하여 스키마 정보 조회)
      * @param searchVO datamartId 필수
-     * @return { result, msg, dataList: [ { id, physicalNm, logicalNm, colCnt, useYn, tableDescKo, usageTy, columns: [...] } ] }
+     * @return { result, msg, dataList: [ { id, physicalNm, logicalNm, colCnt, useYn, tableDescKo, columns: [...] } ] }
      *         컬럼: TB_DM_COL에 해당 DATAMART_ID·TBL_ID 행이 하나라도 있으면 저장 데이터만으로 구성, 없으면 JDBC 스키마로 구성
      * @throws Exception
      */
@@ -286,7 +286,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 String useYn = datamartDAO.selectDmTblUseYn(paramMap);
                 table.put("useYn", useYn);
                 table.put("tableDescKo", tableRemarks != null ? tableRemarks : "");
-                table.put("usageTy", tableType);
                 table.put("columns", columns);
                 dataList.add(table);
             }
