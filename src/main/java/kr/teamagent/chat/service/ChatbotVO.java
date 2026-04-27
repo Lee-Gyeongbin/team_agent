@@ -70,6 +70,8 @@ public class ChatbotVO extends CommonVO {
     private String refId;
     // 질문 내용
     private String qContent;
+    /** REST 요청 호환용 질문 필드 */
+    private String query;
     // 응답 내용
     private String rContent;
     // 입력 토큰 수
@@ -187,4 +189,7 @@ public class ChatbotVO extends CommonVO {
 
     /** selectChatLogList: 질문(LOG)별 TB_CHAT_FILE JSON 배열 문자열 */
     private String chatAttachmentList;
+
+    /** 점심 추천(AG000009) 시작 API 응답 전용. Y이면 UI에서 점심 선택 카드를 함께 표시. */
+    private String lunchSelectCardDisplayYn;
 }
