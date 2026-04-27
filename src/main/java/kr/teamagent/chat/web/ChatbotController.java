@@ -23,6 +23,7 @@ import kr.teamagent.common.web.BaseController;
 public class ChatbotController extends BaseController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatbotController.class);
+    private static final String LUNCH_MENU_AGENT_ID = "AG000009";
 
     @Autowired
     private ChatbotServiceImpl chatbotService;
@@ -80,6 +81,12 @@ public class ChatbotController extends BaseController {
     @ResponseBody
     public ModelAndView selectDmList(ChatbotVO searchVO)throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
+        if (searchVO != null && LUNCH_MENU_AGENT_ID.equals(searchVO.getAgentId())) {
+            searchVO.setUserId(SessionUtil.getUserId());
+            resultMap.put("data", chatbotService.createLunchRecommendationChat(searchVO));
+            resultMap.put("subOptionList", chatbotService.selectDmList(searchVO));
+            return new ModelAndView("jsonView", resultMap);
+        }
         resultMap.put("subOptionList", chatbotService.selectDmList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
@@ -98,6 +105,7 @@ public class ChatbotController extends BaseController {
         resultMap.put("data", chatbotService.createChatRoom(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
+
     
     @RequestMapping(value="/ai/chatbot/selectChatRoomList.do")
     @ResponseBody

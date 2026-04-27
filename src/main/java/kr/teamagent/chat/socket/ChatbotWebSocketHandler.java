@@ -163,7 +163,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
                 sendMessage(session, createMessage("error", "모델 ID가 지정되지 않았습니다.", null));
                 return;
             }
-            if (refId == null || refId.isEmpty()) {
+            if (!"C".equals(svcTy) && (refId == null || refId.isEmpty())) {
                 sendMessage(session, createMessage("error", "참조 문서 ID가 지정되지 않았습니다.", null));
                 return;
             }
@@ -198,7 +198,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
                 }
             }
 
-            logger.info("질문 수신: query={}, threadId={}, svcTy={}, refId={}, userId={}, attachments={}",
+            logger.info("질문 수신: query={}, threadId={}, svcTy={}, refId={}, userId={}, agentId={}, attachments={}",
                     query, threadId, svcTy, refId, userId, agentId, attachmentFileIds.size());
 
             // 질문 수신 확인 메시지 전송

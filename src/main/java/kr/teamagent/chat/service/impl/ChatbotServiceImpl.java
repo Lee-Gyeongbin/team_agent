@@ -41,6 +41,7 @@ import okhttp3.RequestBody;
 public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
+    private static final String LUNCH_MENU_AGENT_ID = "AG000009";
 
     @Autowired
     ChatbotDAO chatbotDAO;
@@ -123,6 +124,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public List<ChatbotVO> selectStatDetailList(ChatbotVO searchVO) throws Exception {
         return chatbotStatDAO.selectStatDetailList(searchVO);
     }
+    
     /**
      * CHAT 대화방 tableData 조회
      * @param searchVO
@@ -223,6 +225,37 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         int result = chatbotDAO.insertChatRoom(chatbotVO);
         return result > 0 ? chatbotVO : null;
     }
+
+    public ChatbotVO createLunchRecommendationChat(ChatbotVO chatbotVO) throws Exception {
+        final String guideMessage = "점심 메뉴를 추천해드릴게요!";
+        if (chatbotVO.getAgentId() == null || !LUNCH_MENU_AGENT_ID.equals(chatbotVO.getAgentId())) {
+            chatbotVO.setAgentId(LUNCH_MENU_AGENT_ID);
+        }
+
+        if (chatbotVO.getRoomId() == null) {
+            chatbotVO.setRoomTitle("점심 메뉴 추천");
+            chatbotDAO.insertChatRoom(chatbotVO);
+        }
+
+        ChatbotVO logVO = new ChatbotVO();
+        logVO.setRoomId(chatbotVO.getRoomId());
+        logVO.setAgentId(LUNCH_MENU_AGENT_ID);
+        logVO.setSvcTy("C");
+        logVO.setRefId(CommonUtil.isNotEmpty(chatbotVO.getRefId()) ? chatbotVO.getRefId() : "all");
+        logVO.setModelId(chatbotVO.getModelId());
+        logVO.setQContent("");
+        logVO.setRContent(guideMessage);
+        logVO.setInTokens(0);
+        logVO.setOutTokens(0);
+        logVO.setSatisYn("N");
+        logVO.setUserId(chatbotVO.getUserId());
+        logVO.setLunchSelectCardDisplayYn("Y");
+        chatbotDAO.insertChatLog(logVO);
+        chatbotDAO.updateChatRoomLastChatDt(logVO);
+
+        logVO.setRoomTitle(chatbotVO.getRoomTitle());
+        return logVO;
+    }
     /**
      * CHAT 대화방 목록 조회
      * @param searchVO
@@ -271,7 +304,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private void callAiApiStreamingWebSocket(WebSocketSession session, String apiUrl, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
         // 요청 파라미터 구성 (JSON body)
         Map<String, Object> params = new HashMap<>();
-        params.put("query", query);
+        String requestQuery = buildRequestQueryByAgent(query, agentId);
+        params.put("query", requestQuery);
         params.put("user_id", userId != null ? userId : "");
         params.put("threadId", threadId != null ? threadId : "string");
         // M(관리): 프론트가 다중 dataset을 콤마 연결 문자열로 전달 → AI API는 dataset_id를 문자열 배열로 기대
@@ -355,7 +389,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             
             Request request = requestBuilder.build();
             
-            logger.info("AI API 호출 시작 (WebSocket): {} - query: {}, agentId: {}, threadId: {}", apiUrl, query, agentId, threadId);
+            logger.info("AI API 호출 시작 (WebSocket): {} - query: {}, agentId: {}, threadId: {}", apiUrl, requestQuery, agentId, threadId);
 
             /**
              * OkHttp를 이용한 AI API 비동기 스트리밍 호출
@@ -427,6 +461,41 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.error("AI API 호출 중 오류 발생: {}", e.getMessage(), e);
             callback.onError("API 호출 오류: " + e.getMessage());
         }
+    }
+
+    private String buildRequestQueryByAgent(String query, String agentId) {
+        if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
+            String userInput = CommonUtil.isNotEmpty(query) ? query : "";
+            String prompt =
+                    "너는 점심 식당 추천 AI이다.\n\n"
+                    + "조건:\n"
+                    + "- 현재 날씨: 사용자 요청에서 위치 정보를 통해 스스로 파악\n"
+                    + "- 사용자 요청: " + userInput + "\n"
+                    + "추천 기준:\n"
+                    + "1. 모든 답변은 카카오맵 기반으로 답변할 것\n"
+                    + "2. 반드시 사용자 위치 기준 도보 15분 이내 식당만 추천할 것\n"
+                    + "2. 폐업, 휴업, 임시휴무 등 이용 불가능한 식당은 절대 포함하지 말 것\n"
+                    + "3. 직장인이 점심으로 많이 이용하는 식당 (리뷰 기반으로 판단)\n"
+                    + "4. 가격은 사용자 요청의 가격 조건을 반영해 실제 금액으로 작성할 것\n"
+                    + "5. 실제 존재할 가능성이 높은 식당명으로 작성할 것\n\n"
+                    + "6. 식당 위치는 정확한 도로명 주소로 작성할 것\n"
+                    + "출력 규칙:\n"
+                    + "- 반드시 JSON 배열 형식으로만 출력\n"
+                    + "- 총 3개의 식당을 반환할 것\n"
+                    + "- 다른 문장, 설명, 코드블럭 절대 금지\n\n"
+                    + "출력:\n"
+                    + "[\n"
+                    + "  {\n"
+                    + "    \"restaurant\": \"\",\n"
+                    + "    \"location\": \"\",\n"
+                    + "    \"menu\": \"\",\n"
+                    + "    \"price\": \"\"\n"
+                    + "  }\n"
+                    + "]";
+            return prompt;
+        }
+
+        return query;
     }
     
     /**
