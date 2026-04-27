@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ai.meeting">
+
+    <!-- ===================== TB_MEETING ===================== -->
+
+    <select id="selectMeetingList" resultType="meetingVO">
+        /* 회의 목록 조회 ai.meeting.selectMeetingList */
+        SELECT
+            A.MEETING_ID        AS MEETING_ID
+            , A.MEETING_TITLE   AS MEETING_TITLE
+            , A.ATTENDEES       AS ATTENDEES
+            , A.STATUS          AS STATUS
+            , B.CODE_NM         AS STATUS_NM
+            , A.START_DT        AS START_DT
+            , A.END_DT          AS END_DT
+            , A.CREATE_USER_ID  AS CREATE_USER_ID
+            , A.CREATE_DT       AS CREATE_DT
+        FROM TB_MEETING A
+        LEFT JOIN TB_CODE B
+            ON B.CODE_GRP_ID = 'MT000001'
+            AND B.CODE_ID = A.STATUS
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+            AND A.CREATE_USER_ID = #{userId}
+        ORDER BY A.CREATE_DT DESC
+    </select>
+
+    <select id="selectMeeting" resultType="meetingVO">
+        /* 회의 단건 조회 ai.meeting.selectMeeting */
+        SELECT
+            A.MEETING_ID        AS MEETING_ID
+            , A.MEETING_TITLE   AS MEETING_TITLE
+            , A.ATTENDEES       AS ATTENDEES
+            , A.STATUS          AS STATUS
+            , B.CODE_NM         AS STATUS_NM
+            , A.START_DT        AS START_DT
+            , A.END_DT          AS END_DT
+            , A.IS_AUTO_TITLE   AS IS_AUTO_TITLE
+            , A.CREATE_USER_ID  AS CREATE_USER_ID
+            , A.CREATE_DT       AS CREATE_DT
+        FROM TB_MEETING A
+        LEFT JOIN TB_CODE B
+            ON B.CODE_GRP_ID = 'MT000001'
+            AND B.CODE_ID = A.STATUS
+        WHERE 1=1
+            AND A.MEETING_ID = #{meetingId}
+            AND A.USE_YN = 'Y'
+    </select>
+
+    <insert id="insertMeeting" parameterType="meetingVO"
+        useGeneratedKeys="true" keyProperty="meetingId">
+        /* 회의 등록 ai.meeting.insertMeeting */
+        INSERT INTO TB_MEETING
+        (MEETING_TITLE, ATTENDEES, STATUS, START_DT, USE_YN, CREATE_USER_ID, CREATE_DT, IS_AUTO_TITLE)
+        VALUES
+        (#{meetingTitle}, #{attendees}, '001', NOW(), 'Y', #{createUserId}, NOW(), #{isAutoTitle})
+    </insert>
+
+    <update id="updateMeetingStatus" parameterType="meetingVO">
+        /* 회의 상태/종료일시 수정 ai.meeting.updateMeetingStatus */
+        UPDATE TB_MEETING SET
+            STATUS      = #{status}
+            , END_DT    = NOW()
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <update id="updateMeetingTitle" parameterType="meetingVO">
+        /* 회의 제목 수정 (AI 자동 생성 반영) ai.meeting.updateMeetingTitle */
+        UPDATE TB_MEETING SET
+            MEETING_TITLE = #{meetingTitle}
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <update id="deleteMeeting" parameterType="meetingVO">
+        /* 회의 삭제 (논리삭제) ai.meeting.deleteMeeting */
+        UPDATE TB_MEETING SET
+            USE_YN      = 'N'
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <!-- ===================== TB_MEETING_MINUTES ===================== -->
+
+    <select id="selectMeetingMinutes" resultType="meetingVO">
+        /* 회의록 조회 ai.meeting.selectMeetingMinutes */
+        SELECT
+            MINUTES_ID      AS MINUTES_ID
+            , MEETING_ID    AS MEETING_ID
+            , FULL_TEXT     AS FULL_TEXT
+            , SUMMARY       AS SUMMARY
+            , DECISIONS     AS DECISIONS
+            , TODO_LIST     AS TODO_LIST
+            , CREATE_DT     AS CREATE_DT
+            , MODIFY_DT     AS MODIFY_DT
+        FROM TB_MEETING_MINUTES
+        WHERE MEETING_ID = #{meetingId}
+    </select>
+
+    <insert id="insertMeetingMinutes" parameterType="meetingVO">
+        /* 회의록 등록 ai.meeting.insertMeetingMinutes */
+        INSERT INTO TB_MEETING_MINUTES
+        (MEETING_ID, FULL_TEXT, SUMMARY, DECISIONS, TODO_LIST, CREATE_DT)
+        VALUES
+        (#{meetingId}, #{fullText}, #{summary}, #{decisions}, #{todoList}, NOW())
+    </insert>
+
+    <update id="updateMeetingMinutes" parameterType="meetingVO">
+        /* 회의록 수정 ai.meeting.updateMeetingMinutes */
+        UPDATE TB_MEETING_MINUTES SET
+            FULL_TEXT       = #{fullText}
+            , SUMMARY       = #{summary}
+            , DECISIONS     = #{decisions}
+            , TODO_LIST     = #{todoList}
+            , MODIFY_DT     = NOW()
+        WHERE MINUTES_ID = #{minutesId}
+    </update>
+
+    <!-- ===================== TB_MEETING_INFOGRAPHIC ===================== -->
+
+    <select id="selectMeetingInfographicList" resultType="meetingVO">
+        /* 회의별 인포그래픽 조회 ai.meeting.selectMeetingInfographicList */
+        SELECT
+            INFOGRAPHIC_ID   AS INFOGRAPHIC_ID
+            , MEETING_ID     AS MEETING_ID
+            , TOPIC_NM       AS TOPIC_NM
+            , TOPIC_SUMMARY  AS TOPIC_SUMMARY
+            , TREE_TEXT      AS TREE_TEXT
+            , INFOGRAPHIC_IMG AS INFOGRAPHIC_IMG
+            , SORT_ORD       AS SORT_ORD
+            , CREATE_DT      AS CREATE_DT
+            , MODIFY_DT      AS MODIFY_DT
+        FROM TB_MEETING_INFOGRAPHIC
+        WHERE 1=1
+            AND MEETING_ID = #{meetingId}
+            AND USE_YN = 'Y'
+        ORDER BY SORT_ORD ASC, INFOGRAPHIC_ID ASC
+    </select>
+
+    <update id="deleteMeetingInfographicByMeetingId" parameterType="meetingVO">
+        /* 회의별 인포그래픽 논리삭제 ai.meeting.deleteMeetingInfographicByMeetingId */
+        UPDATE TB_MEETING_INFOGRAPHIC SET
+            USE_YN = 'N'
+            , MODIFY_DT = NOW()
+        WHERE 1=1
+            AND MEETING_ID = #{meetingId}
+            AND USE_YN = 'Y'
+    </update>
+
+    <insert id="insertMeetingInfographic" parameterType="meetingVO"
+        useGeneratedKeys="true" keyProperty="infographicId">
+        /* 인포그래픽 등록 ai.meeting.insertMeetingInfographic */
+        INSERT INTO TB_MEETING_INFOGRAPHIC
+        (MEETING_ID, TOPIC_NM, TOPIC_SUMMARY, TREE_TEXT, INFOGRAPHIC_IMG, SORT_ORD, USE_YN, CREATE_DT)
+        VALUES
+        (#{meetingId}, #{topicNm}, #{topicSummary}, #{treeText}, #{infographicImg}, #{sortOrd}, 'Y', NOW())
+    </insert>
+
+    <!-- ===================== TB_MEETING_SPEAKER ===================== -->
+
+    <select id="selectSpeakerList" resultType="meetingVO">
+        /* 화자 목록 조회 ai.meeting.selectSpeakerList */
+        SELECT
+            SPEAKER_ID      AS SPEAKER_ID
+            , MEETING_ID    AS MEETING_ID
+            , SPEAKER_LABEL AS SPEAKER_LABEL
+            , SPEAKER_NM    AS SPEAKER_NM
+            , USER_ID       AS SPEAKER_USER_ID
+            , UTTERANCES    AS UTTERANCES
+            , CREATE_DT     AS CREATE_DT
+        FROM TB_MEETING_SPEAKER
+        WHERE MEETING_ID = #{meetingId}
+        ORDER BY SPEAKER_ID ASC
+    </select>
+
+    <insert id="insertSpeaker" parameterType="meetingVO"
+        useGeneratedKeys="true" keyProperty="speakerId">
+        /* 화자 등록 ai.meeting.insertSpeaker */
+        INSERT INTO TB_MEETING_SPEAKER
+        (MEETING_ID, SPEAKER_LABEL, SPEAKER_NM, USER_ID, UTTERANCES, CREATE_DT)
+        VALUES
+        (#{meetingId}, #{speakerLabel}, #{speakerNm}, #{speakerUserId}, #{utterances}, NOW())
+    </insert>
+
+    <update id="updateSpeakerMapping" parameterType="meetingVO">
+        /* 화자 매핑 (실명/사용자ID) 수정 ai.meeting.updateSpeakerMapping */
+        UPDATE TB_MEETING_SPEAKER SET
+            SPEAKER_NM  = #{speakerNm}
+            , USER_ID   = #{speakerUserId}
+            , MODIFY_DT = NOW()
+        WHERE SPEAKER_ID = #{speakerId}
+    </update>
+
+    <!-- ===================== TB_USER (참석자 선택) ===================== -->
+
+    <select id="selectUserListForMeeting" resultType="meetingVO">
+        /* 참석자 선택용 사용자 목록 ai.meeting.selectUserListForMeeting */
+        SELECT
+            USER_ID     AS CREATE_USER_ID
+            , USER_NM   AS USER_NM
+        FROM TB_USER
+        WHERE USE_YN = 'Y'
+        ORDER BY USER_NM ASC
+    </select>
+
+</mapper>

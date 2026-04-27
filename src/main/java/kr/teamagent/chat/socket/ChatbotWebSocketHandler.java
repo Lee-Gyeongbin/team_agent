@@ -278,7 +278,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             }
             
             @Override
-            public void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String responseThreadId, String logId, String tableData) {
+            public void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String responseThreadId, String logId, String tableData, String chartOption) {
                 // complete 메시지: 최종 내용과 threadId, logId 전송
                 JSONObject message = new JSONObject();
                 message.put("type", "complete");
@@ -296,6 +296,9 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
                 }
                 if (tableData != null) {
                     message.put("tableData", tableData);
+                }
+                if (chartOption != null) {
+                    message.put("chartOption", chartOption);
                 }
                 sendMessage(session, message.toJSONString());
             }
@@ -359,7 +362,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
          * @param chunkEvent null 또는 빈 문자열이면 답변 텍스트 델타(answer_delta). "answer_source" 등이면 구조화 청크.
          */
         void onChunk(String content, String accumulated, String chunkEvent);
-        void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData);
+        void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData, String chartOption);
         void onError(String error);
     }
 }
