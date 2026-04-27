@@ -96,6 +96,8 @@ public class ChatbotVO extends CommonVO {
     private int reaskCnt;
     // 테이블 데이터
     private String tableData;
+    // 차트 옵션
+    private String chartOption;
     /** Web 검색·그라운딩 출처 JSON — {"items":[{"url","title"},...]} */
     private String webGroundingJson;
     // SQL
@@ -190,6 +192,4 @@ public class ChatbotVO extends CommonVO {
     /** selectChatLogList: 질문(LOG)별 TB_CHAT_FILE JSON 배열 문자열 */
     private String chatAttachmentList;
 
-    /** 점심 추천(AG000009) 시작 API 응답 전용. Y이면 UI에서 점심 선택 카드를 함께 표시. */
-    private String lunchSelectCardDisplayYn;
 }

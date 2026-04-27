@@ -226,36 +226,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return result > 0 ? chatbotVO : null;
     }
 
-    public ChatbotVO createLunchRecommendationChat(ChatbotVO chatbotVO) throws Exception {
-        final String guideMessage = "점심 메뉴를 추천해드릴게요!";
-        if (chatbotVO.getAgentId() == null || !LUNCH_MENU_AGENT_ID.equals(chatbotVO.getAgentId())) {
-            chatbotVO.setAgentId(LUNCH_MENU_AGENT_ID);
-        }
-
-        if (chatbotVO.getRoomId() == null) {
-            chatbotVO.setRoomTitle("점심 메뉴 추천");
-            chatbotDAO.insertChatRoom(chatbotVO);
-        }
-
-        ChatbotVO logVO = new ChatbotVO();
-        logVO.setRoomId(chatbotVO.getRoomId());
-        logVO.setAgentId(LUNCH_MENU_AGENT_ID);
-        logVO.setSvcTy("C");
-        logVO.setRefId(CommonUtil.isNotEmpty(chatbotVO.getRefId()) ? chatbotVO.getRefId() : "all");
-        logVO.setModelId(chatbotVO.getModelId());
-        logVO.setQContent("");
-        logVO.setRContent(guideMessage);
-        logVO.setInTokens(0);
-        logVO.setOutTokens(0);
-        logVO.setSatisYn("N");
-        logVO.setUserId(chatbotVO.getUserId());
-        logVO.setLunchSelectCardDisplayYn("Y");
-        chatbotDAO.insertChatLog(logVO);
-        chatbotDAO.updateChatRoomLastChatDt(logVO);
-
-        logVO.setRoomTitle(chatbotVO.getRoomTitle());
-        return logVO;
-    }
     /**
      * CHAT 대화방 목록 조회
      * @param searchVO
@@ -522,6 +492,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String mainPage = "";
         String savedLogId = "";
         String tableData = "";
+        String chartOption = "";
         String sql = "";
         List<ChatRefItem> chatRefItems = new ArrayList<>();
         /** answer_source 스트림에서 누적 — done.data.items 가 있으면 그쪽이 최종 우선 */
@@ -587,6 +558,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         inputTokens = parseTokenCount(data.get("input_token"));
                         outputTokens = parseTokenCount(data.get("output_token"));
                         tableData = toJsonIfExists(data.get("table_data"));
+                        chartOption = toJsonIfExists(data.get("chart_option"));
                         sql = getString(data.get("sql"));
 
                         chatRefItems = extractChatRefItems(data);
@@ -627,7 +599,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 mainDocFileId,
                                 mainPage,
                                 chatRefItems,
-                                webGroundingJson);
+                                webGroundingJson,
+                                chartOption
+                            );
 
                         this.updateChatRoomLastChatDt(responseThreadId);
 
@@ -664,7 +638,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             relatedPageNos,
                             fallbackThreadId,
                             CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
-                            tableData);
+                            tableData,
+                            chartOption);
                     isCompleteCalled = true;
                 }
             } finally {
@@ -840,7 +815,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             String mainDocFileId,
             String mainPage,
             List<ChatRefItem> chatRefItems,
-            String webGroundingJson) throws Exception {
+            String webGroundingJson,
+            String chartOption) throws Exception {
 
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setRoomId(Long.parseLong(responseThreadId));
@@ -854,6 +830,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setRContent(answer);
         chatbotVO.setUserId(userId);
         chatbotVO.setTableData(CommonUtil.isNotEmpty(tableData) ? tableData : null);
+        chatbotVO.setChartOption(CommonUtil.isNotEmpty(chartOption) ? chartOption : null);
         chatbotVO.setSql(CommonUtil.isNotEmpty(sql) ? sql : null);
         chatbotVO.setWebGroundingJson(CommonUtil.isNotEmpty(webGroundingJson) ? webGroundingJson : null);
         chatbotVO.setMainDocFileId(CommonUtil.isNotEmpty(mainDocFileId) ? mainDocFileId : null);
