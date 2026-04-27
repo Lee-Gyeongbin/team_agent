@@ -36,6 +36,7 @@
         <typeAlias alias="noticeVO"                          type="kr.teamagent.notice.service.NoticeVO"/>
         <typeAlias alias="tmplVO"                            type="kr.teamagent.tmpl.service.TmplVO"/>
         <typeAlias alias="myPageVO"                          type="kr.teamagent.mypage.service.MyPageVO"/>
+        <typeAlias alias="meetingVO"                         type="kr.teamagent.meeting.service.MeetingVO"/>
     </typeAliases>
 
     <typeHandlers>

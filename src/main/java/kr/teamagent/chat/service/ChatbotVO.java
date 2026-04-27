@@ -96,6 +96,8 @@ public class ChatbotVO extends CommonVO {
     private int reaskCnt;
     // 테이블 데이터
     private String tableData;
+    // 차트 옵션
+    private String chartOption;
     /** Web 검색·그라운딩 출처 JSON — {"items":[{"url","title"},...]} */
     private String webGroundingJson;
     // SQL
