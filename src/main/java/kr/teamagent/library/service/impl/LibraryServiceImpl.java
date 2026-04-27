@@ -472,43 +472,26 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("data", null);
             return resultMap;
         }
-
-        // 화면에서 전달된 이전 보고서 JSON을 우선 사용 (사용자가 수동 수정한 내용 반영)
-        Object generatedReport = searchVO.getGeneratedReport();
-        if (generatedReport == null) {
+        // currentHtml: 프론트 에디터 전체 HTML (표 + 표 외 텍스트 포함)
+        String currentHtml = searchVO.getCurrentHtml();
+        if (CommonUtil.isEmpty(currentHtml)) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "generatedReport가 필요합니다.");
+            resultMap.put("returnMsg", "currentHtml이 필요합니다.");
             resultMap.put("data", null);
             return resultMap;
         }
-        String previousJson;
-        if (generatedReport instanceof String) {
-            previousJson = CommonUtil.nullToBlank((String) generatedReport);
-        } else {
-            previousJson = objectMapper.writeValueAsString(generatedReport);
-        }
-        if (CommonUtil.isEmpty(previousJson) || "{}".equals(previousJson.trim())) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "generatedReport가 비어있습니다.");
-            resultMap.put("data", null);
-            return resultMap;
-        }
-
-        // 로그 적재용 IDX_NO 계산은 DB의 마지막 로그를 참고 (없으면 0부터 시작)
+        // 로그 적재용 IDX_NO 계산
         LibraryVO lastLog = libraryDAO.selectLastReportChatLog(searchVO);
         Integer lastIdx = (lastLog != null && lastLog.getIdxNo() != null) ? lastLog.getIdxNo() : 0;
-
-        String prompt = buildReAskReportPrompt(previousJson, searchVO.getAskQuery());
+        String prompt = buildReAskReportPrompt(currentHtml, searchVO.getAskQuery());
         logger.info("reAskReport prompt: {}", prompt != null ? prompt : "");
         String res = chatbotService.callAiSummary(prompt, "reAskReport");
-
         if (CommonUtil.isEmpty(res)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "AI 보고서 보완 요청 실패");
             resultMap.put("data", null);
             return resultMap;
         }
-
         LibraryVO reportLog = new LibraryVO();
         reportLog.setRoomId(searchVO.getRoomId());
         reportLog.setIdxNo(lastIdx + 1);
@@ -516,7 +499,6 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         reportLog.setReportData(res);
         reportLog.setAskQuery(searchVO.getAskQuery());
         libraryDAO.insertReportChatLog(reportLog);
-
         resultMap.put("successYn", true);
         resultMap.put("returnMsg", "AI 보고서 보완 요청 성공");
         resultMap.put("data", res);
