@@ -190,6 +190,4 @@ public class ChatbotVO extends CommonVO {
     /** selectChatLogList: 질문(LOG)별 TB_CHAT_FILE JSON 배열 문자열 */
     private String chatAttachmentList;
 
-    /** 점심 추천(AG000009) 시작 API 응답 전용. Y이면 UI에서 점심 선택 카드를 함께 표시. */
-    private String lunchSelectCardDisplayYn;
 }
