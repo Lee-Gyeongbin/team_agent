@@ -226,36 +226,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return result > 0 ? chatbotVO : null;
     }
 
-    public ChatbotVO createLunchRecommendationChat(ChatbotVO chatbotVO) throws Exception {
-        final String guideMessage = "점심 메뉴를 추천해드릴게요!";
-        if (chatbotVO.getAgentId() == null || !LUNCH_MENU_AGENT_ID.equals(chatbotVO.getAgentId())) {
-            chatbotVO.setAgentId(LUNCH_MENU_AGENT_ID);
-        }
-
-        if (chatbotVO.getRoomId() == null) {
-            chatbotVO.setRoomTitle("점심 메뉴 추천");
-            chatbotDAO.insertChatRoom(chatbotVO);
-        }
-
-        ChatbotVO logVO = new ChatbotVO();
-        logVO.setRoomId(chatbotVO.getRoomId());
-        logVO.setAgentId(LUNCH_MENU_AGENT_ID);
-        logVO.setSvcTy("C");
-        logVO.setRefId(CommonUtil.isNotEmpty(chatbotVO.getRefId()) ? chatbotVO.getRefId() : "all");
-        logVO.setModelId(chatbotVO.getModelId());
-        logVO.setQContent("");
-        logVO.setRContent(guideMessage);
-        logVO.setInTokens(0);
-        logVO.setOutTokens(0);
-        logVO.setSatisYn("N");
-        logVO.setUserId(chatbotVO.getUserId());
-        logVO.setLunchSelectCardDisplayYn("Y");
-        chatbotDAO.insertChatLog(logVO);
-        chatbotDAO.updateChatRoomLastChatDt(logVO);
-
-        logVO.setRoomTitle(chatbotVO.getRoomTitle());
-        return logVO;
-    }
     /**
      * CHAT 대화방 목록 조회
      * @param searchVO
