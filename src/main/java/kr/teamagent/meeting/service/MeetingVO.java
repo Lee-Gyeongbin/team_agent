@@ -49,6 +49,16 @@ public class MeetingVO extends CommonVO {
     private String utterances;      // JSON 배열 [{seq, text}]
     private List<MeetingVO> speakerList; // 화자 목록 (selectSpeakerList 결과)
 
+    // TB_MEETING_AUDIO - 오디오 파일
+    private Long    audioId;
+    private String  filePath;           // NCP 오브젝트 키
+    private String  originalFilename;
+    private String  fileExt;
+    private Long    fileSize;
+    private Integer durationSec;
+    private String  audioStatus;        // 001:대기 002:처리중 003:완료 004:실패
+    private String  errorMsg;
+
     // TB_USER - 참석자 선택
     private String userNm;
 }

@@ -8,10 +8,14 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.model.ObjectMetadata;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONArray;
@@ -42,6 +46,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     @Autowired
     private MeetingDAO meetingDAO;
 
+    @Autowired
+    private AmazonS3 amazonS3;
+
     /** 참석자 선택용 사용자 목록 */
     public List<MeetingVO> selectUserListForMeeting() throws Exception {
         return meetingDAO.selectUserListForMeeting();
@@ -61,11 +68,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         result.put("infographicList", meetingDAO.selectMeetingInfographicList(searchVO));
         result.put("speakers", meetingDAO.selectSpeakerList(searchVO));
         return result;
-    }
-
-    /** 화자 목록 조회 */
-    public List<MeetingVO> selectSpeakerList(MeetingVO searchVO) throws Exception {
-        return meetingDAO.selectSpeakerList(searchVO);
     }
 
     /** 회의 시작 - 세션 생성 */
@@ -121,138 +123,181 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 회의 종료 (오디오 파일 전사 버전)
-     * 1. gpt-4o-mini-transcribe 로 오디오 → fullText 전사
-     * 2. 기존 finishMeeting 로직 재사용
+     * 1. 오디오 파일 → NCP 오브젝트 스토리지 업로드
+     * 2. TB_MEETING_AUDIO 저장 (status: 001 대기)
+     * 3. AI 서버에 meeting_id 전달 → DB 경로 조회 후 전사+화자분리 수행
+     * 4. fullText → LLM 회의록 생성
+     * 5. diarize 세그먼트 → 화자별 그룹화 후 TB_MEETING_SPEAKER 저장
      */
+    @SuppressWarnings("unchecked")
     public Map<String, Object> finishMeetingWithAudio(MeetingVO dataVO, MultipartFile audioFile) throws Exception {
-        // 전사 수행
-        String transcribedText = callMiniTranscribe(audioFile);
-        if (transcribedText == null || transcribedText.trim().isEmpty()) {
-            Map<String, Object> result = new HashMap<>();
+        Map<String, Object> result = new HashMap<>();
+
+        // 1. NCP 스토리지에 오디오 업로드
+        String objectKey;
+        try {
+            objectKey = uploadAudioToStorage(audioFile, dataVO.getMeetingId());
+        } catch (Exception e) {
+            logger.error("[finishMeetingWithAudio] 스토리지 업로드 실패 - meetingId: {}", dataVO.getMeetingId(), e);
             result.put("successYn", false);
-            result.put("returnMsg", "음성 전사에 실패했습니다. 녹음 내용을 확인해주세요.");
+            result.put("returnMsg", "오디오 파일 업로드에 실패했습니다.");
             return result;
         }
-        logger.info("전사 완료 - meetingId: {}, 전사 길이: {}자", dataVO.getMeetingId(), transcribedText.length());
 
-        // 전사된 텍스트로 기존 회의록 생성 파이프라인 실행
-        dataVO.setFullText(transcribedText);
-        // segments가 함께 넘어오면 기존 화자 분리 로직을 그대로 사용한다.
-        return finishMeeting(dataVO);
+        // 2. TB_MEETING_AUDIO 저장 (status: 001 대기)
+        String originalFilename = audioFile.getOriginalFilename();
+        String ext = Optional.ofNullable(originalFilename)
+            .filter(n -> n.contains("."))
+            .map(n -> n.substring(n.lastIndexOf('.')))
+            .orElse(".webm");
+
+        dataVO.setFilePath(objectKey);
+        dataVO.setOriginalFilename(originalFilename);
+        dataVO.setFileExt(ext.startsWith(".") ? ext.substring(1) : ext);
+        dataVO.setFileSize(audioFile.getSize());
+        meetingDAO.insertMeetingAudio(dataVO);
+        logger.info("[finishMeetingWithAudio] 오디오 레코드 저장 완료 - meetingId: {}, key: {}", dataVO.getMeetingId(), objectKey);
+
+        // 3. AI 서버에 meeting_id 전달하여 전사 + 화자 분리 수행
+        Map<String, Object> diarizeResult = callDiarizeByMeetingId(dataVO.getMeetingId());
+
+        if (diarizeResult == null || !Boolean.TRUE.equals(diarizeResult.get("successYn"))) {
+            dataVO.setAudioStatus("004");
+            Object errMsg = diarizeResult != null ? diarizeResult.get("returnMsg") : null;
+            dataVO.setErrorMsg(errMsg != null ? errMsg.toString() : "전사 실패");
+            meetingDAO.updateMeetingAudioStatus(dataVO);
+            result.put("successYn", false);
+            result.put("returnMsg", dataVO.getErrorMsg());
+            return result;
+        }
+
+        // 4. 오디오 처리 상태 완료(003)로 업데이트
+        dataVO.setAudioStatus("003");
+        Object durObj = diarizeResult.get("durationSec");
+        if (durObj instanceof Number) {
+            dataVO.setDurationSec(((Number) durObj).intValue());
+        }
+        meetingDAO.updateMeetingAudioStatus(dataVO);
+
+        String fullText = (String) diarizeResult.get("text");
+        JSONArray diarizedSegments = (JSONArray) diarizeResult.get("segments");
+
+        if (fullText == null || fullText.trim().isEmpty()) {
+            result.put("successYn", false);
+            result.put("returnMsg", "음성 전사 결과가 비어있습니다.");
+            return result;
+        }
+        logger.info("[finishMeetingWithAudio] 전사 완료 - meetingId: {}, {}자", dataVO.getMeetingId(), fullText.length());
+
+        // 5. DB에서 IS_AUTO_TITLE 조회
+        MeetingVO dbMeeting = meetingDAO.selectMeeting(dataVO);
+        if (dbMeeting != null && dbMeeting.getIsAutoTitle() != null) {
+            dataVO.setIsAutoTitle(dbMeeting.getIsAutoTitle());
+        }
+
+        // 6. 회의 상태 종료(002)로 변경
+        dataVO.setStatus("002");
+        meetingDAO.updateMeetingStatus(dataVO);
+
+        // 7. LLM 호출하여 회의록 생성
+        dataVO.setFullText(fullText);
+        String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle());
+        if (minutesAnswer != null) {
+            parseAndSaveMinutes(dataVO, minutesAnswer);
+        }
+
+        // 8. diarize 세그먼트를 화자별로 그룹화하여 저장
+        if (diarizedSegments != null && !diarizedSegments.isEmpty()) {
+            saveAudioDiarizedSpeakers(dataVO, diarizedSegments);
+        }
+
+        result.put("successYn", true);
+        result.put("meetingId", dataVO.getMeetingId());
+        return result;
     }
 
     /**
-     * OpenAI gpt-4o-mini-transcribe 직접 호출
-     * POST https://api.openai.com/v1/audio/transcriptions
-     * - Authorization: Bearer {apiKey}
-     * - multipart/form-data: file, model, language
-     * - 응답: { "text": "전사 결과" }
-     * - 임시 파일은 finally에서 삭제
+     * NCP 오브젝트 스토리지에 오디오 파일 업로드 후 오브젝트 키 반환
      */
-    private String callMiniTranscribe(MultipartFile audioFile) {
-        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.transcribe.apiUrl");
-        String apiKey = PropertyUtil.getProperty("Globals.chatbot.transcribe.apiKey");
-        String model  = PropertyUtil.getProperty("Globals.chatbot.transcribe.model");
+    private String uploadAudioToStorage(MultipartFile audioFile, Long meetingId) throws Exception {
+        String originalFilename = audioFile.getOriginalFilename();
+        String ext = Optional.ofNullable(originalFilename)
+            .filter(n -> n.contains("."))
+            .map(n -> n.substring(n.lastIndexOf('.')))
+            .orElse(".webm");
 
-        if (apiUrl == null || apiUrl.isEmpty()) {
-            logger.warn("[STT] transcribe API URL 미설정 (Globals.chatbot.transcribe.apiUrl)");
-            return null;
-        }
-        if (apiKey == null || apiKey.isEmpty() || apiKey.startsWith("YOUR_")) {
-            logger.warn("[STT] OpenAI API Key 미설정 (Globals.chatbot.transcribe.apiKey)");
-            return null;
-        }
-        if (model == null || model.isEmpty()) {
-            model = "gpt-4o-mini-transcribe";
-        }
+        String objectKey = "meeting-audio/" + meetingId + "/" + UUID.randomUUID() + ext;
+        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
 
-        int timeoutSec = 180;
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(audioFile.getSize());
+        metadata.setContentType(
+            Optional.ofNullable(audioFile.getContentType()).orElse("audio/webm"));
+
+        amazonS3.putObject(bucket, objectKey, audioFile.getInputStream(), metadata);
+        logger.info("[Storage] 오디오 업로드 완료 - meetingId: {}, key: {}", meetingId, objectKey);
+        return objectKey;
+    }
+
+    /**
+     * AI 서버에 meeting_id 전달 → AI 서버가 DB에서 경로 조회 후 전사+화자분리 수행
+     * - 반환값: successYn, text, segments, durationSec
+     */
+    private Map<String, Object> callDiarizeByMeetingId(Long meetingId) {
+        Map<String, Object> result = new HashMap<>();
+        String pythonUrl = PropertyUtil.getProperty("Globals.chatbot.diarize.pythonUrl");
+
         try {
-            String propTimeout = PropertyUtil.getProperty("Globals.chatbot.transcribe.timeoutSec");
-            if (propTimeout != null && !propTimeout.trim().isEmpty()) {
-                timeoutSec = Integer.parseInt(propTimeout.trim());
-            }
-        } catch (NumberFormatException ignore) { /* 기본값 사용 */ }
-
-        File tempFile = null;
-        try {
-            // 임시 파일 생성 (OS 임시 디렉토리)
-            String originalName = audioFile.getOriginalFilename();
-            String suffix = (originalName != null && originalName.contains("."))
-                ? originalName.substring(originalName.lastIndexOf('.'))
-                : ".webm";
-            tempFile = File.createTempFile("meeting_audio_", suffix);
-            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                fos.write(audioFile.getBytes());
-            }
-
-            // Content-Type 결정
-            String contentType = audioFile.getContentType();
-            if (contentType == null || contentType.isEmpty()) {
-                contentType = "audio/webm";
-            }
-
             OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(timeoutSec, TimeUnit.SECONDS)
+                .readTimeout(1800, TimeUnit.SECONDS)   // 2시간 오디오 처리 여유
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .build();
 
-            RequestBody fileBody = RequestBody.create(tempFile, MediaType.parse(contentType));
-            RequestBody multipartBody = new MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("file", tempFile.getName(), fileBody)
-                .addFormDataPart("model", model)
-                .addFormDataPart("language", "ko")
-                .build();
+            JSONObject requestJson = new JSONObject();
+            requestJson.put("meeting_id", meetingId);
+
+            RequestBody body = RequestBody.create(
+                requestJson.toJSONString(),
+                okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
-                .url(apiUrl)
-                .post(multipartBody)
-                .addHeader("Authorization", "Bearer " + apiKey)
+                .url(pythonUrl)
+                .post(body)
                 .build();
 
-            logger.info("[STT] OpenAI 전사 호출 시작 - model: {}", model);
+            logger.info("[DiarizeByMeetingId] AI 서버 호출 시작 - meetingId: {}", meetingId);
             try (okhttp3.Response response = client.newCall(request).execute()) {
-                if (response.body() == null) {
-                    logger.warn("[STT] 응답 body 없음 - status: {}", response.code());
-                    return null;
+                if (!response.isSuccessful() || response.body() == null) {
+                    result.put("successYn", false);
+                    result.put("returnMsg", "AI 서버 오류: " + response.code());
+                    return result;
                 }
 
-                try (okhttp3.ResponseBody responseBody = response.body()) {
-                    String raw = responseBody.string();
+                String raw = response.body().string();
+                JSONParser parser = new JSONParser();
+                JSONObject data = (JSONObject) parser.parse(raw);
 
-                    if (!response.isSuccessful()) {
-                        // OpenAI 오류 응답 로깅 (status + body)
-                        logger.warn("[STT] OpenAI 오류 응답 - status: {}, body: {}", response.code(), raw);
-                        return null;
-                    }
+                if (!Boolean.TRUE.equals(data.get("successYn"))) {
+                    result.put("successYn", false);
+                    Object msg = data.get("returnMsg");
+                    result.put("returnMsg", msg != null ? msg : "전사 실패");
+                    return result;
+                }
 
-                    if (raw == null || raw.trim().isEmpty()) return null;
-
-                    // OpenAI 응답: { "text": "전사 결과" }
-                    JSONParser parser = new JSONParser();
-                    JSONObject data = (JSONObject) parser.parse(raw.trim());
-
-                    String text = (String) data.get("text");
-                    if (text != null && !text.trim().isEmpty()) {
-                        logger.info("[STT] 전사 완료 - {}자", text.trim().length());
-                        return text.trim();
-                    }
-                    logger.warn("[STT] 응답에 text 필드 없음: {}", raw);
+                result.put("successYn", true);
+                result.put("segments", data.get("segments"));
+                result.put("text", data.get("text"));
+                if (data.get("durationSec") != null) {
+                    result.put("durationSec", data.get("durationSec"));
                 }
             }
         } catch (Exception e) {
-            logger.error("[STT] OpenAI 전사 호출 실패", e);
-        } finally {
-            if (tempFile != null && tempFile.exists()) {
-                try {
-                    Files.delete(tempFile.toPath());
-                } catch (Exception ignore) { /* 임시 파일 삭제 실패 무시 */ }
-            }
+            logger.error("[DiarizeByMeetingId] AI 서버 호출 실패 - meetingId: {}", meetingId, e);
+            result.put("successYn", false);
+            result.put("returnMsg", "전사 실패: " + e.getMessage());
         }
-        return null;
+        return result;
     }
-
     /**
      * OpenAI Realtime API 임시 토큰 발급
      * POST https://api.openai.com/v1/realtime/sessions
@@ -342,116 +387,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
         result.put("successYn", false);
         result.put("returnMsg", "토큰 발급 실패");
-        return result;
-    }
-
-    /**
-     * 오디오 청크 화자 분리 전사
-     * POST https://api.openai.com/v1/audio/transcriptions
-     * - model: gpt-4o-transcribe-diarize
-     * - response_format: diarized_json
-     * - chunking_strategy: auto (30초 미만 오디오도 필수)
-     * - language: ko
-     */
-    @SuppressWarnings("unchecked")
-    public Map<String, Object> transcribeChunk(MultipartFile audioChunk) {
-        Map<String, Object> result = new HashMap<>();
-
-        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.transcribe.apiUrl");
-        String apiKey = PropertyUtil.getProperty("Globals.chatbot.transcribe.apiKey");
-        String diarizeModel = PropertyUtil.getProperty("Globals.chatbot.transcribe.diarizeModel");
-
-        File tempFile = null;
-        try {
-            String originalName = audioChunk.getOriginalFilename();
-            String suffix = (originalName != null && originalName.contains("."))
-                ? originalName.substring(originalName.lastIndexOf('.'))
-                : ".webm";
-            tempFile = File.createTempFile("meeting_chunk_", suffix);
-            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                fos.write(audioChunk.getBytes());
-            }
-
-            String contentType = audioChunk.getContentType();
-            if (contentType == null || contentType.isEmpty()) {
-                contentType = "audio/webm";
-            }
-
-            OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(120, TimeUnit.SECONDS)
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .build();
-
-            RequestBody fileBody = RequestBody.create(tempFile, MediaType.parse(contentType));
-            RequestBody multipartBody = new MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("file", tempFile.getName(), fileBody)
-                .addFormDataPart("model", diarizeModel)
-                .addFormDataPart("language", "ko")
-                .addFormDataPart("response_format", "diarized_json")
-                .addFormDataPart("chunking_strategy", "auto")
-                .build();
-
-            Request request = new Request.Builder()
-                .url(apiUrl)
-                .post(multipartBody)
-                .addHeader("Authorization", "Bearer " + apiKey)
-                .build();
-
-            logger.info("[Diarize] 청크 화자 분리 전사 호출 시작 - model: {}", diarizeModel);
-
-            try (okhttp3.Response response = client.newCall(request).execute()) {
-                if (response.body() == null) {
-                    result.put("successYn", false);
-                    result.put("returnMsg", "응답 body 없음");
-                    return result;
-                }
-
-                try (okhttp3.ResponseBody responseBody = response.body()) {
-                    String raw = responseBody.string();
-
-                    if (!response.isSuccessful()) {
-                        logger.warn("[Diarize] OpenAI 오류 응답 - status: {}, body: {}", response.code(), raw);
-                        result.put("successYn", false);
-                        result.put("returnMsg", "전사 API 오류 (HTTP " + response.code() + ")");
-                        return result;
-                    }
-
-                    JSONParser parser = new JSONParser();
-                    JSONObject data = (JSONObject) parser.parse(raw.trim());
-
-                    JSONArray segments = (JSONArray) data.get("segments");
-                    if (segments != null && !segments.isEmpty()) {
-                        logger.info("[Diarize] 청크 전사 완료 - segments: {}개", segments.size());
-                        result.put("successYn", true);
-                        result.put("segments", segments);
-                    } else {
-                        // fallback: segments 없으면 text 단독 반환
-                        String text = (String) data.get("text");
-                        JSONArray fallback = new JSONArray();
-                        if (text != null && !text.trim().isEmpty()) {
-                            JSONObject seg = new JSONObject();
-                            seg.put("text", text.trim());
-                            seg.put("start", 0.0);
-                            seg.put("end", 0.0);
-                            fallback.add(seg);
-                        }
-                        logger.info("[Diarize] segments 없음, text fallback 사용");
-                        result.put("successYn", true);
-                        result.put("segments", fallback);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.error("[Diarize] 청크 전사 호출 실패", e);
-            result.put("successYn", false);
-            result.put("returnMsg", "전사 실패: " + e.getMessage());
-        } finally {
-            if (tempFile != null && tempFile.exists()) {
-                try { Files.delete(tempFile.toPath()); } catch (Exception ignore) { /* 임시 파일 삭제 실패 무시 */ }
-            }
-        }
-
         return result;
     }
 
@@ -572,86 +507,50 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * LLM 호출 - 회의록 생성 (summary, decisions, todo_list, infographic_topics)
-     * IS_AUTO_TITLE = Y 인 경우 응답 JSON에 meeting_title 포함 요청
+     * LLM 호출 - 회의록 생성.
+     * 응답 JSON 키만 사용해 설명한다(마크다운 별도 출력 금지). IS_AUTO_TITLE=Y 이면 meeting_title 포함.
+     * 주제별 본문은 discussion_topics에만 담고, 서버가 FULL_TEXT로 직렬화한다.
      */
     private String callLlmForMinutes(String fullText, String isAutoTitle) {
         boolean wantTitle = isAutoTitleYn(isAutoTitle);
 
         String jsonShape;
         String titleRules = "";
+        String commonTail = "\"meeting_time\": {\"start\": \"녹취에 나온 시작 시각(HH:MM 등) 또는 빈 문자열\", \"end\": \"종료 시각 또는 빈 문자열\"},"
+            + "\"summary\": \"전체 회의 요약(한 필드)\","
+            + "\"decisions\": [\"합의된 결정만, 문자열 배열\"],"
+            + "\"todo_list\": ["
+            + "  {\"due_date\": \"YYYY-MM-DD 또는 언급 없으면 빈 문자열\", \"content\": \"해야 할 일\", \"collaborators\": \"담당자 또는 빈 문자열\"}],"
+            + "\"discussion_topics\": ["
+            + "  {\"topic\": \"주제명\", \"background\": \"논의 배경(평문, 줄바꿈 가능)\", \"discussion\": \"핵심 논의\", \"opinions\": \"주요 의견\"}],"
+            + "\"infographic_topics\": ["
+            + "  {\"topic_nm\": \"주제명\", \"topic_summary\": \"한 줄 요약\", \"tree_text\": \"- [주제명]\\\\n  - 한 줄 요약\\\\n  - 1단계: ...\\\\n  - 2단계: ...\\\\n  - 3단계: ...\"}"
+            + "]}";
+
         if (wantTitle) {
-            jsonShape = "{\"meeting_title\": \"녹취록 전체 맥락을 반영한 한국어 회의 제목 (30자 이내, 따옴표 없이 핵심만)\","
-                + "\"summary\": \"전체 회의 요약\","
-                + "\"decisions\": [\"결정사항1\", \"결정사항2\"],"
-                + "\"todo_list\": ["
-                + "  {\"due_date\": \"YYYY-MM-DD\", \"content\": \"해야 할 일\", \"collaborators\": \"담당자\"}],"
-                + "\"infographic_topics\": ["
-                + "  {\"topic_nm\": \"주제명\", \"topic_summary\": \"핵심 요약 (한 줄)\", \"tree_text\": \"- [주제명]\\n  - 핵심 요약 (한 줄)\\n  - 1단계: 회의에서 등장하는 모든 논의 주제를 식별\\n  - 2단계: 유사하거나 중복되는 주제는 하나로 병합\\n  - 3단계: 최종적으로 의미 있는 주제 단위로 그룹화\"}"
-                + "]}";
-            titleRules = "meeting_title은 회의 내용을 대표할 수 있는 제목 한 줄로 작성하세요 (한글 30자 이내 권장, DB MEETING_TITLE 컬럼 최대 200자 이내).\n";
+            jsonShape = "{\"meeting_title\": \"녹취 맥락 반영 한국어 제목(30자 이내 권장, 따옴표 없이)\","
+                + commonTail;
+            titleRules = "meeting_title: 회의를 대표하는 제목 한 줄 (DB 최대 200자).\n";
         } else {
-            jsonShape = "{\"summary\": \"전체 회의 요약\","
-                + "\"decisions\": [\"결정사항1\", \"결정사항2\"],"
-                + "\"todo_list\": ["
-                + "  {\"due_date\": \"YYYY-MM-DD\", \"content\": \"해야 할 일\", \"collaborators\": \"담당자\"}],"
-                + "\"infographic_topics\": ["
-                + "  {\"topic_nm\": \"주제명\", \"topic_summary\": \"핵심 요약 (한 줄)\", \"tree_text\": \"- [주제명]\\n  - 핵심 요약 (한 줄)\\n  - 1단계: 회의에서 등장하는 모든 논의 주제를 식별\\n  - 2단계: 유사하거나 중복되는 주제는 하나로 병합\\n  - 3단계: 최종적으로 의미 있는 주제 단위로 그룹화\"}"
-                + "]}";
+            jsonShape = "{" + commonTail;
         }
 
-        String prompt = "다음은 회의 녹취록입니다. 아래 JSON 형식으로 회의록을 작성해주세요.\n"
-            + "당신은 기업용 회의록 자동 작성 AI입니다. 입력된 회의 녹취 텍스트를 기반으로, 구조화된 고품질 회의록을 생성해야 합니다.\n\n"
-
-            + "다음 규칙을 반드시 지켜주세요:\n\n"
-            + "[핵심 규칙]\n\n"
-            + "1. 정보 왜곡 금지 (추측 금지, 녹취 기반으로만 작성)\n\n"
-            + "2. 중복 제거 및 핵심 요약 중심 작성\n\n"
-            + "3. 불필요한 수식어 제거, 명확하고 간결하게 작성\n\n"
-            + "4. 항목별로 구조화하여 출력\n\n"
-
-
-            + "반드시 JSON만 응답하고 다른 설명은 포함하지 마세요.\n\n"
-            + "응답 형식:\n"
+        String prompt = "다음은 회의 녹취록입니다. 아래 JSON 키에만 값을 채워 단일 JSON 객체만 응답하세요 (설명문·마크다운 본문·코드펜스 금지).\n"
+            + "역할: 기업용 회의록 자동 작성. 녹취에 없는 사실은 추측하지 말 것.\n\n"
+            + "[핵심]\n"
+            + "- 중복 최소화, 간결한 문장.\n"
+            + "- 동일 정보를 JSON 밖이나 다른 형식으로 다시 쓰지 말 것.\n\n"
+            + "[키별 안내]\n"
+            + "- meeting_time: 녹취에서만 추출. 시각 불명이면 start·end 모두 빈 문자열 \"\".\n"
+            + "- summary: 전체 요약(한 문자열).\n"
+            + "- decisions: 최종 합의·확정만 문자열 배열. 불확실하면 제외.\n"
+            + "- todo_list: 녹취 기반. 미언급 시 due_date·collaborators는 \"\".\n"
+            + "- discussion_topics: 주제별 상세(배경·논의·의견). 줄바꿈은 필드 문자열 내 \\n. 주제 수 통상 2~8.\n"
+            + "- infographic_topics: 시각 요약용. topic_nm, topic_summary, tree_text만 사용. "
+            + "tree_text는 해당 주제의 트리형 줄글(내부 줄바꿈 \\n). 유사 주제는 병합.\n"
+            + (wantTitle ? titleRules : "")
+            + "\n응답 형식(값은 예시):\n"
             + jsonShape + "\n\n"
-            + titleRules
-
-            + "추가 규칙:\n\n"
-            + "1. due_date는 회의 내용에서 날짜를 언급하지 않으면 빈 문자열(\"\")로 하세요.\n"
-            + "2. collaborators는 회의 내용에서 담당자를 언급하지 않으면 빈 문자열(\"\")로 하세요.\n"
-            + "3. 회의시간은 녹취 내용에서 시간 정보가 있으면 시작 시간과 종료 시간으로 추출하고, 없으면 '확인 불가'로 표기하세요.\n\n"
-            + "## 3. 인포그래픽\n"
-            + "- 회의 주요 논의 주제를 주제별로 나누어 정리\n"
-            + "- 각 주제는 아래 형식으로 작성\n\n"
-            + "[형식]\n"
-            + "- [주제명]\n"
-            + "  - 핵심 요약 (한 줄)\n"
-            + "  - 1단계: 회의에서 등장하는 모든 논의 주제를 식별\n"
-            + "  - 2단계: 유사하거나 중복되는 주제는 하나로 병합\n"
-            + "  - 3단계: 최종적으로 의미 있는 주제 단위로 그룹화\n\n"
-            + "※ 최종 주제 수는 자연스럽게 결정하되, 일반적으로 2~8개 범위 내에서 유지하세요.\n"
-            + "※ 사람이 한눈에 이해할 수 있도록 시각화된 구조(트리형 구조)로 작성하세요.\n\n"
-            + "4. 회의내용\n"
-            + "- 주요 논의 주제별로 구분하여 상세 요약\n"
-            + "- 각 주제마다 아래 형식을 사용하세요.\n\n"
-            + "[형식]\n"
-            + "### (주제명)\n"
-            + "- 논의 배경:\n"
-            + "- 핵심 논의 내용:\n"
-            + "- 주요 의견:\n\n"
-            + "- 항목별 bullet point로 작성하세요.\n\n"
-            + "5. 결정사항\n"
-            + "- 회의에서 최종적으로 합의된 내용만 정리하세요.\n"
-            + "- 불확실한 내용은 제외하세요.\n"
-            + "- 항목별 bullet point로 작성하세요.\n\n"
-            + "6. To-Do 리스트\n"
-            + "- 회의 내용을 기반으로 해야 할 일을 도출하세요.\n"
-            + "- 반드시 아래 형식으로 작성하세요.\n\n"
-            + "[형식]\n"
-            + "- 작업내용:\n"
-            + "- 담당자: (언급 없으면 \"미정\")\n"
-            + "- 기한: (언급 없으면 \"미정\")\n\n"
-            + "- 항목별 bullet point로 작성하세요.\n\n"
             + "회의 녹취록:\n" + fullText;
 
         logger.info("회의록 LLM 호출 시작 (isAutoTitle={})", isAutoTitle);
@@ -880,7 +779,67 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     // ─────────────────────────────────────────────────────────────────
 
     /**
-     * 회의록 LLM answer 파싱 후 TB_MEETING_MINUTES 저장
+     * LLM JSON의 meeting_time·discussion_topics를 FULL_TEXT(에디터 본문) 평문으로 직렬화.
+     *
+     * @return 직렬화 문자열, discussion_topics가 없거나 비어 있으면 null(호출측에서 기존 녹취 fullText 유지)
+     */
+    private String serializeMinutesBodyFromJson(JSONObject json) {
+        JSONArray discussion = (JSONArray) json.get("discussion_topics");
+        if (discussion == null || discussion.isEmpty()) {
+            return null;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        Object mtObj = json.get("meeting_time");
+        if (mtObj instanceof JSONObject) {
+            JSONObject mt = (JSONObject) mtObj;
+            String start = stringValue(mt.get("start"));
+            String end = stringValue(mt.get("end"));
+            sb.append("[회의 시간]\n");
+            if (start.isEmpty() && end.isEmpty()) {
+                sb.append("확인 불가\n\n");
+            } else {
+                if (!start.isEmpty()) {
+                    sb.append("시작: ").append(start).append("\n");
+                }
+                if (!end.isEmpty()) {
+                    sb.append("종료: ").append(end).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+
+        sb.append("[주제별 회의 내용]\n\n");
+        for (int i = 0; i < discussion.size(); i++) {
+            Object row = discussion.get(i);
+            if (!(row instanceof JSONObject)) {
+                continue;
+            }
+            JSONObject t = (JSONObject) row;
+            String topic = stringValue(t.get("topic"));
+            if (topic.isEmpty()) {
+                topic = stringValue(t.get("topic_nm"));
+            }
+            if (topic.isEmpty()) {
+                continue;
+            }
+            String background = stringValue(t.get("background"));
+            String disc = stringValue(t.get("discussion"));
+            String opinions = stringValue(t.get("opinions"));
+
+            sb.append("### ").append(topic).append("\n");
+            sb.append("논의 배경:\n").append(background.isEmpty() ? "(없음)" : background).append("\n\n");
+            sb.append("핵심 논의 내용:\n").append(disc.isEmpty() ? "(없음)" : disc).append("\n\n");
+            sb.append("주요 의견:\n").append(opinions.isEmpty() ? "(없음)" : opinions).append("\n\n");
+        }
+
+        String out = sb.toString().trim();
+        return out.isEmpty() ? null : out;
+    }
+
+    /**
+     * 회의록 LLM answer 파싱 후 TB_MEETING_MINUTES 저장.
+     * discussion_topics가 있으면 FULL_TEXT를 에디터용 직렬화 본문으로 갱신하고, 없으면 기존 fullText(녹취) 유지.
      */
     private void parseAndSaveMinutes(MeetingVO dataVO, String answer) {
         try {
@@ -899,6 +858,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
             JSONArray todoList = (JSONArray) json.get("todo_list");
             dataVO.setTodoList(todoList != null ? todoList.toJSONString() : "[]");
+
+            String bodyFromLlm = serializeMinutesBodyFromJson(json);
+            if (bodyFromLlm != null) {
+                dataVO.setFullText(bodyFromLlm);
+            }
 
             // IS_AUTO_TITLE = Y 이면 LLM이 반환한 meeting_title 로 TB_MEETING 제목 갱신
             if (isAutoTitleYn(dataVO.getIsAutoTitle())) {
@@ -924,8 +888,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 meetingDAO.updateMeetingMinutes(dataVO);
             }
 
-            JSONArray infographicTopics = (JSONArray) json.get("infographic_topics");
-            saveMeetingInfographic(dataVO, infographicTopics);
+            // 인포그래픽 이미지 API 동기 호출 — 운영에서 필요 시:
+            // saveMeetingInfographic(dataVO, (JSONArray) json.get("infographic_topics"));
 
             logger.info("회의록 저장 완료 - meetingId: {}", dataVO.getMeetingId());
         } catch (Exception e) {
@@ -1115,31 +1079,50 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     @SuppressWarnings("unchecked")
     private void saveSpeakersFromSegments(MeetingVO dataVO, JSONArray finalSegments) {
         try {
-            Map<String, JSONArray> groupedBySpeaker = new LinkedHashMap<>();
+            int speakerBlockCount = 0;
+            String currentSpeaker = null;
+            JSONArray currentUtterances = new JSONArray();
+
             for (Object obj : finalSegments) {
                 JSONObject seg = (JSONObject) obj;
                 String speaker = normalizeSpeaker((String) seg.get("speaker"));
                 if (speaker.isEmpty()) {
                     speaker = "UNKNOWN";
                 }
-                JSONArray utterances = groupedBySpeaker.computeIfAbsent(speaker, key -> new JSONArray());
 
                 JSONObject utterance = new JSONObject();
                 utterance.put("seq", toInt(seg.get("seq"), 0));
                 utterance.put("text", stringValue(seg.get("text")));
-                utterances.add(utterance);
+
+                if (currentSpeaker == null) {
+                    currentSpeaker = speaker;
+                } else if (!currentSpeaker.equals(speaker)) {
+                    MeetingVO speakerVO = new MeetingVO();
+                    speakerVO.setMeetingId(dataVO.getMeetingId());
+                    speakerVO.setSpeakerLabel(currentSpeaker);
+                    // 기존 구조 유지: utterances는 [{seq,text}] 형태로 저장
+                    speakerVO.setUtterances(currentUtterances.toJSONString());
+                    meetingDAO.insertSpeaker(speakerVO);
+                    speakerBlockCount++;
+
+                    currentSpeaker = speaker;
+                    currentUtterances = new JSONArray();
+                }
+
+                currentUtterances.add(utterance);
             }
 
-            for (Map.Entry<String, JSONArray> entry : groupedBySpeaker.entrySet()) {
+            if (currentSpeaker != null && !currentUtterances.isEmpty()) {
                 MeetingVO speakerVO = new MeetingVO();
                 speakerVO.setMeetingId(dataVO.getMeetingId());
-                speakerVO.setSpeakerLabel(entry.getKey());
+                speakerVO.setSpeakerLabel(currentSpeaker);
                 // 기존 구조 유지: utterances는 [{seq,text}] 형태로 저장
-                speakerVO.setUtterances(entry.getValue().toJSONString());
+                speakerVO.setUtterances(currentUtterances.toJSONString());
                 meetingDAO.insertSpeaker(speakerVO);
+                speakerBlockCount++;
             }
 
-            logger.info("화자 분리 저장 완료 - meetingId: {}, 화자 수: {}", dataVO.getMeetingId(), groupedBySpeaker.size());
+            logger.info("화자 분리 저장 완료 - meetingId: {}, 연속 화자 블록 수: {}", dataVO.getMeetingId(), speakerBlockCount);
         } catch (Exception e) {
             logger.error("화자 분리 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
         }
@@ -1192,6 +1175,46 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             return Integer.parseInt(String.valueOf(value).trim());
         } catch (Exception e) {
             return defaultValue;
+        }
+    }
+
+    /**
+     * gpt-4o-transcribe-diarize 결과 세그먼트를 화자별로 그룹화해 TB_MEETING_SPEAKER 저장
+     * - segments: [{speaker: "SPEAKER_0", text: "...", start: 0.0, end: 1.5}, ...]
+     * - 화자 등장 순서 기준으로 "화자1", "화자2" ... 레이블 부여
+     */
+    @SuppressWarnings("unchecked")
+    private void saveAudioDiarizedSpeakers(MeetingVO dataVO, JSONArray segments) {
+        try {
+            // 화자 등장 순서 유지 LinkedHashMap: speakerKey → utterances JSONArray
+            java.util.LinkedHashMap<String, JSONArray> speakerMap = new java.util.LinkedHashMap<>();
+            for (Object obj : segments) {
+                JSONObject seg = (JSONObject) obj;
+                String speakerKey = stringValue(seg.get("speaker"));
+                if (speakerKey.isEmpty()) speakerKey = "UNKNOWN";
+
+                JSONArray utterances = speakerMap.computeIfAbsent(speakerKey, k -> new JSONArray());
+                JSONObject utterance = new JSONObject();
+                utterance.put("text", stringValue(seg.get("text")));
+                utterance.put("start", seg.get("start"));
+                utterance.put("end", seg.get("end"));
+                utterances.add(utterance);
+            }
+
+            // 등장 순서대로 화자N 레이블 부여 후 DB 저장
+            int num = 1;
+            for (java.util.Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
+                MeetingVO speakerVO = new MeetingVO();
+                speakerVO.setMeetingId(dataVO.getMeetingId());
+                speakerVO.setSpeakerLabel("화자" + num);
+                speakerVO.setUtterances(entry.getValue().toJSONString());
+                meetingDAO.insertSpeaker(speakerVO);
+                num++;
+            }
+
+            logger.info("화자 저장 완료 (오디오 기반) - meetingId: {}, 화자 수: {}", dataVO.getMeetingId(), speakerMap.size());
+        } catch (Exception e) {
+            logger.error("화자 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
         }
     }
 }
