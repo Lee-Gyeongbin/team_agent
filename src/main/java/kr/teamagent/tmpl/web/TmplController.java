@@ -46,8 +46,8 @@ public class TmplController extends BaseController {
     @RequestMapping(value = "/save.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView save(@RequestBody TmplVO.SaveFormVO formVO) throws Exception {
-        if (formVO == null || formVO.getTmplId() == null || formVO.getTmplId().trim().isEmpty()) {
-            return makeFailJsonData("tmplId is required");
+        if (formVO == null) {
+            return makeFailJsonData("formVO is required");
         }
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("data", tmplService.saveTmpl(formVO));
