@@ -14,6 +14,7 @@
             , A.LLM_PROMPT_SMRY
             , A.LLM_PROMPT
             , A.SYS_TMPL_YN
+            , A.TMPL_HTML
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
@@ -50,6 +51,7 @@
             , DESCRIPTION
             , LLM_PROMPT_SMRY
             , LLM_PROMPT
+            , TMPL_HTML
             , USE_YN
             , CREATE_DT
             , MODIFY_DT
@@ -60,6 +62,7 @@
             , #{description, jdbcType=VARCHAR}
             , #{llmPromptSmry, jdbcType=VARCHAR}
             , #{llmPrompt, jdbcType=VARCHAR}
+            , #{tmplHtml, jdbcType=VARCHAR}
             , #{useYn, jdbcType=VARCHAR}
             , NOW()
             , NOW()
@@ -70,6 +73,7 @@
             , DESCRIPTION = VALUES(DESCRIPTION)
             , LLM_PROMPT_SMRY = VALUES(LLM_PROMPT_SMRY)
             , LLM_PROMPT = VALUES(LLM_PROMPT)
+            , TMPL_HTML = VALUES(TMPL_HTML)
             , USE_YN = VALUES(USE_YN)
             , MODIFY_DT = NOW()
     </insert>

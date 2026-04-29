@@ -54,15 +54,6 @@ public class MeetingController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
-    /** 화자 목록 조회 (별도 호출 시) */
-    @RequestMapping("/ai/meeting/selectSpeakerList.do")
-    @ResponseBody
-    public ModelAndView selectSpeakerList(MeetingVO searchVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("list", meetingService.selectSpeakerList(searchVO));
-        return new ModelAndView("jsonView", resultMap);
-    }
-
     /** 회의 시작 - 세션 생성 */
     @RequestMapping("/ai/meeting/createMeeting.do")
     @ResponseBody
@@ -203,32 +194,6 @@ public class MeetingController extends BaseController {
             log.error("getRealtimeToken error", e);
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "토큰 발급에 실패하였습니다. (" + e.getMessage() + ")");
-        }
-        return resultMap;
-    }
-
-    /**
-     * 오디오 청크 화자 분리 전사
-     * - multipart/form-data: audioChunk (Blob, audio/webm)
-     * - 백엔드: gpt-4o-transcribe-diarize → segments 반환
-     * - POST /meeting/transcribe-chunk
-     */
-    @RequestMapping("/meeting/transcribe-chunk")
-    @ResponseBody
-    public Map<String, Object> transcribeChunk(
-            @RequestParam("audioChunk") MultipartFile audioChunk) throws Exception {
-        Map<String, Object> resultMap = new HashMap<>();
-        try {
-            if (audioChunk == null || audioChunk.isEmpty()) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "오디오 청크가 없습니다.");
-                return resultMap;
-            }
-            resultMap = meetingService.transcribeChunk(audioChunk);
-        } catch (Exception e) {
-            log.error("transcribeChunk error", e);
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "전사에 실패하였습니다. (" + e.getMessage() + ")");
         }
         return resultMap;
     }

@@ -193,6 +193,27 @@
         WHERE SPEAKER_ID = #{speakerId}
     </update>
 
+    <!-- ===================== TB_MEETING_AUDIO ===================== -->
+
+    <insert id="insertMeetingAudio" parameterType="meetingVO"
+        useGeneratedKeys="true" keyProperty="audioId">
+        /* 오디오 파일 등록 ai.meeting.insertMeetingAudio */
+        INSERT INTO TB_MEETING_AUDIO
+        (MEETING_ID, FILE_PATH, ORIGINAL_FILENAME, FILE_EXT, FILE_SIZE, STATUS, CREATE_DT)
+        VALUES
+        (#{meetingId}, #{filePath}, #{originalFilename}, #{fileExt}, #{fileSize}, '001', NOW())
+    </insert>
+
+    <update id="updateMeetingAudioStatus" parameterType="meetingVO">
+        /* 오디오 처리 상태 수정 ai.meeting.updateMeetingAudioStatus */
+        UPDATE TB_MEETING_AUDIO SET
+            STATUS      = #{audioStatus}
+            <if test="durationSec != null">, DURATION_SEC = #{durationSec}</if>
+            <if test="errorMsg != null">,    ERROR_MSG    = #{errorMsg}</if>
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
     <!-- ===================== TB_USER (참석자 선택) ===================== -->
 
     <select id="selectUserListForMeeting" resultType="meetingVO">
