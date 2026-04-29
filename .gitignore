@@ -19,3 +19,8 @@ teamagent-debugger-tomcat.bat
 # JRebel
 src/main/resources/rebel.xml
 /.cursor/rules/personal/
+
+# API Keys and Secret Configuration
+src/main/resources/egovframework/egovProps/properties/dev/globals-secret.properties
+src/main/resources/egovframework/egovProps/properties/local/globals-secret.properties
+src/main/resources/egovframework/egovProps/properties/prod/globals-secret.properties
