@@ -7,6 +7,8 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -484,7 +486,12 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         // 로그 적재용 IDX_NO 계산
         LibraryVO lastLog = libraryDAO.selectLastReportChatLog(searchVO);
         Integer lastIdx = (lastLog != null && lastLog.getIdxNo() != null) ? lastLog.getIdxNo() : 0;
-        String prompt = buildReAskReportPrompt(currentHtml, searchVO.getAskQuery());
+
+        // AI 전송 전 <img> 태그를 플레이스홀더로 교체 (base64 이미지로 인한 payload 크기 및 타임아웃 방지)
+        List<String> extractedImgTags = new ArrayList<>();
+        String strippedHtml = stripImgTags(currentHtml, extractedImgTags);
+
+        String prompt = buildReAskReportPrompt(strippedHtml, searchVO.getAskQuery());
         logger.info("reAskReport prompt: {}", prompt != null ? prompt : "");
         String res = chatbotService.callAiSummary(prompt, "reAskReport");
         if (CommonUtil.isEmpty(res)) {
@@ -492,6 +499,11 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("returnMsg", "AI 보고서 보완 요청 실패");
             resultMap.put("data", null);
             return resultMap;
+        }
+
+        // AI 응답에서 플레이스홀더를 원래 <img> 태그로 복원
+        if (!extractedImgTags.isEmpty()) {
+            res = restoreImgTags(res, extractedImgTags);
         }
         LibraryVO reportLog = new LibraryVO();
         reportLog.setRoomId(searchVO.getRoomId());
@@ -526,6 +538,37 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         sb.append(askQuery);
         
         return sb.toString();
+    }
+
+    /**
+     * HTML에서 <img> 태그를 추출하고 플레이스홀더로 교체한다.
+     * base64 이미지 등이 포함된 경우 AI 전송 payload 크기를 줄이기 위해 사용한다.
+     */
+    private String stripImgTags(String html, List<String> extractedImgTags) {
+        if (CommonUtil.isEmpty(html)) return html;
+        StringBuffer sb = new StringBuffer();
+        Pattern imgPattern = Pattern.compile("<img(?:\\s[^>]*)?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher matcher = imgPattern.matcher(html);
+        int idx = 0;
+        while (matcher.find()) {
+            extractedImgTags.add(matcher.group());
+            matcher.appendReplacement(sb, Matcher.quoteReplacement("<img data-img-placeholder=\"" + idx + "\">"));
+            idx++;
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
+    }
+
+    /**
+     * AI 응답 HTML에서 플레이스홀더를 원래 <img> 태그로 복원한다.
+     */
+    private String restoreImgTags(String html, List<String> extractedImgTags) {
+        if (CommonUtil.isEmpty(html) || extractedImgTags.isEmpty()) return html;
+        for (int i = 0; i < extractedImgTags.size(); i++) {
+            String placeholder = "<img data-img-placeholder=\"" + i + "\">";
+            html = html.replace(placeholder, extractedImgTags.get(i));
+        }
+        return html;
     }
 
     /**
