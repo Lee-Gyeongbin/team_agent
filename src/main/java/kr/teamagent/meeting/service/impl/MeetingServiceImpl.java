@@ -307,6 +307,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> getRealtimeToken() {
         Map<String, Object> result = new HashMap<>();
         String apiKey = PropertyUtil.getProperty("Globals.chatbot.transcribe.apiKey");
+        String apiKeyFingerprint = getApiKeyFingerprint(apiKey);
 
         if (apiKey == null || apiKey.isEmpty() || apiKey.startsWith("YOUR_")) {
             logger.warn("[Realtime] API Key 미설정 (Globals.chatbot.transcribe.apiKey)");
@@ -353,10 +354,20 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .addHeader("Content-Type", "application/json")
                 .build();
 
-            logger.info("[Realtime] 전사 세션 임시 토큰 발급 요청 (transcription_sessions)");
+            logger.info("[Realtime] 전사 세션 임시 토큰 발급 요청 (transcription_sessions) - key: {}", apiKeyFingerprint);
             try (okhttp3.Response response = client.newCall(request).execute()) {
                 if (!response.isSuccessful() || response.body() == null) {
-                    logger.warn("[Realtime] 토큰 발급 실패 - status: {}", response.code());
+                    String errorBody = "";
+                    if (response.body() != null) {
+                        try (okhttp3.ResponseBody errorResponseBody = response.body()) {
+                            errorBody = errorResponseBody.string();
+                        }
+                    }
+                    if (errorBody.length() > 500) {
+                        errorBody = errorBody.substring(0, 500) + "...";
+                    }
+                    logger.warn("[Realtime] 토큰 발급 실패 - status: {}, key: {}, body: {}",
+                        response.code(), apiKeyFingerprint, errorBody);
                     result.put("successYn", false);
                     result.put("returnMsg", "토큰 발급 실패 (HTTP " + response.code() + ")");
                     return result;
@@ -388,6 +399,23 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         result.put("successYn", false);
         result.put("returnMsg", "토큰 발급 실패");
         return result;
+    }
+
+    private String getApiKeyFingerprint(String apiKey) {
+        if (apiKey == null) {
+            return "null";
+        }
+
+        String normalized = apiKey.trim();
+        int length = normalized.length();
+        if (length == 0) {
+            return "empty(len=0)";
+        }
+        if (length <= 10) {
+            return "masked(len=" + length + ")";
+        }
+
+        return normalized.substring(0, 6) + "..." + normalized.substring(length - 4) + "(len=" + length + ")";
     }
 
     /** 화자-참석자 매핑 저장 */

@@ -62,7 +62,16 @@
 
 	<!-- websocket xml 설정 (네이티브 WebSocket, SockJS 미사용) -->
 	<bean id="chatbotWebSocketHandler" class="kr.teamagent.chat.socket.ChatbotWebSocketHandler" autowire="byType"/>
-	<websocket:handlers allowed-origins="https://www.cmberp.co.kr,https://cmberp.co.kr,http://61.78.123.204:8888,http://localhost:8082,http://127.0.0.1:8082,http://localhost:3001,http://127.0.0.1:3001">
+	<websocket:handlers 
+		allowed-origins="
+		https://www.cmberp.co.kr,
+		https://cmberp.co.kr,
+		https://175.45.194.170,
+		http://61.78.123.204:8888,
+		http://localhost:8082,
+		http://127.0.0.1:8082,
+		http://localhost:3001,
+		http://127.0.0.1:3001">
 		<websocket:mapping path="/ws/chat" handler="chatbotWebSocketHandler"/>
 		<websocket:handshake-interceptors>
 			<bean class="org.springframework.web.socket.server.support.HttpSessionHandshakeInterceptor"/>
