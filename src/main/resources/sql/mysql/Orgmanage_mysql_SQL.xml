@@ -15,8 +15,151 @@
             O.CREATED_DT,
             O.UPDATED_DT
         FROM TB_ORG O
-        WHERE 1 = 1
-        ORDER BY O.CREATED_DT DESC
+        WHERE O.USE_YN = 'Y'
+        ORDER BY CAST(IFNULL(O.SORT_ORDER, '0') AS UNSIGNED) ASC
     </select>
 
+    <!-- 동일 ORG_ID 사용자 목록 조회 -->
+    <select id="selectUserList" resultType="orgManageVO">
+        /* 조직별 사용자 목록 orgManage.selectUserList */
+        SELECT
+            U.PROFILE_IMG_PATH,
+            U.USER_ID,
+            U.USER_NM,
+            U.EMAIL,
+            U.PHONE,
+            U.ORG_ID,
+            U.ACCT_STATUS_CD,
+            C.DESCRIPTION AS ACCT_STATUS_DESC
+        FROM TB_USER U
+            LEFT JOIN TB_CODE C
+                ON U.ACCT_STATUS_CD = C.CODE_ID
+                AND C.CODE_GRP_ID = 'CG000001'
+        WHERE U.ORG_ID = #{orgId}
+        ORDER BY U.CREATE_DT DESC
+    </select>
+
+    <insert id="insertOrg" parameterType="orgManageVO">
+        /* 조직 등록 orgManage.insertOrg */
+        INSERT INTO TB_ORG (
+            ORG_ID,
+            ORG_NM,
+            PARENT_ORG_ID,
+            ORG_LEVEL,
+            SORT_ORDER,
+            USE_YN,
+            CREATED_DT,
+            UPDATED_DT
+        ) VALUES (
+            #{orgId},
+            #{orgNm},
+            NULLIF(#{parentOrgId, jdbcType=VARCHAR}, ''),
+            #{orgLevel},
+            #{sortOrder},
+            #{useYn},
+            NOW(),
+            NOW()
+        )
+    </insert>
+
+    <select id="selectOrgByOrgId" parameterType="String" resultType="orgManageVO">
+        /* 조직 단건 조회 orgManage.selectOrgByOrgId */
+        SELECT
+            ORG_ID,
+            PARENT_ORG_ID,
+            ORG_LEVEL,
+            SORT_ORDER
+        FROM TB_ORG
+        WHERE ORG_ID = #{orgId}
+    </select>
+
+    <select id="selectParentOrgId" parameterType="String" resultType="orgManageVO">
+        /* 동일 부모 조직 목록 조회 orgManage.selectParentOrgId */
+        SELECT
+            ORG_ID,
+            PARENT_ORG_ID,
+            ORG_LEVEL,
+            SORT_ORDER
+        FROM TB_ORG
+        WHERE
+            <choose>
+                <when test="_parameter != null and _parameter != ''">
+                    PARENT_ORG_ID = #{parentOrgId}
+                </when>
+                <otherwise>
+                    PARENT_ORG_ID IS NULL
+                </otherwise>
+            </choose>
+          AND USE_YN = 'Y'
+        ORDER BY CAST(IFNULL(SORT_ORDER, '0') AS UNSIGNED) ASC, ORG_ID ASC
+    </select>
+
+    <select id="selectMaxSortOrderByParentOrgId" parameterType="String" resultType="int">
+        /* 동일 부모 조직 내 최대 정렬순서 조회 orgManage.selectMaxSortOrderByParentOrgId */
+        SELECT IFNULL(MAX(CAST(SORT_ORDER AS UNSIGNED)), 0)
+        FROM TB_ORG
+        WHERE
+            <choose>
+                <when test="_parameter != null and _parameter != ''">
+                    PARENT_ORG_ID = #{parentOrgId}
+                </when>
+                <otherwise>
+                    PARENT_ORG_ID IS NULL
+                </otherwise>
+            </choose>
+    </select>
+
+    <select id="selectMaxSortOrderByTopLevel" resultType="int">
+        /* 최상위 조직(ORG_LEVEL=1) 최대 정렬순서 조회 orgManage.selectMaxSortOrderByTopLevel */
+        SELECT IFNULL(MAX(CAST(SORT_ORDER AS UNSIGNED)), 0)
+        FROM TB_ORG
+        WHERE ORG_LEVEL = '1'
+    </select>
+
+    <update id="updateOrg" parameterType="orgManageVO">
+        /* 조직 수정 orgManage.updateOrg */
+        UPDATE TB_ORG
+        SET
+            ORG_NM = #{orgNm},
+            PARENT_ORG_ID = #{parentOrgId},
+            ORG_LEVEL = #{orgLevel},
+            SORT_ORDER = #{sortOrder},
+            USE_YN = #{useYn},
+            UPDATED_DT = NOW()
+        WHERE ORG_ID = #{orgId}
+    </update>
+
+    <update id="updateSiblingSortOrderBatch" parameterType="orgManageVO">
+        /* 동일 부모 조직 정렬순서 일괄 수정 orgManage.updateSiblingSortOrderBatch */
+        UPDATE TB_ORG
+        SET SORT_ORDER = CASE ORG_ID
+        <foreach collection="items" item="item">
+            WHEN #{item.orgId} THEN #{item.sortOrder}
+        </foreach>
+        END,
+        UPDATED_DT = NOW()
+        WHERE USE_YN = 'Y'
+        AND
+        <choose>
+            <when test="parentOrgId != null and parentOrgId != ''">
+                PARENT_ORG_ID = #{parentOrgId}
+            </when>
+            <otherwise>
+                PARENT_ORG_ID IS NULL
+            </otherwise>
+        </choose>
+        AND ORG_ID IN
+        <foreach collection="items" item="item" open="(" separator="," close=")">
+            #{item.orgId}
+        </foreach>
+    </update>
+
+    <update id="deleteOrg" parameterType="orgManageVO">
+        /* 조직 삭제 orgManage.deleteOrg */
+        UPDATE TB_ORG
+        SET
+            USE_YN = 'N',
+            UPDATED_DT = NOW()
+        WHERE ORG_ID = #{orgId}
+    </update>
 </mapper>

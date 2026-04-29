@@ -39,6 +39,19 @@ public class KeyGenerate {
     }
 
     /**
+     * 테이블 키 생성 (prefix + 지정 자리수 숫자)
+     * @param businessPrefix 접두사 (예: ORG)
+     * @param tableName 테이블명 (예: TB_ORG)
+     * @param idColumn ID 컬럼명 (예: ORG_ID)
+     * @param numberLength 숫자 자리수 (예: 3)
+     * @return 키 (예: ORG001)
+     */
+    public String generateTableKey(String businessPrefix, String tableName, String idColumn, int numberLength) throws Exception {
+        String lastId = commonDAO.selectMaxId(tableName, idColumn);
+        return CommonUtil.generateTableKey(businessPrefix, lastId, numberLength);
+    }
+
+    /**
      * 테이블 컬럼 MAX 정수값 조회
      * @param tableName 테이블명 (예: TB_AGT)
      * @param columnName 컬럼명 (예: SORT_ORD)

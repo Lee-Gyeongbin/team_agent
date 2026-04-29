@@ -23,7 +23,10 @@ public class TmplVO {
     private String useYn;
     private String createDt;
     private String modifyDt;
+    private String tmplHtml;
+
     private List<TmplFieldVO> fields;
+    
 
     /** 템플릿 저장 요청 폼 (TB_TMPL + TB_TMPL_FIELD) */
     @Getter

@@ -425,6 +425,7 @@
         SELECT
             A.TMPL_TYPE
             , A.LLM_PROMPT
+            , A.TMPL_HTML
         FROM TB_TMPL A
         WHERE 1=1
             AND A.TMPL_ID = #{tmplId}

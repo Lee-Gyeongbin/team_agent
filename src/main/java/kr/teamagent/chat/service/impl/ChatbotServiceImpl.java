@@ -29,6 +29,7 @@ import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.prompt.service.impl.PromptServiceImpl;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -173,6 +174,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 스트리밍 호출용 URL. svcTy=C 이고 첨부 파일 ID가 있으면 file_query 전용 URL(Globals.chatbot.gpt.apiFileUrl) 사용.
      */
     private String resolveStreamingApiUrl(String svcTy, String agentId, List<Long> attachmentFileIds) {
+        if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
+            String lunchApiUrl = PropertyUtil.getProperty("Globals.chatbot.lunch.apiUrl");
+            if (CommonUtil.isNotEmpty(lunchApiUrl)) {
+                logger.info("resolveStreamingApiUrl: lunch agent -> lunch_query URL");
+                return lunchApiUrl;
+            }
+        }
+
         if ("C".equals(svcTy) && hasNonNullAttachmentId(attachmentFileIds)) {
             // 첨부파일이 있는 일반채팅이라면
             String fileUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiFileUrl");
@@ -439,27 +448,29 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             String prompt =
                     "너는 점심 식당 추천 AI이다.\n\n"
                     + "조건:\n"
-                    + "- 현재 날씨: 사용자 요청에서 위치 정보를 통해 스스로 파악\n"
-                    + "- 사용자 요청: " + userInput + "\n"
+                    + "- 사용자 요청: " + userInput + "\n\n"
                     + "추천 기준:\n"
-                    + "1. 모든 답변은 카카오맵 기반으로 답변할 것\n"
-                    + "2. 반드시 사용자 위치 기준 도보 15분 이내 식당만 추천할 것\n"
-                    + "2. 폐업, 휴업, 임시휴무 등 이용 불가능한 식당은 절대 포함하지 말 것\n"
-                    + "3. 직장인이 점심으로 많이 이용하는 식당 (리뷰 기반으로 판단)\n"
-                    + "4. 가격은 사용자 요청의 가격 조건을 반영해 실제 금액으로 작성할 것\n"
-                    + "5. 실제 존재할 가능성이 높은 식당명으로 작성할 것\n\n"
-                    + "6. 식당 위치는 정확한 도로명 주소로 작성할 것\n"
+                    + "1. 반드시 웹 검색으로 검색 가능한 식당 데이터만 사용\n"
+                    + "2. 절대 새로운 식당을 생성하지 말 것\n"
+                    + "3. 가게명은 그대로 사용\n"
+                    + "4. 폐업, 휴업, 임시휴무 등 이용 불가능한 식당은 절대 포함하지 말 것\n"
+                    + "5. 메뉴는 대표 메뉴 1개만 작성\n"
+                    + "6. 가격은 일반적인 평균 가격으로 작성\n"
+                    + "7. location은 도로명 주소\n"
+                    + "8. address는 빈 문자열로 출력 (URL 생성은 백엔드에서 처리)\n\n"
                     + "출력 규칙:\n"
-                    + "- 반드시 JSON 배열 형식으로만 출력\n"
-                    + "- 총 3개의 식당을 반환할 것\n"
-                    + "- 다른 문장, 설명, 코드블럭 절대 금지\n\n"
+                    + "- 반드시 JSON 배열\n"
+                    + "- 최대 3개\n"
+                    + "- 설명 금지\n"
+                    + "- 허위 생성 금지\n\n"
                     + "출력:\n"
                     + "[\n"
                     + "  {\n"
                     + "    \"restaurant\": \"\",\n"
                     + "    \"location\": \"\",\n"
                     + "    \"menu\": \"\",\n"
-                    + "    \"price\": \"\"\n"
+                    + "    \"price\": \"\",\n"
+                    + "    \"address\": \"\"\n"
                     + "  }\n"
                     + "]";
             return prompt;
@@ -467,17 +478,137 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         return query;
     }
-    
+
+    private String ensureLunchAddressUrlFormat(String answerJson) {
+        if (CommonUtil.isEmpty(answerJson)) {
+            return answerJson;
+        }
+
+        try {
+            JSONParser parser = new JSONParser();
+            Object parsed = parser.parse(answerJson);
+            if (!(parsed instanceof JSONArray)) {
+                return answerJson;
+            }
+
+            JSONArray rows = (JSONArray) parsed;
+            JSONArray normalizedRows = new JSONArray();
+            for (Object rowObj : rows) {
+                if (!(rowObj instanceof JSONObject)) {
+                    continue;
+                }
+                JSONObject row = (JSONObject) rowObj;
+                JSONObject normalizedRow = new JSONObject();
+                String restaurant = getString(row.get("restaurant")).trim();
+                String location = getString(row.get("location")).trim();
+                String menu = getString(row.get("menu")).trim();
+                String price = getString(row.get("price")).trim();
+
+                normalizedRow.put("restaurant", restaurant);
+                normalizedRow.put("location", location);
+                normalizedRow.put("menu", menu);
+                normalizedRow.put("price", price);
+
+                String kakaoPlaceUrl = resolveKakaoPlaceUrlByKeyword(restaurant, location);
+                normalizedRow.put("address", CommonUtil.isNotEmpty(kakaoPlaceUrl) ? kakaoPlaceUrl : "");
+                normalizedRows.add(normalizedRow);
+            }
+            return normalizedRows.toJSONString();
+        } catch (Exception e) {
+            logger.warn("점심 추천 address URL 후처리 실패: {}", e.getMessage());
+            return answerJson;
+        }
+    }
+
+    private String resolveKakaoPlaceUrlByKeyword(String restaurant, String location) {
+        String kakaoApiUrl = PropertyUtil.getProperty("Globals.kakao.local.keyword.apiUrl");
+        String kakaoRestApiKey = PropertyUtil.getProperty("Globals.kakao.restApiKey");
+        if (CommonUtil.isEmpty(kakaoApiUrl) || CommonUtil.isEmpty(kakaoRestApiKey)) {
+            return "";
+        }
+
+        List<String> candidateKeywords = new ArrayList<>();
+        String fullKeyword = (restaurant + " " + location).trim();
+        if (CommonUtil.isNotEmpty(fullKeyword)) {
+            candidateKeywords.add(fullKeyword);
+        }
+        if (CommonUtil.isNotEmpty(restaurant) && !candidateKeywords.contains(restaurant)) {
+            candidateKeywords.add(restaurant);
+        }
+        if (candidateKeywords.isEmpty()) {
+            return "";
+        }
+
+        try {
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .build();
+
+            for (String keyword : candidateKeywords) {
+                HttpUrl requestUrl = HttpUrl.parse(kakaoApiUrl).newBuilder()
+                        .addQueryParameter("query", keyword)
+                        .addQueryParameter("size", "1")
+                        .build();
+                Request request = new Request.Builder()
+                        .url(requestUrl)
+                        .get()
+                        .addHeader("Authorization", "KakaoAK " + kakaoRestApiKey)
+                        .addHeader("Accept", "application/json")
+                        .build();
+
+                try (okhttp3.Response response = client.newCall(request).execute()) {
+                    if (!response.isSuccessful() || response.body() == null) {
+                        logger.warn("카카오 장소 검색 응답 오류: {} / keyword={}", response.code(), keyword);
+                        continue;
+                    }
+
+                    String body = response.body().string();
+                    if (CommonUtil.isEmpty(body)) {
+                        continue;
+                    }
+
+                    JSONParser parser = new JSONParser();
+                    JSONObject root = (JSONObject) parser.parse(body);
+                    Object docsObj = root.get("documents");
+                    if (!(docsObj instanceof JSONArray)) {
+                        continue;
+                    }
+
+                    JSONArray documents = (JSONArray) docsObj;
+                    if (documents.isEmpty()) {
+                        continue;
+                    }
+
+                    Object firstObj = documents.get(0);
+                    if (!(firstObj instanceof JSONObject)) {
+                        continue;
+                    }
+
+                    JSONObject first = (JSONObject) firstObj;
+                    String placeId = getString(first.get("id")).trim();
+                    if (CommonUtil.isEmpty(placeId)) {
+                        continue;
+                    }
+                    return "https://place.map.kakao.com/" + placeId;
+                }
+            }
+            return "";
+        } catch (Exception e) {
+            logger.warn("카카오 장소 URL 생성 실패 - restaurant: {}, location: {}, error: {}", restaurant, location, e.getMessage());
+            return "";
+        }
+    }
+
     /**
      * WebSocket 방식으로 스트리밍 응답을 처리하여 클라이언트로 전달
-     * SSE 형식: event: answer_delta, data: {"text": "..."}
-     * event: answer_source, data: {"items":[{"url":"...","title":"..."}, ...]} — 항목별 chunk 전달
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
     private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
+        boolean isLunchAgent = LUNCH_MENU_AGENT_ID.equals(agentId);
 
         String line;
         String currentEvent = null;
@@ -518,12 +649,28 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         String text = (String) data.get("text");
                         if (text != null && text.length() > 0) {
                             accumulatedContent.append(text);
-                            callback.onChunk(text, accumulatedContent.toString(), null);
+                            if (!isLunchAgent) {
+                                callback.onChunk(text, accumulatedContent.toString(), null);
+                            }
+                        }
+                        continue;
+                    }
+
+                    if ("answer_linked".equals(currentEvent)) {
+                        String linkedText = getString(data.get("text"));
+                        if (CommonUtil.isNotEmpty(linkedText)) {
+                            accumulatedContent = new StringBuilder(linkedText);
+                            if (!isLunchAgent) {
+                                callback.onChunk(linkedText, accumulatedContent.toString(), "answer_linked");
+                            }
                         }
                         continue;
                     }
 
                     if ("answer_source".equals(currentEvent)) {
+                        if (isLunchAgent) {
+                            continue;
+                        }
                         Object itemsObj = data.get("items");
                         if (itemsObj instanceof JSONArray) {
                             JSONArray items = (JSONArray) itemsObj;
@@ -544,10 +691,25 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
+                    if ("error".equals(currentEvent)) {
+                        String errorCode = getString(data.get("errorCode"));
+                        String errorContent = getString(data.get("errorContent"));
+                        JSONObject errorPayload = new JSONObject();
+                        errorPayload.put("errorCode", errorCode);
+                        errorPayload.put("errorContent", errorContent);
+                        callback.onError(errorPayload.toJSONString());
+                        hasStreamError = true;
+                        break;
+                    }
+
                     if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
                         String answer = getAnswerText(data);
                         if (CommonUtil.isNotEmpty(answer)) {
-                            if (accumulatedContent.length() == 0) {
+                            if (isLunchAgent) {
+                                answer = ensureLunchAddressUrlFormat(answer);
+                                callback.onChunk(answer, answer, null);
+                            }
+                            if (!isLunchAgent && accumulatedContent.length() == 0) {
                                 callback.onChunk(answer, answer, null);
                             }
                             accumulatedContent = new StringBuilder(answer);
@@ -581,6 +743,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             hasStreamError = true;
         } finally {
             try {
+                if (accumulatedContent.length() > 0 && LUNCH_MENU_AGENT_ID.equals(agentId)) {
+                    String normalizedAnswer = ensureLunchAddressUrlFormat(accumulatedContent.toString());
+                    accumulatedContent = new StringBuilder(normalizedAnswer);
+                }
+
                 if (accumulatedContent.length() > 0 && !"llmTest".equals(svcTy)) {
                     try {
                         savedLogId = this.doInsertAiLog(

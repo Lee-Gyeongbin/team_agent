@@ -331,4 +331,28 @@ public class CommonUtil {
 
 		return prefix + String.format("%06d", nextNum);
 	}
+
+	/**
+	 * 테이블 키 생성 (prefix + 지정 자리수 숫자)
+	 * @param businessPrefix 접두사 (예: ORG)
+	 * @param lastId 해당 테이블의 마지막 ID (예: ORG001). null/empty면 1부터 시작
+	 * @param numberLength 숫자 자리수 (예: 3)
+	 * @return 생성 키 (예: ORG002)
+	 */
+	public static String generateTableKey(String businessPrefix, String lastId, int numberLength) {
+		String prefix = nullToBlank(businessPrefix).toUpperCase();
+		int digitLength = numberLength > 0 ? numberLength : 6;
+		int nextNum = 1;
+
+		if (isNotEmpty(lastId)) {
+			try {
+				String numPart = lastId.substring(Math.max(0, lastId.length() - digitLength));
+				nextNum = Integer.parseInt(numPart) + 1;
+			} catch (NumberFormatException e) {
+				logger.debug("generateTableKey(lastId, numberLength) lastId 파싱 실패, 1부터 시작: {}", lastId);
+			}
+		}
+
+		return prefix + String.format("%0" + digitLength + "d", nextNum);
+	}
 }
