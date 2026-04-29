@@ -87,6 +87,18 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return update("ai.meeting.updateSpeakerMapping", dataVO);
     }
 
+    // ── 오디오 파일 ──────────────────────────────────────────────────
+
+    /** 오디오 파일 등록 */
+    public int insertMeetingAudio(MeetingVO dataVO) throws Exception {
+        return insert("ai.meeting.insertMeetingAudio", dataVO);
+    }
+
+    /** 오디오 처리 상태 수정 */
+    public int updateMeetingAudioStatus(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingAudioStatus", dataVO);
+    }
+
     // ── 사용자 목록 ───────────────────────────────────────────────────
 
     /** 참석자 선택용 사용자 목록 */
