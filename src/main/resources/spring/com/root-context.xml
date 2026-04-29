@@ -71,15 +71,29 @@
 
     <util:properties id="globals" location="classpath:/egovframework/egovProps/globals.properties"/>
 
-	<bean id="propertyConfigurer" class="kr.teamagent.common.util.PropertyUtil">
-		<property name="locations">
-			<list>
-				<value>classpath:/egovframework/egovProps/globals.properties</value>
-				<value>classpath:/egovframework/egovProps/globals-secret.properties</value>
-			</list>
-		</property>
-		<property name="ignoreResourceNotFound" value="true"/>
-	</bean>
+	<beans profile="local">
+		<bean id="propertyConfigurer" class="kr.teamagent.common.util.PropertyUtil">
+			<property name="locations">
+				<list>
+					<value>classpath:/egovframework/egovProps/globals.properties</value>
+					<value>classpath:/egovframework/egovProps/globals-secret.properties</value>
+				</list>
+			</property>
+			<property name="ignoreResourceNotFound" value="true"/>
+		</bean>
+	</beans>
+
+	<beans profile="!local">
+		<bean id="propertyConfigurer" class="kr.teamagent.common.util.PropertyUtil">
+			<property name="locations">
+				<list>
+					<value>classpath:/egovframework/egovProps/globals.properties</value>
+					<value>file:/home/teamagent/secrets/globals-secret.properties</value>
+				</list>
+			</property>
+			<property name="ignoreResourceNotFound" value="true"/>
+		</bean>
+	</beans>
 
 	<!-- Dashboard category trend batch (Quartz) -->
 	<bean id="dashBoardCategoryTrendJobDetail" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
