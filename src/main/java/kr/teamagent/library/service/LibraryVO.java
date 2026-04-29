@@ -175,6 +175,7 @@ public class LibraryVO {
     public static class TmplItem {
         private String tmplType;
         private String llmPrompt;
+        private String tmplHtml;
     }
 
 }

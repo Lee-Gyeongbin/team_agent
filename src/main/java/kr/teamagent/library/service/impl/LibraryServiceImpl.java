@@ -359,7 +359,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                     if (fieldItem == null || CommonUtil.isEmpty(fieldItem.getJsonKey())) continue;
                     String jsonKey = fieldItem.getJsonKey();
                     String fieldNm = CommonUtil.isEmpty(fieldItem.getFieldNm()) ? jsonKey : fieldItem.getFieldNm();
-                    fieldList.append("\nkey : ").append(jsonKey).append("_label (").append(jsonKey).append("의 라벨명. ").append(fieldNm).append(" 값을 그대로 사용할 것)");
+                    fieldList.append("\nkey : ").append(jsonKey).append("_label (고정값: \"").append(fieldNm).append("\". 반드시 이 문자열만 사용. 내용 요약 금지)");
                     fieldList.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm).append(")");
                 }
             }
@@ -397,6 +397,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "AI 문서 생성 성공");
+            resultMap.put("tmplHtml", CommonUtil.nullToBlank(tmpl.getTmplHtml()));
             resultMap.put("data", res);
             if (!CommonUtil.isEmpty(searchVO.getRoomId())) {
                 LibraryVO reportLog = new LibraryVO();
