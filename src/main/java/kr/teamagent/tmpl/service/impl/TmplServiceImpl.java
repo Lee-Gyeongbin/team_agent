@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
+import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.tmpl.service.TmplVO;
 import kr.teamagent.tmpl.service.TmplVO.TmplFieldVO;
 import kr.teamagent.tmpl.service.TmplVO.SaveFormVO;
@@ -25,6 +26,9 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private ChatbotServiceImpl chatbotService;
+
+    @Autowired
+    KeyGenerate keyGenerate;
 
     /**
      * 사용자 문서 템플릿 목록 조회
@@ -60,8 +64,11 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     public TmplVO saveTmpl(SaveFormVO formVO) throws Exception {
-        if (formVO == null || formVO.getTmplId() == null || formVO.getTmplId().trim().isEmpty()) {
-            throw new IllegalArgumentException("tmplId is required");
+        if (formVO == null) {
+            throw new IllegalArgumentException("formVO is required");
+        }
+        if (formVO.getTmplId() == null || formVO.getTmplId().trim().isEmpty()) {
+            formVO.setTmplId(keyGenerate.generateTableKey("TM", "TB_TMPL", "TMPL_ID"));
         }
 
         String llmPrompt = formVO.getLlmPrompt();
