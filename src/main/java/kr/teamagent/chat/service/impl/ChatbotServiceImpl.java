@@ -511,6 +511,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                 String kakaoPlaceUrl = resolveKakaoPlaceUrlByKeyword(restaurant, location);
                 normalizedRow.put("address", CommonUtil.isNotEmpty(kakaoPlaceUrl) ? kakaoPlaceUrl : "");
+                String lunchImageUrl = resolveLunchMenuImageUrl(menu, restaurant);
+                normalizedRow.put("imageUrl", CommonUtil.isNotEmpty(lunchImageUrl) ? lunchImageUrl : "");
                 normalizedRows.add(normalizedRow);
             }
             return normalizedRows.toJSONString();
@@ -518,6 +520,34 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.warn("점심 추천 address URL 후처리 실패: {}", e.getMessage());
             return answerJson;
         }
+    }
+
+    /**
+     * 점심 추천 항목의 메뉴/식당명을 이용해 이미지 API를 호출하고,
+     * 프론트에서 바로 사용할 수 있는 URL(http 또는 data URL) 형태로 반환한다.
+     */
+    private String resolveLunchMenuImageUrl(String menu, String restaurant) {
+        String imageKeyword = CommonUtil.isNotEmpty(menu) ? menu.trim() : "";
+        if (CommonUtil.isEmpty(imageKeyword)) {
+            imageKeyword = CommonUtil.isNotEmpty(restaurant) ? restaurant.trim() : "";
+        }
+        if (CommonUtil.isEmpty(imageKeyword)) {
+            return "";
+        }
+
+        String prompt = "음식 사진 생성. 설명 없이 음식만 사실적으로 표현. 음식명: " + imageKeyword;
+        String imageResult = callAiImageApi(prompt);
+        if (CommonUtil.isEmpty(imageResult)) {
+            return "";
+        }
+
+        String normalized = imageResult.trim();
+        if (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("data:image/")) {
+            return normalized;
+        }
+        
+        // image API가 순수 base64를 반환하는 경우 프론트 표시용 data URL로 변환
+        return "data:image/png;base64," + normalized;
     }
 
     private String resolveKakaoPlaceUrlByKeyword(String restaurant, String location) {
