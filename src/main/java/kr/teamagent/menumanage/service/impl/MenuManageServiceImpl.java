@@ -12,6 +12,10 @@ public class MenuManageServiceImpl extends EgovAbstractServiceImpl {
     @Autowired
     private MenuManageDAO menuManageDAO;
 
+    public int saveMenu(MenuManageVO.SaveMenuVO saveVO) throws Exception {
+        return menuManageDAO.saveMenu(saveVO);
+    }
+
     public int updateMenuOrder(MenuManageVO.UpdateMenuOrderVO searchVO) throws Exception {
         if (searchVO == null || searchVO.getItems() == null || searchVO.getItems().isEmpty()) {
             return 0;

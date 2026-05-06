@@ -28,6 +28,11 @@ public class MenuManageVO extends CommonVO {
 
     @Getter
     @Setter
+    public static class SaveMenuVO extends MenuManageVO {
+    }
+
+    @Getter
+    @Setter
     public static class UpdateMenuOrderVO extends MenuManageVO {
         private List<MenuOrderSortItem> items;
     }

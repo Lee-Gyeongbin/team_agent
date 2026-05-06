@@ -2,6 +2,51 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="menuManage">
 
+    <insert id="saveMenu" parameterType="kr.teamagent.menumanage.service.MenuManageVO$SaveMenuVO">
+        /* 메뉴 등록/수정 (ON DUPLICATE KEY UPDATE) menuManage.saveMenu */
+        INSERT INTO TB_MENU (
+            MENU_ID
+          , MENU_NAME
+          , PARN_MENU_ID
+          , MENU_LEVEL
+          , MENU_PATH
+          , IS_LEAF
+          , SRC_PATH
+          , ICON
+          , SORT_ORD
+          , USE_YN
+          , DESCRIPTION
+          , CREATE_DT
+          , MODIFY_DT
+        ) VALUES (
+            #{menuId}
+          , #{menuName}
+          , #{parnMenuId, jdbcType=VARCHAR}
+          , #{menuLevel, jdbcType=INTEGER}
+          , #{menuPath, jdbcType=VARCHAR}
+          , #{isLeaf}
+          , #{srcPath, jdbcType=VARCHAR}
+          , #{icon, jdbcType=VARCHAR}
+          , #{sortOrd, jdbcType=INTEGER}
+          , #{useYn}
+          , #{description, jdbcType=VARCHAR}
+          , NOW()
+          , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            MENU_NAME   = #{menuName}
+          , PARN_MENU_ID  = #{parnMenuId, jdbcType=VARCHAR}
+          , MENU_LEVEL    = #{menuLevel, jdbcType=INTEGER}
+          , MENU_PATH     = #{menuPath, jdbcType=VARCHAR}
+          , IS_LEAF       = #{isLeaf}
+          , SRC_PATH      = #{srcPath, jdbcType=VARCHAR}
+          , ICON          = #{icon, jdbcType=VARCHAR}
+          , SORT_ORD      = #{sortOrd, jdbcType=INTEGER}
+          , USE_YN        = #{useYn}
+          , DESCRIPTION   = #{description, jdbcType=VARCHAR}
+          , MODIFY_DT     = NOW()
+    </insert>
+
     <update id="updateMenuOrder" parameterType="kr.teamagent.menumanage.service.MenuManageVO$UpdateMenuOrderVO">
         /* 같은 상위 메뉴 하위 형제 간 정렬 순서 저장 menuManage.updateMenuOrder */
         UPDATE TB_MENU

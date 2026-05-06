@@ -19,6 +19,28 @@ public class MenuManageController extends BaseController {
     @Autowired
     private MenuManageServiceImpl menuManageService;
 
+    /**
+     * 메뉴 등록/수정
+     * @param saveVO
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/save.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView saveMenu(@RequestBody MenuManageVO.SaveMenuVO saveVO) throws Exception {
+        if (saveVO == null || saveVO.getMenuId() == null || saveVO.getMenuId().isEmpty()) {
+            return makeFailJsonData("메뉴 ID가 없습니다.");
+        }
+        menuManageService.saveMenu(saveVO);
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 메뉴 정렬
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
     @RequestMapping(value = "/updateMenuOrder.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView updateMenuOrder(@RequestBody MenuManageVO.UpdateMenuOrderVO searchVO) throws Exception {
