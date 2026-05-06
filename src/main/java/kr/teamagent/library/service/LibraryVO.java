@@ -114,6 +114,7 @@ public class LibraryVO {
     public static class TableDataItem {
         private String logId;
         private String tableData;
+        private String chartOption;
     }
 
     /** 참조 매뉴얼(문서) 목록 조회 API 응답 — TB_DOC_FILE 조회 결과 */
