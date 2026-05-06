@@ -677,8 +677,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                     if ("answer_delta".equals(currentEvent)) {
                         String text = (String) data.get("text");
-                        System.out.println("answer_delta: " + text);
-                        System.out.println("answer_delta:[" + text.replace("\n", "\\n") + "]");
                         if (text != null && text.length() > 0) {
                             accumulatedContent.append(text);
                             if (!isLunchAgent) {
