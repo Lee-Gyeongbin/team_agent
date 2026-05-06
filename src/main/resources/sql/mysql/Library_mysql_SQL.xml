@@ -91,6 +91,7 @@
         SELECT
             A.LOG_ID
             , A.TABLE_DATA
+            , A.CHART_OPTION
         FROM TB_CHAT_LOG A
         WHERE 1=1
             AND A.LOG_ID = #{logId}

@@ -15,9 +15,11 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 
+import kr.teamagent.common.web.BaseController;
 import kr.teamagent.meeting.service.MeetingVO;
 import kr.teamagent.meeting.service.impl.MeetingServiceImpl;
-import kr.teamagent.common.web.BaseController;
+import kr.teamagent.usermanage.service.UserManageVO;
+import kr.teamagent.usermanage.service.impl.UserManageServiceImpl;
 
 @Controller
 @RequestMapping("/")
@@ -27,6 +29,9 @@ public class MeetingController extends BaseController {
 
     @Autowired
     private MeetingServiceImpl meetingService;
+
+    @Autowired
+    private UserManageServiceImpl userManageService;
 
     /** 참석자 선택용 사용자 목록 */
     @RequestMapping("/ai/meeting/selectUserList.do")
@@ -51,6 +56,9 @@ public class MeetingController extends BaseController {
     @ResponseBody
     public ModelAndView selectMeetingDetail(MeetingVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>(meetingService.selectMeetingDetail(searchVO));
+        UserManageVO userManageVO = new UserManageVO();
+        userManageVO.setUserId(searchVO.getCreateUserId());
+        resultMap.put("userList", userManageService.selectUserList(userManageVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
