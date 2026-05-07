@@ -27,9 +27,8 @@ public class MeetingVO extends CommonVO {
     // TB_MEETING_MINUTES - 회의록
     private Long   minutesId;
     private String fullText;
-    private String summary;
-    private String decisions;
-    private String todoList;        // 구 actionItems → ToDoList JSON [{due_date, content, collaborators}]
+    /** LLM 구조화 필드 등 단일 JSON (예: summary, decisions, todo_list) */
+    private String flatData;
     private String segments;        // 화자분리용 발화단락 JSON [{seq, text}]
 
     // TB_MEETING_INFOGRAPHIC - 주제별 인포그래픽
@@ -61,4 +60,11 @@ public class MeetingVO extends CommonVO {
 
     // TB_USER - 참석자 선택
     private String userNm;
+
+    // TB_TMPL_FIELD - 회의록 템플릿 필드
+    private String fieldId;
+    private String tmplId;
+    private String jsonKey;
+    private String fieldNm;
+    private String multilineYn;
 }

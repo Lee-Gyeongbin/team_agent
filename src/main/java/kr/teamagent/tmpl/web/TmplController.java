@@ -54,4 +54,21 @@ public class TmplController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 템플릿 상세 조회
+     * @param tmplVO { tmplId }
+     * @return { data: TmplVO }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/detail.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView detail(@RequestBody TmplVO tmplVO) throws Exception {
+        if (tmplVO == null) {
+            return makeFailJsonData("tmplVO is required");
+        }
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("tmplDetail", tmplService.selectTmplDetail(tmplVO));
+        resultMap.put("tmplFieldList", tmplService.selectTmplFieldList(tmplVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
 }
