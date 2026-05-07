@@ -1347,14 +1347,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private String callAiImageApi(String query) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.image.apiUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
-            logger.warn("썸네일 이미지 생성 실패 - image API URL 미설정");
+            logger.warn("이미지 생성 실패 - image API URL 미설정");
             return null;
         }
         if (CommonUtil.isEmpty(query)) {
             return null;
         }
-
-        logger.info("AI 썸네일 이미지 호출 시작 - query: {}", query);
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
@@ -1648,6 +1646,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String docFileId;
         String mainPageNo;
         List<Integer> relatedPageNos = new ArrayList<>();
+    }
+
+    /**
+     * 외부에서 prompt를 받아 AI 이미지 생성 API를 호출하고 순수 base64를 반환한다.
+     */
+    public String generateImageByPrompt(String prompt) {
+        return callAiImageApi(prompt);
     }
 
 }
