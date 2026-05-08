@@ -62,4 +62,24 @@ public class TmplDAO extends EgovComAbstractDAO {
         insert("tmpl.insertTmplFieldList", fieldList);
     }
 
+    /**
+     * 템플릿 상세 조회
+     * @param tmplVO
+     * @return
+     * @throws Exception
+     */
+    public TmplVO selectTmplDetail(TmplVO tmplVO) throws Exception {
+        return selectOne("tmpl.selectTmplDetail", tmplVO);
+    }
+
+    /**
+     * 템플릿 필드 목록 조회
+     * @param tmplVO
+     * @return
+     * @throws Exception
+     */
+    public List<TmplFieldVO> selectTmplFieldList(TmplVO tmplVO) throws Exception {
+        return selectList("tmpl.selectTmplFieldList", tmplVO);
+    }
+
 }

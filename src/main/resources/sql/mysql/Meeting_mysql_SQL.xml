@@ -90,9 +90,8 @@
             MINUTES_ID      AS MINUTES_ID
             , MEETING_ID    AS MEETING_ID
             , FULL_TEXT     AS FULL_TEXT
-            , SUMMARY       AS SUMMARY
-            , DECISIONS     AS DECISIONS
-            , TODO_LIST     AS TODO_LIST
+            , FLAT_DATA     AS FLAT_DATA
+            , EDITED_CONTENT AS EDITED_CONTENT
             , CREATE_DT     AS CREATE_DT
             , MODIFY_DT     AS MODIFY_DT
         FROM TB_MEETING_MINUTES
@@ -102,18 +101,15 @@
     <insert id="insertMeetingMinutes" parameterType="meetingVO">
         /* 회의록 등록 ai.meeting.insertMeetingMinutes */
         INSERT INTO TB_MEETING_MINUTES
-        (MEETING_ID, FULL_TEXT, SUMMARY, DECISIONS, TODO_LIST, CREATE_DT)
+        (MEETING_ID, FULL_TEXT, FLAT_DATA, CREATE_DT)
         VALUES
-        (#{meetingId}, #{fullText}, #{summary}, #{decisions}, #{todoList}, NOW())
+        (#{meetingId}, #{fullText}, #{flatData}, NOW())
     </insert>
 
     <update id="updateMeetingMinutes" parameterType="meetingVO">
         /* 회의록 수정 ai.meeting.updateMeetingMinutes */
         UPDATE TB_MEETING_MINUTES SET
-            FULL_TEXT       = #{fullText}
-            , SUMMARY       = #{summary}
-            , DECISIONS     = #{decisions}
-            , TODO_LIST     = #{todoList}
+            EDITED_CONTENT = #{editedContent}
             , MODIFY_DT     = NOW()
         WHERE MINUTES_ID = #{minutesId}
     </update>
@@ -226,4 +222,23 @@
         ORDER BY USER_NM ASC
     </select>
 
+    <!-- ===================== TB_TMPL_FIELD(회의록 템플릿 조회) ===================== -->
+    <select id="selectMeetingFieldList" resultType="meetingVO">
+        /* 회의록 필드 목록 조회 ai.meeting.selectMeetingFieldList */
+        SELECT
+            A.FIELD_ID
+            , A.TMPL_ID
+            , A.JSON_KEY
+            , A.FIELD_NM
+            , A.MULTILINE_YN
+            , A.SORT_ORD
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM
+            TB_TMPL_FIELD A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+            AND A.TMPL_ID = 'TM000004'
+    </select>
 </mapper>

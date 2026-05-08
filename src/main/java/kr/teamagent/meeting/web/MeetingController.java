@@ -82,26 +82,6 @@ public class MeetingController extends BaseController {
         return resultMap;
     }
 
-    /** 회의 종료 - 상태 변경 + 회의록 생성 + 화자 분리 */
-    @RequestMapping("/ai/meeting/finishMeeting.do")
-    @ResponseBody
-    public Map<String, Object> finishMeeting(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
-        Map<String, Object> resultMap = new HashMap<>();
-        try {
-            if (bindingResult.hasErrors()) {
-                resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
-                return resultMap;
-            }
-            resultMap = meetingService.finishMeeting(dataVO);
-        } catch (Exception e) {
-            log.error("finishMeeting error", e);
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
-        }
-        return resultMap;
-    }
-
     /**
      * 회의 종료 (오디오 파일 전사 버전)
      * - multipart/form-data: meetingId(Long) + audioFile(MultipartFile)
@@ -202,6 +182,20 @@ public class MeetingController extends BaseController {
             log.error("getRealtimeToken error", e);
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "토큰 발급에 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    @RequestMapping("/ai/meeting/saveMeetingMinutes.do")
+    @ResponseBody
+    public Map<String, Object> saveMeetingMinutes(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.saveMeetingMinutes(dataVO);
+        } catch (Exception e) {
+            log.error("saveMeetingMinutes error", e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
         return resultMap;
     }

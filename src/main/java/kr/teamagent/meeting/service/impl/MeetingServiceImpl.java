@@ -1,21 +1,11 @@
 package kr.teamagent.meeting.service.impl;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.ObjectMetadata;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONArray;
@@ -27,13 +17,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.google.gson.Gson;
 
+import kr.teamagent.common.security.service.UserVO;
+import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.library.service.LibraryVO;
+import kr.teamagent.library.service.impl.LibraryDAO;
 import kr.teamagent.meeting.service.MeetingVO;
-import okhttp3.MediaType;
-import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -45,6 +39,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private MeetingDAO meetingDAO;
+
+    @Autowired
+    private LibraryDAO libraryDAO;
 
     @Autowired
     private AmazonS3 amazonS3;
@@ -82,40 +79,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             dataVO.setIsAutoTitle("N");
         }
         meetingDAO.insertMeeting(dataVO);
-        result.put("successYn", true);
-        result.put("meetingId", dataVO.getMeetingId());
-        return result;
-    }
-
-    /** 회의 종료 - 상태 변경 + 회의록 생성 + 화자 분리 */
-    public Map<String, Object> finishMeeting(MeetingVO dataVO) throws Exception {
-        Map<String, Object> result = new HashMap<>();
-
-        // 요청 본문에는 fullText/segments만 오는 경우가 있어, DB에서 IS_AUTO_TITLE 조회
-        MeetingVO dbMeeting = meetingDAO.selectMeeting(dataVO);
-        if (dbMeeting != null && dbMeeting.getIsAutoTitle() != null) {
-            dataVO.setIsAutoTitle(dbMeeting.getIsAutoTitle());
-        }
-
-        // 1. 회의 상태 종료(002)로 변경
-        dataVO.setStatus("002");
-        meetingDAO.updateMeetingStatus(dataVO);
-
-        // 2. LLM 호출하여 회의록 생성
-        String minutesAnswer = callLlmForMinutes(dataVO.getFullText(), dataVO.getIsAutoTitle());
-        if (minutesAnswer != null) {
-            parseAndSaveMinutes(dataVO, minutesAnswer);
-        }
-
-        // 3. LLM 호출하여 화자 분리 (segments 있을 때만)
-        if (dataVO.getSegments() != null && !dataVO.getSegments().trim().isEmpty()
-                && !"[]".equals(dataVO.getSegments().trim())) {
-            JSONArray finalSegments = buildFinalSpeakerSegments(dataVO.getSegments());
-            if (finalSegments != null && !finalSegments.isEmpty()) {
-                saveSpeakersFromSegments(dataVO, finalSegments);
-            }
-        }
-
         result.put("successYn", true);
         result.put("meetingId", dataVO.getMeetingId());
         return result;
@@ -201,9 +164,12 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
         // 7. LLM 호출하여 회의록 생성
         dataVO.setFullText(fullText);
-        String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle());
+        LibraryVO searchVO = new LibraryVO();
+        searchVO.setTmplId("TM000004");
+        List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
+        String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle(), tmplFieldList);
         if (minutesAnswer != null) {
-            parseAndSaveMinutes(dataVO, minutesAnswer);
+            parseAndSaveMinutes(dataVO, minutesAnswer, tmplFieldList);
         }
 
         // 8. diarize 세그먼트를 화자별로 그룹화하여 저장
@@ -539,267 +505,58 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      * 응답 JSON 키만 사용해 설명한다(마크다운 별도 출력 금지). IS_AUTO_TITLE=Y 이면 meeting_title 포함.
      * 주제별 본문은 discussion_topics에만 담고, 서버가 FULL_TEXT로 직렬화한다.
      */
-    private String callLlmForMinutes(String fullText, String isAutoTitle) {
+    private String callLlmForMinutes(String fullText, String isAutoTitle, 
+        List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
         boolean wantTitle = isAutoTitleYn(isAutoTitle);
 
-        String jsonShape;
-        String titleRules = "";
-        String commonTail = "\"meeting_time\": {\"start\": \"녹취에 나온 시작 시각(HH:MM 등) 또는 빈 문자열\", \"end\": \"종료 시각 또는 빈 문자열\"},"
-            + "\"summary\": \"전체 회의 요약(한 필드)\","
-            + "\"decisions\": [\"합의된 결정만, 문자열 배열\"],"
-            + "\"todo_list\": ["
-            + "  {\"due_date\": \"YYYY-MM-DD 또는 언급 없으면 빈 문자열\", \"content\": \"해야 할 일\", \"collaborators\": \"담당자 또는 빈 문자열\"}],"
-            + "\"discussion_topics\": ["
-            + "  {\"topic\": \"주제명\", \"background\": \"논의 배경(평문, 줄바꿈 가능)\", \"discussion\": \"핵심 논의\", \"opinions\": \"주요 의견\"}],"
-            + "\"infographic_topics\": ["
-            + "  {\"topic_nm\": \"주제명\", \"topic_summary\": \"한 줄 요약\", \"tree_text\": \"- [주제명]\\\\n  - 한 줄 요약\\\\n  - 1단계: ...\\\\n  - 2단계: ...\\\\n  - 3단계: ...\"}"
-            + "]}";
+        LibraryVO searchVO = new LibraryVO();
+        searchVO.setTmplId("TM000004");
+        LibraryVO.TmplItem tmpl = libraryDAO.selectTmpl(searchVO);
 
-        if (wantTitle) {
-            jsonShape = "{\"meeting_title\": \"녹취 맥락 반영 한국어 제목(30자 이내 권장, 따옴표 없이)\","
-                + commonTail;
-            titleRules = "meeting_title: 회의를 대표하는 제목 한 줄 (DB 최대 200자).\n";
-        } else {
-            jsonShape = "{" + commonTail;
+        String promptTemplate = CommonUtil.nullToBlank(tmpl.getLlmPrompt());
+        if (CommonUtil.isEmpty(promptTemplate)) {
+            logger.warn("회의록 프롬프트 템플릿 없음 (tmplId={})", searchVO.getTmplId());
+            return null;
         }
 
-        String prompt = "다음은 회의 녹취록입니다. 아래 JSON 키에만 값을 채워 단일 JSON 객체만 응답하세요 (설명문·마크다운 본문·코드펜스 금지).\n"
-            + "역할: 기업용 회의록 자동 작성. 녹취에 없는 사실은 추측하지 말 것.\n\n"
-            + "[핵심]\n"
-            + "- 중복 최소화, 간결한 문장.\n"
-            + "- 동일 정보를 JSON 밖이나 다른 형식으로 다시 쓰지 말 것.\n\n"
-            + "[키별 안내]\n"
-            + "- meeting_time: 녹취에서만 추출. 시각 불명이면 start·end 모두 빈 문자열 \"\".\n"
-            + "- summary: 전체 요약(한 문자열).\n"
-            + "- decisions: 최종 합의·확정만 문자열 배열. 불확실하면 제외.\n"
-            + "- todo_list: 녹취 기반. 미언급 시 due_date·collaborators는 \"\".\n"
-            + "- discussion_topics: 주제별 상세(배경·논의·의견). 줄바꿈은 필드 문자열 내 \\n. 주제 수 통상 2~8.\n"
-            + "- infographic_topics: 시각 요약용. topic_nm, topic_summary, tree_text만 사용. "
-            + "tree_text는 해당 주제의 트리형 줄글(내부 줄바꿈 \\n). 유사 주제는 병합.\n"
-            + (wantTitle ? titleRules : "")
-            + "\n응답 형식(값은 예시):\n"
-            + jsonShape + "\n\n"
-            + "회의 녹취록:\n" + fullText;
+        UserVO userVO = SessionUtil.getUserVO();
+        String userNm = userVO != null ? CommonUtil.nullToBlank(userVO.getUserNm()) : "";
 
-        logger.info("회의록 LLM 호출 시작 (isAutoTitle={})", isAutoTitle);
+        StringBuilder fieldList = new StringBuilder();
+        if (tmplFieldList != null) {
+            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
+                if (field == null || CommonUtil.isEmpty(field.getJsonKey())) continue;
+                String key = field.getJsonKey();
+                String nm  = CommonUtil.isEmpty(field.getFieldNm()) ? key : field.getFieldNm();
+                if ("title".equals(key) && !wantTitle) continue;
+                if ("author".equals(key)) {
+                    fieldList.append("- ").append(key).append(": ")
+                            .append(nm).append(" (고정값: \"").append(userNm)
+                            .append("\". LLM이 임의로 변경 금지)\n");
+                    continue;
+                }
+                if ("Y".equals(field.getMultilineYn())) {
+                    fieldList.append("- ").append(key).append(": ")
+                            .append(nm).append(" (JSON 문자열 배열로 응답. 예: [\"항목1\", \"항목2\"])\n");
+                } else {
+                    fieldList.append("- ").append(key).append(": ").append(nm).append("\n");
+                }
+            }
+        }
+
+        String autoTitleRule = wantTitle
+            ? "[제목 규칙]\n- title 필드: 회의를 대표하는 제목 한 줄 (DB 최대 200자, 30자 이내 권장).\n"
+            : "";
+
+        String prompt = promptTemplate
+            .replace("{{FULL_TEXT}}", fullText)
+            .replace("{{FIELD_LIST}}", fieldList.toString())
+            .replace("{{AUTO_TITLE_RULE}}", autoTitleRule);
+
+        logger.info("회의록 LLM 호출 시작 (tmplId={}, isAutoTitle={})", searchVO.getTmplId(), isAutoTitle);
         String answer = callLlm(prompt);
         if (answer != null) logger.info("회의록 LLM 호출 완료");
         return answer;
-    }
-
-    /** 화자 분리 최종 세그먼트 구성 (실시간 diarize 우선 + 빈 구간만 LLM 보완 + 전체 fallback) */
-    @SuppressWarnings("unchecked")
-    private JSONArray buildFinalSpeakerSegments(String segments) {
-        try {
-            JSONParser parser = new JSONParser();
-            JSONArray parsedSegments = (JSONArray) parser.parse(normalizeSegmentsJson(segments));
-            if (parsedSegments == null || parsedSegments.isEmpty()) {
-                return null;
-            }
-
-            List<JSONObject> cleanedList = new ArrayList<>();
-            for (int i = 0; i < parsedSegments.size(); i++) {
-                Object obj = parsedSegments.get(i);
-                if (!(obj instanceof JSONObject)) {
-                    continue;
-                }
-                JSONObject src = (JSONObject) obj;
-                String text = sanitizeText((String) src.get("text"));
-                if (isIgnorableSegment(text)) {
-                    continue;
-                }
-
-                JSONObject dst = new JSONObject();
-                dst.put("seq", toInt(src.get("seq"), i));
-                dst.put("text", text);
-                dst.put("speaker", normalizeSpeaker((String) src.get("speaker")));
-                cleanedList.add(dst);
-            }
-
-            if (cleanedList.isEmpty()) {
-                return null;
-            }
-            cleanedList.sort(Comparator.comparingInt(seg -> toInt(seg.get("seq"), 0)));
-
-            JSONArray finalSegments = new JSONArray();
-            finalSegments.addAll(cleanedList);
-
-            JSONArray llmTarget = new JSONArray();
-            int withSpeakerCount = 0;
-            for (Object obj : finalSegments) {
-                JSONObject seg = (JSONObject) obj;
-                if (hasSpeaker(seg)) {
-                    withSpeakerCount++;
-                } else {
-                    llmTarget.add(seg);
-                }
-            }
-
-            // speaker가 비어 있는 구간만 보조 추론
-            if (!llmTarget.isEmpty()) {
-                applySpeakerInference(finalSegments, llmTarget);
-            }
-
-            // 여전히 공백이면 전체 fallback
-            boolean hasMissing = false;
-            for (Object obj : finalSegments) {
-                JSONObject seg = (JSONObject) obj;
-                if (!hasSpeaker(seg)) {
-                    hasMissing = true;
-                    break;
-                }
-            }
-            if (hasMissing) {
-                logger.info("화자 분리 fallback 실행 - withSpeaker: {}, total: {}", withSpeakerCount, finalSegments.size());
-                applyFullSpeakerFallback(finalSegments);
-            }
-
-            // 마지막 방어: 공백 화자 제거
-            for (Object obj : finalSegments) {
-                JSONObject seg = (JSONObject) obj;
-                if (!hasSpeaker(seg)) {
-                    seg.put("speaker", "UNKNOWN");
-                }
-            }
-            return finalSegments;
-        } catch (Exception e) {
-            logger.error("화자 분리 segments 파싱 실패 - raw: {}", segments, e);
-            return null;
-        }
-    }
-
-    /** 빈 speaker 구간만 LLM에 보조 추론 요청 */
-    private void applySpeakerInference(JSONArray finalSegments, JSONArray llmTarget) {
-        try {
-            String prompt = "너는 회의 대화 화자 정규화 보조기다.\n"
-                + "아래 세그먼트는 실시간 diarization 결과이며, speaker(A/B/C...)는 가능한 한 유지해야 한다.\n"
-                + "절대 임의로 전체 speaker를 재할당하지 말고, speaker가 비어있는 항목만 추론하라.\n\n"
-                + "규칙:\n"
-                + "1) 입력의 seq 순서를 변경하지 말 것\n"
-                + "2) speaker가 있는 항목은 그대로 유지\n"
-                + "3) speaker가 없는 항목만 인접 문맥 기반으로 A/B/C 중 하나로 보완\n"
-                + "4) 확신이 낮으면 \"UNKNOWN\" 사용\n\n"
-                + "입력:\n"
-                + finalSegments.toJSONString() + "\n\n"
-                + "출력(JSON only):\n"
-                + "[\n"
-                + "  {\"seq\":0, \"text\":\"...\", \"speaker\":\"A\"}\n"
-                + "]";
-
-            logger.info("화자 보조 추론 LLM 호출 시작 - target: {}개", llmTarget.size());
-            String answer = callLlm(prompt);
-            if (answer == null || answer.trim().isEmpty()) {
-                return;
-            }
-            applySpeakerResult(finalSegments, answer, false);
-            logger.info("화자 보조 추론 LLM 호출 완료");
-        } catch (Exception e) {
-            logger.warn("화자 보조 추론 실패", e);
-        }
-    }
-
-    /** 전체 재분석 fallback (최후 수단) */
-    private void applyFullSpeakerFallback(JSONArray finalSegments) {
-        try {
-            StringBuilder fullTextSb = new StringBuilder();
-            for (Object obj : finalSegments) {
-                JSONObject seg = (JSONObject) obj;
-                fullTextSb.append("[")
-                          .append(toInt(seg.get("seq"), 0))
-                          .append("] ")
-                          .append(stringValue(seg.get("text")))
-                          .append("\n");
-            }
-
-            String prompt = "다음은 회의 녹취 내용입니다. 각 줄은 [인덱스] 텍스트 형식입니다.\n"
-                + "텍스트 내용과 문맥을 보고 각 인덱스의 speaker를 추정하세요.\n"
-                + "반드시 JSON 배열만 응답하세요.\n"
-                + "[{\"seq\":0,\"speaker\":\"A\"}, {\"seq\":1,\"speaker\":\"B\"}]\n\n"
-                + "녹취 내용:\n" + fullTextSb;
-
-            logger.info("화자 전체 fallback LLM 호출 시작 - segments: {}개", finalSegments.size());
-            String answer = callLlm(prompt);
-            if (answer == null || answer.trim().isEmpty()) {
-                return;
-            }
-            applySpeakerResult(finalSegments, answer, true);
-            logger.info("화자 전체 fallback LLM 호출 완료");
-        } catch (Exception e) {
-            logger.warn("화자 전체 fallback 실패", e);
-        }
-    }
-
-    /** LLM 결과(JSON 배열)에서 seq별 speaker를 세그먼트에 반영 */
-    @SuppressWarnings("unchecked")
-    private void applySpeakerResult(JSONArray finalSegments, String answer, boolean overwriteAll) throws Exception {
-        JSONParser parser = new JSONParser();
-        String jsonStr = answer
-            .replaceAll("```json\\s*", "")
-            .replaceAll("```\\s*", "")
-            .trim();
-        JSONArray inferred = (JSONArray) parser.parse(jsonStr);
-        if (inferred == null || inferred.isEmpty()) {
-            return;
-        }
-
-        Map<Integer, String> speakerBySeq = new HashMap<>();
-        for (Object obj : inferred) {
-            if (!(obj instanceof JSONObject)) {
-                continue;
-            }
-            JSONObject row = (JSONObject) obj;
-            int seq = toInt(row.get("seq"), -1);
-            String speaker = normalizeSpeaker((String) row.get("speaker"));
-            if (seq < 0 || speaker.isEmpty()) {
-                continue;
-            }
-            speakerBySeq.put(seq, speaker);
-        }
-
-        for (Object obj : finalSegments) {
-            JSONObject seg = (JSONObject) obj;
-            if (!overwriteAll && hasSpeaker(seg)) {
-                continue;
-            }
-            int seq = toInt(seg.get("seq"), -1);
-            String speaker = speakerBySeq.get(seq);
-            if (speaker != null && !speaker.isEmpty()) {
-                seg.put("speaker", speaker);
-            }
-        }
-    }
-
-    /**
-     * multipart text 필드로 넘어온 segments 문자열 정규화
-     * - URL 인코딩(%5B%7B...) 형태 대응
-     * - JSON 문자열 한 번 더 감싼 형태("\"[{\\\"seq\\\":0}]\"") 대응
-     */
-    private String normalizeSegmentsJson(String rawSegments) {
-        if (rawSegments == null) return "[]";
-
-        String s = rawSegments.trim();
-        if (s.isEmpty()) return "[]";
-
-        // HTML 엔티티(&quot; 등)로 넘어온 JSON 문자열 대응
-        if (s.contains("&quot;") || s.contains("&#34;") || s.contains("&amp;")) {
-            s = s.replace("&quot;", "\"")
-                 .replace("&#34;", "\"")
-                 .replace("&amp;", "&");
-        }
-
-        try {
-            if (s.startsWith("%5B") || s.startsWith("%7B") || s.contains("%22")) {
-                s = URLDecoder.decode(s, StandardCharsets.UTF_8.name());
-            }
-        } catch (Exception ignore) { /* 디코딩 실패 시 원문 유지 */ }
-
-        // JSON 문자열로 한 번 더 감싸진 경우
-        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
-            s = s.substring(1, s.length() - 1);
-            s = s.replace("\\\"", "\"").replace("\\\\", "\\");
-        }
-
-        return s;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -869,37 +626,41 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      * 회의록 LLM answer 파싱 후 TB_MEETING_MINUTES 저장.
      * discussion_topics가 있으면 FULL_TEXT를 에디터용 직렬화 본문으로 갱신하고, 없으면 기존 fullText(녹취) 유지.
      */
-    private void parseAndSaveMinutes(MeetingVO dataVO, String answer) {
+    private void parseAndSaveMinutes(MeetingVO dataVO, String answer, List<LibraryVO.TmplFieldItem> tmplFieldList) {
         try {
             String jsonStr = answer
                 .replaceAll("```json\\s*", "")
                 .replaceAll("```\\s*", "")
                 .trim();
-
+    
             JSONParser parser = new JSONParser();
             JSONObject json = (JSONObject) parser.parse(jsonStr);
-
-            dataVO.setSummary((String) json.get("summary"));
-
-            JSONArray decisions = (JSONArray) json.get("decisions");
-            dataVO.setDecisions(decisions != null ? decisions.toJSONString() : "[]");
-
-            JSONArray todoList = (JSONArray) json.get("todo_list");
-            dataVO.setTodoList(todoList != null ? todoList.toJSONString() : "[]");
-
-            String bodyFromLlm = serializeMinutesBodyFromJson(json);
-            if (bodyFromLlm != null) {
-                dataVO.setFullText(bodyFromLlm);
+    
+            // TB_TMPL_FIELD 기반으로 동적 수집
+            JSONObject flat = new JSONObject();
+            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
+                String key = field.getJsonKey();
+                Object val = json.get(key);
+                if (val == null) continue;
+                // MULTILINE_YN=Y + 배열이면 toJSONString, 아니면 String
+                if ("Y".equals(field.getMultilineYn()) && val instanceof JSONArray) {
+                    flat.put(key, ((JSONArray) val).toJSONString());
+                } else {
+                    flat.put(key, String.valueOf(val));
+                }
             }
-
-            // IS_AUTO_TITLE = Y 이면 LLM이 반환한 meeting_title 로 TB_MEETING 제목 갱신
+            dataVO.setFlatData(flat.toJSONString());
+    
+            // discussion_topics → FULL_TEXT (기존 유지)
+            String bodyFromLlm = serializeMinutesBodyFromJson(json);
+            if (bodyFromLlm != null) dataVO.setFullText(bodyFromLlm);
+    
+            // 자동 제목: meeting_title → title로 변경
             if (isAutoTitleYn(dataVO.getIsAutoTitle())) {
-                Object titleObj = json.get("meeting_title");
+                Object titleObj = json.get("title"); // ← 변경
                 if (titleObj != null) {
                     String generatedTitle = String.valueOf(titleObj).trim().replaceAll("[\"']", "");
-                    if (generatedTitle.length() > 200) {
-                        generatedTitle = generatedTitle.substring(0, 200);
-                    }
+                    if (generatedTitle.length() > 200) generatedTitle = generatedTitle.substring(0, 200);
                     if (!generatedTitle.isEmpty()) {
                         dataVO.setMeetingTitle(generatedTitle);
                         meetingDAO.updateMeetingTitle(dataVO);
@@ -907,7 +668,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     }
                 }
             }
-
+    
             MeetingVO existing = meetingDAO.selectMeetingMinutes(dataVO);
             if (existing == null) {
                 meetingDAO.insertMeetingMinutes(dataVO);
@@ -915,10 +676,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 dataVO.setMinutesId(existing.getMinutesId());
                 meetingDAO.updateMeetingMinutes(dataVO);
             }
-
-            // 인포그래픽 이미지 API 동기 호출 — 운영에서 필요 시:
-            // saveMeetingInfographic(dataVO, (JSONArray) json.get("infographic_topics"));
-
+    
             logger.info("회의록 저장 완료 - meetingId: {}", dataVO.getMeetingId());
         } catch (Exception e) {
             logger.error("회의록 파싱/저장 실패 - answer: {}", answer, e);
@@ -1103,109 +861,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return v;
     }
 
-    /** 최종 세그먼트(JSON [{seq,text,speaker}])를 화자 단위로 묶어 TB_MEETING_SPEAKER 저장 */
-    @SuppressWarnings("unchecked")
-    private void saveSpeakersFromSegments(MeetingVO dataVO, JSONArray finalSegments) {
-        try {
-            int speakerBlockCount = 0;
-            String currentSpeaker = null;
-            JSONArray currentUtterances = new JSONArray();
-
-            for (Object obj : finalSegments) {
-                JSONObject seg = (JSONObject) obj;
-                String speaker = normalizeSpeaker((String) seg.get("speaker"));
-                if (speaker.isEmpty()) {
-                    speaker = "UNKNOWN";
-                }
-
-                JSONObject utterance = new JSONObject();
-                utterance.put("seq", toInt(seg.get("seq"), 0));
-                utterance.put("text", stringValue(seg.get("text")));
-
-                if (currentSpeaker == null) {
-                    currentSpeaker = speaker;
-                } else if (!currentSpeaker.equals(speaker)) {
-                    MeetingVO speakerVO = new MeetingVO();
-                    speakerVO.setMeetingId(dataVO.getMeetingId());
-                    speakerVO.setSpeakerLabel(currentSpeaker);
-                    // 기존 구조 유지: utterances는 [{seq,text}] 형태로 저장
-                    speakerVO.setUtterances(currentUtterances.toJSONString());
-                    meetingDAO.insertSpeaker(speakerVO);
-                    speakerBlockCount++;
-
-                    currentSpeaker = speaker;
-                    currentUtterances = new JSONArray();
-                }
-
-                currentUtterances.add(utterance);
-            }
-
-            if (currentSpeaker != null && !currentUtterances.isEmpty()) {
-                MeetingVO speakerVO = new MeetingVO();
-                speakerVO.setMeetingId(dataVO.getMeetingId());
-                speakerVO.setSpeakerLabel(currentSpeaker);
-                // 기존 구조 유지: utterances는 [{seq,text}] 형태로 저장
-                speakerVO.setUtterances(currentUtterances.toJSONString());
-                meetingDAO.insertSpeaker(speakerVO);
-                speakerBlockCount++;
-            }
-
-            logger.info("화자 분리 저장 완료 - meetingId: {}, 연속 화자 블록 수: {}", dataVO.getMeetingId(), speakerBlockCount);
-        } catch (Exception e) {
-            logger.error("화자 분리 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
-        }
-    }
-
-    /** null/공백 방어 + 개행 정리 */
-    private String sanitizeText(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text.replaceAll("\\s+", " ").trim();
-    }
-
-    /** 잡음성 짧은 텍스트 필터 */
-    private boolean isIgnorableSegment(String text) {
-        if (text == null || text.trim().isEmpty()) {
-            return true;
-        }
-        String t = text.trim();
-        if (t.length() < 2) {
-            return true;
-        }
-        return "음".equals(t) || "아".equals(t) || "어".equals(t);
-    }
-
-    /** speaker 값 정규화 */
-    private String normalizeSpeaker(String speaker) {
-        if (speaker == null) {
-            return "";
-        }
-        String s = speaker.trim();
-        if (s.isEmpty() || "null".equalsIgnoreCase(s)) {
-            return "";
-        }
-        return s;
-    }
-
-    private boolean hasSpeaker(JSONObject seg) {
-        return !normalizeSpeaker((String) seg.get("speaker")).isEmpty();
-    }
-
-    private int toInt(Object value, int defaultValue) {
-        if (value == null) {
-            return defaultValue;
-        }
-        if (value instanceof Number) {
-            return ((Number) value).intValue();
-        }
-        try {
-            return Integer.parseInt(String.valueOf(value).trim());
-        } catch (Exception e) {
-            return defaultValue;
-        }
-    }
-
     /**
      * gpt-4o-transcribe-diarize 결과 세그먼트를 화자별로 그룹화해 TB_MEETING_SPEAKER 저장
      * - segments: [{speaker: "SPEAKER_0", text: "...", start: 0.0, end: 1.5}, ...]
@@ -1244,5 +899,22 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         } catch (Exception e) {
             logger.error("화자 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
         }
+    }
+
+    public Map<String, Object> saveMeetingMinutes(MeetingVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            String id = dataVO.getId();
+            if (id != null && !id.trim().isEmpty()) {
+                dataVO.setMinutesId(Long.valueOf(id.trim()));
+            } else {
+                dataVO.setMinutesId(null);
+            }
+            dataVO.setEditedContent(dataVO.getMinutesContent());
+            meetingDAO.updateMeetingMinutes(dataVO);
+        } catch (Exception e) {
+            logger.error("회의록 수정 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+        }
+        return result;
     }
 }

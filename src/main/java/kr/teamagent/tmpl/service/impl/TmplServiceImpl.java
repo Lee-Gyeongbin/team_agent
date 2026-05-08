@@ -113,4 +113,24 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
         return s.substring(0, maxLen);
     }
 
+    /**
+     * 템플릿 상세 조회
+     * @param tmplVO
+     * @return
+     * @throws Exception
+     */
+    public TmplVO selectTmplDetail(TmplVO tmplVO) throws Exception {
+        return tmplDAO.selectTmplDetail(tmplVO);
+    }
+
+    /**
+     * 템플릿 필드 목록 조회
+     * @param tmplVO
+     * @return
+     * @throws Exception
+     */
+    public List<TmplFieldVO> selectTmplFieldList(TmplVO tmplVO) throws Exception {
+        return tmplDAO.selectTmplFieldList(tmplVO);
+    }
+    
 }

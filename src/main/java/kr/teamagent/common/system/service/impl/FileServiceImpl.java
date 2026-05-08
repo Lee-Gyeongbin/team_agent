@@ -43,6 +43,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     private static final int DEFAULT_TXT_MAX_BYTES = 1024 * 1024;
     private static final int DEFAULT_CONVERT_TIMEOUT_SEC = 60;
     private static final int PDF_CONVERT_LOCK_STRIPES = 64;
+    private static final Object LIBREOFFICE_PROCESS_LOCK = new Object();
     private static final Object[] PDF_CONVERT_LOCKS = new Object[PDF_CONVERT_LOCK_STRIPES];
     static {
         for (int i = 0; i < PDF_CONVERT_LOCKS.length; i++) {
@@ -348,6 +349,8 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
                      InputStream in = sourceObject.getObjectContent()) {
                     Files.copy(in, inputPath, StandardCopyOption.REPLACE_EXISTING);
                 }
+                log.info("File convert input prepared. sourceKey={}, inputPath={}, inputExists={}, inputSize={}",
+                        sourceKey, inputPath, Files.exists(inputPath), safeFileSize(inputPath));
 
                 runLibreOfficeConvert(inputPath, workDir);
 
@@ -394,7 +397,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     }
 
     private void runLibreOfficeConvert(Path inputPath, Path outDir) throws Exception {
-        String libreOfficeExec = getPropertyOrDefault("fileView.libreOffice.exec", "soffice");
+        String libreOfficeExec = resolveLibreOfficeExec(getPropertyOrDefault("fileView.libreOffice.exec", "soffice"));
         int timeoutSec = parseIntProperty("fileView.convertTimeoutSec", DEFAULT_CONVERT_TIMEOUT_SEC);
 
         // 요청마다 독립 프로파일 디렉토리 생성 (lock 충돌 방지) - 개발 서버 내 libreoffice 프로파일 경로 지정
@@ -412,19 +415,58 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         command.add(outDir.toString());
         command.add(inputPath.toString());
 
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.redirectErrorStream(true);
+        synchronized (LIBREOFFICE_PROCESS_LOCK) {
+            log.info("LibreOffice convert start. command={}, inputPath={}, inputExists={}, inputSize={}, outDir={}",
+                    command, inputPath, Files.exists(inputPath), safeFileSize(inputPath), outDir);
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            sanitizeLibreOfficeProcessEnv(processBuilder);
+            processBuilder.redirectErrorStream(true);
 
-        Process process = processBuilder.start();
-        String output = new String(process.getInputStream().readAllBytes()); // 출력 캡처
-        boolean finished = process.waitFor(timeoutSec, TimeUnit.SECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            throw new IOException("LibreOffice convert timeout. timeoutSec=" + timeoutSec + ", output=" + output);
+            Process process = processBuilder.start();
+            String output = new String(process.getInputStream().readAllBytes()); // 출력 캡처
+            boolean finished = process.waitFor(timeoutSec, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                throw new IOException("LibreOffice convert timeout. timeoutSec=" + timeoutSec + ", output=" + output);
+            }
+            if (process.exitValue() != 0) {
+                throw new IOException("LibreOffice convert exit code=" + process.exitValue() + ", output=" + output);
+            }
         }
-        if (process.exitValue() != 0) {
-            throw new IOException("LibreOffice convert exit code=" + process.exitValue() + ", output=" + output);
+    }
+
+    private String resolveLibreOfficeExec(String configuredExec) {
+        if (configuredExec == null || configuredExec.trim().isEmpty()) {
+            return "soffice";
         }
+        String normalized = configuredExec.trim();
+        String lower = normalized.toLowerCase();
+        if (!lower.endsWith("soffice.exe")) {
+            return normalized;
+        }
+        Path exePath = Paths.get(normalized);
+        Path comPath = exePath.resolveSibling("soffice.com");
+        if (Files.exists(comPath)) {
+            return comPath.toString();
+        }
+        return normalized;
+    }
+
+    private long safeFileSize(Path path) {
+        try {
+            if (path == null || !Files.exists(path)) {
+                return -1L;
+            }
+            return Files.size(path);
+        } catch (Exception e) {
+            return -1L;
+        }
+    }
+
+    private void sanitizeLibreOfficeProcessEnv(ProcessBuilder processBuilder) {
+        Map<String, String> env = processBuilder.environment();
+        env.remove("PYTHONHOME");
+        env.remove("PYTHONPATH");
     }
 
     private String createSafeInputFileName(FileVO doc, String sourceKey) {
@@ -433,8 +475,19 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
             int slashIdx = sourceKey.lastIndexOf('/');
             originName = slashIdx >= 0 ? sourceKey.substring(slashIdx + 1) : sourceKey;
         }
-        originName = originName.replaceAll("[\\\\/:*?\"<>|]", "_");
-        return System.currentTimeMillis() + "_" + originName;
+        String ext = extractExtension(originName);
+        return System.currentTimeMillis() + "_input" + ext;
+    }
+
+    private String extractExtension(String fileName) {
+        if (fileName == null || fileName.trim().isEmpty()) {
+            return "";
+        }
+        int dotIdx = fileName.lastIndexOf('.');
+        if (dotIdx < 0 || dotIdx >= fileName.length() - 1) {
+            return "";
+        }
+        return fileName.substring(dotIdx).toLowerCase();
     }
 
     private String replaceExtensionToPdf(String fileName) {
