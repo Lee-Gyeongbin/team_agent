@@ -1649,10 +1649,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 외부에서 prompt를 받아 AI 이미지 생성 API를 호출하고 순수 base64를 반환한다.
+     * 외부에서 prompt를 받아 AI 요약 API를 호출하고 방사형 차트용 JSON 문자열을 반환한다.
      */
-    public String generateImageByPrompt(String prompt) {
-        return callAiImageApi(prompt);
+    public String getPsychologyChartData(String prompt) {
+        return callAiSummary(prompt, "방사형 차트 데이터");
     }
 
 }

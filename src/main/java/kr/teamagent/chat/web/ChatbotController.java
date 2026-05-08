@@ -349,10 +349,10 @@ public class ChatbotController extends BaseController {
     }
 
     /**
-     * AI 이미지 생성 — prompt를 받아 base64 이미지를 반환한다.
+     * 방사형 차트 데이터 조회 — prompt를 받아 AI가 생성한 차트용 JSON 문자열을 반환한다.
      */
-    @RequestMapping("/ai/chatbot/generatePsychologyImage.do")
-    public @ResponseBody Map<String, Object> generatePsychologyImage(@RequestBody Map<String, String> body) {
+    @RequestMapping("/ai/chatbot/getPsychologyChartData.do")
+    public @ResponseBody Map<String, Object> getPsychologyChartData(@RequestBody Map<String, String> body) {
         Map<String, Object> resultMap = new HashMap<>();
         try {
             String prompt = body != null ? body.get("prompt") : null;
@@ -361,18 +361,18 @@ public class ChatbotController extends BaseController {
                 resultMap.put("returnMsg", "prompt가 비어 있습니다.");
                 return resultMap;
             }
-            String base64 = chatbotService.generateImageByPrompt(prompt);
-            if (base64 == null) {
+            String chartData = chatbotService.getPsychologyChartData(prompt);
+            if (chartData == null) {
                 resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "이미지 생성에 실패하였습니다.");
+                resultMap.put("returnMsg", "차트 데이터 생성에 실패하였습니다.");
                 return resultMap;
             }
             resultMap.put("successYn", true);
-            resultMap.put("base64Image", base64);
+            resultMap.put("chartData", chartData);
         } catch (Exception e) {
-            log.error("generatePsychologyImage failed", e);
+            log.error("getPsychologyChartData failed", e);
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "이미지 생성 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
+            resultMap.put("returnMsg", "차트 데이터 생성 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
         }
         return resultMap;
     }
