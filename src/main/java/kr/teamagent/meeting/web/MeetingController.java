@@ -185,4 +185,18 @@ public class MeetingController extends BaseController {
         }
         return resultMap;
     }
+
+    @RequestMapping("/ai/meeting/saveMeetingMinutes.do")
+    @ResponseBody
+    public Map<String, Object> saveMeetingMinutes(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.saveMeetingMinutes(dataVO);
+        } catch (Exception e) {
+            log.error("saveMeetingMinutes error", e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
 }

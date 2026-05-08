@@ -900,4 +900,21 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             logger.error("화자 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
         }
     }
+
+    public Map<String, Object> saveMeetingMinutes(MeetingVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            String id = dataVO.getId();
+            if (id != null && !id.trim().isEmpty()) {
+                dataVO.setMinutesId(Long.valueOf(id.trim()));
+            } else {
+                dataVO.setMinutesId(null);
+            }
+            dataVO.setEditedContent(dataVO.getMinutesContent());
+            meetingDAO.updateMeetingMinutes(dataVO);
+        } catch (Exception e) {
+            logger.error("회의록 수정 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+        }
+        return result;
+    }
 }

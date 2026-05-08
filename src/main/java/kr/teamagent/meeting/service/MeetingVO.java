@@ -10,6 +10,8 @@ import lombok.Setter;
 @Setter
 public class MeetingVO extends CommonVO {
 
+    private String id;
+    private String minutesContent;
     // TB_MEETING - 회의 세션
     private Long   meetingId;
     private String meetingTitle;
@@ -29,6 +31,8 @@ public class MeetingVO extends CommonVO {
     private String fullText;
     /** LLM 구조화 필드 등 단일 JSON (예: summary, decisions, todo_list) */
     private String flatData;
+    // 수정된 회의록 내용
+    private String editedContent;
     private String segments;        // 화자분리용 발화단락 JSON [{seq, text}]
 
     // TB_MEETING_INFOGRAPHIC - 주제별 인포그래픽

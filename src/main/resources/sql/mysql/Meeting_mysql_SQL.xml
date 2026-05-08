@@ -91,6 +91,7 @@
             , MEETING_ID    AS MEETING_ID
             , FULL_TEXT     AS FULL_TEXT
             , FLAT_DATA     AS FLAT_DATA
+            , EDITED_CONTENT AS EDITED_CONTENT
             , CREATE_DT     AS CREATE_DT
             , MODIFY_DT     AS MODIFY_DT
         FROM TB_MEETING_MINUTES
@@ -108,8 +109,7 @@
     <update id="updateMeetingMinutes" parameterType="meetingVO">
         /* 회의록 수정 ai.meeting.updateMeetingMinutes */
         UPDATE TB_MEETING_MINUTES SET
-            FULL_TEXT       = #{fullText}
-            , FLAT_DATA     = #{flatData}
+            EDITED_CONTENT = #{editedContent}
             , MODIFY_DT     = NOW()
         WHERE MINUTES_ID = #{minutesId}
     </update>
