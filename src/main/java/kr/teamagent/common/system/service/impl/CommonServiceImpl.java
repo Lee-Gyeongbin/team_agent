@@ -4,6 +4,7 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.egovframe.rte.psl.dataaccess.util.EgovMap;
 import kr.teamagent.common.CommonVO;
 import kr.teamagent.common.security.service.UserVO;
+import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import org.slf4j.Logger;
@@ -24,6 +25,9 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 
 	@Autowired
 	private CommonDAO commonDAO;
+
+	@Autowired
+	private KeyGenerate keyGenerate;
 
 	public List<String> selectAdminPageAccessIpList() throws Exception {
 		return commonDAO.selectAdminPageAccessIpList(PropertyUtil.getProperty("Globals.Master.db"));
@@ -70,6 +74,71 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 		HashMap<String, Object> resultMap = new HashMap<>();
 		resultMap.put("iconList", commonDAO.comSelectIconList());
 		resultMap.put("colorList", commonDAO.comSelectColorList());
+		return resultMap;
+	}
+
+	/**
+	 * 공유 지식 카드 단건 조회
+	 * 1. refId(SHARE_ID)로 TB_KNOW_CARD_SHARE에서 원본 CARD_ID 조회
+	 * 2. 조회된 CARD_ID로 TB_KNOW_CARD 상세 조회
+	 * @param refId 공유 ID (TB_KNOW_CARD_SHARE.SHARE_ID)
+	 * @return SharedCardVO
+	 * @throws Exception
+	 */
+	public CommonVO.SharedCardVO selectSharedCardInfo(String refId) throws Exception {
+		String cardId = commonDAO.selectCardIdByShareId(refId);
+		if (cardId == null || cardId.isEmpty()) {
+			return null;
+		}
+		return commonDAO.selectSharedCardInfo(cardId);
+	}
+
+	/**
+	 * 공유 받은 지식 카드 저장
+	 * 1. refId(SHARE_ID)로 원본 CARD_ID 조회
+	 * 2. 원본 카드를 세션 userId / payload categoryId로 복사 등록 (맨 앞 순서 1)
+	 * 3. TB_KNOW_CARD_SHARE의 SAVE_YN, SAVE_CARD_ID, SAVE_CATEGORY_ID 업데이트
+	 * 4. TB_NOTIFY 읽음 처리 (READ_YN='Y', READ_DT=NOW())
+	 * @param notifyVO notifyId, refId, categoryId 필수
+	 * @return successYn, returnMsg
+	 * @throws Exception
+	 */
+	public Map<String, Object> insertReceiveKnowledge(CommonVO.NotifyVO notifyVO) throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+
+		String userId     = SessionUtil.getUserId();
+		String shareId    = notifyVO.getRefId();
+		String categoryId = notifyVO.getCategoryId();
+		String notifyId   = notifyVO.getNotifyId();
+
+		// 1. SHARE_ID로 원본 CARD_ID 조회
+		String srcCardId = commonDAO.selectCardIdByShareId(shareId);
+
+		// 2. 원본 카드 복사 등록
+		String newCardId = keyGenerate.generateTableKey("KD", "TB_KNOW_CARD", "CARD_ID");
+
+		commonDAO.updateKnowledgeSortOrdForPrepend(userId, categoryId);
+
+		Map<String, Object> cardParam = new HashMap<>();
+		cardParam.put("cardId",     newCardId);
+		cardParam.put("userId",     userId);
+		cardParam.put("categoryId", categoryId);
+		cardParam.put("srcCardId",  srcCardId);
+		cardParam.put("sortOrd",    1);
+		commonDAO.insertReceiveKnowledgeCard(cardParam);
+
+		// 3. TB_KNOW_CARD_SHARE 저장 정보 업데이트
+		Map<String, Object> shareParam = new HashMap<>();
+		shareParam.put("shareId",        shareId);
+		shareParam.put("saveCardId",     newCardId);
+		shareParam.put("saveCategoryId", categoryId);
+		commonDAO.updateKnowledgeShareSave(shareParam);
+
+		// 4. TB_NOTIFY 읽음 처리
+		commonDAO.updateNotifyRead(notifyId);
+
+		resultMap.put("successYn", true);
+		resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
 		return resultMap;
 	}
 

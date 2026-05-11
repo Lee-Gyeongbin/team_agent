@@ -88,4 +88,74 @@ public class CommonDAO extends EgovComAbstractDAO {
 		param.put("userId", userId);
 		return (List<CommonVO.NotifyVO>) list("common.selectNotifyList", param);
 	}
+
+	/**
+	 * 공유 지식 카드 단건 조회
+	 * @param cardId 카드 ID
+	 * @return SharedCardVO
+	 * @throws Exception
+	 */
+	public CommonVO.SharedCardVO selectSharedCardInfo(String cardId) throws Exception {
+		Map<String, Object> param = new HashMap<>();
+		param.put("cardId", cardId);
+		return (CommonVO.SharedCardVO) selectOne("common.selectSharedCardInfo", param);
+	}
+
+	/**
+	 * 공유 카드 원본 CARD_ID 조회
+	 * @param shareId TB_KNOW_CARD_SHARE.SHARE_ID
+	 * @return 원본 CARD_ID
+	 * @throws Exception
+	 */
+	public String selectCardIdByShareId(String shareId) throws Exception {
+		Map<String, Object> param = new HashMap<>();
+		param.put("shareId", shareId);
+		return (String) selectOne("common.selectCardIdByShareId", param);
+	}
+
+	/**
+	 * 지식 카드 맨 앞 등록을 위한 정렬 순서 증가
+	 * @param userId 사용자 ID
+	 * @param categoryId 카테고리 ID
+	 * @return 처리된 행 수
+	 * @throws Exception
+	 */
+	public int updateKnowledgeSortOrdForPrepend(String userId, String categoryId) throws Exception {
+		Map<String, Object> param = new HashMap<>();
+		param.put("userId", userId);
+		param.put("categoryId", categoryId);
+		return update("common.updateKnowledgeSortOrdForPrepend", param);
+	}
+
+	/**
+	 * 공유 받은 지식 카드 복사 등록
+	 * @param paramMap cardId, userId, categoryId, srcCardId, sortOrd 포함
+	 * @return 처리된 행 수
+	 * @throws Exception
+	 */
+	public int insertReceiveKnowledgeCard(Map<String, Object> paramMap) throws Exception {
+		return insert("common.insertReceiveKnowledgeCard", paramMap);
+	}
+
+	/**
+	 * 공유 카드 저장 정보 업데이트 (SAVE_YN, SAVE_CARD_ID, SAVE_CATEGORY_ID)
+	 * @param paramMap shareId, saveCardId, saveCategoryId 포함
+	 * @return 처리된 행 수
+	 * @throws Exception
+	 */
+	public int updateKnowledgeShareSave(Map<String, Object> paramMap) throws Exception {
+		return update("common.updateKnowledgeShareSave", paramMap);
+	}
+
+	/**
+	 * 알림 읽음 처리
+	 * @param notifyId 알림 ID
+	 * @return 처리된 행 수
+	 * @throws Exception
+	 */
+	public int updateNotifyRead(String notifyId) throws Exception {
+		Map<String, Object> param = new HashMap<>();
+		param.put("notifyId", notifyId);
+		return update("common.updateNotifyRead", param);
+	}
 }
