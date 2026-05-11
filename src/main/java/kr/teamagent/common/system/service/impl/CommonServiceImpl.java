@@ -5,6 +5,7 @@ import org.egovframe.rte.psl.dataaccess.util.EgovMap;
 import kr.teamagent.common.CommonVO;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.util.PropertyUtil;
+import kr.teamagent.common.util.SessionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +49,16 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	public List<EgovMap> selectMenuTreeList() throws Exception {
 		List<EgovMap> flatList = commonDAO.selectMenuTreeList();
 		return buildMenuTree(flatList);
+	}
+
+	/**
+	 * 알림 목록 조회 (세션 userId 기준)
+	 * @return
+	 * @throws Exception
+	 */
+	public List<CommonVO.NotifyVO> selectNotifyList() throws Exception {
+		String userId = SessionUtil.getUserId();
+		return commonDAO.selectNotifyList(userId);
 	}
 
 	/**

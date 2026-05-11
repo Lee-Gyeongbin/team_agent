@@ -236,4 +236,24 @@ public class LibraryDAO extends EgovComAbstractDAO {
         return insert("library.insertReportChatLog", searchVO);
     }
 
+    /**
+     * 카드 공유 정보 등록 (TB_KNOW_CARD_SHARE)
+     * @param searchVO shareId, cardId, fromUserId, toUserId, shareMsg 필수
+     * @return
+     * @throws Exception
+     */
+    public int insertCardShare(LibraryVO.ShareCardPayload searchVO) throws Exception {
+        return insert("library.insertCardShare", searchVO);
+    }
+
+    /**
+     * 알림 등록 (TB_NOTIFY)
+     * @param searchVO notifyId, toUserId, fromUserId, notifyTitle, shareId 필수
+     * @return
+     * @throws Exception
+     */
+    public int insertNotify(LibraryVO.ShareCardPayload searchVO) throws Exception {
+        return insert("library.insertNotify", searchVO);
+    }
+
 }

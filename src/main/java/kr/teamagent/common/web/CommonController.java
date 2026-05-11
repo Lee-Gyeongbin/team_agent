@@ -122,4 +122,16 @@ public class CommonController extends BaseController {
 	public ModelAndView comThemeOptions() throws Exception {
 		return new ModelAndView("jsonView", commonService.comSelectThemeOptions());
 	}
+
+	/**
+	 * 알림 목록 조회 (세션 userId 기준)
+	 * @return jsonView list: NotifyVO[]
+	 * @throws Exception
+	 */
+	@RequestMapping("/selectNotifyList.do")
+	public ModelAndView selectNotifyList() throws Exception {
+		HashMap<String, Object> resultMap = new LinkedHashMap<>();
+		resultMap.put("list", commonService.selectNotifyList());
+		return new ModelAndView("jsonView", resultMap);
+	}
 }

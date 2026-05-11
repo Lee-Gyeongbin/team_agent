@@ -75,4 +75,17 @@ public class CommonDAO extends EgovComAbstractDAO {
 		param.put("columnName", columnName);
 		return (int) selectOne("common.selectMaxInt", param);
 	}
+
+	/**
+	 * 알림 목록 조회 (세션 userId 기준)
+	 * @param userId 조회 대상 사용자 ID
+	 * @return
+	 * @throws Exception
+	 */
+	@SuppressWarnings("unchecked")
+	public List<CommonVO.NotifyVO> selectNotifyList(String userId) throws Exception {
+		Map<String, Object> param = new HashMap<>();
+		param.put("userId", userId);
+		return (List<CommonVO.NotifyVO>) list("common.selectNotifyList", param);
+	}
 }

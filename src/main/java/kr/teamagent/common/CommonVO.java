@@ -39,4 +39,23 @@ public class CommonVO extends ComDefaultVO {
         private String modifyDt;
     }
 
+    /** 알림 [TB_NOTIFY] */
+    @Getter
+    @Setter
+    public static class NotifyVO {
+        private String notifyId;
+        private String userId;
+        private String sendUserId;
+        private String sendUserNm;
+        private String notifyTyCd;
+        private String title;
+        private String content;
+        private String refId;
+        private String readYn;
+        private String readDt;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
 }

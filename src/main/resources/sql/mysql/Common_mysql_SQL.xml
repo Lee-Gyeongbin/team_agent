@@ -141,4 +141,29 @@
         FROM ${tableName}
     </select>
 
+    <resultMap id="notifyVOResult" type="kr.teamagent.common.CommonVO$NotifyVO" autoMapping="true"/>
+
+    <select id="selectNotifyList" resultMap="notifyVOResult">
+        /* 알림 목록 조회 common.selectNotifyList */
+        SELECT
+            A.NOTIFY_ID
+            , A.USER_ID
+            , A.SEND_USER_ID
+            , B.USER_NM AS SEND_USER_NM
+            , A.NOTIFY_TY_CD
+            , A.TITLE
+            , A.CONTENT
+            , A.REF_ID
+            , A.READ_YN
+            , A.READ_DT
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM TB_NOTIFY A
+        LEFT JOIN TB_USER B ON B.USER_ID = A.SEND_USER_ID
+        WHERE A.USER_ID = #{userId}
+          AND A.USE_YN = 'Y'
+        ORDER BY A.CREATE_DT DESC
+    </select>
+
 </mapper>
