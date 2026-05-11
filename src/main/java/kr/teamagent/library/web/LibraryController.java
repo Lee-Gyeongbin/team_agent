@@ -296,4 +296,19 @@ public class LibraryController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 카드 공유 (TB_KNOW_CARD_SHARE + TB_NOTIFY userIds 수만큼 INSERT)
+     * @param searchVO cardId, userIds 필수 / shareMsg 선택
+     * @return
+     * @throws Exception
+     */
+    @RequestMapping(value = "/shareCard.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView shareCard(@RequestBody LibraryVO.ShareCardPayload searchVO) throws Exception {
+        if (searchVO != null && searchVO.getCardId() != null && searchVO.getUserIds() != null) {
+            libraryService.shareCard(searchVO);
+        }
+        return makeSuccessJsonData();
+    }
+
 }
