@@ -148,6 +148,16 @@ public class CommonDAO extends EgovComAbstractDAO {
 	}
 
 	/**
+	 * 알림 등록 (TB_NOTIFY)
+	 * @param notifyVO notifyId, userId(수신자), sendUserId(발신자), notifyTyCd, title, content, refId 필수
+	 * @return 처리된 행 수
+	 * @throws Exception
+	 */
+	public int insertNotify(CommonVO.NotifyVO notifyVO) throws Exception {
+		return insert("common.insertNotify", notifyVO);
+	}
+
+	/**
 	 * 알림 읽음 처리
 	 * @param notifyId 알림 ID
 	 * @return 처리된 행 수
@@ -157,5 +167,29 @@ public class CommonDAO extends EgovComAbstractDAO {
 		Map<String, Object> param = new HashMap<>();
 		param.put("notifyId", notifyId);
 		return update("common.updateNotifyRead", param);
+	}
+
+	/**
+	 * 알림 삭제 (USE_YN='N')
+	 * @param notifyId 알림 ID
+	 * @return 처리된 행 수
+	 * @throws Exception
+	 */
+	public int deleteNotify(String notifyId) throws Exception {
+		Map<String, Object> param = new HashMap<>();
+		param.put("notifyId", notifyId);
+		return update("common.deleteNotify", param);
+	}
+
+	/**
+	 * 알림 전체 읽음 처리 (해당 사용자의 READ_YN='N' 전체)
+	 * @param userId 사용자 ID
+	 * @return 처리된 행 수
+	 * @throws Exception
+	 */
+	public int updateNotifyAllRead(String userId) throws Exception {
+		Map<String, Object> param = new HashMap<>();
+		param.put("userId", userId);
+		return update("common.updateNotifyAllRead", param);
 	}
 }
