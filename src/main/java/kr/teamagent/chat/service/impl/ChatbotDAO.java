@@ -29,6 +29,12 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public List<ChatbotVO> selectChatRoomList(ChatbotVO searchVO) throws Exception {
         return selectList("ai.chatbot.selectChatRoomList", searchVO);
     }
+
+    /** 대화방이 해당 사용자에게 속하는지 확인 */
+    public int countChatRoomOwnedByUser(ChatbotVO searchVO) throws Exception {
+        Integer cnt = selectOne("ai.chatbot.countChatRoomOwnedByUser", searchVO);
+        return cnt != null ? cnt.intValue() : 0;
+    }
     /**
      * 모델 목록 조회
      * @param searchVO
@@ -204,6 +210,16 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public int countShareTokenByToken(ChatbotVO searchVO) throws Exception {
         Integer cnt = selectOne("ai.chatbot.countShareTokenByToken", searchVO);
         return cnt != null ? cnt : 0;
+    }
+
+    /** 공유 원본 ROOM의 채팅 로그 (복사 INSERT용, 시간순) */
+    public List<ChatbotVO> selectChatLogsForShareCopy(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectChatLogsForShareCopy", searchVO);
+    }
+
+    /** 공유 원본 ROOM에 연결된 TB_CHAT_REF 목록 */
+    public List<ChatbotVO> selectChatRefsForShareCopyRoom(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectChatRefsForShareCopyRoom", searchVO);
     }
 
     /**

@@ -285,6 +285,16 @@ public class ChatbotController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /**
+     * 공유 토큰으로 조회된 대화 로그를, 로그인 사용자가 소유한 신규 대화방( roomId )에 복사
+     */
+    @RequestMapping(value = "/ai/chatbot/copySharedChatLogsToRoom.do")
+    @ResponseBody
+    public ModelAndView copySharedChatLogsToRoom(@RequestBody ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(chatbotService.copySharedChatLogsToRoom(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
     @RequestMapping("/ai/chatbot/saveChatFile.do")
     public @ResponseBody Map<String, Object> saveChatFile(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();

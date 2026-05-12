@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.socket.WebSocketSession;
 
 import kr.teamagent.chat.service.ChatbotVO;
@@ -1554,6 +1555,131 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             resultMap.put("returnMsg", "유효하지 않은 공유 링크입니다.");
         }
         resultMap.put("list", new ArrayList<ChatbotVO>());
+        return resultMap;
+    }
+
+    /**
+     * 공유 링크(유효 토큰)의 원본 대화 로그를 로그인 사용자의 대화방으로 복사한다.
+     * TB_CHAT_REF(M 타입 참조 행)는 새 LOG_ID에 맞게 함께 복사한다.
+     *
+     * @param searchVO roomId: 복사 대상(신규) 대화방, shareToken: 공유 토큰
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> copySharedChatLogsToRoom(ChatbotVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        String userId = SessionUtil.getUserId();
+
+        if (searchVO == null || searchVO.getRoomId() == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "roomId가 필요합니다.");
+            return resultMap;
+        }
+
+        String shareToken = searchVO.getShareToken();
+        if (CommonUtil.isEmpty(shareToken)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "shareToken이 필요합니다.");
+            return resultMap;
+        }
+
+        ChatbotVO tokenParam = new ChatbotVO();
+        tokenParam.setShareToken(shareToken);
+        ChatbotVO validRoom = chatbotDAO.selectShareTokenValidRoomId(tokenParam);
+        if (validRoom == null || validRoom.getRoomId() == null) {
+            int exists = chatbotDAO.countShareTokenByToken(tokenParam);
+            resultMap.put("successYn", false);
+            if (exists > 0) {
+                resultMap.put("returnMsg", "만료된 공유 URL입니다.");
+            } else {
+                resultMap.put("returnMsg", "유효하지 않은 공유 링크입니다.");
+            }
+            return resultMap;
+        }
+
+        Long sourceRoomId = validRoom.getRoomId();
+        Long destRoomId = searchVO.getRoomId();
+        if (sourceRoomId.longValue() == destRoomId.longValue()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "원본과 동일한 대화방입니다.");
+            return resultMap;
+        }
+
+        ChatbotVO roomOwnerParam = new ChatbotVO();
+        roomOwnerParam.setRoomId(destRoomId);
+        roomOwnerParam.setUserId(userId);
+        if (chatbotDAO.countChatRoomOwnedByUser(roomOwnerParam) <= 0) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "대화방이 없거나 복사 권한이 없습니다.");
+            return resultMap;
+        }
+
+        ChatbotVO srcRoomParam = new ChatbotVO();
+        srcRoomParam.setRoomId(sourceRoomId);
+
+        List<ChatbotVO> sourceLogs = chatbotDAO.selectChatLogsForShareCopy(srcRoomParam);
+        List<ChatbotVO> refRows = chatbotDAO.selectChatRefsForShareCopyRoom(srcRoomParam);
+        Map<Long, List<ChatbotVO>> refsBySourceLogId = new HashMap<>();
+        for (ChatbotVO r : refRows) {
+            Long oldLogId = r.getLogId();
+            if (oldLogId == null) {
+                continue;
+            }
+            refsBySourceLogId.computeIfAbsent(oldLogId, k -> new ArrayList<>()).add(r);
+        }
+
+        int copied = 0;
+        for (ChatbotVO src : sourceLogs) {
+            Long oldLogId = src.getLogId();
+            ChatbotVO ins = new ChatbotVO();
+            ins.setRoomId(destRoomId);
+            ins.setUserId(userId);
+            ins.setAgentId(src.getAgentId());
+            ins.setSvcTy(src.getSvcTy());
+            ins.setRefId(CommonUtil.isNotEmpty(src.getRefId()) ? src.getRefId() : null);
+            ins.setModelId(CommonUtil.isNotEmpty(src.getModelId()) ? src.getModelId() : null);
+            ins.setQContent(src.getQContent());
+            ins.setRContent(src.getRContent());
+            ins.setInTokens(src.getInTokens());
+            ins.setOutTokens(src.getOutTokens());
+            ins.setSatisYn(CommonUtil.isNotEmpty(src.getSatisYn()) ? src.getSatisYn() : null);
+            ins.setSql(CommonUtil.isNotEmpty(src.getTtsq()) ? src.getTtsq() : null);
+            ins.setTableData(CommonUtil.isNotEmpty(src.getTableData()) ? src.getTableData() : null);
+            ins.setChartOption(CommonUtil.isNotEmpty(src.getChartOption()) ? src.getChartOption() : null);
+            ins.setWebGroundingJson(CommonUtil.isNotEmpty(src.getWebGroundingJson()) ? src.getWebGroundingJson() : null);
+            ins.setMainDocFileId(CommonUtil.isNotEmpty(src.getMainDocFileId()) ? src.getMainDocFileId() : null);
+            ins.setMainPage(CommonUtil.isNotEmpty(src.getMainPage()) ? src.getMainPage() : null);
+            ins.setReaskCnt(src.getReaskCnt());
+
+            chatbotDAO.insertChatLog(ins);
+            copied++;
+
+            if ("M".equals(src.getSvcTy()) && oldLogId != null && ins.getLogId() != null) {
+                List<ChatbotVO> refs = refsBySourceLogId.get(oldLogId);
+                if (refs != null) {
+                    for (ChatbotVO refSrc : refs) {
+                        if (!CommonUtil.isNotEmpty(refSrc.getDocFileId())) {
+                            continue;
+                        }
+                        ChatbotVO refIns = new ChatbotVO();
+                        refIns.setLogId(ins.getLogId());
+                        refIns.setDocFileId(refSrc.getDocFileId());
+                        refIns.setMainPageNo(refSrc.getMainPageNo());
+                        refIns.setRelatedPages(refSrc.getRelatedPages());
+                        chatbotDAO.insertChatRef(refIns);
+                    }
+                }
+            }
+        }
+
+        if (copied > 0) {
+            ChatbotVO lastChat = new ChatbotVO();
+            lastChat.setRoomId(destRoomId);
+            chatbotDAO.updateChatRoomLastChatDt(lastChat);
+        }
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        resultMap.put("copiedCnt", copied);
         return resultMap;
     }
 

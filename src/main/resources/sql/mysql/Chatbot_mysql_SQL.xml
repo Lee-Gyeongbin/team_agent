@@ -51,6 +51,14 @@
         ORDER BY A.FIX_YN = 'Y' DESC, A.LAST_CHAT_DT DESC
     </select>
 
+    <select id="countChatRoomOwnedByUser" parameterType="chatbotVO" resultType="int">
+        /* 대화방 소유자 검증 ai.chatbot.countChatRoomOwnedByUser */
+        SELECT COUNT(1)
+        FROM TB_CHAT_ROOM A
+        WHERE A.ROOM_ID = #{roomId}
+          AND A.CREATE_USER_ID = #{userId}
+    </select>
+
     <select id="selectModelList" resultType="chatbotVO">
         /* 모델 목록 조회 ai.chatbot.selectModelList */
         SELECT
@@ -164,6 +172,43 @@
         SELECT COUNT(1)
         FROM TB_SHARE_TOKEN T
         WHERE T.SHARE_TOKEN = #{shareToken}
+    </select>
+
+    <select id="selectChatLogsForShareCopy" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 공유 복사용 원본 채팅 로그 (시간순, insertChatLog 매핑용) ai.chatbot.selectChatLogsForShareCopy */
+        SELECT
+            A.LOG_ID
+            , A.AGENT_ID
+            , A.SVC_TY
+            , A.REF_ID
+            , A.MODEL_ID
+            , A.Q_CONTENT
+            , A.R_CONTENT
+            , IFNULL(A.IN_TOKENS, 0)   AS IN_TOKENS
+            , IFNULL(A.OUT_TOKENS, 0) AS OUT_TOKENS
+            , A.SATIS_YN
+            , A.TTSQ
+            , A.TABLE_DATA
+            , A.CHART_OPTION
+            , A.WEB_GROUNDING_JSON
+            , A.MAIN_DOC_FILE_ID
+            , A.MAIN_PAGE
+            , IFNULL(A.REASK_CNT, 0) AS REASK_CNT
+        FROM TB_CHAT_LOG A
+        WHERE A.ROOM_ID = #{roomId}
+        ORDER BY A.CREATE_DT ASC, A.LOG_ID ASC
+    </select>
+
+    <select id="selectChatRefsForShareCopyRoom" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 공유 복사용 TB_CHAT_REF (원본 ROOM) ai.chatbot.selectChatRefsForShareCopyRoom */
+        SELECT
+            R.LOG_ID AS LOG_ID
+            , R.DOC_FILE_ID
+            , R.MAIN_PAGE_NO
+            , R.RELATED_PAGES
+        FROM TB_CHAT_REF R
+        INNER JOIN TB_CHAT_LOG L ON R.LOG_ID = L.LOG_ID
+        WHERE L.ROOM_ID = #{roomId}
     </select>
 
     <insert id="insertChatLog" parameterType="chatbotVO" useGeneratedKeys="true" keyProperty="logId">
