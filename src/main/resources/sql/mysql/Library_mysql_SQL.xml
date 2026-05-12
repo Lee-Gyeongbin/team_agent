@@ -521,35 +521,4 @@
         )
     </insert>
 
-    <insert id="insertNotify" parameterMap="shareCardPayload">
-        /* 알림 등록 library.insertNotify */
-        INSERT INTO TB_NOTIFY (
-            NOTIFY_ID
-            , USER_ID
-            , SEND_USER_ID
-            , NOTIFY_TY_CD
-            , TITLE
-            , CONTENT
-            , REF_ID
-            , READ_YN
-            , READ_DT
-            , USE_YN
-            , CREATE_DT
-            , MODIFY_DT
-        ) VALUES (
-            #{notifyId}
-            , #{toUserId}
-            , #{fromUserId}
-            , 'KS'
-            , #{notifyTitle}
-            , #{content}
-            , #{shareId}
-            , 'N'
-            , NULL
-            , 'Y'
-            , NOW()
-            , NULL
-        )
-    </insert>
-
 </mapper>

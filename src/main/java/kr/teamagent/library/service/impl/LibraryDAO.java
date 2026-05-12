@@ -246,14 +246,4 @@ public class LibraryDAO extends EgovComAbstractDAO {
         return insert("library.insertCardShare", searchVO);
     }
 
-    /**
-     * 알림 등록 (TB_NOTIFY)
-     * @param searchVO notifyId, toUserId, fromUserId, notifyTitle, shareId 필수
-     * @return
-     * @throws Exception
-     */
-    public int insertNotify(LibraryVO.ShareCardPayload searchVO) throws Exception {
-        return insert("library.insertNotify", searchVO);
-    }
-
 }

@@ -182,10 +182,26 @@ public class CommonController extends BaseController {
 	}
 
 	/**
+	 * 알림 읽음 처리
+	 * - notifyId에 해당하는 TB_NOTIFY 레코드의 READ_YN='Y', READ_DT=NOW() 업데이트
+	 */
+	@RequestMapping("/updateNotifyRead.do")
+	public @ResponseBody Map<String, Object> updateNotifyRead(@RequestBody CommonVO.NotifyVO dataVO) throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		try {
+			resultMap = commonService.updateNotifyRead(dataVO.getNotifyId());
+		} catch (Exception e) {
+			log.error("updateNotifyRead failed", e);
+			resultMap.put("successYn", false);
+			resultMap.put("returnMsg", "읽음 처리 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
+		}
+		return resultMap;
+	}
+
+	/**
 	 * 공유 받은 지식 카드 저장
 	 * - refId(SHARE_ID)로 원본 카드 조회 후 복사 등록
 	 * - TB_KNOW_CARD_SHARE SAVE_YN/SAVE_CARD_ID/SAVE_CATEGORY_ID 업데이트
-	 * - TB_NOTIFY 읽음 처리
 	 */
 	@RequestMapping("/ai/chatbot/insertReceiveKnowledge.do")
 	public @ResponseBody Map<String, Object> insertReceiveKnowledge(@RequestBody CommonVO.NotifyVO dataVO, BindingResult bindingResult) throws Exception {
