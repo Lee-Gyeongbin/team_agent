@@ -572,6 +572,38 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 카드 공유 (TB_KNOW_CARD_SHARE + TB_NOTIFY userIds 수만큼 INSERT)
+     * @param searchVO cardId, userIds 필수 / shareMsg 선택
+     * @throws Exception
+     */
+    public void shareCard(LibraryVO.ShareCardPayload searchVO) throws Exception {
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getCardId())
+                || searchVO.getUserIds() == null || searchVO.getUserIds().isEmpty()) {
+            return;
+        }
+        String fromUserId = SessionUtil.getUserId();
+        UserVO userVO = SessionUtil.getUserVO();
+        String userNm = userVO != null ? CommonUtil.nullToBlank(userVO.getUserNm()) : "";
+
+        searchVO.setFromUserId(fromUserId);
+
+        for (String toUserId : searchVO.getUserIds()) {
+            // 1. 공유정보 INSERT
+            String shareId = keyGenerate.generateTableKey("SI", "TB_KNOW_CARD_SHARE", "SHARE_ID");
+            searchVO.setShareId(shareId);
+            searchVO.setToUserId(toUserId);
+            libraryDAO.insertCardShare(searchVO);
+
+            // 2. 알림 INSERT
+            String notifyId = keyGenerate.generateTableKey("NI", "TB_NOTIFY", "NOTIFY_ID");
+            searchVO.setNotifyId(notifyId);
+            searchVO.setNotifyTitle("지식정보 공유");
+            searchVO.setContent(userNm + "님이 지식정보를 공유했습니다.");
+            libraryDAO.insertNotify(searchVO);
+        }
+    }
+
+    /**
      * 리포트 채팅방 생성
      * @return
      * @throws Exception

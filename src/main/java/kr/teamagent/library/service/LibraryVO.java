@@ -180,4 +180,21 @@ public class LibraryVO {
         private String tmplHtml;
     }
 
+    /** 카드 공유 요청 payload [TB_KNOW_CARD_SHARE, TB_NOTIFY] */
+    @Getter
+    @Setter
+    public static class ShareCardPayload {
+        /** 요청 필드 */
+        private String cardId;
+        private List<String> userIds;
+        private String shareMsg;
+        /** 서비스 내부 사용 필드 */
+        private String shareId;
+        private String fromUserId;
+        private String toUserId;
+        private String notifyId;
+        private String content;
+        private String notifyTitle;
+    }
+
 }

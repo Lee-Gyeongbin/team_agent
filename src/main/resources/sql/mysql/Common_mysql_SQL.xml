@@ -5,6 +5,7 @@
 
     <resultMap id="comColorResultMap" type="kr.teamagent.common.CommonVO$ColorVO" autoMapping="true"/>
     <resultMap id="comIconResultMap" type="kr.teamagent.common.CommonVO$IconVO" autoMapping="true"/>
+    <resultMap id="sharedCardVOResult" type="kr.teamagent.common.CommonVO$SharedCardVO" autoMapping="true"/>
 
     <select id="selectDbList" resultType="commonVO">
         /* DB 목록 조회 common.selectDbList */
@@ -139,6 +140,136 @@
         /* 테이블 컬럼 MAX 정수값 조회 common.selectMaxInt */
         SELECT IFNULL(MAX(${columnName}), 0)
         FROM ${tableName}
+    </select>
+
+    <select id="selectSharedCardInfo" resultMap="sharedCardVOResult">
+        /* 공유 지식 카드 단건 조회 common.selectSharedCardInfo */
+        SELECT
+            CARD_ID
+            , USER_ID
+            , CATEGORY_ID
+            , LOG_ID
+            , SVC_TY
+            , TITLE
+            , TAGS
+            , PIN_YN
+            , ARCHIVE_YN
+            , ARCHIVE_DT
+            , SORT_ORD
+            , SQL_CODE
+            , NEW_YN
+            , THUMB_IMG
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        FROM TB_KNOW_CARD
+        WHERE USE_YN = 'Y'
+          AND CARD_ID = #{cardId}
+    </select>
+
+    <resultMap id="notifyVOResult" type="kr.teamagent.common.CommonVO$NotifyVO" autoMapping="true"/>
+
+    <select id="selectCardIdByShareId" resultType="String">
+        /* 공유 카드 원본 CARD_ID 조회 common.selectCardIdByShareId */
+        SELECT CARD_ID
+        FROM TB_KNOW_CARD_SHARE
+        WHERE SHARE_ID = #{shareId}
+    </select>
+
+    <update id="updateKnowledgeSortOrdForPrepend">
+        /* 지식 카드 맨 앞 등록을 위한 정렬 순서 증가 common.updateKnowledgeSortOrdForPrepend */
+        UPDATE TB_KNOW_CARD
+        SET SORT_ORD = SORT_ORD + 1
+            , MODIFY_DT = NOW()
+        WHERE USER_ID = #{userId}
+          AND CATEGORY_ID = #{categoryId}
+    </update>
+
+    <insert id="insertReceiveKnowledgeCard">
+        /* 공유 받은 지식 카드 복사 등록 common.insertReceiveKnowledgeCard */
+        INSERT INTO TB_KNOW_CARD (
+            CARD_ID
+            , USER_ID
+            , CATEGORY_ID
+            , LOG_ID
+            , SVC_TY
+            , TITLE
+            , TAGS
+            , PIN_YN
+            , ARCHIVE_YN
+            , ARCHIVE_DT
+            , SORT_ORD
+            , SQL_CODE
+            , NEW_YN
+            , THUMB_IMG
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        )
+        SELECT
+            #{cardId}
+            , #{userId}
+            , #{categoryId}
+            , LOG_ID
+            , SVC_TY
+            , TITLE
+            , TAGS
+            , 'N'
+            , 'N'
+            , NULL
+            , #{sortOrd}
+            , SQL_CODE
+            , 'Y'
+            , THUMB_IMG
+            , 'Y'
+            , NOW()
+            , NULL
+        FROM TB_KNOW_CARD
+        WHERE CARD_ID = #{srcCardId}
+    </insert>
+
+    <update id="updateKnowledgeShareSave">
+        /* 공유 카드 저장 정보 업데이트 common.updateKnowledgeShareSave */
+        UPDATE TB_KNOW_CARD_SHARE
+        SET SAVE_YN = 'Y'
+            , SAVE_CARD_ID = #{saveCardId}
+            , SAVE_CATEGORY_ID = #{saveCategoryId}
+            , MODIFY_DT = NOW()
+        WHERE SHARE_ID = #{shareId}
+    </update>
+
+    <update id="updateNotifyRead">
+        /* 알림 읽음 처리 common.updateNotifyRead */
+        UPDATE TB_NOTIFY
+        SET READ_YN = 'Y'
+            , READ_DT = NOW()
+            , MODIFY_DT = NOW()
+        WHERE NOTIFY_ID = #{notifyId}
+    </update>
+
+    <select id="selectNotifyList" resultMap="notifyVOResult">
+        /* 알림 목록 조회 common.selectNotifyList */
+        SELECT
+            A.NOTIFY_ID
+            , A.USER_ID
+            , A.SEND_USER_ID
+            , B.USER_NM AS SEND_USER_NM
+            , A.NOTIFY_TY_CD
+            , A.TITLE
+            , A.CONTENT
+            , A.REF_ID
+            , A.READ_YN
+            , A.READ_DT
+            , A.USE_YN
+            , A.CREATE_DT
+            , A.MODIFY_DT
+            , C.SAVE_YN
+        FROM TB_NOTIFY A
+        LEFT JOIN TB_USER B ON B.USER_ID = A.SEND_USER_ID
+        LEFT JOIN TB_KNOW_CARD_SHARE C ON A.NOTIFY_TY_CD = 'KS' AND C.SHARE_ID = A.REF_ID
+        WHERE A.USER_ID = #{userId}
+          AND A.USE_YN = 'Y'
+        ORDER BY A.CREATE_DT DESC
     </select>
 
 </mapper>

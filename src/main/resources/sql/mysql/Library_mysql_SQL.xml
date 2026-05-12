@@ -4,6 +4,7 @@
 
     <parameterMap id="categoryItem" type="kr.teamagent.library.service.LibraryVO$CategoryItem"/>
     <parameterMap id="cardItem" type="kr.teamagent.library.service.LibraryVO$CardItem"/>
+    <parameterMap id="shareCardPayload" type="kr.teamagent.library.service.LibraryVO$ShareCardPayload"/>
     <resultMap id="docItemResult" type="kr.teamagent.library.service.LibraryVO$DocItem" autoMapping="true"/>
     <resultMap id="tableDataItemResult" type="kr.teamagent.library.service.LibraryVO$TableDataItem" autoMapping="true"/>
     <resultMap id="chartStatItemResult" type="kr.teamagent.library.service.LibraryVO$ChartStatItem" autoMapping="true"/>
@@ -488,6 +489,66 @@
             , #{userId}
             , NOW()
             , NOW()
+        )
+    </insert>
+
+    <insert id="insertCardShare" parameterMap="shareCardPayload">
+        /* 카드 공유 정보 등록 library.insertCardShare */
+        INSERT INTO TB_KNOW_CARD_SHARE (
+            SHARE_ID
+            , CARD_ID
+            , FROM_USER_ID
+            , TO_USER_ID
+            , SHARE_MSG
+            , SAVE_YN
+            , SAVE_CARD_ID
+            , SAVE_CATEGORY_ID
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{shareId}
+            , #{cardId}
+            , #{fromUserId}
+            , #{toUserId}
+            , #{shareMsg, jdbcType=VARCHAR}
+            , 'N'
+            , NULL
+            , NULL
+            , 'Y'
+            , NOW()
+            , NULL
+        )
+    </insert>
+
+    <insert id="insertNotify" parameterMap="shareCardPayload">
+        /* 알림 등록 library.insertNotify */
+        INSERT INTO TB_NOTIFY (
+            NOTIFY_ID
+            , USER_ID
+            , SEND_USER_ID
+            , NOTIFY_TY_CD
+            , TITLE
+            , CONTENT
+            , REF_ID
+            , READ_YN
+            , READ_DT
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{notifyId}
+            , #{toUserId}
+            , #{fromUserId}
+            , 'KS'
+            , #{notifyTitle}
+            , #{content}
+            , #{shareId}
+            , 'N'
+            , NULL
+            , 'Y'
+            , NOW()
+            , NULL
         )
     </insert>
 
