@@ -21,7 +21,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
+import kr.teamagent.common.CommonVO;
 import kr.teamagent.common.security.service.UserVO;
+import kr.teamagent.common.system.service.impl.CommonServiceImpl;
 import kr.teamagent.library.service.LibraryVO;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
@@ -40,6 +42,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     KeyGenerate keyGenerate;
+
+    @Autowired
+    CommonServiceImpl commonService;
 
     @Autowired
     ChatbotServiceImpl chatbotService;
@@ -635,11 +640,14 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             libraryDAO.insertCardShare(searchVO);
 
             // 2. 알림 INSERT
-            String notifyId = keyGenerate.generateTableKey("NI", "TB_NOTIFY", "NOTIFY_ID");
-            searchVO.setNotifyId(notifyId);
-            searchVO.setNotifyTitle("지식정보 공유");
-            searchVO.setContent(userNm + "님이 지식정보를 공유했습니다.");
-            libraryDAO.insertNotify(searchVO);
+            CommonVO.NotifyVO notifyVO = new CommonVO.NotifyVO();
+            notifyVO.setUserId(toUserId);
+            notifyVO.setSendUserId(fromUserId);
+            notifyVO.setNotifyTyCd("KS");
+            notifyVO.setTitle("지식정보 공유");
+            notifyVO.setContent(userNm + "님이 지식정보를 공유했습니다.");
+            notifyVO.setRefId(searchVO.getShareId());
+            commonService.insertNotify(notifyVO);
         }
     }
 

@@ -98,8 +98,7 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	 * 1. refId(SHARE_ID)로 원본 CARD_ID 조회
 	 * 2. 원본 카드를 세션 userId / payload categoryId로 복사 등록 (맨 앞 순서 1)
 	 * 3. TB_KNOW_CARD_SHARE의 SAVE_YN, SAVE_CARD_ID, SAVE_CATEGORY_ID 업데이트
-	 * 4. TB_NOTIFY 읽음 처리 (READ_YN='Y', READ_DT=NOW())
-	 * @param notifyVO notifyId, refId, categoryId 필수
+	 * @param notifyVO refId, categoryId 필수
 	 * @return successYn, returnMsg
 	 * @throws Exception
 	 */
@@ -109,7 +108,6 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 		String userId     = SessionUtil.getUserId();
 		String shareId    = notifyVO.getRefId();
 		String categoryId = notifyVO.getCategoryId();
-		String notifyId   = notifyVO.getNotifyId();
 
 		// 1. SHARE_ID로 원본 CARD_ID 조회
 		String srcCardId = commonDAO.selectCardIdByShareId(shareId);
@@ -134,11 +132,62 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 		shareParam.put("saveCategoryId", categoryId);
 		commonDAO.updateKnowledgeShareSave(shareParam);
 
-		// 4. TB_NOTIFY 읽음 처리
-		commonDAO.updateNotifyRead(notifyId);
-
 		resultMap.put("successYn", true);
 		resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+		return resultMap;
+	}
+
+	/**
+	 * 알림 등록 공통 메서드
+	 * notifyId는 내부에서 자동 생성하며, 나머지 필드(userId, sendUserId, notifyTyCd, title, content, refId)는 호출부에서 조립해서 전달한다.
+	 * @param notifyVO userId(수신자), sendUserId(발신자), notifyTyCd, title, content, refId 필수
+	 * @throws Exception
+	 */
+	public void insertNotify(CommonVO.NotifyVO notifyVO) throws Exception {
+		String notifyId = keyGenerate.generateTableKey("NI", "TB_NOTIFY", "NOTIFY_ID");
+		notifyVO.setNotifyId(notifyId);
+		commonDAO.insertNotify(notifyVO);
+	}
+
+	/**
+	 * 알림 읽음 처리 (READ_YN='Y', READ_DT=NOW())
+	 * @param notifyId 알림 ID
+	 * @return successYn, returnMsg
+	 * @throws Exception
+	 */
+	public Map<String, Object> updateNotifyRead(String notifyId) throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		commonDAO.updateNotifyRead(notifyId);
+		resultMap.put("successYn", true);
+		resultMap.put("returnMsg", "읽음 처리가 완료되었습니다.");
+		return resultMap;
+	}
+
+	/**
+	 * 알림 삭제 (USE_YN='N')
+	 * @param notifyId 알림 ID
+	 * @return successYn, returnMsg
+	 * @throws Exception
+	 */
+	public Map<String, Object> deleteNotify(String notifyId) throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		commonDAO.deleteNotify(notifyId);
+		resultMap.put("successYn", true);
+		resultMap.put("returnMsg", "알림이 삭제되었습니다.");
+		return resultMap;
+	}
+
+	/**
+	 * 알림 전체 읽음 처리 (세션 userId 기준 READ_YN='N' 전체)
+	 * @return successYn, returnMsg
+	 * @throws Exception
+	 */
+	public Map<String, Object> updateNotifyAllRead() throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		String userId = SessionUtil.getUserId();
+		commonDAO.updateNotifyAllRead(userId);
+		resultMap.put("successYn", true);
+		resultMap.put("returnMsg", "전체 읽음 처리가 완료되었습니다.");
 		return resultMap;
 	}
 

@@ -238,6 +238,37 @@
         WHERE SHARE_ID = #{shareId}
     </update>
 
+    <insert id="insertNotify" parameterType="kr.teamagent.common.CommonVO$NotifyVO">
+        /* 알림 등록 common.insertNotify */
+        INSERT INTO TB_NOTIFY (
+            NOTIFY_ID
+            , USER_ID
+            , SEND_USER_ID
+            , NOTIFY_TY_CD
+            , TITLE
+            , CONTENT
+            , REF_ID
+            , READ_YN
+            , READ_DT
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{notifyId}
+            , #{userId}
+            , #{sendUserId}
+            , #{notifyTyCd}
+            , #{title}
+            , #{content}
+            , #{refId}
+            , 'N'
+            , NULL
+            , 'Y'
+            , NOW()
+            , NULL
+        )
+    </insert>
+
     <update id="updateNotifyRead">
         /* 알림 읽음 처리 common.updateNotifyRead */
         UPDATE TB_NOTIFY
@@ -245,6 +276,25 @@
             , READ_DT = NOW()
             , MODIFY_DT = NOW()
         WHERE NOTIFY_ID = #{notifyId}
+    </update>
+
+    <update id="deleteNotify">
+        /* 알림 삭제 (USE_YN='N') common.deleteNotify */
+        UPDATE TB_NOTIFY
+        SET USE_YN = 'N'
+            , MODIFY_DT = NOW()
+        WHERE NOTIFY_ID = #{notifyId}
+    </update>
+
+    <update id="updateNotifyAllRead">
+        /* 알림 전체 읽음 처리 common.updateNotifyAllRead */
+        UPDATE TB_NOTIFY
+        SET READ_YN = 'Y'
+            , READ_DT = NOW()
+            , MODIFY_DT = NOW()
+        WHERE USER_ID = #{userId}
+          AND READ_YN = 'N'
+          AND USE_YN = 'Y'
     </update>
 
     <select id="selectNotifyList" resultMap="notifyVOResult">
