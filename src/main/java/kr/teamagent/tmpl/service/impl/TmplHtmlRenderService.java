@@ -18,7 +18,14 @@ import kr.teamagent.library.service.LibraryVO;
 public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
 
     /**
-     * TB_TMPL.TMPL_HTML의 {{jsonKey}} 자리에 LLM JSON 값을 채운다.
+     * 템플릿 HTML 문자열의 placeholder({{jsonKey}})를 LLM 응답 JSON 값으로 치환한다.
+     * 필드 메타(`tmplFieldList`)를 기준으로 렌더링 규칙을 결정한다.
+     * 일반 필드는 단순 치환하고, LAYOUT_TYPE=table은 tr 단위 확장/치환한다.
+     * MULTILINE_YN=Y는 줄바꿈/배열을 리스트 표현으로 렌더링한다.
+     * @param tmplHtml 템플릿 원본 HTML(TB_TMPL.TMPL_HTML)
+     * @param json LLM 응답 JSON 객체
+     * @param tmplFieldList 템플릿 필드 메타 목록(TB_TMPL_FIELD)
+     * @return 치환 완료된 HTML
      */
     public String renderTemplateHtml(String tmplHtml, JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
         if (CommonUtil.isEmpty(tmplHtml)) {
@@ -34,10 +41,12 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
                 continue;
             }
             String key = field.getJsonKey();
+            // table 레이아웃은 동일 row 복제 규칙이 필요하므로 전용 처리.
             if ("table".equalsIgnoreCase(stringValue(field.getLayoutType()))) {
                 html = renderTableRows(html, key, json.get(key), "Y".equals(field.getMultilineYn()));
                 continue;
             }
+            // table 외 레이아웃은 placeholder 1:1 치환.
             String value = renderTemplateValue(json.get(key), "Y".equals(field.getMultilineYn()));
             html = html.replace("{{" + key + "}}", value);
         }
@@ -46,6 +55,10 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
 
     /**
      * LAYOUT_TYPE=table 필드는 {{jsonKey}}가 포함된 tr을 배열 길이만큼 복제한다.
+     * placeholder를 포함한 tr만 대상으로 처리한다.
+     * 행에 placeholder가 1개면 배열 원소 수만큼 row를 복제하고,
+     * 여러 개면 복제 대신 단일 값으로 치환한다.
+     * 매칭되는 tr이 없으면 문서 전체 replace fallback을 수행한다.
      */
     private String renderTableRows(String html, String key, Object value, boolean multiline) {
         if (CommonUtil.isEmpty(html) || CommonUtil.isEmpty(key)) {
@@ -75,14 +88,17 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
             if (countTemplatePlaceholders(tr) == 1) {
                 List<String> rows = extractTemplateRowValues(value);
                 if (rows.isEmpty()) {
+                    // 값이 비어 있으면 placeholder만 제거해 빈 cell로 유지.
                     out.append(tr.replace(placeholder, ""));
                 } else {
+                    // 배열 길이만큼 동일한 tr을 복제한다.
                     for (String row : rows) {
                         String cellValue = escapeHtml(row).replace("\r\n", "\n").replace("\n", "<br/>");
                         out.append(tr.replace(placeholder, cellValue));
                     }
                 }
             } else {
+                // 같은 row에 placeholder가 여러 개 섞여 있으면 복제 로직보다 단일 치환이 안전하다.
                 String singleValue = renderTemplateValue(value, multiline);
                 out.append(tr.replace(placeholder, singleValue));
             }
@@ -99,6 +115,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
 
     /**
      * HTML 템플릿 내부에 들어갈 값으로 변환한다.
+     * 배열/문자열/null을 공통 규칙으로 정규화하고, 최종적으로 XSS 방지를 위해 HTML escape 처리한다.
      */
     private String renderTemplateValue(Object value, boolean multiline) {
         if (value == null) {
@@ -107,8 +124,10 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
         if (value instanceof JSONArray) {
             JSONArray arr = (JSONArray) value;
             if (multiline) {
+                // 멀티라인 배열은 목록 형태로 출력(줄 구분 유지).
                 return renderTemplateListValue(arr);
             }
+            // 일반 배열은 콤마 구분 단일 라인으로 출력.
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < arr.size(); i++) {
                 if (i > 0) {
@@ -121,6 +140,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
         String text = stringValue(value);
         if (multiline && text.startsWith("[") && text.endsWith("]")) {
             try {
+                // 문자열로 들어온 JSON 배열도 동일 규칙으로 처리.
                 Object parsed = new JSONParser().parse(text);
                 if (parsed instanceof JSONArray) {
                     return renderTemplateListValue((JSONArray) parsed);
@@ -132,7 +152,11 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
         return escapeHtml(text).replace("\r\n", "\n").replace("\n", multiline ? "<br/>" : " ");
     }
 
-    /** MULTILINE_YN=Y 배열 값을 리스트 형태로 렌더링 */
+    /**
+     * MULTILINE_YN=Y 배열 값을 리스트 형태의 HTML 문자열로 렌더링한다.
+     * 각 원소는 줄 단위로 분해한 뒤 빈 줄을 제거한다.
+     * 리스트 마커가 없으면 기본 "- "를 붙이고, 항목 사이는 "<br/>"로 구분한다.
+     */
     private String renderTemplateListValue(JSONArray arr) {
         if (arr == null || arr.isEmpty()) {
             return "";
@@ -154,13 +178,19 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
                 if (sb.length() > 0) {
                     sb.append("<br/>");
                 }
+                // 마커 정규화 후 escape를 적용해 템플릿 삽입 시 안전성을 확보한다.
                 sb.append(escapeHtml(normalizeListMarker(normalized)));
             }
         }
         return sb.toString();
     }
 
-    /** 리스트 마커가 없으면 기본 '-' 마커를 붙인다. */
+    /**
+     * 리스트 항목의 선행 마커를 정규화한다.
+     * 이미 -, *, • 로 시작하면 유지한다.
+     * 숫자 목록(1), 1. 형태도 유지한다.
+     * 그 외 텍스트는 "- " 접두어를 추가한다.
+     */
     private String normalizeListMarker(String line) {
         if (line.startsWith("-") || line.startsWith("*") || line.startsWith("•")) {
             return line;
@@ -173,6 +203,8 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
 
     /**
      * 템플릿 table row 복제를 위한 값 목록 추출.
+     * 입력 타입이 배열(JSONArray/배열 문자열)이면 항목 리스트를 그대로 추출하고,
+     * 그 외에는 단일 항목 리스트로 반환한다.
      */
     private List<String> extractTemplateRowValues(Object value) {
         List<String> rows = new ArrayList<>();
@@ -215,7 +247,10 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
         return rows;
     }
 
-    /** 템플릿 행 내부 placeholder({{...}}) 개수 */
+    /**
+     * 템플릿 행 내부 placeholder({{...}}) 개수를 센다.
+     * row 복제 여부를 판단하는 기준값으로 사용한다.
+     */
     private int countTemplatePlaceholders(String text) {
         if (CommonUtil.isEmpty(text)) {
             return 0;
@@ -232,6 +267,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
         return obj == null ? "" : String.valueOf(obj).trim();
     }
 
+    /** 템플릿 렌더링 결과를 HTML 문맥에 안전하게 삽입하기 위한 최소 escape. */
     private static String escapeHtml(String value) {
         if (value == null) return "";
         return value

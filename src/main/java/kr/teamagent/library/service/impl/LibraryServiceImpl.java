@@ -13,6 +13,8 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +27,7 @@ import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.prompt.service.impl.PromptServiceImpl;
+import kr.teamagent.tmpl.service.impl.TmplHtmlRenderService;
 
 @Service
 public class LibraryServiceImpl extends EgovAbstractServiceImpl {
@@ -43,6 +46,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     PromptServiceImpl promptService;
+
+    @Autowired
+    TmplHtmlRenderService tmplHtmlRenderService;
 
     /**
      * 카테고리 목록 조회 (세션 userId 자동 설정)
@@ -345,11 +351,10 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             // STEP2 : {{HTML_FIELD_INSTRUCTION}} 치환값 생성 (조건부)
             String htmlFieldInstruction = "";
             if (!multilineJsonKeys.isEmpty()) {
-                htmlFieldInstruction = "key가 다음인 필드의 value는 완전한 HTML 문자열이어야 합니다: "
+                htmlFieldInstruction = "key가 다음인 필드의 value는 HTML이 아닌 일반 텍스트 기반 JSON 문자열 배열이어야 합니다: "
                         + String.join(", ", multilineJsonKeys)
-                        + ". 모든 태그는 반드시 열고 닫을 것(<p>...</p>, <li>...</li>)."
-                        + " 허용 태그: h3, p, ul, ol, li, strong만 사용."
-                        + " 응답 전 해당 필드의 태그가 모두 정상적으로 닫혔는지 검증 후 출력할 것."
+                        + ". 예: [\"항목1\", \"항목2\"]."
+                        + " HTML 태그(<p>, <li> 등)는 포함하지 말 것."
                         + " 응답 JSON의 키(key) 순서는 본 프롬프트에 제시된 필드 목록에 나온 key 나열 순서와 동일하게 유지할 것."
                         + " 요청·명세에 정의된 필드 순서를 바꾸거나 뒤섞지 말고, 동일한 순서로 출력할 것.";
             }
@@ -362,7 +367,12 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                     String jsonKey = fieldItem.getJsonKey();
                     String fieldNm = CommonUtil.isEmpty(fieldItem.getFieldNm()) ? jsonKey : fieldItem.getFieldNm();
                     fieldList.append("\nkey : ").append(jsonKey).append("_label (고정값: \"").append(fieldNm).append("\". 반드시 이 문자열만 사용. 내용 요약 금지)");
-                    fieldList.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm).append(")");
+                    if ("Y".equals(fieldItem.getMultilineYn())) {
+                        fieldList.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm)
+                                .append(") (JSON 문자열 배열로 응답. 예: [\"항목1\", \"항목2\"])");
+                    } else {
+                        fieldList.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm).append(")");
+                    }
                 }
             }
 
@@ -399,7 +409,14 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "AI 문서 생성 성공");
-            resultMap.put("tmplHtml", CommonUtil.nullToBlank(tmpl.getTmplHtml()));
+            String renderedHtml = CommonUtil.nullToBlank(tmpl.getTmplHtml());
+            JSONObject aiJson = parseAiTemplateJson(res);
+            if (aiJson != null) {
+                renderedHtml = tmplHtmlRenderService.renderTemplateHtml(renderedHtml, aiJson, tmplFieldList);
+            } else {
+                logger.warn("createDoc HTML 렌더링 생략 - AI 응답 JSON 파싱 실패 (tmplId={})", searchVO.getTmplId());
+            }
+            resultMap.put("tmplHtml", renderedHtml);
             resultMap.put("data", res);
             if (!CommonUtil.isEmpty(searchVO.getRoomId())) {
                 LibraryVO reportLog = new LibraryVO();
@@ -458,6 +475,29 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         }
 
         return resultMap;
+    }
+
+    /** createDoc AI 응답에서 템플릿 렌더링용 JSON 객체를 추출한다. */
+    private JSONObject parseAiTemplateJson(String answer) {
+        if (CommonUtil.isEmpty(answer)) {
+            return null;
+        }
+        String jsonStr = answer
+                .replace("```json", "")
+                .replace("```", "")
+                .trim();
+        if (jsonStr.isEmpty()) {
+            return null;
+        }
+        try {
+            Object parsed = new JSONParser().parse(jsonStr);
+            if (parsed instanceof JSONObject) {
+                return (JSONObject) parsed;
+            }
+        } catch (Exception e) {
+            logger.warn("createDoc JSON 파싱 실패: {}", e.getMessage());
+        }
+        return null;
     }
 
     /**
