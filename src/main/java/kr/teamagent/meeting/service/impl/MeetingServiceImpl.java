@@ -1,5 +1,9 @@
 package kr.teamagent.meeting.service.impl;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -7,6 +11,11 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import javax.servlet.http.HttpServletResponse;
+
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -16,10 +25,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.xhtmlrenderer.pdf.ITextRenderer;
 
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.google.gson.Gson;
+import com.lowagie.text.pdf.BaseFont;
 
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.util.CommonUtil;
@@ -28,6 +39,7 @@ import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.library.service.LibraryVO;
 import kr.teamagent.library.service.impl.LibraryDAO;
 import kr.teamagent.meeting.service.MeetingVO;
+import kr.teamagent.tmpl.service.impl.TmplHtmlRenderService;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -36,6 +48,7 @@ import okhttp3.RequestBody;
 public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     private static final Logger logger = LoggerFactory.getLogger(MeetingServiceImpl.class);
+    private static final String MINUTES_TMPL_ID = "TM000005";
 
     @Autowired
     private MeetingDAO meetingDAO;
@@ -45,6 +58,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private AmazonS3 amazonS3;
+
+    @Autowired
+    private TmplHtmlRenderService tmplHtmlRenderService;
 
     /** 참석자 선택용 사용자 목록 */
     public List<MeetingVO> selectUserListForMeeting() throws Exception {
@@ -165,7 +181,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         // 7. LLM 호출하여 회의록 생성
         dataVO.setFullText(fullText);
         LibraryVO searchVO = new LibraryVO();
-        searchVO.setTmplId("TM000004");
+        searchVO.setTmplId(MINUTES_TMPL_ID);
         List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
         String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle(), tmplFieldList);
         if (minutesAnswer != null) {
@@ -510,7 +526,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         boolean wantTitle = isAutoTitleYn(isAutoTitle);
 
         LibraryVO searchVO = new LibraryVO();
-        searchVO.setTmplId("TM000004");
+        searchVO.setTmplId(MINUTES_TMPL_ID);
         LibraryVO.TmplItem tmpl = libraryDAO.selectTmpl(searchVO);
 
         String promptTemplate = CommonUtil.nullToBlank(tmpl.getLlmPrompt());
@@ -626,6 +642,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      * 회의록 LLM answer 파싱 후 TB_MEETING_MINUTES 저장.
      * discussion_topics가 있으면 FULL_TEXT를 에디터용 직렬화 본문으로 갱신하고, 없으면 기존 fullText(녹취) 유지.
      */
+    @SuppressWarnings("unchecked")
     private void parseAndSaveMinutes(MeetingVO dataVO, String answer, List<LibraryVO.TmplFieldItem> tmplFieldList) {
         try {
             String jsonStr = answer
@@ -654,6 +671,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             // discussion_topics → FULL_TEXT (기존 유지)
             String bodyFromLlm = serializeMinutesBodyFromJson(json);
             if (bodyFromLlm != null) dataVO.setFullText(bodyFromLlm);
+
+            String renderedHtml = renderMinutesTemplateHtml(json, tmplFieldList);
+            if (!CommonUtil.isEmpty(renderedHtml)) {
+                dataVO.setGeneratedContent(renderedHtml);
+            }
     
             // 자동 제목: meeting_title → title로 변경
             if (isAutoTitleYn(dataVO.getIsAutoTitle())) {
@@ -681,6 +703,20 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         } catch (Exception e) {
             logger.error("회의록 파싱/저장 실패 - answer: {}", answer, e);
         }
+    }
+
+    /**
+     * TB_TMPL.TMPL_HTML의 {{jsonKey}} 자리에 LLM JSON 값을 채운다.
+     */
+    private String renderMinutesTemplateHtml(JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
+        LibraryVO searchVO = new LibraryVO();
+        searchVO.setTmplId(MINUTES_TMPL_ID);
+        LibraryVO.TmplItem tmpl = libraryDAO.selectTmpl(searchVO);
+        if (tmpl == null || CommonUtil.isEmpty(tmpl.getTmplHtml())) {
+            logger.warn("회의록 HTML 템플릿 없음 (tmplId={})", searchVO.getTmplId());
+            return "";
+        }
+        return tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), json, tmplFieldList);
     }
 
     /**
@@ -917,4 +953,194 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         }
         return result;
     }
+
+    public void downloadMinutes(Long meetingId, String format, HttpServletResponse response) throws Exception {
+        MeetingVO dataVO = new MeetingVO();
+        dataVO.setMeetingId(meetingId);
+        // 회의록 내용 조회
+        MeetingVO meetingVO = meetingDAO.selectMeetingMinutes(dataVO);
+        
+        String content = (meetingVO.getEditedContent() != null && !meetingVO.getEditedContent().isEmpty())
+                ? meetingVO.getEditedContent()
+                : meetingVO.getGeneratedContent();
+        
+        String fileName = "회의록_" + meetingId;
+        
+        switch (format.toLowerCase()) {
+            case "pdf":
+                downloadAsPdf(content, fileName, response);
+                break;
+            case "docx":
+                downloadAsDocx(content, fileName, response);
+                break;
+            case "txt":
+                downloadAsTxt(content, fileName, response);
+                break;
+            case "md":
+                downloadAsMd(content, fileName, response);
+                break;
+            default:
+                throw new IllegalArgumentException("지원하지 않는 형식입니다: " + format);
+        }
+    }
+    
+    private void downloadAsPdf(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
+        response.setContentType("application/pdf");
+        response.setHeader("Content-Disposition", "attachment; filename=\"" + 
+                URLEncoder.encode(fileName + ".pdf", "UTF-8") + "\"");
+    
+        // classpath에서 폰트 로드 (맑은 고딕 TTF의 실제 family name은 Malgun Gothic / 맑은 고딕)
+        InputStream fontStream = getClass().getClassLoader().getResourceAsStream("fonts/MALGUN.TTF");
+        if (fontStream == null) {
+            throw new IllegalStateException("PDF 폰트를 찾을 수 없습니다: classpath:fonts/MALGUN.TTF");
+        }
+        File tempFont = File.createTempFile("MALGUN", ".ttf");
+        tempFont.deleteOnExit();
+        try (FileOutputStream fos = new FileOutputStream(tempFont)) {
+            byte[] buffer = new byte[1024];
+            int len;
+            while ((len = fontStream.read(buffer)) != -1) {
+                fos.write(buffer, 0, len);
+            }
+        } finally {
+            fontStream.close();
+        }
+        String fontPath = tempFont.getAbsolutePath();
+        String fontFileUrl = tempFont.toURI().toString();
+        String baseUrl = tempFont.getParentFile().toURI().toString();
+    
+        String xhtmlContent = normalizeHtmlForPdf(htmlContent);
+    
+        // family명은 TTF name table과 일치해야 addFont와 매칭됨. 에디터 인라인 font-family(Arial 등) 무력화.
+        String styledHtml = buildPdfHtml(xhtmlContent, fontFileUrl);
+    
+        ITextRenderer renderer = new ITextRenderer();
+        renderer.getFontResolver().addFont(fontPath, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
+        renderer.setDocumentFromString(styledHtml, baseUrl);
+        renderer.layout();
+        renderer.createPDF(response.getOutputStream());
+    }
+
+    private String buildPdfHtml(String xhtmlContent, String fontFileUrl) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" "
+            + "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">"
+            + "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"ko\" lang=\"ko\"><head>"
+            + "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"/>"
+            + "<style>"
+            + "@font-face { font-family: 'Malgun Gothic'; src: url('" + fontFileUrl + "'); }"
+            + "@font-face { font-family: '맑은 고딕'; src: url('" + fontFileUrl + "'); }"
+            + "body { font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; font-size: 14px; color: #5c6677; margin: 24px 32px; line-height: 1.5; text-align: center; }"
+            + "img.doc-logo { display: inline-block; vertical-align: middle; margin: 0 16px 32px 0; max-height: 60px; width: auto; }"
+            + "* { font-family: 'Malgun Gothic', '맑은 고딕', sans-serif !important; }"
+            + "h1 { display: inline-block; vertical-align: middle; font-size: 26px; font-weight: 700; color: #5c6677; margin: 0 0 32px 0; padding-bottom: 0; border-bottom: none; line-height: 1.4; text-align: center; }"
+            + "table:first-of-type { border-top: 1px solid #dce4e9; padding-top: 16px; margin-top: 0; }"
+            + "h2 { font-size: 16px; font-weight: 700; color: #333333 !important; margin: 32px 0 8px 0; padding-bottom: 8px; border-bottom: 1px solid #dce4e9; text-align: left; }"
+            + "h3 { font-size: 14px; font-weight: 700; color: #5c6677; margin: 16px 0 8px 0; text-align: left; }"
+            + "p { margin: 0 0 16px 0; font-size: 14px; color: #5c6677; line-height: 1.7; text-align: left; }"
+            + "table { width: 100%; margin: 0 0 24px 0; border-collapse: collapse; border: 1px solid #dce4e9; table-layout: fixed; }"
+            + "th, td { padding: 6px 10px; border: 1px solid #dce4e9; font-size: 14px; color: #5c6677; line-height: 1.6; vertical-align: middle; text-align: left; }"
+            + "th { background-color: #f4f7f9; font-weight: 700; text-align: center; width: 120px; color: #333333 !important; }"
+            + "th p { color: #333333 !important; margin: 0; font-size: inherit; line-height: inherit; }"
+            + "td p { margin: 0; font-size: inherit; line-height: inherit; }"
+            + "ul { list-style: none; margin: 0 0 16px 0; padding-left: 0; text-align: left; }"
+            + "ul li { position: relative; padding-left: 18px; margin-bottom: 10px; font-size: 14px; color: #5c6677; line-height: 1.7; }"
+            + "ol { list-style: decimal outside; margin: 0 0 16px 0; padding-left: 26px; text-align: left; }"
+            + "ol li { margin-bottom: 8px; font-size: 14px; color: #5c6677; line-height: 1.7; }"
+            + "li > p { margin: 0; }"
+            + "blockquote { margin: 0 0 16px 0; padding: 8px 16px; border-left: 3px solid #3c69db; background-color: #f0f4fd; font-size: 14px; color: #5c6677; line-height: 1.7; font-style: italic; text-align: left; }"
+            + "img { max-width: 100%; height: auto; border-radius: 4px; margin: 8px 0; }"
+            + "a { color: #3c69db; text-decoration: underline; }"
+            + "pre { margin: 0 0 16px 0; padding: 8px 16px; background: #2d3139; color: #fff; border-radius: 6px; font-family: 'Menlo', 'Consolas', monospace; font-size: 13px; }"
+            + "code { padding: 2px 4px; background: #f4f7f9; border-radius: 3px; font-family: 'Menlo', 'Consolas', monospace; font-size: 0.9em; color: #d92d20; }"
+            + ".column-resize-handle { display: none; }"
+            + ".selectedCell::after { display: none; }"
+            + ".ProseMirror-selectednode { outline: none; }"
+            + "</style></head><body>"
+            + xhtmlContent
+            + "</body></html>";
+    }
+
+    /**
+     * Flying Saucer는 XHTML/XML로 파싱하므로 HTML void tag를 self-closing 형태로 보정한다.
+     */
+    private String normalizeHtmlForPdf(String htmlContent) {
+        if (htmlContent == null) return "";
+        return htmlContent
+            .replace("&nbsp;", "&#160;")
+            // Pretendard 포함 모든 font-family 인라인 스타일 → Malgun Gothic으로 치환
+            .replaceAll("font-family\\s*:\\s*[^;\"']*", 
+                        "font-family: 'Malgun Gothic', '맑은 고딕', sans-serif")
+            // void 태그 self-closing
+            .replaceAll("(?i)<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\\b([^<>]*?)(?<!/)>", "<$1$2 />")
+            // data-* 속성 제거
+            .replaceAll("\\s+data-[a-zA-Z0-9-]+(=\"[^\"]*\")?", "")
+            // colgroup/col 제거
+            .replaceAll("(?si)<colgroup[^>]*>.*?</colgroup>", "")
+            // figure → div
+            .replaceAll("(?i)<figure([^>]*)>", "<div$1>")
+            .replaceAll("(?i)</figure>", "</div>");
+    }
+    
+    private void downloadAsDocx(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
+        response.setContentType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        response.setHeader("Content-Disposition", "attachment; filename=\"" + 
+                URLEncoder.encode(fileName + ".docx", "UTF-8") + "\"");
+        
+        XWPFDocument document = new XWPFDocument();
+        
+        // HTML 태그 제거 후 텍스트만 추출
+        String plainText = htmlContent.replaceAll("<[^>]*>", "").replaceAll("&nbsp;", " ").trim();
+        String[] lines = plainText.split("\n");
+        
+        for (String line : lines) {
+            if (!line.trim().isEmpty()) {
+                XWPFParagraph paragraph = document.createParagraph();
+                XWPFRun run = paragraph.createRun();
+                run.setFontFamily("맑은 고딕");
+                run.setFontSize(11);
+                run.setText(line.trim());
+            }
+        }
+        
+        document.write(response.getOutputStream());
+        document.close();
+    }
+    
+    private void downloadAsTxt(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
+        response.setContentType("text/plain; charset=UTF-8");
+        response.setHeader("Content-Disposition", "attachment; filename=\"" + 
+                URLEncoder.encode(fileName + ".txt", "UTF-8") + "\"");
+        
+        String plainText = htmlContent.replaceAll("<[^>]*>", "").replaceAll("&nbsp;", " ").trim();
+        response.getWriter().write(plainText);
+    }
+    
+    private void downloadAsMd(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
+        response.setContentType("text/markdown; charset=UTF-8");
+        response.setHeader("Content-Disposition", "attachment; filename=\"" + 
+                URLEncoder.encode(fileName + ".md", "UTF-8") + "\"");
+        
+        // 기본적인 HTML → Markdown 변환
+        String md = htmlContent
+                .replaceAll("<h1[^>]*>(.*?)</h1>", "# $1\n")
+                .replaceAll("<h2[^>]*>(.*?)</h2>", "## $1\n")
+                .replaceAll("<h3[^>]*>(.*?)</h3>", "### $1\n")
+                .replaceAll("<strong[^>]*>(.*?)</strong>", "**$1**")
+                .replaceAll("<b[^>]*>(.*?)</b>", "**$1**")
+                .replaceAll("<em[^>]*>(.*?)</em>", "*$1*")
+                .replaceAll("<li[^>]*>(.*?)</li>", "- $1\n")
+                .replaceAll("<br\\s*/?>", "\n")
+                .replaceAll("<p[^>]*>", "\n")
+                .replaceAll("</p>", "\n")
+                .replaceAll("<[^>]*>", "")
+                .replaceAll("&nbsp;", " ")
+                .replaceAll("&lt;", "<")
+                .replaceAll("&gt;", ">")
+                .replaceAll("&amp;", "&")
+                .trim();
+        
+        response.getWriter().write(md);
+    }
+    
 }
