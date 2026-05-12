@@ -43,6 +43,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
     private static final String LUNCH_MENU_AGENT_ID = "AG000009";
+    /** summary_query 동기 호출 중 reAskReport(전체 HTML 재생성) 읽기 타임아웃(초) */
+    private static final int SUMMARY_READ_TIMEOUT_REASK_REPORT_SEC = 180;
 
     @Autowired
     ChatbotDAO chatbotDAO;
@@ -1233,7 +1235,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * GPT endpoint에 동기 호출하여 AI 응답 텍스트를 반환한다.
      * doInsertAiLog를 호출하지 않으므로 로그 테이블에 쌓이지 않는다.
      * @param prompt 요청 프롬프트
-     * @param purpose 로깅용 호출 목적 (title, tags 등)
+     * @param purpose 로깅용 호출 목적 (title, tags, reAskReport 등). reAskReport는 응답 지연 대비 읽기 타임아웃이 더 김.
      * @return AI 응답 텍스트, 실패 시 null
      */
     public String callAiSummary(String prompt, String purpose) {
@@ -1243,13 +1245,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return null;
         }
 
+        int readTimeoutSec = "reAskReport".equals(purpose) ? SUMMARY_READ_TIMEOUT_REASK_REPORT_SEC : 30;
+
         Map<String, Object> params = new HashMap<>();
         params.put("query", prompt);
         params.put("room_id", "");
 
         try {
             OkHttpClient client = new OkHttpClient.Builder()
-                    .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(readTimeoutSec, java.util.concurrent.TimeUnit.SECONDS)
                     .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build();
 
