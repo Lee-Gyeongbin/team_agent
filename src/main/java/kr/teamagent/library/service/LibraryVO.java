@@ -169,6 +169,7 @@ public class LibraryVO {
         private String jsonKey;
         private String fieldNm;
         private String multilineYn;
+        private String layoutType;
     }
 
     @Getter

@@ -438,6 +438,7 @@
             A.JSON_KEY
             , A.FIELD_NM
             , A.MULTILINE_YN
+            , A.LAYOUT_TYPE
         FROM TB_TMPL_FIELD A
         WHERE 1=1
             AND A.TMPL_ID = #{tmplId}

@@ -91,6 +91,7 @@
             , MEETING_ID    AS MEETING_ID
             , FULL_TEXT     AS FULL_TEXT
             , FLAT_DATA     AS FLAT_DATA
+            , GENERATED_CONTENT AS GENERATED_CONTENT
             , EDITED_CONTENT AS EDITED_CONTENT
             , CREATE_DT     AS CREATE_DT
             , MODIFY_DT     AS MODIFY_DT
@@ -101,16 +102,21 @@
     <insert id="insertMeetingMinutes" parameterType="meetingVO">
         /* 회의록 등록 ai.meeting.insertMeetingMinutes */
         INSERT INTO TB_MEETING_MINUTES
-        (MEETING_ID, FULL_TEXT, FLAT_DATA, CREATE_DT)
+        (MEETING_ID, FULL_TEXT, FLAT_DATA, GENERATED_CONTENT, CREATE_DT)
         VALUES
-        (#{meetingId}, #{fullText}, #{flatData}, NOW())
+        (#{meetingId}, #{fullText}, #{flatData}, #{generatedContent}, NOW())
     </insert>
 
     <update id="updateMeetingMinutes" parameterType="meetingVO">
         /* 회의록 수정 ai.meeting.updateMeetingMinutes */
-        UPDATE TB_MEETING_MINUTES SET
-            EDITED_CONTENT = #{editedContent}
-            , MODIFY_DT     = NOW()
+        UPDATE TB_MEETING_MINUTES
+        <set>
+            <if test="fullText != null">FULL_TEXT = #{fullText},</if>
+            <if test="flatData != null">FLAT_DATA = #{flatData},</if>
+            <if test="generatedContent != null">GENERATED_CONTENT = #{generatedContent},</if>
+            <if test="editedContent != null">EDITED_CONTENT = #{editedContent},</if>
+            MODIFY_DT = NOW()
+        </set>
         WHERE MINUTES_ID = #{minutesId}
     </update>
 
@@ -222,23 +228,4 @@
         ORDER BY USER_NM ASC
     </select>
 
-    <!-- ===================== TB_TMPL_FIELD(회의록 템플릿 조회) ===================== -->
-    <select id="selectMeetingFieldList" resultType="meetingVO">
-        /* 회의록 필드 목록 조회 ai.meeting.selectMeetingFieldList */
-        SELECT
-            A.FIELD_ID
-            , A.TMPL_ID
-            , A.JSON_KEY
-            , A.FIELD_NM
-            , A.MULTILINE_YN
-            , A.SORT_ORD
-            , A.USE_YN
-            , A.CREATE_DT
-            , A.MODIFY_DT
-        FROM
-            TB_TMPL_FIELD A
-        WHERE 1=1
-            AND A.USE_YN = 'Y'
-            AND A.TMPL_ID = 'TM000004'
-    </select>
 </mapper>

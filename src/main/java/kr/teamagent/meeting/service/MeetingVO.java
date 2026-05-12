@@ -33,6 +33,8 @@ public class MeetingVO extends CommonVO {
     private String flatData;
     // 수정된 회의록 내용
     private String editedContent;
+    // 생성된 회의록 내용
+    private String generatedContent;
     private String segments;        // 화자분리용 발화단락 JSON [{seq, text}]
 
     // TB_MEETING_INFOGRAPHIC - 주제별 인포그래픽

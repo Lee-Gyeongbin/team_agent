@@ -3,6 +3,8 @@ package kr.teamagent.meeting.web;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -91,8 +93,7 @@ public class MeetingController extends BaseController {
     @ResponseBody
     public Map<String, Object> finishMeetingWithAudio(
             @RequestParam("meetingId") Long meetingId,
-            @RequestParam("audioFile") MultipartFile audioFile,
-            @RequestParam(value = "segments", required = false) String segments) throws Exception {
+            @RequestParam("audioFile") MultipartFile audioFile) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
         try {
             if (audioFile == null || audioFile.isEmpty()) {
@@ -102,7 +103,6 @@ public class MeetingController extends BaseController {
             }
             MeetingVO dataVO = new MeetingVO();
             dataVO.setMeetingId(meetingId);
-            dataVO.setSegments(segments);
             resultMap = meetingService.finishMeetingWithAudio(dataVO, audioFile);
         } catch (Exception e) {
             log.error("finishMeetingWithAudio error", e);
@@ -198,5 +198,18 @@ public class MeetingController extends BaseController {
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
         return resultMap;
+    }
+
+    @RequestMapping(value = "/ai/meeting/downloadMinutes.do")
+    public void downloadMinutes(
+            @RequestParam("meetingId") Long meetingId,
+            @RequestParam("format") String format,
+            HttpServletResponse response) throws Exception {
+        try {
+            meetingService.downloadMinutes(meetingId, format, response);
+        } catch (Exception e) {
+            log.error("downloadMinutes error", e);
+            throw new Exception("요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
     }
 }

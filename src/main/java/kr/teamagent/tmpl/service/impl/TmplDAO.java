@@ -29,7 +29,7 @@ public class TmplDAO extends EgovComAbstractDAO {
      * @throws Exception
      */
     public List<TmplFieldVO> selectTmplFieldListForTypeT() throws Exception {
-        return selectList("tmpl.selectTmplFieldListForTypeT");
+        return selectList("tmpl.selectTmplFieldList", new TmplVO());
     }
 
     /**

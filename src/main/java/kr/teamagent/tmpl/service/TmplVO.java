@@ -44,6 +44,8 @@ public class TmplVO {
         private String jsonKey;
         private String fieldNm;
         private String multilineYn;
+        // 레이아웃 타입 (table | section)
+        private String layoutType;
         private Integer sortOrd;
         private String useYn;
         private String createDt;
