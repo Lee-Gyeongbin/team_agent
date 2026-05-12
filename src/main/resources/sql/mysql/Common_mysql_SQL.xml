@@ -278,6 +278,25 @@
         WHERE NOTIFY_ID = #{notifyId}
     </update>
 
+    <update id="deleteNotify">
+        /* 알림 삭제 (USE_YN='N') common.deleteNotify */
+        UPDATE TB_NOTIFY
+        SET USE_YN = 'N'
+            , MODIFY_DT = NOW()
+        WHERE NOTIFY_ID = #{notifyId}
+    </update>
+
+    <update id="updateNotifyAllRead">
+        /* 알림 전체 읽음 처리 common.updateNotifyAllRead */
+        UPDATE TB_NOTIFY
+        SET READ_YN = 'Y'
+            , READ_DT = NOW()
+            , MODIFY_DT = NOW()
+        WHERE USER_ID = #{userId}
+          AND READ_YN = 'N'
+          AND USE_YN = 'Y'
+    </update>
+
     <select id="selectNotifyList" resultMap="notifyVOResult">
         /* 알림 목록 조회 common.selectNotifyList */
         SELECT

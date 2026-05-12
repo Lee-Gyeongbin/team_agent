@@ -164,6 +164,34 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	}
 
 	/**
+	 * 알림 삭제 (USE_YN='N')
+	 * @param notifyId 알림 ID
+	 * @return successYn, returnMsg
+	 * @throws Exception
+	 */
+	public Map<String, Object> deleteNotify(String notifyId) throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		commonDAO.deleteNotify(notifyId);
+		resultMap.put("successYn", true);
+		resultMap.put("returnMsg", "알림이 삭제되었습니다.");
+		return resultMap;
+	}
+
+	/**
+	 * 알림 전체 읽음 처리 (세션 userId 기준 READ_YN='N' 전체)
+	 * @return successYn, returnMsg
+	 * @throws Exception
+	 */
+	public Map<String, Object> updateNotifyAllRead() throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		String userId = SessionUtil.getUserId();
+		commonDAO.updateNotifyAllRead(userId);
+		resultMap.put("successYn", true);
+		resultMap.put("returnMsg", "전체 읽음 처리가 완료되었습니다.");
+		return resultMap;
+	}
+
+	/**
 	 * 평면 메뉴 목록을 PARN_MENU_ID 기준 계층 구조로 변환
 	 * @param flatList DB 조회 결과 (SORT_PATH 순)
 	 * @return 루트 메뉴 목록, 하위 메뉴는 children 리스트에 포함

@@ -199,6 +199,40 @@ public class CommonController extends BaseController {
 	}
 
 	/**
+	 * 알림 삭제
+	 * - notifyId에 해당하는 TB_NOTIFY 레코드의 USE_YN='N' 업데이트
+	 */
+	@RequestMapping("/deleteNotify.do")
+	public @ResponseBody Map<String, Object> deleteNotify(@RequestBody CommonVO.NotifyVO dataVO) throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		try {
+			resultMap = commonService.deleteNotify(dataVO.getNotifyId());
+		} catch (Exception e) {
+			log.error("deleteNotify failed", e);
+			resultMap.put("successYn", false);
+			resultMap.put("returnMsg", "알림 삭제 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
+		}
+		return resultMap;
+	}
+
+	/**
+	 * 알림 전체 읽음 처리
+	 * - 세션 userId 기준으로 READ_YN='N'인 TB_NOTIFY 레코드 전체를 READ_YN='Y', READ_DT=NOW() 업데이트
+	 */
+	@RequestMapping("/updateNotifyAllRead.do")
+	public @ResponseBody Map<String, Object> updateNotifyAllRead() throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		try {
+			resultMap = commonService.updateNotifyAllRead();
+		} catch (Exception e) {
+			log.error("updateNotifyAllRead failed", e);
+			resultMap.put("successYn", false);
+			resultMap.put("returnMsg", "전체 읽음 처리 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
+		}
+		return resultMap;
+	}
+
+	/**
 	 * 공유 받은 지식 카드 저장
 	 * - refId(SHARE_ID)로 원본 카드 조회 후 복사 등록
 	 * - TB_KNOW_CARD_SHARE SAVE_YN/SAVE_CARD_ID/SAVE_CATEGORY_ID 업데이트
