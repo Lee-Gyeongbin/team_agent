@@ -315,24 +315,6 @@
 			<scope>test</scope>
 		</dependency>
 
-		<!-- Apache POI (docx) -->
-		<dependency>
-			<groupId>org.apache.poi</groupId>
-			<artifactId>poi-ooxml</artifactId>
-			<version>5.2.3</version>
-		</dependency>
-
-		<!-- openhtmltopdf (HTML → PDF, Flying Saucer 후속 — CSS3 지원, 한글 안정) -->
-		<dependency>
-			<groupId>com.openhtmltopdf</groupId>
-			<artifactId>openhtmltopdf-core</artifactId>
-			<version>1.0.10</version>
-		</dependency>
-		<dependency>
-			<groupId>com.openhtmltopdf</groupId>
-			<artifactId>openhtmltopdf-pdfbox</artifactId>
-			<version>1.0.10</version>
-		</dependency>
 	</dependencies>
 
 	<profiles>

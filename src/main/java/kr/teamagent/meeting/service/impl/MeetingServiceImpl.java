@@ -14,9 +14,6 @@ import java.util.concurrent.TimeUnit;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.apache.poi.xwpf.usermodel.XWPFParagraph;
-import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -31,8 +28,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.google.gson.Gson;
-import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
-
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
@@ -1081,22 +1076,15 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     public void downloadMinutes(Long meetingId, String format, HttpServletResponse response) throws Exception {
         MeetingVO dataVO = new MeetingVO();
         dataVO.setMeetingId(meetingId);
-        // 회의록 내용 조회
         MeetingVO meetingVO = meetingDAO.selectMeetingMinutes(dataVO);
-        
+
         String content = (meetingVO.getEditedContent() != null && !meetingVO.getEditedContent().isEmpty())
                 ? meetingVO.getEditedContent()
                 : meetingVO.getGeneratedContent();
-        
+
         String fileName = "회의록_" + meetingId;
-        
+
         switch (format.toLowerCase()) {
-            case "pdf":
-                downloadAsPdf(content, fileName, response);
-                break;
-            case "docx":
-                downloadAsDocx(content, fileName, response);
-                break;
             case "txt":
                 downloadAsTxt(content, fileName, response);
                 break;
@@ -1107,111 +1095,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 throw new IllegalArgumentException("지원하지 않는 형식입니다: " + format);
         }
     }
-    
-    private void downloadAsPdf(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
-        response.setContentType("application/pdf");
-        response.setHeader("Content-Disposition", "attachment; filename=\"" +
-                URLEncoder.encode(fileName + ".pdf", "UTF-8") + "\"");
 
-        InputStream fontRegular = getClass().getClassLoader().getResourceAsStream("fonts/MALGUN.TTF");
-        InputStream fontBold    = getClass().getClassLoader().getResourceAsStream("fonts/MALGUNBD.TTF");
-        if (fontRegular == null) {
-            throw new IllegalStateException("PDF 폰트를 찾을 수 없습니다: classpath:fonts/MALGUN.TTF");
-        }
-
-        String styledHtml = buildPdfHtml(normalizeHtmlForPdf(htmlContent));
-
-        PdfRendererBuilder builder = new PdfRendererBuilder();
-        builder.useFont(() -> fontRegular, "Malgun Gothic", 400, com.openhtmltopdf.outputdevice.helper.BaseRendererBuilder.FontStyle.NORMAL, true);
-        if (fontBold != null) {
-            builder.useFont(() -> fontBold, "Malgun Gothic", 700, com.openhtmltopdf.outputdevice.helper.BaseRendererBuilder.FontStyle.NORMAL, true);
-        } else {
-            // Bold 폰트 파일 없으면 Regular로 700도 등록 (한글 누락 방지)
-            InputStream fontRegular2 = getClass().getClassLoader().getResourceAsStream("fonts/MALGUN.TTF");
-            builder.useFont(() -> fontRegular2, "Malgun Gothic", 700, com.openhtmltopdf.outputdevice.helper.BaseRendererBuilder.FontStyle.NORMAL, true);
-        }
-        builder.withHtmlContent(styledHtml, null);
-        builder.toStream(response.getOutputStream());
-        builder.run();
-    }
-
-    /**
-     * openhtmltopdf용 HTML 래퍼.
-     * HTML5 파서를 사용하므로 XHTML 변환 불필요 — 에디터 원본 HTML을 그대로 감싼다.
-     */
-    private String buildPdfHtml(String bodyContent) {
-        return "<!DOCTYPE html><html lang=\"ko\"><head>"
-            + "<meta charset=\"UTF-8\"/>"
-            + "<style>"
-            + "@font-face { font-family: 'Malgun Gothic'; font-weight: normal; src: local('Malgun Gothic'); }"
-            + "@font-face { font-family: 'Malgun Gothic'; font-weight: bold;   src: local('Malgun Gothic Bold'); }"
-            + "* { box-sizing: border-box; }"
-            + "body { font-family: 'Malgun Gothic', sans-serif; font-size: 14px; color: #5c6677;"
-            + "       margin: 24px 32px; line-height: 1.6; }"
-            + "h1 { font-size: 26px; font-weight: bold; color: #5c6677; margin: 0 0 32px 0; text-align: center; }"
-            + "h2 { font-size: 16px; font-weight: bold; color: #333; margin: 32px 0 8px 0;"
-            + "     padding-bottom: 8px; border-bottom: 1px solid #dce4e9; }"
-            + "h3 { font-size: 14px; font-weight: bold; color: #5c6677; margin: 16px 0 8px 0; }"
-            + "p  { margin: 0 0 12px 0; }"
-            + "table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }"
-            + "th, td { padding: 6px 10px; border: 1px solid #dce4e9; font-size: 14px;"
-            + "         color: #5c6677; line-height: 1.6; vertical-align: middle; }"
-            + "th { background: #f4f7f9; font-weight: bold; color: #333; text-align: left; }"
-            + "ul { margin: 0 0 12px 0; padding-left: 20px; }"
-            + "ol { margin: 0 0 12px 0; padding-left: 26px; }"
-            + "li { margin-bottom: 6px; }"
-            + "blockquote { margin: 0 0 12px 16px; padding: 8px 16px;"
-            + "             border-left: 3px solid #3c69db; background: #f0f4fd; font-style: italic; }"
-            + "strong, b { font-weight: bold; }"
-            + "em, i { font-style: italic; }"
-            + "img { max-width: 100%; height: auto; }"
-            + "a { color: #3c69db; text-decoration: underline; }"
-            + ".column-resize-handle, .ProseMirror-selectednode { display: none; }"
-            + "</style></head><body>"
-            + bodyContent
-            + "</body></html>";
-    }
-
-    /**
-     * openhtmltopdf는 XML 파서로 읽으므로 HTML void 태그를 XHTML 형식으로 정리한다.
-     * 에디터 인라인 font-family만 Malgun Gothic으로 통일하고 에디터 전용 속성을 제거한다.
-     */
-    private String normalizeHtmlForPdf(String htmlContent) {
-        if (htmlContent == null) return "";
-        return htmlContent
-            .replaceAll("font-family\\s*:\\s*[^;\"'>]+", "font-family: 'Malgun Gothic', sans-serif")
-            .replaceAll("\\s+data-[a-zA-Z0-9-]+(=\"[^\"]*\")?", "")
-            .replaceAll("(?i)<figure([^>]*)>", "<div$1>")
-            .replaceAll("(?i)</figure>", "</div>")
-            .replaceAll("(?i)<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)(\\s[^<>]*?[^/])?>", "<$1$2/>")
-            .replaceAll("(?i)&nbsp;", "&#160;");
-    }
-    
-    private void downloadAsDocx(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
-        response.setContentType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-        response.setHeader("Content-Disposition", "attachment; filename=\"" + 
-                URLEncoder.encode(fileName + ".docx", "UTF-8") + "\"");
-        
-        XWPFDocument document = new XWPFDocument();
-        
-        // HTML 태그 제거 후 텍스트만 추출
-        String plainText = htmlContent.replaceAll("<[^>]*>", "").replaceAll("&nbsp;", " ").trim();
-        String[] lines = plainText.split("\n");
-        
-        for (String line : lines) {
-            if (!line.trim().isEmpty()) {
-                XWPFParagraph paragraph = document.createParagraph();
-                XWPFRun run = paragraph.createRun();
-                run.setFontFamily("맑은 고딕");
-                run.setFontSize(11);
-                run.setText(line.trim());
-            }
-        }
-        
-        document.write(response.getOutputStream());
-        document.close();
-    }
-    
     private void downloadAsTxt(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
         response.setContentType("text/plain; charset=UTF-8");
         response.setHeader("Content-Disposition", "attachment; filename=\"" + 
