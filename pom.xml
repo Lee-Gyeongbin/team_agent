@@ -277,6 +277,11 @@
 			<artifactId>xercesImpl</artifactId>
 			<version>2.11.0</version>
 		</dependency>
+		<dependency>
+			<groupId>com.rometools</groupId>
+			<artifactId>rome</artifactId>
+			<version>2.1.0</version>
+		</dependency>
 
 		<!-- Commons Lang -->
 		<dependency>
@@ -310,26 +315,6 @@
 			<scope>test</scope>
 		</dependency>
 
-		<!-- Apache POI (docx) -->
-		<dependency>
-			<groupId>org.apache.poi</groupId>
-			<artifactId>poi-ooxml</artifactId>
-			<version>5.2.3</version>
-		</dependency>
-
-		<!-- OpenPDF (pdf) -->
-		<dependency>
-			<groupId>com.github.librepdf</groupId>
-			<artifactId>openpdf</artifactId>
-			<version>1.3.30</version>
-		</dependency>
-
-		<!-- Flying Saucer (HTML → PDF) -->
-		<dependency>
-			<groupId>org.xhtmlrenderer</groupId>
-			<artifactId>flying-saucer-pdf-openpdf</artifactId>
-			<version>9.1.22</version>
-		</dependency>
 	</dependencies>
 
 	<profiles>

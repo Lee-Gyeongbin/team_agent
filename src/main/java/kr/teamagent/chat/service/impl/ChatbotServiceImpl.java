@@ -5,10 +5,12 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONArray;
@@ -21,13 +23,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.socket.WebSocketSession;
 
+import com.google.gson.Gson;
+
 import kr.teamagent.chat.service.ChatbotVO;
+import kr.teamagent.chat.service.ChatbotVO.NewsRecommendCard;
+import kr.teamagent.chat.service.ChatbotVO.RssArticleRow;
 import kr.teamagent.chat.socket.ChatbotWebSocketHandler;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.service.FileVO;
+import kr.teamagent.common.util.NewsRssUtil;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
+import kr.teamagent.common.util.RestApiManager;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.prompt.service.impl.PromptServiceImpl;
 import okhttp3.HttpUrl;
@@ -44,8 +52,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
     private static final String LUNCH_MENU_AGENT_ID = "AG000009";
-    /** summary_query 동기 호출 중 reAskReport(전체 HTML 재생성) 읽기 타임아웃(초) */
-    private static final int SUMMARY_READ_TIMEOUT_REPORT_SEC = 180;
+    /** summary_query 동기 호출 시 프롬프트·응답이 커 지연이 길어질 수 있는 경우의 OkHttp 읽기 타임아웃(초). */
+    private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
+    private static final String NEWS_CURATION_AGENT_ID = "AG000012";
+    private static final int NEWS_RECOMMEND_COUNT = 5;
+    private static final Gson NEWS_CURATE_PROMPT_GSON = new Gson();
 
     @Autowired
     ChatbotDAO chatbotDAO;
@@ -61,6 +72,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     PromptServiceImpl promptService;
+
+    @Autowired
+    RestApiManager restApiManager;
 
     /**
      * 채팅 에이전트 목록 조회
@@ -140,6 +154,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
+        if (NEWS_CURATION_AGENT_ID.equals(agentId)) {
+            deliverNewsRecommendationViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
+            return;
+        }
+
         String apiUrl = this.resolveStreamingApiUrl(svcTy, agentId, attachmentFileIds);
         logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
 
@@ -174,7 +193,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 스트리밍 호출용 URL. svcTy=C 이고 첨부 파일 ID가 있으면 file_query 전용 URL(Globals.chatbot.gpt.apiFileUrl) 사용.
+     * 스트리밍 호출용 URL. 점심 에이전트는 전용 URL.
      */
     private String resolveStreamingApiUrl(String svcTy, String agentId, List<Long> attachmentFileIds) {
         if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
@@ -514,7 +533,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                 String kakaoPlaceUrl = resolveKakaoPlaceUrlByKeyword(restaurant, location);
                 normalizedRow.put("address", CommonUtil.isNotEmpty(kakaoPlaceUrl) ? kakaoPlaceUrl : "");
-                String lunchImageUrl = resolveLunchMenuImageUrl(menu, restaurant);
+                String lunchImageUrl = resolveLunchMenuImageUrl(menu);
                 normalizedRow.put("imageUrl", CommonUtil.isNotEmpty(lunchImageUrl) ? lunchImageUrl : "");
                 normalizedRows.add(normalizedRow);
             }
@@ -527,29 +546,19 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /**
      * 점심 추천 항목의 메뉴/식당명을 이용해 이미지 API를 호출하고,
-     * 프론트에서 바로 사용할 수 있는 URL(http 또는 data URL) 형태로 반환한다.
+     * 프론트에서 바로 쓰는 data URL(data:image/...;base64,...)만 반환한다.
      */
-    private String resolveLunchMenuImageUrl(String menu, String restaurant) {
-        String imageKeyword = CommonUtil.isNotEmpty(menu) ? menu.trim() : "";
-        if (CommonUtil.isEmpty(imageKeyword)) {
-            imageKeyword = CommonUtil.isNotEmpty(restaurant) ? restaurant.trim() : "";
-        }
-        if (CommonUtil.isEmpty(imageKeyword)) {
-            return "";
-        }
-
-        String prompt = "음식 사진 생성. 설명 없이 음식만 사실적으로 표현. 음식명: " + imageKeyword;
+    private String resolveLunchMenuImageUrl(String menu) {
+        String prompt = "음식 사진 생성. 설명 없이 음식만 사실적으로 표현. 음식명: " + menu;
         String imageResult = callAiImageApi(prompt);
         if (CommonUtil.isEmpty(imageResult)) {
             return "";
         }
 
-        String normalized = imageResult.trim();
-        if (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("data:image/")) {
+        String normalized = imageResult.trim().replace("\\/", "/");
+        if (normalized.startsWith("data:image/")) {
             return normalized;
         }
-        
-        // image API가 순수 base64를 반환하는 경우 프론트 표시용 data URL로 변환
         return "data:image/png;base64," + normalized;
     }
 
@@ -741,8 +750,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             if (isLunchAgent) {
                                 answer = ensureLunchAddressUrlFormat(answer);
                                 callback.onChunk(answer, answer, null);
-                            }
-                            if (!isLunchAgent && accumulatedContent.length() == 0) {
+                            } else if (accumulatedContent.length() == 0) {
                                 callback.onChunk(answer, answer, null);
                             }
                             accumulatedContent = new StringBuilder(answer);
@@ -776,11 +784,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             hasStreamError = true;
         } finally {
             try {
-                if (accumulatedContent.length() > 0 && LUNCH_MENU_AGENT_ID.equals(agentId)) {
-                    String normalizedAnswer = ensureLunchAddressUrlFormat(accumulatedContent.toString());
-                    accumulatedContent = new StringBuilder(normalizedAnswer);
-                }
-
                 if (accumulatedContent.length() > 0 && !"llmTest".equals(svcTy)) {
                     try {
                         savedLogId = this.doInsertAiLog(
@@ -1246,7 +1249,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return null;
         }
 
-        int readTimeoutSec = "reAskReport".equals(purpose) || "createDoc".equals(purpose) ? SUMMARY_READ_TIMEOUT_REPORT_SEC : 60;
+        int readTimeoutSec = ("reAskReport".equals(purpose) || "createDoc".equals(purpose) || "news_curate".equals(purpose))
+                ? SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC
+                : 60;
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", prompt);
@@ -1816,6 +1821,212 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     public String getPsychologyChartData(String prompt) {
         return callAiSummary(prompt, "방사형 차트 데이터");
+    }
+
+    /**
+     * WebSocket {@code query} 첫 줄을 쉼표(, / ，)로 나눈 관심 카테고리 목록. 개행 뒤는 무시.
+     */
+    private static List<String> parseNewsKindsFromWebSocketQuery(String query) {
+        if (CommonUtil.isEmpty(query)) {
+            return Collections.emptyList();
+        }
+        String trimmedWsQuery = query.trim();
+        String[] firstLineParts = trimmedWsQuery.split("\\r\\n|\\n|\\r", 2);
+        String interestLine = firstLineParts[0].trim();
+        if (CommonUtil.isEmpty(interestLine)) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(interestLine.split("[,，]")).map(String::trim).filter(categoryToken -> !categoryToken.isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 뉴스 큐레이션 에이전트 전용
+     */
+    private void deliverNewsRecommendationViaWebSocket(String query, String threadId, String userId, String svcTy,
+            String modelId, String refId, String agentId, List<Long> attachmentFileIds,
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
+        Map<String, Object> newsRecommendPayload = recommendNews(parseNewsKindsFromWebSocketQuery(query));
+        String responseJson = new com.google.gson.Gson().toJson(newsRecommendPayload);
+        callback.onChunk(responseJson, responseJson, null);
+        String savedLogId = "";
+        if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
+            try {
+                savedLogId = doInsertAiLog(
+                        threadId,
+                        agentId,
+                        query,
+                        responseJson,
+                        0,
+                        0,
+                        svcTy,
+                        modelId,
+                        refId,
+                        userId,
+                        "",
+                        "",
+                        "",
+                        "",
+                        new ArrayList<>(),
+                        "",
+                        "");
+                updateChatRoomLastChatDt(threadId);
+                if (CommonUtil.isNotEmpty(savedLogId) && attachmentFileIds != null && !attachmentFileIds.isEmpty()) {
+                    try {
+                        ChatbotVO fileVO = new ChatbotVO();
+                        fileVO.setChatFileIdList(attachmentFileIds);
+                        fileVO.setLogId(Long.parseLong(savedLogId));
+                        chatbotDAO.linkChatFilesToLog(fileVO);
+                    } catch (Exception e) {
+                        logger.warn("첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
+            }
+        }
+        callback.onComplete(responseJson, "", "", new ArrayList<>(), CommonUtil.nullToBlank(threadId),
+                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null);
+    }
+
+    public Map<String, Object> recommendNews(List<String> interests) {
+        List<String> interestCategories = interests != null ? interests : Collections.emptyList();
+        List<RssArticleRow> rssCandidateRows = NewsRssUtil.collectCandidates(restApiManager, logger, interestCategories);
+        if (rssCandidateRows.isEmpty()) {
+            return buildNewsRecommendResponse(interestCategories, new ArrayList<>(), false, "RSS에서 기사를 가져오지 못했습니다.");
+        }
+        String curatorPrompt = buildNewsCuratorPrompt(interestCategories, rssCandidateRows);
+        String curatorAiJson = callAiSummary(curatorPrompt, "news_curate");
+        List<NewsRecommendCard> curatedCards = parseNewsCuratorJson(curatorAiJson, rssCandidateRows);
+        if (curatedCards.isEmpty()) {
+            String msg = CommonUtil.isEmpty(curatorAiJson)
+                    ? "뉴스 큐레이션 AI 응답이 없습니다. 서버 지연 또는 타임아웃일 수 있으니 잠시 후 다시 시도해 주세요."
+                    : "AI가 선정한 뉴스를 확인하지 못했습니다. 응답 형식 오류일 수 있으니 다시 시도해 주세요.";
+            return buildNewsRecommendResponse(interestCategories, new ArrayList<>(), false, msg);
+        }
+        return buildNewsRecommendResponse(interestCategories, curatedCards, true, null);
+    }
+
+    private Map<String, Object> buildNewsRecommendResponse(List<String> interestsEcho, List<NewsRecommendCard> curatedNewsCards,
+            boolean success, String message) {
+        return Map.of(
+                "successYn", success,
+                "returnMsg", CommonUtil.nullToBlank(message),
+                "interests", interestsEcho,
+                "news", curatedNewsCards);
+    }
+
+    private String buildNewsCuratorPrompt(List<String> interests, List<RssArticleRow> candidates) {
+        List<Map<String, Object>> curatorInputArticles = new ArrayList<>(candidates.size());
+        for (RssArticleRow candidateRow : candidates) {
+            curatorInputArticles.add(NewsRssUtil.curatorPromptArticleMap(candidateRow));
+        }
+        String interestsJson = NEWS_CURATE_PROMPT_GSON.toJson(interests);
+        String articlesJson = NEWS_CURATE_PROMPT_GSON.toJson(curatorInputArticles);
+        String curatorSystemPrompt = "너는 뉴스 큐레이션 편집자이다.\n\n"
+
+                        + "[입력 데이터]\n"
+                        + "- 사용자 관심 카테고리: " + interestsJson + "\n"
+                        + "- 후보 기사 목록(JSON 배열): " + articlesJson + "\n"
+                        + "  각 항목의 rssCategory는 서버가 사용자 관심에 맞춰 선택한 RSS 피드 구분이다. 이를 바꾸거나 재분류하지 않고 그대로 사용한다.\n\n"
+
+                        + "[역할]\n"
+                        + "후보 기사 목록 중에서 사용자 관심 카테고리와 가장 관련성이 높은 기사 " + NEWS_RECOMMEND_COUNT + "개를 선정한다.\n\n"
+
+                        + "[전제 조건]\n"
+                        + "1. 반드시 후보 기사 목록 안에 존재하는 기사만 사용한다.\n"
+                        + "2. 존재하지 않는 기사나 값을 임의 생성하지 않는다.\n"
+                        + "3. source, title, sourceUrl, imageUrl 값은 입력 데이터를 그대로 사용한다.\n"
+                        + "4. imageUrl은 기사 원본 데이터의 imageUrl 값을 그대로 사용한다.\n"
+                        + "5. 받은 카테고리별로 1가지 이상의 기사를 선택해야 한다.\n\n"
+
+                        + "[작업 규칙]\n"
+                        + "1. 사용자 관심 카테고리와 일치하거나 가장 가까운 기사를 우선 선정한다.\n"
+                        + "2. 같은 주제 또는 유사한 내용의 기사는 중복 선택하지 않는다.\n"
+                        + "3. summary만 새롭게 작성하며, 기사 내용을 자연스럽게 축약한 한국어 두 문장으로 작성한다.\n"
+                        + "4. summary는 최대 150자 이내로 간결하게 작성한다.\n"
+                        + "5. summary에는 과장, 추측, 허위 표현을 사용하지 않는다.\n\n"
+
+                        + "[출력 규칙]\n"
+                        + "1. 반드시 JSON 배열만 출력한다.\n"
+                        + "2. 설명, 마크다운, 코드블록, 추가 텍스트는 절대 출력하지 않는다.\n"
+                        + "3. 배열 원소 개수는 반드시 정확히 " + NEWS_RECOMMEND_COUNT + "개이다.\n"
+                        + "4. rank 값은 반드시 1부터 " + NEWS_RECOMMEND_COUNT + "까지 순서로 출력한다.\n"
+                        + "5. 출력 필드는 아래만 사용한다.\n"
+                        + "   - rank\n"
+                        + "   - source\n"
+                        + "   - title\n"
+                        + "   - summary\n"
+                        + "   - sourceUrl\n"
+                        + "   - imageUrl\n\n"
+
+                        + "[출력 예시]\n"
+                        + "[\n"
+                        + "  {\n"
+                        + "    \"rank\": 1,\n"
+                        + "    \"source\": \"전자신문\",\n"
+                        + "    \"title\": \"삼성전자 AI 반도체 투자 확대\",\n"
+                        + "    \"summary\": \"삼성전자가 AI 반도체 투자를 확대한다. 생산 역량 강화에 나선다.\",\n"
+                        + "    \"sourceUrl\": \"https://www.etnews.com/20260507000353\",\n"
+                        + "    \"imageUrl\": \"https://image.example.com/sample.jpg\"\n"
+                        + "  }\n"
+                        + "]";
+        return curatorSystemPrompt;
+    }
+
+    private Map<String, RssArticleRow> buildUrlIndex(List<RssArticleRow> candidates) {
+        Map<String, RssArticleRow> articleRowBySourceUrl = new HashMap<>();
+        for (RssArticleRow candidateRow : candidates) {
+            String sourceUrlKey = candidateRow.getLink() != null ? candidateRow.getLink().trim() : "";
+            if (!sourceUrlKey.isEmpty() && !articleRowBySourceUrl.containsKey(sourceUrlKey)) {
+                articleRowBySourceUrl.put(sourceUrlKey, candidateRow);
+            }
+        }
+        return articleRowBySourceUrl;
+    }
+
+    private List<NewsRecommendCard> parseNewsCuratorJson(String curatorAiJson, List<RssArticleRow> candidates) {
+        if (CommonUtil.isEmpty(curatorAiJson)) {
+            return new ArrayList<>();
+        }
+        try {
+            JSONParser parser = new JSONParser();
+            JSONArray curatorItems = (JSONArray) parser.parse(curatorAiJson.trim());
+            Map<String, RssArticleRow> articleRowBySourceUrl = buildUrlIndex(candidates);
+            List<NewsRecommendCard> curatedCards = new ArrayList<>();
+            for (Object curatorItem : curatorItems) {
+                JSONObject curatorObject = (JSONObject) curatorItem;
+                String sourceUrl = curatorObject.get("sourceUrl") == null ? "" : String.valueOf(curatorObject.get("sourceUrl")).trim();
+                RssArticleRow matchedRow = articleRowBySourceUrl.get(sourceUrl);
+                if (matchedRow == null) {
+                    return new ArrayList<>();
+                }
+                String aiSummary = curatorObject.get("summary") == null ? "" : String.valueOf(curatorObject.get("summary")).trim();
+                curatedCards.add(buildNewsRecommendCard(matchedRow, aiSummary));
+            }
+            for (int rankIndex = 0; rankIndex < curatedCards.size(); rankIndex++) {
+                curatedCards.get(rankIndex).setRank(rankIndex + 1);
+            }
+            return curatedCards;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    /** RSS 후보 행 1건을 뉴스 카드로 변환한다. rank는 호출부에서 일괄 부여한다. */
+    private NewsRecommendCard buildNewsRecommendCard(RssArticleRow row, String aiSummary) {
+        NewsRecommendCard card = new NewsRecommendCard();
+        card.setCategory(CommonUtil.nullToBlank(row.getRssCategory()));
+        card.setSource(CommonUtil.nullToBlank(row.getPressLabel()));
+        card.setTitle(CommonUtil.nullToBlank(row.getTitle()));
+        card.setSourceUrl(CommonUtil.nullToBlank(row.getLink()));
+        card.setImageUrl(CommonUtil.nullToBlank(row.getImageUrl()));
+        String snippet = CommonUtil.nullToBlank(row.getSnippet());
+        String titleFallback = CommonUtil.nullToBlank(row.getTitle());
+        String displaySummary = Arrays.asList(aiSummary, snippet, titleFallback).stream().filter(CommonUtil::isNotEmpty).findFirst()
+                .orElse("");
+        card.setSummary(displaySummary);
+        return card;
     }
 
 }

@@ -171,6 +171,32 @@ public class ChatbotVO extends CommonVO {
         private String createDt;
     }
 
+    /** 뉴스 추천 API 응답 카드 1건 (JSON 직렬화용). */
+    @Getter
+    @Setter
+    public static class NewsRecommendCard {
+        private int rank;
+        private String source;
+        private String title;
+        private String category;
+        private String summary;
+        private String sourceUrl;
+        private String imageUrl;
+    }
+
+    /** 연합뉴스 RSS 후보 기사 1건 (뉴스 큐레이션 수집·AI 프롬프트 매핑용). */
+    @Getter
+    @Setter
+    public static class RssArticleRow {
+        private int id;
+        private String pressLabel;
+        private String rssCategory;
+        private String title;
+        private String link;
+        private String snippet;
+        private String imageUrl;
+    }
+
     // 고정 여부
     private String fixYn;
 
