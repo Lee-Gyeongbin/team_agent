@@ -222,6 +222,16 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return selectList("ai.chatbot.selectChatRefsForShareCopyRoom", searchVO);
     }
 
+    /** 공유 원본 ROOM의 TB_CHAT_LOG에 연결된 TB_CHAT_FILE (복사 INSERT용, LOG_ID 오름차순) */
+    public List<ChatbotVO> selectChatFilesForShareCopyRoom(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectChatFilesForShareCopyRoom", searchVO);
+    }
+
+    /** 공유 로그 복사 시 첨부 행 INSERT (실파일 재사용, CREATE_USER_ID = 원본 업로더) */
+    public int insertChatFileShareCopy(ChatbotVO chatbotVO) throws Exception {
+        return insert("ai.chatbot.insertChatFileShareCopy", chatbotVO);
+    }
+
     /**
      * 채팅 파일 저장
      * @param chatbotVO
@@ -253,7 +263,7 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 채팅 첨부 단건 조회 (대화방 소유자와 일치할 때만)
+     * 채팅 첨부 단건 조회 (대화방 소유 + 첨부 CREATE_USER 일치 또는 CREATE_USER 미기록 레거시)
      */
     public ChatbotVO selectChatFileOwnedByUser(ChatbotVO searchVO) throws Exception {
         return selectOne("ai.chatbot.selectChatFileOwnedByUser", searchVO);
