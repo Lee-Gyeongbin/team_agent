@@ -70,6 +70,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return insert("ai.meeting.insertMeetingInfographic", dataVO);
     }
 
+    /** 인포그래픽 이미지/상태 수정 */
+    public int updateMeetingInfographic(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingInfographic", dataVO);
+    }
+
     // ── 화자 분리 ──────────────────────────────────────────────────────
 
     /** 화자 목록 조회 */
