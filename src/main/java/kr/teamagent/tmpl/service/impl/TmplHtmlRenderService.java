@@ -50,6 +50,8 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
             String value = renderTemplateValue(json.get(key), "Y".equals(field.getMultilineYn()));
             html = html.replace("{{" + key + "}}", value);
         }
+        // 모든 치환 완료 후 잔여 {{no}}가 있으면 제거한다.
+        html = html.replace("{{no}}", "");
         return html;
     }
 
@@ -85,22 +87,25 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
             }
 
             matchedRow = true;
-            if (countTemplatePlaceholders(tr) == 1) {
+            // {{no}}는 예약 순번 플레이스홀더이므로 실제 데이터 placeholder 수에서 제외한다.
+            int dataPlaceholderCount = countTemplatePlaceholders(tr.replace("{{no}}", ""));
+            if (dataPlaceholderCount == 1) {
                 List<String> rows = extractTemplateRowValues(value);
                 if (rows.isEmpty()) {
                     // 값이 비어 있으면 placeholder만 제거해 빈 cell로 유지.
-                    out.append(tr.replace(placeholder, ""));
+                    out.append(tr.replace(placeholder, "").replace("{{no}}", ""));
                 } else {
-                    // 배열 길이만큼 동일한 tr을 복제한다.
-                    for (String row : rows) {
-                        String cellValue = escapeHtml(row).replace("\r\n", "\n").replace("\n", "<br/>");
-                        out.append(tr.replace(placeholder, cellValue));
+                    // 배열 길이만큼 동일한 tr을 복제하며 {{no}}에 순번(1부터)을 채운다.
+                    for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
+                        String cellValue = escapeHtml(rows.get(rowIdx)).replace("\r\n", "\n").replace("\n", "<br/>");
+                        out.append(tr.replace(placeholder, cellValue)
+                                     .replace("{{no}}", String.valueOf(rowIdx + 1)));
                     }
                 }
             } else {
                 // 같은 row에 placeholder가 여러 개 섞여 있으면 복제 로직보다 단일 치환이 안전하다.
                 String singleValue = renderTemplateValue(value, multiline);
-                out.append(tr.replace(placeholder, singleValue));
+                out.append(tr.replace(placeholder, singleValue).replace("{{no}}", ""));
             }
             lastEnd = matcher.end();
         }
@@ -108,7 +113,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
 
         if (!matchedRow) {
             String fallback = renderTemplateValue(value, multiline);
-            return html.replace(placeholder, fallback);
+            return html.replace(placeholder, fallback).replace("{{no}}", "");
         }
         return out.toString();
     }

@@ -322,18 +322,16 @@
 			<version>5.2.3</version>
 		</dependency>
 
-		<!-- OpenPDF (pdf) -->
+		<!-- openhtmltopdf (HTML → PDF, Flying Saucer 후속 — CSS3 지원, 한글 안정) -->
 		<dependency>
-			<groupId>com.github.librepdf</groupId>
-			<artifactId>openpdf</artifactId>
-			<version>1.3.30</version>
+			<groupId>com.openhtmltopdf</groupId>
+			<artifactId>openhtmltopdf-core</artifactId>
+			<version>1.0.10</version>
 		</dependency>
-
-		<!-- Flying Saucer (HTML → PDF) -->
 		<dependency>
-			<groupId>org.xhtmlrenderer</groupId>
-			<artifactId>flying-saucer-pdf-openpdf</artifactId>
-			<version>9.1.22</version>
+			<groupId>com.openhtmltopdf</groupId>
+			<artifactId>openhtmltopdf-pdfbox</artifactId>
+			<version>1.0.10</version>
 		</dependency>
 	</dependencies>
 
