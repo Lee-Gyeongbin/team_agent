@@ -189,7 +189,25 @@ public class ChatbotVO extends CommonVO {
     private String expireDt;
     private String fileDelDt;
 
-    /** selectChatLogList: 질문(LOG)별 TB_CHAT_FILE JSON 배열 문자열 */
+    /** 공유 로그 복사 시 원본 첨부의 CREATE_USER_ID (TB_CHAT_FILE) — insert 매핑용 */
+    private String chatFileUploaderUserId;
+
+    /**
+     * selectChatLogList: 질문(LOG)별 TB_CHAT_FILE JSON 배열 문자열.
+     * 각 원소는 {@link ChatAttachmentItem} 필드명과 동일한 JSON 키(chatFileId, fileName, filePath, mimeType, createUserId).
+     */
     private String chatAttachmentList;
+
+    /** selectChatLogList chatAttachmentList JSON 원소 구조 (TB_CHAT_FILE) */
+    @Getter
+    @Setter
+    public static class ChatAttachmentItem {
+        private String chatFileId;
+        private String fileName;
+        private String filePath;
+        private String mimeType;
+        /** TB_CHAT_FILE.CREATE_USER_ID (업로더) */
+        private String createUserId;
+    }
 
 }

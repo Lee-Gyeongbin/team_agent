@@ -44,6 +44,8 @@ public class MeetingVO extends CommonVO {
     private String treeText;
     private String infographicImg;
     private Integer sortOrd;
+    /** 001:대기 002:생성중 003:완료 004:실패 */
+    private String infographicStatus;
     private List<MeetingVO> infographicList;
 
     // TB_MEETING_SPEAKER - 화자 분리

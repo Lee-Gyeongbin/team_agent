@@ -125,15 +125,16 @@
     <select id="selectMeetingInfographicList" resultType="meetingVO">
         /* 회의별 인포그래픽 조회 ai.meeting.selectMeetingInfographicList */
         SELECT
-            INFOGRAPHIC_ID   AS INFOGRAPHIC_ID
-            , MEETING_ID     AS MEETING_ID
-            , TOPIC_NM       AS TOPIC_NM
-            , TOPIC_SUMMARY  AS TOPIC_SUMMARY
-            , TREE_TEXT      AS TREE_TEXT
+            INFOGRAPHIC_ID    AS INFOGRAPHIC_ID
+            , MEETING_ID      AS MEETING_ID
+            , TOPIC_NM        AS TOPIC_NM
+            , TOPIC_SUMMARY   AS TOPIC_SUMMARY
+            , TREE_TEXT       AS TREE_TEXT
             , INFOGRAPHIC_IMG AS INFOGRAPHIC_IMG
-            , SORT_ORD       AS SORT_ORD
-            , CREATE_DT      AS CREATE_DT
-            , MODIFY_DT      AS MODIFY_DT
+            , SORT_ORD        AS SORT_ORD
+            , STATUS          AS INFOGRAPHIC_STATUS
+            , CREATE_DT       AS CREATE_DT
+            , MODIFY_DT       AS MODIFY_DT
         FROM TB_MEETING_INFOGRAPHIC
         WHERE 1=1
             AND MEETING_ID = #{meetingId}
@@ -155,10 +156,19 @@
         useGeneratedKeys="true" keyProperty="infographicId">
         /* 인포그래픽 등록 ai.meeting.insertMeetingInfographic */
         INSERT INTO TB_MEETING_INFOGRAPHIC
-        (MEETING_ID, TOPIC_NM, TOPIC_SUMMARY, TREE_TEXT, INFOGRAPHIC_IMG, SORT_ORD, USE_YN, CREATE_DT)
+        (MEETING_ID, TOPIC_NM, TOPIC_SUMMARY, TREE_TEXT, INFOGRAPHIC_IMG, SORT_ORD, STATUS, USE_YN, CREATE_DT)
         VALUES
-        (#{meetingId}, #{topicNm}, #{topicSummary}, #{treeText}, #{infographicImg}, #{sortOrd}, 'Y', NOW())
+        (#{meetingId}, #{topicNm}, #{topicSummary}, #{treeText}, #{infographicImg}, #{sortOrd}, #{infographicStatus}, 'Y', NOW())
     </insert>
+
+    <update id="updateMeetingInfographic" parameterType="meetingVO">
+        /* 인포그래픽 이미지/상태 수정 ai.meeting.updateMeetingInfographic */
+        UPDATE TB_MEETING_INFOGRAPHIC SET
+            INFOGRAPHIC_IMG = #{infographicImg}
+            , STATUS        = #{infographicStatus}
+            , MODIFY_DT     = NOW()
+        WHERE INFOGRAPHIC_ID = #{infographicId}
+    </update>
 
     <!-- ===================== TB_MEETING_SPEAKER ===================== -->
 
