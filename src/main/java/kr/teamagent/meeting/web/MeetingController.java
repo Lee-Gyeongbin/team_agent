@@ -203,7 +203,7 @@ public class MeetingController extends BaseController {
     }
 
     /** 인포그래픽 이미지 생성 SSE 스트림 */
-    @RequestMapping(value = "/ai/meeting/streamInfographic.do", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RequestMapping(value = "/ai/meeting/streamInfographic.do", produces = "text/event-stream;charset=UTF-8")
     @ResponseBody
     public SseEmitter streamInfographic(@RequestParam("meetingId") Long meetingId) {
         return meetingService.streamInfographicGeneration(meetingId);
