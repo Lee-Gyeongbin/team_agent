@@ -8,6 +8,7 @@ import javax.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.meeting.service.MeetingVO;
@@ -198,6 +200,21 @@ public class MeetingController extends BaseController {
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
         return resultMap;
+    }
+
+    /** 인포그래픽 이미지 생성 SSE 스트림 */
+    @RequestMapping(value = "/ai/meeting/streamInfographic.do", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @ResponseBody
+    public SseEmitter streamInfographic(@RequestParam("meetingId") Long meetingId) {
+        return meetingService.streamInfographicGeneration(meetingId);
+    }
+
+    /** 인포그래픽 목록 조회 (폴백용) */
+    @RequestMapping("/ai/meeting/selectMeetingInfographicList.do")
+    @ResponseBody
+    public ModelAndView selectMeetingInfographicList(MeetingVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(meetingService.selectMeetingInfographicList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
     }
 
     @RequestMapping(value = "/ai/meeting/downloadMinutes.do")

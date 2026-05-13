@@ -1249,9 +1249,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return null;
         }
 
-        int readTimeoutSec = ("reAskReport".equals(purpose) || "news_curate".equals(purpose))
+        int readTimeoutSec = ("reAskReport".equals(purpose) || "createDoc".equals(purpose) || "news_curate".equals(purpose))
                 ? SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC
-                : 30;
+                : 60;
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", prompt);
@@ -1566,6 +1566,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * 공유 링크(유효 토큰)의 원본 대화 로그를 로그인 사용자의 대화방으로 복사한다.
      * TB_CHAT_REF(M 타입 참조 행)는 새 LOG_ID에 맞게 함께 복사한다.
+     * TB_CHAT_FILE은 동일 STORAGE 경로를 가리키는 행만 복사하며 CREATE_USER_ID는 원본 업로더를 유지한다.
      *
      * @param searchVO roomId: 복사 대상(신규) 대화방, shareToken: 공유 토큰
      */
@@ -1623,6 +1624,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         List<ChatbotVO> sourceLogs = chatbotDAO.selectChatLogsForShareCopy(srcRoomParam);
         List<ChatbotVO> refRows = chatbotDAO.selectChatRefsForShareCopyRoom(srcRoomParam);
+        List<ChatbotVO> fileRows = chatbotDAO.selectChatFilesForShareCopyRoom(srcRoomParam);
         Map<Long, List<ChatbotVO>> refsBySourceLogId = new HashMap<>();
         for (ChatbotVO r : refRows) {
             Long oldLogId = r.getLogId();
@@ -1630,6 +1632,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 continue;
             }
             refsBySourceLogId.computeIfAbsent(oldLogId, k -> new ArrayList<>()).add(r);
+        }
+        Map<Long, List<ChatbotVO>> filesBySourceLogId = new HashMap<>();
+        for (ChatbotVO f : fileRows) {
+            Long oldLogId = f.getLogId();
+            if (oldLogId == null) {
+                continue;
+            }
+            filesBySourceLogId.computeIfAbsent(oldLogId, k -> new ArrayList<>()).add(f);
         }
 
         int copied = 0;
@@ -1671,6 +1681,29 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         refIns.setMainPageNo(refSrc.getMainPageNo());
                         refIns.setRelatedPages(refSrc.getRelatedPages());
                         chatbotDAO.insertChatRef(refIns);
+                    }
+                }
+            }
+
+            if (oldLogId != null && ins.getLogId() != null) {
+                List<ChatbotVO> attachList = filesBySourceLogId.get(oldLogId);
+                if (attachList != null) {
+                    for (ChatbotVO fSrc : attachList) {
+                        if (!CommonUtil.isNotEmpty(fSrc.getChatFileUploaderUserId())
+                                || !CommonUtil.isNotEmpty(fSrc.getFilePath())) {
+                            continue;
+                        }
+                        ChatbotVO fIns = new ChatbotVO();
+                        fIns.setRoomId(destRoomId);
+                        fIns.setLogId(ins.getLogId());
+                        fIns.setFileName(fSrc.getFileName());
+                        fIns.setStoreFileName(fSrc.getStoreFileName());
+                        fIns.setFilePath(fSrc.getFilePath());
+                        fIns.setFileSize(fSrc.getFileSize());
+                        fIns.setFileType(fSrc.getFileType());
+                        fIns.setFileDelDt(fSrc.getFileDelDt());
+                        fIns.setChatFileUploaderUserId(fSrc.getChatFileUploaderUserId());
+                        chatbotDAO.insertChatFileShareCopy(fIns);
                     }
                 }
             }
@@ -1727,7 +1760,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 채팅 첨부 미리보기 (본인 대화방 파일만, FileService 스토리지 뷰와 동일 규칙)
+     * 채팅 첨부 미리보기 (본인 대화방 + TB_CHAT_FILE.CREATE_USER_ID가 현재 사용자와 같거나 레거시 NULL인 경우만)
      */
     public Map<String, Object> viewChatFile(ChatbotVO searchVO) throws Exception {
         searchVO.setUserId(SessionUtil.getUserId());

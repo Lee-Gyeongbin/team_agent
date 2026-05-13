@@ -4,11 +4,14 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import javax.servlet.http.HttpServletResponse;
@@ -25,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.xhtmlrenderer.pdf.ITextRenderer;
 
 import com.amazonaws.services.s3.AmazonS3;
@@ -49,6 +53,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     private static final Logger logger = LoggerFactory.getLogger(MeetingServiceImpl.class);
     private static final String MINUTES_TMPL_ID = "TM000005";
+    private static final ExecutorService INFOGRAPHIC_EXECUTOR = Executors.newFixedThreadPool(3);
 
     @Autowired
     private MeetingDAO meetingDAO;
@@ -698,6 +703,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 dataVO.setMinutesId(existing.getMinutesId());
                 meetingDAO.updateMeetingMinutes(dataVO);
             }
+
+            // 인포그래픽 이미지 API 동기 호출 — 운영에서 필요 시:
+            saveMeetingInfographic(dataVO, (JSONArray) json.get("infographic_topics"));
     
             logger.info("회의록 저장 완료 - meetingId: {}", dataVO.getMeetingId());
         } catch (Exception e) {
@@ -720,8 +728,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * LLM 회의록의 인포그래픽 주제 목록 저장
-     * topic image 생성 실패 시 topic row는 저장하되 이미지는 null 허용
+     * LLM 회의록의 인포그래픽 주제 목록 저장 (2단계 비동기)
+     * 1단계: 모든 주제 row를 STATUS=002(생성중)로 즉시 저장 → 프론트에 빠른 응답
+     * 2단계: 비동기로 AI 이미지 생성 후 STATUS=003(완료)/004(실패)로 업데이트
      */
     private void saveMeetingInfographic(MeetingVO dataVO, JSONArray infographicTopics) {
         try {
@@ -732,11 +741,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 return;
             }
 
+            // 1단계: 주제 row를 STATUS=002(생성중)로 선저장
+            List<MeetingVO> pendingList = new ArrayList<>();
             for (int i = 0; i < infographicTopics.size(); i++) {
                 Object topicObj = infographicTopics.get(i);
-                if (!(topicObj instanceof JSONObject)) {
-                    continue;
-                }
+                if (!(topicObj instanceof JSONObject)) continue;
 
                 JSONObject topicJson = (JSONObject) topicObj;
                 String topicNm = trimToLength(stringValue(topicJson.get("topic_nm")), 200);
@@ -748,29 +757,141 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                String topicSummary = stringValue(topicJson.get("topic_summary"));
-                String treeText = stringValue(topicJson.get("tree_text"));
-
                 MeetingVO infographicVO = new MeetingVO();
                 infographicVO.setMeetingId(dataVO.getMeetingId());
                 infographicVO.setSortOrd(i + 1);
                 infographicVO.setTopicNm(topicNm);
-                infographicVO.setTopicSummary(topicSummary);
-                infographicVO.setTreeText(treeText);
-
-                String imageQuery = buildInfographicImageQuery(topicNm, topicSummary, treeText);
-                String infographicImg = callAiImageApi(imageQuery);
-                if (infographicImg == null || infographicImg.isEmpty()) {
-                    logger.warn("인포그래픽 이미지 생성 실패 - meetingId: {}, topic: {}", dataVO.getMeetingId(), topicNm);
-                }
-                infographicVO.setInfographicImg(infographicImg);
+                infographicVO.setTopicSummary(stringValue(topicJson.get("topic_summary")));
+                infographicVO.setTreeText(stringValue(topicJson.get("tree_text")));
+                infographicVO.setInfographicStatus("002"); // 생성중
                 meetingDAO.insertMeetingInfographic(infographicVO);
+                pendingList.add(infographicVO);
             }
 
-            logger.info("인포그래픽 저장 완료 - meetingId: {}, topicCount: {}", dataVO.getMeetingId(), infographicTopics.size());
+            if (pendingList.isEmpty()) return;
+            logger.info("인포그래픽 row 선저장 완료 (SSE 스트림 대기) - meetingId: {}, count: {}",
+                dataVO.getMeetingId(), pendingList.size());
+
         } catch (Exception e) {
             logger.error("인포그래픽 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
         }
+    }
+
+    /**
+     * 인포그래픽 이미지 생성 SSE 스트림
+     * - STATUS=002(생성중) 인 항목을 순차 처리하며 완료 시마다 SSE 이벤트 전송
+     * - 프론트는 finishMeetingWithAudio 응답 후 이 엔드포인트를 구독
+     */
+    public SseEmitter streamInfographicGeneration(Long meetingId) {
+        SseEmitter emitter = new SseEmitter(0L);
+
+        if (meetingId == null) {
+            sendSseEvent(emitter, "error", buildSseErrorData("meetingId가 없습니다."));
+            emitter.complete();
+            return emitter;
+        }
+
+        emitter.onTimeout(() -> {
+            logger.warn("인포그래픽 SSE timeout - meetingId={}", meetingId);
+            emitter.complete();
+        });
+        emitter.onError(e -> logger.warn("인포그래픽 SSE error - meetingId={}, message={}", meetingId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("인포그래픽 SSE complete - meetingId={}", meetingId));
+
+        INFOGRAPHIC_EXECUTOR.execute(() -> {
+            try {
+                MeetingVO searchVO = new MeetingVO();
+                searchVO.setMeetingId(meetingId);
+                List<MeetingVO> pendingList = meetingDAO.selectMeetingInfographicList(searchVO);
+
+                if (pendingList == null || pendingList.isEmpty()) {
+                    sendSseEvent(emitter, "done", buildSseDoneData(meetingId, 0, 0));
+                    return;
+                }
+
+                int successCount = 0;
+                for (MeetingVO vo : pendingList) {
+                    if (!"002".equals(vo.getInfographicStatus())) continue;
+                    try {
+                        String imageQuery = buildInfographicImageQuery(vo.getTopicNm(), vo.getTopicSummary(), vo.getTreeText());
+                        String img = callAiImageApi(imageQuery);
+
+                        Map<String, Object> eventData = new HashMap<>();
+                        eventData.put("infographicId", vo.getInfographicId());
+                        eventData.put("topicNm", vo.getTopicNm());
+                        eventData.put("sortOrd", vo.getSortOrd());
+
+                        if (img != null && !img.isEmpty()) {
+                            vo.setInfographicImg(img);
+                            vo.setInfographicStatus("003");
+                            eventData.put("status", "003");
+                            eventData.put("infographicImg", img);
+                            successCount++;
+                        } else {
+                            logger.warn("인포그래픽 이미지 생성 실패 - meetingId: {}, topic: {}", meetingId, vo.getTopicNm());
+                            vo.setInfographicStatus("004");
+                            eventData.put("status", "004");
+                        }
+                        meetingDAO.updateMeetingInfographic(vo);
+                        sendSseEvent(emitter, "progress", new com.google.gson.Gson().toJson(eventData));
+                    } catch (Exception e) {
+                        logger.error("인포그래픽 이미지 생성 오류 - topic: {}", vo.getTopicNm(), e);
+                        try {
+                            vo.setInfographicStatus("004");
+                            meetingDAO.updateMeetingInfographic(vo);
+                        } catch (Exception ex) {
+                            logger.error("인포그래픽 실패 상태 저장 오류 - infographicId: {}", vo.getInfographicId(), ex);
+                        }
+                        Map<String, Object> errorData = new HashMap<>();
+                        errorData.put("infographicId", vo.getInfographicId());
+                        errorData.put("topicNm", vo.getTopicNm());
+                        errorData.put("status", "004");
+                        sendSseEvent(emitter, "progress", new com.google.gson.Gson().toJson(errorData));
+                    }
+                }
+                logger.info("인포그래픽 SSE 완료 - meetingId: {}, 성공: {}/{}", meetingId, successCount, pendingList.size());
+                sendSseEvent(emitter, "done", buildSseDoneData(meetingId, pendingList.size(), successCount));
+            } catch (Exception e) {
+                logger.error("인포그래픽 SSE 스트림 오류 - meetingId={}", meetingId, e);
+                sendSseEvent(emitter, "error", buildSseErrorData("인포그래픽 생성 중 오류가 발생했습니다."));
+            } finally {
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
+    private boolean sendSseEvent(SseEmitter emitter, String eventName, String data) {
+        try {
+            emitter.send(SseEmitter.event().name(eventName).data(data));
+            return true;
+        } catch (Exception e) {
+            logger.warn("SSE event send failed - eventName={}, message={}", eventName, e.getMessage());
+            return false;
+        }
+    }
+
+    private String buildSseErrorData(String message) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("status", "error");
+        data.put("message", message);
+        return new com.google.gson.Gson().toJson(data);
+    }
+
+    private String buildSseDoneData(Long meetingId, int totalCount, int successCount) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("meetingId", meetingId);
+        data.put("totalCount", totalCount);
+        data.put("successCount", successCount);
+        return new com.google.gson.Gson().toJson(data);
+    }
+
+    /** 인포그래픽 목록 조회 (폴링용) */
+    public Map<String, Object> selectMeetingInfographicList(MeetingVO searchVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", meetingDAO.selectMeetingInfographicList(searchVO));
+        return result;
     }
 
     /** 인포그래픽 이미지 생성용 query 구성 */
