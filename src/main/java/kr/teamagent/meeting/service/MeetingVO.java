@@ -53,8 +53,9 @@ public class MeetingVO extends CommonVO {
     private String speakerLabel;    // 화자1, 화자2 ...
     private String speakerNm;       // 매핑 후 실명
     private String speakerUserId;   // 매핑된 TB_USER.USER_ID
-    private String utterances;      // JSON 배열 [{seq, text}]
-    private List<MeetingVO> speakerList; // 화자 목록 (selectSpeakerList 결과)
+    private String utterances;      // JSON 배열 [{start, end, text}]
+    private List<MeetingVO> speakerList; // 화자 목록 (selectSpeakerList 결과 또는 일괄 저장 요청)
+    private String mergeSpeakerYn;  // 동명이인 머지 여부 (Y/N)
 
     // TB_MEETING_AUDIO - 오디오 파일
     private Long    audioId;

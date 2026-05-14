@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,10 +29,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import kr.teamagent.common.security.service.UserVO;
+import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.library.service.LibraryVO;
 import kr.teamagent.library.service.impl.LibraryDAO;
 import kr.teamagent.meeting.service.MeetingVO;
@@ -58,6 +62,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private TmplHtmlRenderService tmplHtmlRenderService;
+
+    @Autowired
+    private FileServiceImpl fileService;
 
     /** 참석자 선택용 사용자 목록 */
     public List<MeetingVO> selectUserListForMeeting() throws Exception {
@@ -405,6 +412,82 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
+    /** 화자 일괄 저장 (동명이인 머지 포함) */
+    public Map<String, Object> saveSpeakers(MeetingVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        List<MeetingVO> speakerList = dataVO.getSpeakerList();
+
+        if (speakerList == null || speakerList.isEmpty()) {
+            result.put("successYn", false);
+            result.put("returnMsg", "화자 목록이 없습니다.");
+            return result;
+        }
+
+        if ("Y".equals(dataVO.getMergeSpeakerYn())) {
+            // DB에서 전체 화자 utterances 한 번에 조회
+            MeetingVO searchVO = new MeetingVO();
+            searchVO.setMeetingId(dataVO.getMeetingId());
+            List<MeetingVO> dbSpeakers = meetingDAO.selectSpeakerList(searchVO);
+            Map<Long, String> utterancesMap = new HashMap<>();
+            for (MeetingVO dbSpeaker : dbSpeakers) {
+                utterancesMap.put(dbSpeaker.getSpeakerId(), dbSpeaker.getUtterances());
+            }
+
+            // speakerNm 기준으로 그룹핑 (입력 순서 유지)
+            Map<String, List<MeetingVO>> groupByName = new LinkedHashMap<>();
+            for (MeetingVO speaker : speakerList) {
+                String nm = speaker.getSpeakerNm() != null ? speaker.getSpeakerNm() : "";
+                groupByName.computeIfAbsent(nm, k -> new ArrayList<>()).add(speaker);
+            }
+
+            Gson gson = new Gson();
+            java.lang.reflect.Type listType = new TypeToken<List<Map<String, Object>>>(){}.getType();
+
+            for (Map.Entry<String, List<MeetingVO>> entry : groupByName.entrySet()) {
+                List<MeetingVO> group = entry.getValue();
+                if (group.size() == 1) {
+                    // 단일 화자: 이름/userId만 업데이트
+                    meetingDAO.updateSpeakerMapping(group.get(0));
+                } else {
+                    // 동명이인 그룹: 모든 utterances 수집 후 start 순 정렬
+                    List<Map<String, Object>> mergedUtterances = new ArrayList<>();
+                    for (MeetingVO speaker : group) {
+                        String utterancesJson = utterancesMap.get(speaker.getSpeakerId());
+                        if (utterancesJson != null && !utterancesJson.isEmpty()) {
+                            List<Map<String, Object>> utterances = gson.fromJson(utterancesJson, listType);
+                            if (utterances != null) {
+                                mergedUtterances.addAll(utterances);
+                            }
+                        }
+                    }
+                    mergedUtterances.sort((a, b) -> {
+                        double startA = ((Number) a.getOrDefault("start", 0.0)).doubleValue();
+                        double startB = ((Number) b.getOrDefault("start", 0.0)).doubleValue();
+                        return Double.compare(startA, startB);
+                    });
+
+                    // 첫 번째 화자에 머지된 utterances + 이름 저장
+                    MeetingVO keepSpeaker = group.get(0);
+                    keepSpeaker.setUtterances(gson.toJson(mergedUtterances));
+                    meetingDAO.updateSpeakerUtterances(keepSpeaker);
+
+                    // 나머지 화자 행 삭제
+                    for (int i = 1; i < group.size(); i++) {
+                        meetingDAO.deleteSpeaker(group.get(i));
+                    }
+                }
+            }
+        } else {
+            // 일반 저장: 이름/userId만 업데이트
+            for (MeetingVO speaker : speakerList) {
+                meetingDAO.updateSpeakerMapping(speaker);
+            }
+        }
+
+        result.put("successYn", true);
+        return result;
+    }
+
     /** 회의 삭제 (USE_YN = 'N') */
     public Map<String, Object> deleteMeeting(MeetingVO dataVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
@@ -516,7 +599,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     /**
      * LLM 호출 - 회의록 생성.
      * 응답 JSON 키만 사용해 설명한다(마크다운 별도 출력 금지). IS_AUTO_TITLE=Y 이면 meeting_title 포함.
-     * 주제별 본문은 discussion_topics에만 담고, 서버가 FULL_TEXT로 직렬화한다.
      */
     private String callLlmForMinutes(String fullText, String isAutoTitle, 
         List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
@@ -577,67 +659,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     // ─────────────────────────────────────────────────────────────────
 
     /**
-     * LLM JSON의 meeting_time·discussion_topics를 FULL_TEXT(에디터 본문) 평문으로 직렬화.
-     *
-     * @return 직렬화 문자열, discussion_topics가 없거나 비어 있으면 null(호출측에서 기존 녹취 fullText 유지)
-     */
-    private String serializeMinutesBodyFromJson(JSONObject json) {
-        JSONArray discussion = (JSONArray) json.get("discussion_topics");
-        if (discussion == null || discussion.isEmpty()) {
-            return null;
-        }
-
-        StringBuilder sb = new StringBuilder();
-        Object mtObj = json.get("meeting_time");
-        if (mtObj instanceof JSONObject) {
-            JSONObject mt = (JSONObject) mtObj;
-            String start = stringValue(mt.get("start"));
-            String end = stringValue(mt.get("end"));
-            sb.append("[회의 시간]\n");
-            if (start.isEmpty() && end.isEmpty()) {
-                sb.append("확인 불가\n\n");
-            } else {
-                if (!start.isEmpty()) {
-                    sb.append("시작: ").append(start).append("\n");
-                }
-                if (!end.isEmpty()) {
-                    sb.append("종료: ").append(end).append("\n");
-                }
-                sb.append("\n");
-            }
-        }
-
-        sb.append("[주제별 회의 내용]\n\n");
-        for (int i = 0; i < discussion.size(); i++) {
-            Object row = discussion.get(i);
-            if (!(row instanceof JSONObject)) {
-                continue;
-            }
-            JSONObject t = (JSONObject) row;
-            String topic = stringValue(t.get("topic"));
-            if (topic.isEmpty()) {
-                topic = stringValue(t.get("topic_nm"));
-            }
-            if (topic.isEmpty()) {
-                continue;
-            }
-            String background = stringValue(t.get("background"));
-            String disc = stringValue(t.get("discussion"));
-            String opinions = stringValue(t.get("opinions"));
-
-            sb.append("### ").append(topic).append("\n");
-            sb.append("논의 배경:\n").append(background.isEmpty() ? "(없음)" : background).append("\n\n");
-            sb.append("핵심 논의 내용:\n").append(disc.isEmpty() ? "(없음)" : disc).append("\n\n");
-            sb.append("주요 의견:\n").append(opinions.isEmpty() ? "(없음)" : opinions).append("\n\n");
-        }
-
-        String out = sb.toString().trim();
-        return out.isEmpty() ? null : out;
-    }
-
-    /**
      * 회의록 LLM answer 파싱 후 TB_MEETING_MINUTES 저장.
-     * discussion_topics가 있으면 FULL_TEXT를 에디터용 직렬화 본문으로 갱신하고, 없으면 기존 fullText(녹취) 유지.
+     * FULL_TEXT는 diarize 원문을 유지하고, LLM JSON은 flatData/HTML 생성에만 사용한다.
      */
     @SuppressWarnings("unchecked")
     private void parseAndSaveMinutes(MeetingVO dataVO, String answer, List<LibraryVO.TmplFieldItem> tmplFieldList) {
@@ -665,10 +688,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             }
             dataVO.setFlatData(flat.toJSONString());
     
-            // discussion_topics → FULL_TEXT (기존 유지)
-            String bodyFromLlm = serializeMinutesBodyFromJson(json);
-            if (bodyFromLlm != null) dataVO.setFullText(bodyFromLlm);
-
             String renderedHtml = renderMinutesTemplateHtml(json, tmplFieldList);
             if (!CommonUtil.isEmpty(renderedHtml)) {
                 dataVO.setGeneratedContent(renderedHtml);
@@ -885,13 +904,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return new com.google.gson.Gson().toJson(data);
     }
 
-    /** 인포그래픽 목록 조회 (폴링용) */
-    public Map<String, Object> selectMeetingInfographicList(MeetingVO searchVO) throws Exception {
-        Map<String, Object> result = new HashMap<>();
-        result.put("list", meetingDAO.selectMeetingInfographicList(searchVO));
-        return result;
-    }
-
     /** 인포그래픽 이미지 생성용 query 구성 */
     private String buildInfographicImageQuery(String topicNm, String topicSummary, String treeText) {
         StringBuilder query = new StringBuilder();
@@ -1071,6 +1083,26 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             logger.error("회의록 수정 실패 - meetingId: {}", dataVO.getMeetingId(), e);
         }
         return result;
+    }
+
+    public Map<String, Object> downloadAudioFile(MeetingVO req) throws Exception {
+        if (req == null || req.getMeetingId() == null) {
+            HashMap<String, Object> resultMap = new HashMap<>();
+            resultMap.put("url", "");
+            return resultMap;
+        }
+
+        MeetingVO audioVO = meetingDAO.selectMeetingAudio(req);
+        if (audioVO == null || CommonUtil.isEmpty(audioVO.getFilePath())) {
+            HashMap<String, Object> resultMap = new HashMap<>();
+            resultMap.put("url", "");
+            return resultMap;
+        }
+
+        FileVO fileVO = new FileVO();
+        fileVO.setFilePath(audioVO.getFilePath());
+        fileVO.setFileName(audioVO.getOriginalFilename());
+        return fileService.createDownloadPresignedUrlForStorageObject(fileVO);
     }
 
     public void downloadMinutes(Long meetingId, String format, HttpServletResponse response) throws Exception {
