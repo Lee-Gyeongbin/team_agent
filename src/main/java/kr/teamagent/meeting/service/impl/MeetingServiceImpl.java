@@ -169,12 +169,16 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         emitter.onError(e -> logger.warn("회의 처리 SSE error - meetingId={}, message={}", meetingId, e.getMessage()));
         emitter.onCompletion(() -> logger.info("회의 처리 SSE complete - meetingId={}", meetingId));
 
+        // SSE 응답 헤더가 클라이언트에 flush되기 전에 executor가 write를 시도하는 레이스 컨디션 방지
+        // connected 이벤트로 연결을 먼저 확정한 뒤 백그라운드 처리 시작
+        sendSseEvent(emitter, "connected", "{}");
+
         MEETING_EXECUTOR.execute(() -> {
             MeetingVO dataVO = new MeetingVO();
             dataVO.setMeetingId(meetingId);
             try {
-                // step 3-1: 음성 전사 시작
-                sendSseEvent(emitter, "progress", buildSseStepData("transcribe", "음성을 인식 중입니다..."));
+                // step 3: 음성 전사 + 화자 분리 (AI 서버에서 단일 호출로 처리)
+                sendSseEvent(emitter, "progress", buildSseStepData("transcribe"));
                 Map<String, Object> diarizeResult = callDiarizeByMeetingId(meetingId);
 
                 if (diarizeResult == null || !Boolean.TRUE.equals(diarizeResult.get("successYn"))) {
@@ -185,9 +189,6 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     sendSseEvent(emitter, "error", buildSseErrorData(dataVO.getErrorMsg()));
                     return;
                 }
-
-                // step 3-2: 화자 분리 (AI 서버에서 전사와 함께 처리됨)
-                sendSseEvent(emitter, "progress", buildSseStepData("diarize", "화자 분리 중입니다..."));
 
                 dataVO.setAudioStatus("003");
                 Object durObj = diarizeResult.get("durationSec");
@@ -214,7 +215,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 meetingDAO.updateMeetingStatus(dataVO);
 
                 // step 4: LLM 회의록 생성
-                sendSseEvent(emitter, "progress", buildSseStepData("minutes", "회의록 생성 중입니다..."));
+                sendSseEvent(emitter, "progress", buildSseStepData("minutes"));
                 dataVO.setFullText(fullText);
                 LibraryVO searchVO = new LibraryVO();
                 searchVO.setTmplId(MINUTES_TMPL_ID);
@@ -222,7 +223,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle(), tmplFieldList);
 
                 // step 5: 저장
-                sendSseEvent(emitter, "progress", buildSseStepData("save", "데이터를 저장 중입니다..."));
+                sendSseEvent(emitter, "progress", buildSseStepData("save"));
                 if (minutesAnswer != null) {
                     parseAndSaveMinutes(dataVO, minutesAnswer, tmplFieldList);
                 }
@@ -929,20 +930,21 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** SSE 진행 단계 데이터 구성 */
-    private String buildSseStepData(String step, String message) {
-        Map<String, Object> data = new HashMap<>();
+    /** SSE 진행 단계 데이터 구성 — step 값만 전송 (메시지는 프론트에서 매핑) */
+    @SuppressWarnings("unchecked")
+    private String buildSseStepData(String step) {
+        JSONObject data = new JSONObject();
         data.put("step", step);
-        data.put("message", message);
-        return new com.google.gson.Gson().toJson(data);
+        return data.toJSONString();
     }
 
-    /** SSE 에러 데이터 구성 */
+    /** SSE 에러 데이터 구성 — JSONObject.toJSONString()으로 한글을 uXXXX 이스케이프 처리 */
+    @SuppressWarnings("unchecked")
     private String buildSseErrorData(String message) {
-        Map<String, Object> data = new HashMap<>();
+        JSONObject data = new JSONObject();
         data.put("infographicStatus", "error");
         data.put("message", message);
-        return new com.google.gson.Gson().toJson(data);
+        return data.toJSONString();
     }
 
     /** SSE 완료 데이터 구성 */
