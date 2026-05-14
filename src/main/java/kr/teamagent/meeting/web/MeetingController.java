@@ -114,6 +114,26 @@ public class MeetingController extends BaseController {
         return resultMap;
     }
 
+    /** 화자 일괄 저장 (동명이인 머지 포함) */
+    @RequestMapping("/ai/meeting/saveSpeakers.do")
+    @ResponseBody
+    public Map<String, Object> saveSpeakers(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "요청사항을 실패하였습니다.");
+                return resultMap;
+            }
+            resultMap = meetingService.saveSpeakers(dataVO);
+        } catch (Exception e) {
+            log.error("saveSpeakers error", e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
     /** 화자-참석자 매핑 저장 */
     @RequestMapping("/ai/meeting/saveSpeakerMapping.do")
     @ResponseBody
@@ -202,19 +222,24 @@ public class MeetingController extends BaseController {
         return resultMap;
     }
 
+    @RequestMapping(value = "/ai/meeting/downloadAudioFile.do")
+    @ResponseBody
+    public Map<String, Object> downloadAudioFile(@RequestBody MeetingVO req) throws Exception {
+        return meetingService.downloadAudioFile(req);
+    }
+
+    /** 회의 처리 SSE 스트림 (전사·화자분리·회의록생성·저장) */
+    @RequestMapping(value = "/ai/meeting/streamMeetingProcessing.do", produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamMeetingProcessing(@RequestParam("meetingId") Long meetingId) {
+        return meetingService.streamMeetingProcessing(meetingId);
+    }
+
     /** 인포그래픽 이미지 생성 SSE 스트림 */
     @RequestMapping(value = "/ai/meeting/streamInfographic.do", produces = "text/event-stream;charset=UTF-8")
     @ResponseBody
     public SseEmitter streamInfographic(@RequestParam("meetingId") Long meetingId) {
         return meetingService.streamInfographicGeneration(meetingId);
-    }
-
-    /** 인포그래픽 목록 조회 (폴백용) */
-    @RequestMapping("/ai/meeting/selectMeetingInfographicList.do")
-    @ResponseBody
-    public ModelAndView selectMeetingInfographicList(MeetingVO searchVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>(meetingService.selectMeetingInfographicList(searchVO));
-        return new ModelAndView("jsonView", resultMap);
     }
 
     @RequestMapping(value = "/ai/meeting/downloadMinutes.do")

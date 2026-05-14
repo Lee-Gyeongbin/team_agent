@@ -205,6 +205,22 @@
         WHERE SPEAKER_ID = #{speakerId}
     </update>
 
+    <update id="updateSpeakerUtterances" parameterType="meetingVO">
+        /* 화자 utterances + 이름 수정 (머지 결과 저장) ai.meeting.updateSpeakerUtterances */
+        UPDATE TB_MEETING_SPEAKER SET
+            SPEAKER_NM  = #{speakerNm}
+            , USER_ID   = #{speakerUserId}
+            , UTTERANCES = #{utterances}
+            , MODIFY_DT = NOW()
+        WHERE SPEAKER_ID = #{speakerId}
+    </update>
+
+    <delete id="deleteSpeaker" parameterType="meetingVO">
+        /* 화자 행 삭제 (머지 후 중복 제거) ai.meeting.deleteSpeaker */
+        DELETE FROM TB_MEETING_SPEAKER
+        WHERE SPEAKER_ID = #{speakerId}
+    </delete>
+
     <!-- ===================== TB_MEETING_AUDIO ===================== -->
 
     <insert id="insertMeetingAudio" parameterType="meetingVO"
@@ -225,6 +241,25 @@
             , MODIFY_DT = NOW()
         WHERE MEETING_ID = #{meetingId}
     </update>
+
+    <select id="selectMeetingAudio" resultType="meetingVO">
+        /* 오디오 파일 조회 ai.meeting.selectMeetingAudio */
+        SELECT
+            A.AUDIO_ID
+            , A.MEETING_ID
+            , A.FILE_PATH
+            , A.ORIGINAL_FILENAME
+            , A.FILE_EXT
+            , A.FILE_SIZE
+            , A.DURATION_SEC
+            , A.STATUS
+            , A.ERROR_MSG
+            , A.CREATE_DT
+            , A.MODIFY_DT
+        FROM
+            TB_MEETING_AUDIO A
+        WHERE 1=1 AND A.MEETING_ID = #{meetingId}
+    </select>
 
     <!-- ===================== TB_USER (참석자 선택) ===================== -->
 

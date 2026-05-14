@@ -25,6 +25,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return selectOne("ai.meeting.selectMeetingMinutes", searchVO);
     }
 
+    /** 오디오 파일 조회 */
+    public MeetingVO selectMeetingAudio(MeetingVO searchVO) throws Exception {
+        return selectOne("ai.meeting.selectMeetingAudio", searchVO);
+    }
+
     /** 회의 등록 */
     public int insertMeeting(MeetingVO dataVO) throws Exception {
         return insert("ai.meeting.insertMeeting", dataVO);
@@ -90,6 +95,16 @@ public class MeetingDAO extends EgovComAbstractDAO {
     /** 화자 매핑(실명/사용자ID) 수정 */
     public int updateSpeakerMapping(MeetingVO dataVO) throws Exception {
         return update("ai.meeting.updateSpeakerMapping", dataVO);
+    }
+
+    /** 화자 utterances + 이름 수정 (머지 결과 저장) */
+    public int updateSpeakerUtterances(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateSpeakerUtterances", dataVO);
+    }
+
+    /** 화자 행 삭제 (머지 후 중복 제거) */
+    public int deleteSpeaker(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteSpeaker", dataVO);
     }
 
     // ── 오디오 파일 ──────────────────────────────────────────────────
