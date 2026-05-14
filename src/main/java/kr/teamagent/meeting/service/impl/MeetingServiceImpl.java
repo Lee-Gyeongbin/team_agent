@@ -50,6 +50,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     private static final Logger logger = LoggerFactory.getLogger(MeetingServiceImpl.class);
     private static final String MINUTES_TMPL_ID = "TM000005";
     private static final ExecutorService INFOGRAPHIC_EXECUTOR = Executors.newFixedThreadPool(3);
+    private static final ExecutorService MEETING_EXECUTOR = Executors.newFixedThreadPool(5);
 
     @Autowired
     private MeetingDAO meetingDAO;
@@ -107,12 +108,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 회의 종료 (오디오 파일 전사 버전)
      * 1. 오디오 파일 → NCP 오브젝트 스토리지 업로드
-     * 2. TB_MEETING_AUDIO 저장 (status: 001 대기)
-     * 3. AI 서버에 meeting_id 전달 → DB 경로 조회 후 전사+화자분리 수행
-     * 4. fullText → LLM 회의록 생성
-     * 5. diarize 세그먼트 → 화자별 그룹화 후 TB_MEETING_SPEAKER 저장
+     * 2. TB_MEETING_AUDIO 저장 (status: 001 대기) 후 즉시 반환
+     * → step 3-5(전사·화자분리·회의록생성·저장)는 streamMeetingProcessing SSE에서 비동기 처리
      */
-    @SuppressWarnings("unchecked")
     public Map<String, Object> finishMeetingWithAudio(MeetingVO dataVO, MultipartFile audioFile) throws Exception {
         Map<String, Object> result = new HashMap<>();
 
@@ -141,65 +139,109 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         meetingDAO.insertMeetingAudio(dataVO);
         logger.info("[finishMeetingWithAudio] 오디오 레코드 저장 완료 - meetingId: {}, key: {}", dataVO.getMeetingId(), objectKey);
 
-        // 3. AI 서버에 meeting_id 전달하여 전사 + 화자 분리 수행
-        Map<String, Object> diarizeResult = callDiarizeByMeetingId(dataVO.getMeetingId());
-
-        if (diarizeResult == null || !Boolean.TRUE.equals(diarizeResult.get("successYn"))) {
-            dataVO.setAudioStatus("004");
-            Object errMsg = diarizeResult != null ? diarizeResult.get("returnMsg") : null;
-            dataVO.setErrorMsg(errMsg != null ? errMsg.toString() : "전사 실패");
-            meetingDAO.updateMeetingAudioStatus(dataVO);
-            result.put("successYn", false);
-            result.put("returnMsg", dataVO.getErrorMsg());
-            return result;
-        }
-
-        // 4. 오디오 처리 상태 완료(003)로 업데이트
-        dataVO.setAudioStatus("003");
-        Object durObj = diarizeResult.get("durationSec");
-        if (durObj instanceof Number) {
-            dataVO.setDurationSec(((Number) durObj).intValue());
-        }
-        meetingDAO.updateMeetingAudioStatus(dataVO);
-
-        String fullText = (String) diarizeResult.get("text");
-        JSONArray diarizedSegments = (JSONArray) diarizeResult.get("segments");
-
-        if (fullText == null || fullText.trim().isEmpty()) {
-            result.put("successYn", false);
-            result.put("returnMsg", "음성 전사 결과가 비어있습니다.");
-            return result;
-        }
-        logger.info("[finishMeetingWithAudio] 전사 완료 - meetingId: {}, {}자", dataVO.getMeetingId(), fullText.length());
-
-        // 5. DB에서 IS_AUTO_TITLE 조회
-        MeetingVO dbMeeting = meetingDAO.selectMeeting(dataVO);
-        if (dbMeeting != null && dbMeeting.getIsAutoTitle() != null) {
-            dataVO.setIsAutoTitle(dbMeeting.getIsAutoTitle());
-        }
-
-        // 6. 회의 상태 종료(002)로 변경
-        dataVO.setStatus("002");
-        meetingDAO.updateMeetingStatus(dataVO);
-
-        // 7. LLM 호출하여 회의록 생성
-        dataVO.setFullText(fullText);
-        LibraryVO searchVO = new LibraryVO();
-        searchVO.setTmplId(MINUTES_TMPL_ID);
-        List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
-        String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle(), tmplFieldList);
-        if (minutesAnswer != null) {
-            parseAndSaveMinutes(dataVO, minutesAnswer, tmplFieldList);
-        }
-
-        // 8. diarize 세그먼트를 화자별로 그룹화하여 저장
-        if (diarizedSegments != null && !diarizedSegments.isEmpty()) {
-            saveAudioDiarizedSpeakers(dataVO, diarizedSegments);
-        }
-
+        // step 3-5는 SSE 스트림(streamMeetingProcessing)에서 비동기 처리
         result.put("successYn", true);
         result.put("meetingId", dataVO.getMeetingId());
         return result;
+    }
+
+    /**
+     * 회의 처리 SSE 스트림 (step 3-5 비동기)
+     * - step 3: AI 서버 전사 + 화자분리
+     * - step 4: LLM 회의록 생성
+     * - step 5: DB 저장
+     * 각 단계 시작 시 progress 이벤트 전송, 완료 시 done 이벤트 전송
+     */
+    @SuppressWarnings("unchecked")
+    public SseEmitter streamMeetingProcessing(Long meetingId) {
+        SseEmitter emitter = new SseEmitter(0L);
+
+        if (meetingId == null) {
+            sendSseEvent(emitter, "error", buildSseErrorData("meetingId가 없습니다."));
+            emitter.complete();
+            return emitter;
+        }
+
+        emitter.onTimeout(() -> {
+            logger.warn("회의 처리 SSE timeout - meetingId={}", meetingId);
+            emitter.complete();
+        });
+        emitter.onError(e -> logger.warn("회의 처리 SSE error - meetingId={}, message={}", meetingId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("회의 처리 SSE complete - meetingId={}", meetingId));
+
+        MEETING_EXECUTOR.execute(() -> {
+            MeetingVO dataVO = new MeetingVO();
+            dataVO.setMeetingId(meetingId);
+            try {
+                // step 3-1: 음성 전사 시작
+                sendSseEvent(emitter, "progress", buildSseStepData("transcribe", "음성을 인식 중입니다..."));
+                Map<String, Object> diarizeResult = callDiarizeByMeetingId(meetingId);
+
+                if (diarizeResult == null || !Boolean.TRUE.equals(diarizeResult.get("successYn"))) {
+                    dataVO.setAudioStatus("004");
+                    Object errMsg = diarizeResult != null ? diarizeResult.get("returnMsg") : null;
+                    dataVO.setErrorMsg(errMsg != null ? errMsg.toString() : "전사 실패");
+                    meetingDAO.updateMeetingAudioStatus(dataVO);
+                    sendSseEvent(emitter, "error", buildSseErrorData(dataVO.getErrorMsg()));
+                    return;
+                }
+
+                // step 3-2: 화자 분리 (AI 서버에서 전사와 함께 처리됨)
+                sendSseEvent(emitter, "progress", buildSseStepData("diarize", "화자 분리 중입니다..."));
+
+                dataVO.setAudioStatus("003");
+                Object durObj = diarizeResult.get("durationSec");
+                if (durObj instanceof Number) {
+                    dataVO.setDurationSec(((Number) durObj).intValue());
+                }
+                meetingDAO.updateMeetingAudioStatus(dataVO);
+
+                String fullText = (String) diarizeResult.get("text");
+                JSONArray diarizedSegments = (JSONArray) diarizeResult.get("segments");
+
+                if (fullText == null || fullText.trim().isEmpty()) {
+                    sendSseEvent(emitter, "error", buildSseErrorData("음성 전사 결과가 비어있습니다."));
+                    return;
+                }
+                logger.info("[streamMeetingProcessing] 전사 완료 - meetingId: {}, {}자", meetingId, fullText.length());
+
+                // DB에서 IS_AUTO_TITLE 조회 후 회의 상태 종료(002)로 변경
+                MeetingVO dbMeeting = meetingDAO.selectMeeting(dataVO);
+                if (dbMeeting != null && dbMeeting.getIsAutoTitle() != null) {
+                    dataVO.setIsAutoTitle(dbMeeting.getIsAutoTitle());
+                }
+                dataVO.setStatus("002");
+                meetingDAO.updateMeetingStatus(dataVO);
+
+                // step 4: LLM 회의록 생성
+                sendSseEvent(emitter, "progress", buildSseStepData("minutes", "회의록 생성 중입니다..."));
+                dataVO.setFullText(fullText);
+                LibraryVO searchVO = new LibraryVO();
+                searchVO.setTmplId(MINUTES_TMPL_ID);
+                List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
+                String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle(), tmplFieldList);
+
+                // step 5: 저장
+                sendSseEvent(emitter, "progress", buildSseStepData("save", "데이터를 저장 중입니다..."));
+                if (minutesAnswer != null) {
+                    parseAndSaveMinutes(dataVO, minutesAnswer, tmplFieldList);
+                }
+                if (diarizedSegments != null && !diarizedSegments.isEmpty()) {
+                    saveAudioDiarizedSpeakers(dataVO, diarizedSegments);
+                }
+
+                logger.info("[streamMeetingProcessing] 처리 완료 - meetingId: {}", meetingId);
+                sendSseEvent(emitter, "done", buildSseDoneData(meetingId, 0, 0));
+
+            } catch (Exception e) {
+                logger.error("[streamMeetingProcessing] 처리 오류 - meetingId={}", meetingId, e);
+                sendSseEvent(emitter, "error", buildSseErrorData("회의 처리 중 오류가 발생했습니다."));
+            } finally {
+                emitter.complete();
+            }
+        });
+
+        return emitter;
     }
 
     /**
@@ -885,6 +927,14 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             logger.warn("SSE event send failed - eventName={}, message={}", eventName, e.getMessage());
             return false;
         }
+    }
+
+    /** SSE 진행 단계 데이터 구성 */
+    private String buildSseStepData(String step, String message) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("step", step);
+        data.put("message", message);
+        return new com.google.gson.Gson().toJson(data);
     }
 
     /** SSE 에러 데이터 구성 */
