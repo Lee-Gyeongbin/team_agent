@@ -231,14 +231,16 @@ public class MeetingController extends BaseController {
     /** 회의 처리 SSE 스트림 (전사·화자분리·회의록생성·저장) */
     @RequestMapping(value = "/ai/meeting/streamMeetingProcessing.do", produces = "text/event-stream;charset=UTF-8")
     @ResponseBody
-    public SseEmitter streamMeetingProcessing(@RequestParam("meetingId") Long meetingId) {
+    public SseEmitter streamMeetingProcessing(@RequestParam("meetingId") Long meetingId, HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
         return meetingService.streamMeetingProcessing(meetingId);
     }
 
     /** 인포그래픽 이미지 생성 SSE 스트림 */
     @RequestMapping(value = "/ai/meeting/streamInfographic.do", produces = "text/event-stream;charset=UTF-8")
     @ResponseBody
-    public SseEmitter streamInfographic(@RequestParam("meetingId") Long meetingId) {
+    public SseEmitter streamInfographic(@RequestParam("meetingId") Long meetingId, HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
         return meetingService.streamInfographicGeneration(meetingId);
     }
 
