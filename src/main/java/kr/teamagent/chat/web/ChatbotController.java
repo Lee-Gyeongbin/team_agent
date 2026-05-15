@@ -263,8 +263,18 @@ public class ChatbotController extends BaseController {
     }
     
     /**
-         * 대화방 공유 토큰 발급 (TB_SHARE_TOKEN 저장, 만료 3일)
-         */
+     * 대화방 첨부파일 업로드 여부 사전 확인
+     */
+    @RequestMapping(value = "/ai/chatbot/checkRoomAttachment.do")
+    @ResponseBody
+    public ModelAndView checkRoomAttachment(@RequestBody ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(chatbotService.checkRoomAttachment(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 대화방 공유 토큰 발급 (TB_SHARE_TOKEN 저장, 만료 3일, FILE_SHARE_YN 포함)
+     */
     @RequestMapping(value = "/ai/chatbot/createShareToken.do")
     @ResponseBody
     public ModelAndView createShareToken(@RequestBody ChatbotVO searchVO) throws Exception {

@@ -198,6 +198,13 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 대화방 첨부파일 존재 여부 조회 (Y/N)
+     */
+    public String selectHasAttachmentByRoomId(ChatbotVO searchVO) throws Exception {
+        return selectOne("ai.chatbot.selectHasAttachmentByRoomId", searchVO);
+    }
+
+    /**
      * 만료되지 않은 공유 토큰에 매핑된 ROOM_ID
      */
     public ChatbotVO selectShareTokenValidRoomId(ChatbotVO searchVO) throws Exception {

@@ -204,6 +204,8 @@ public class ChatbotVO extends CommonVO {
     private String shareToken;
     /** TB_SHARE_TOKEN.EXPIRED_DT (조회 시 매핑, INSERT는 쿼리에서 DATE_ADD) */
     private String expiredDt;
+    /** 공유 토큰 발급 시 첨부파일 공유 여부 (TB_SHARE_TOKEN.FILE_SHARE_YN, Y/N) */
+    private String includeAttachment;
 
     /** TB_CHAT_FILE 채팅 첨부파일 */
     private Long chatFileId;

@@ -1500,6 +1500,24 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
         return resultMap;
     }
+
+    /**
+     * 대화방 첨부파일 업로드 여부 사전 확인
+     */
+    public Map<String, Object> checkRoomAttachment(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (chatbotVO == null || chatbotVO.getRoomId() == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "roomId가 필요합니다.");
+            return resultMap;
+        }
+
+        String hasAttachment = chatbotDAO.selectHasAttachmentByRoomId(chatbotVO);
+        resultMap.put("successYn", true);
+        resultMap.put("hasAttachment", "Y".equals(hasAttachment));
+        return resultMap;
+    }
     
     /**
      * 채팅 첨부 업로드용 presigned URL 발급
