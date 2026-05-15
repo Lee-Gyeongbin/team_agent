@@ -351,25 +351,45 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .build();
 
-            // 전사 세션 전용 엔드포인트 — /v1/realtime/sessions(대화 세션)와 다름
-            JSONObject inputTranscription = new JSONObject();
-            inputTranscription.put("model", "gpt-4o-mini-transcribe");
-            inputTranscription.put("language", "ko");
+            // --- audio.input.transcription ---
+            JSONObject transcription = new JSONObject();
+            transcription.put("model", "gpt-4o-mini-transcribe");
+            transcription.put("language", "ko");
 
+            // --- audio.input.noise_reduction ---
+            JSONObject noiseReduction = new JSONObject();
+            noiseReduction.put("type", "far_field");
+
+            // --- audio.input.turn_detection ---
             JSONObject turnDetection = new JSONObject();
             turnDetection.put("type", "server_vad");
             turnDetection.put("threshold", 0.5);
             turnDetection.put("prefix_padding_ms", 300);
             turnDetection.put("silence_duration_ms", 500);
 
-            JSONObject noiseReduction = new JSONObject();
-            noiseReduction.put("type", "far_field");
+            // --- audio.input ---
+            JSONObject audioInput = new JSONObject();
+            JSONObject inputFormat = new JSONObject();
+            inputFormat.put("type", "audio/pcm");
+            inputFormat.put("rate", 24000);
+            audioInput.put("format", inputFormat);
+            audioInput.put("transcription", transcription); // ← input_audio_transcription 대신
+            audioInput.put("noise_reduction", noiseReduction); // ← input_audio_noise_reduction 대신
+            audioInput.put("turn_detection", turnDetection);   // ← turn_detection 위치 이동
 
+            // --- audio ---
+            JSONObject audio = new JSONObject();
+            audio.put("input", audioInput);
+
+            // --- session ---
+            JSONObject sessionConfig = new JSONObject();
+            sessionConfig.put("type", "realtime");
+            sessionConfig.put("model", "gpt-4o-realtime-preview");
+            sessionConfig.put("audio", audio);
+
+            // --- 최상위 ---
             JSONObject requestJson = new JSONObject();
-            requestJson.put("input_audio_format", "pcm16");
-            requestJson.put("input_audio_transcription", inputTranscription);
-            requestJson.put("turn_detection", turnDetection);
-            requestJson.put("input_audio_noise_reduction", noiseReduction);
+            requestJson.put("session", sessionConfig);
 
             RequestBody body = RequestBody.create(
                 requestJson.toJSONString(),
@@ -377,7 +397,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             );
 
             Request request = new Request.Builder()
-                .url("https://api.openai.com/v1/realtime/transcription_sessions")
+                .url("https://api.openai.com/v1/realtime/client_secrets")
                 .post(body)
                 .addHeader("Authorization", "Bearer " + apiKey)
                 .addHeader("Content-Type", "application/json")
@@ -407,18 +427,17 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     JSONParser parser = new JSONParser();
                     JSONObject data = (JSONObject) parser.parse(raw.trim());
 
-                    JSONObject clientSecret = (JSONObject) data.get("client_secret");
-                    if (clientSecret != null) {
-                        String token = (String) clientSecret.get("value");
-                        Object expiresAt = clientSecret.get("expires_at");
+                    String token = (String) data.get("value");
+                    Object expiresAt = data.get("expires_at");
+
+                    if (token != null && !token.isEmpty()) {
                         logger.info("[Realtime] 임시 토큰 발급 완료");
                         result.put("successYn", true);
                         result.put("token", token);
                         result.put("expiresAt", expiresAt);
                         return result;
                     }
-
-                    logger.warn("[Realtime] 응답에 client_secret 없음: {}", raw);
+                    logger.warn("[Realtime] 응답에 token(value) 없음: {}", raw);
                 }
             }
         } catch (Exception e) {
