@@ -173,8 +173,10 @@
     </select>
 
     <select id="selectShareTokenValidRoomId" parameterType="chatbotVO" resultType="chatbotVO">
-        /* 유효한 공유 토큰 → ROOM_ID (만료되지 않은 경우만) ai.chatbot.selectShareTokenValidRoomId */
-        SELECT T.ROOM_ID AS roomId
+        /* 유효한 공유 토큰 → ROOM_ID, FILE_SHARE_YN (만료되지 않은 경우만) ai.chatbot.selectShareTokenValidRoomId */
+        SELECT
+            T.ROOM_ID       AS roomId
+            , T.FILE_SHARE_YN AS includeAttachment
         FROM TB_SHARE_TOKEN T
         WHERE T.SHARE_TOKEN = #{shareToken}
           AND T.EXPIRED_DT &gt; NOW()
@@ -675,5 +677,16 @@
               F.CREATE_USER_ID = #{userId}
               OR F.CREATE_USER_ID IS NULL
           )
+    </select>
+
+    <select id="selectChatFileById" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 채팅 첨부 단건 조회 (사용자 검증 없음 — 공유 페이지 전용) ai.chatbot.selectChatFileById */
+        SELECT
+            F.CHAT_FILE_ID AS chatFileId,
+            F.FILE_PATH AS filePath,
+            F.FILE_NAME AS fileName,
+            F.FILE_TYPE AS fileType
+        FROM TB_CHAT_FILE F
+        WHERE F.CHAT_FILE_ID = #{chatFileId}
     </select>
 </mapper>

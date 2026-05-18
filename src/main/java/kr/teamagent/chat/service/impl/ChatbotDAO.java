@@ -275,4 +275,11 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public ChatbotVO selectChatFileOwnedByUser(ChatbotVO searchVO) throws Exception {
         return selectOne("ai.chatbot.selectChatFileOwnedByUser", searchVO);
     }
+
+    /**
+     * 채팅 첨부 단건 조회 (사용자 검증 없음 — 공유 페이지 전용)
+     */
+    public ChatbotVO selectChatFileById(ChatbotVO searchVO) throws Exception {
+        return selectOne("ai.chatbot.selectChatFileById", searchVO);
+    }
 }
