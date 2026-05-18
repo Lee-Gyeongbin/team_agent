@@ -67,6 +67,10 @@ public class MeetingVO extends CommonVO {
     private String  audioStatus;        // 001:대기 002:처리중 003:완료 004:실패
     private String  errorMsg;
 
+    // TB_MEETING - Heartbeat / 비정상종료
+    private String lastHeartbeatDt;  // 마지막 heartbeat 수신일시
+    private String abnormalYn;       // 비정상종료 여부 (Y/N)
+
     // TB_USER - 참석자 선택
     private String userNm;
 
