@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="dataDashboard">
+
+    <!-- ================================================================
+         나의 TextToSQL 쿼리 목록 조회
+         TB_CHAT_LOG (SVC_TY='S', TTSQ NOT NULL, CREATE_USER_ID = 로그인 사용자)
+         ================================================================ -->
+    <select id="selectDashboardSqlList" parameterType="dataDashboardVO" resultType="dataDashboardVO">
+        /* 나의 TextToSQL 쿼리 목록 dataDashboard.selectDashboardSqlList */
+        SELECT
+              A.LOG_ID
+            , A.Q_CONTENT                                            AS SQL_TITLE
+            , A.TTSQ                                                 AS SQL_CONTENT
+            , A.TTSQ_PARAM
+            , A.AGENT_ID
+            , B.AGENT_NM
+            , A.REF_ID                                               AS DATAMART_ID
+            , C.DM_NM                                                AS DATAMART_NM
+            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s')         AS CREATED_AT
+        FROM TB_CHAT_LOG A
+            LEFT JOIN TB_AGT  B ON A.AGENT_ID = B.AGENT_ID
+            LEFT JOIN TB_DM   C ON A.REF_ID   = C.DATAMART_ID
+        WHERE A.SVC_TY         = 'S'
+          AND A.TTSQ           IS NOT NULL
+          AND A.TTSQ           != ''
+          AND A.CREATE_USER_ID = #{userId}
+        ORDER BY A.CREATE_DT DESC
+        LIMIT 200
+    </select>
+
+    <!-- ================================================================
+         사용자 위젯 목록 조회
+         TB_USER_DASHBOARD_WIDGET JOIN TB_CHAT_LOG
+         ================================================================ -->
+    <select id="selectDashboardWidgetList" parameterType="dataDashboardVO" resultType="dataDashboardVO">
+        /* 사용자 위젯 목록 dataDashboard.selectDashboardWidgetList */
+        SELECT
+              W.WIDGET_ID
+            , W.LOG_ID
+            , W.TITLE
+            , W.VIZ_TYPE
+            , W.VIZ_CONFIG
+            , W.COL_SPAN
+            , W.SORT_ORD
+            , A.Q_CONTENT                                            AS SQL_TITLE
+            , A.TTSQ                                                 AS SQL_CONTENT
+            , A.TTSQ_PARAM
+            , A.AGENT_ID
+            , B.AGENT_NM
+            , A.REF_ID                                               AS DATAMART_ID
+            , C.DM_NM                                                AS DATAMART_NM
+        FROM TB_USER_DASHBOARD_WIDGET W
+            JOIN      TB_CHAT_LOG A ON W.LOG_ID   = A.LOG_ID
+            LEFT JOIN TB_AGT      B ON A.AGENT_ID = B.AGENT_ID
+            LEFT JOIN TB_DM       C ON A.REF_ID   = C.DATAMART_ID
+        WHERE W.USER_ID = #{userId}
+        <if test="widgetId != null and widgetId != ''">
+          AND W.WIDGET_ID = #{widgetId}
+        </if>
+        ORDER BY W.SORT_ORD, W.WIDGET_ID
+    </select>
+
+    <!-- ================================================================
+         위젯 저장 (INSERT ... ON DUPLICATE KEY UPDATE)
+         ================================================================ -->
+    <insert id="saveDashboardWidget" parameterType="dataDashboardVO">
+        /* 위젯 저장 dataDashboard.saveDashboardWidget */
+        INSERT INTO TB_USER_DASHBOARD_WIDGET (
+              WIDGET_ID
+            , USER_ID
+            , LOG_ID
+            , TITLE
+            , VIZ_TYPE
+            , VIZ_CONFIG
+            , COL_SPAN
+            , SORT_ORD
+            , CREATE_DT
+        ) VALUES (
+              #{widgetId}
+            , #{userId}
+            , #{logId}
+            , #{title}
+            , #{vizType}
+            , #{vizConfig}
+            , #{colSpan, jdbcType=INTEGER}
+            , #{sortOrd, jdbcType=INTEGER}
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+              TITLE      = #{title}
+            , VIZ_TYPE   = #{vizType}
+            , VIZ_CONFIG = #{vizConfig}
+            , COL_SPAN   = #{colSpan, jdbcType=INTEGER}
+            , SORT_ORD   = #{sortOrd, jdbcType=INTEGER}
+            , MODIFY_DT  = NOW()
+    </insert>
+
+    <!-- ================================================================
+         위젯 삭제
+         ================================================================ -->
+    <delete id="deleteDashboardWidget" parameterType="dataDashboardVO">
+        /* 위젯 삭제 dataDashboard.deleteDashboardWidget */
+        DELETE FROM TB_USER_DASHBOARD_WIDGET
+        WHERE WIDGET_ID = #{widgetId}
+          AND USER_ID   = #{userId}
+    </delete>
+
+    <!-- ================================================================
+         위젯 순서 일괄 변경
+         ================================================================ -->
+    <update id="updateDashboardWidgetOrder" parameterType="hashmap">
+        /* 위젯 순서 변경 dataDashboard.updateDashboardWidgetOrder */
+        UPDATE TB_USER_DASHBOARD_WIDGET
+        SET SORT_ORD = CASE WIDGET_ID
+            <foreach collection="orderList" item="item">
+                WHEN #{item.widgetId} THEN #{item.sortOrd}
+            </foreach>
+        END
+        , MODIFY_DT = NOW()
+        WHERE USER_ID = #{userId}
+          AND WIDGET_ID IN
+        <foreach collection="orderList" item="item" open="(" separator="," close=")">
+            #{item.widgetId}
+        </foreach>
+    </update>
+
+    <!-- ================================================================
+         SQL 실행용 채팅 로그 + 데이터마트 ID 조회
+         (logId + userId 기준 — 본인 로그만 접근 가능)
+         ================================================================ -->
+    <select id="selectSqlDatamartInfo" parameterType="dataDashboardVO" resultType="dataDashboardVO">
+        /* SQL 실행 정보 조회 dataDashboard.selectSqlDatamartInfo */
+        SELECT
+              A.LOG_ID
+            , A.TTSQ     AS SQL_CONTENT
+            , A.REF_ID   AS DATAMART_ID
+        FROM TB_CHAT_LOG A
+        WHERE A.LOG_ID         = #{logId}
+          AND A.SVC_TY         = 'S'
+          AND A.TTSQ           IS NOT NULL
+          AND A.CREATE_USER_ID = #{userId}
+        LIMIT 1
+    </select>
+
+</mapper>

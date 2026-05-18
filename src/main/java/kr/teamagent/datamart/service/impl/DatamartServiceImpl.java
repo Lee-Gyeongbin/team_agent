@@ -97,6 +97,11 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      * @param extraParams JDBC URL에 추가할 파라미터 (예: "useInformationSchema=true")
      * @return Connection
      */
+    /** 외부에서 직접 JDBC Connection이 필요한 경우 사용 (예: DataDashboard SQL 실행) */
+    public Connection openJdbcConnection(DatamartVO dm) throws ClassNotFoundException, SQLException {
+        return buildJdbcConnection(dm);
+    }
+
     private Connection buildJdbcConnection(DatamartVO dm, String... extraParams) throws ClassNotFoundException, SQLException {
         int port = dm.getPort() != null ? dm.getPort() : DEFAULT_MYSQL_PORT;
         String jdbcUrl = "jdbc:mysql://" + dm.getHost() + ":" + port + "/" + dm.getSchNm();
