@@ -12,6 +12,15 @@ public class MenuManageDAO extends EgovComAbstractDAO {
         return insert("menuManage.saveMenu", saveVO);
     }
 
+    public MenuManageVO selectMenuById(String menuId) throws Exception {
+        return (MenuManageVO) selectOne("menuManage.selectMenuById", menuId);
+    }
+
+    public int selectMaxSortOrdByParnMenuId(String parnMenuId) throws Exception {
+        Integer result = (Integer) selectOne("menuManage.selectMaxSortOrdByParnMenuId", parnMenuId);
+        return result != null ? result : 0;
+    }
+
     public int updateMenuOrder(MenuManageVO.UpdateMenuOrderVO searchVO) throws Exception {
         return update("menuManage.updateMenuOrder", searchVO);
     }

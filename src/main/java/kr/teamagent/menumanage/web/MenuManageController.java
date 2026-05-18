@@ -28,8 +28,8 @@ public class MenuManageController extends BaseController {
     @RequestMapping(value = "/save.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView saveMenu(@RequestBody MenuManageVO.SaveMenuVO saveVO) throws Exception {
-        if (saveVO == null || saveVO.getMenuId() == null || saveVO.getMenuId().isEmpty()) {
-            return makeFailJsonData("메뉴 ID가 없습니다.");
+        if (saveVO == null) {
+            return makeFailJsonData("요청 본문이 없습니다.");
         }
         menuManageService.saveMenu(saveVO);
         return makeSuccessJsonData();
