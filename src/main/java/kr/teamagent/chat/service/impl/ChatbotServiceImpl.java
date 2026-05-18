@@ -1532,6 +1532,24 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
         return resultMap;
     }
+
+    /**
+     * 대화방 첨부파일 업로드 여부 사전 확인
+     */
+    public Map<String, Object> checkRoomAttachment(ChatbotVO chatbotVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (chatbotVO == null || chatbotVO.getRoomId() == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "roomId가 필요합니다.");
+            return resultMap;
+        }
+
+        String hasAttachment = chatbotDAO.selectHasAttachmentByRoomId(chatbotVO);
+        resultMap.put("successYn", true);
+        resultMap.put("hasAttachment", "Y".equals(hasAttachment));
+        return resultMap;
+    }
     
     /**
      * 채팅 첨부 업로드용 presigned URL 발급
@@ -1580,6 +1598,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logParam.setRoomId(validRoom.getRoomId());
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+            resultMap.put("fileShareYn", validRoom.getIncludeAttachment());
             resultMap.put("list", selectChatLogList(logParam));
             return resultMap;
         }
@@ -1721,8 +1740,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 List<ChatbotVO> attachList = filesBySourceLogId.get(oldLogId);
                 if (attachList != null) {
                     for (ChatbotVO fSrc : attachList) {
-                        if (!CommonUtil.isNotEmpty(fSrc.getChatFileUploaderUserId())
-                                || !CommonUtil.isNotEmpty(fSrc.getFilePath())) {
+                        if (!CommonUtil.isNotEmpty(fSrc.getFilePath())) {
                             continue;
                         }
                         ChatbotVO fIns = new ChatbotVO();
@@ -1734,7 +1752,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         fIns.setFileSize(fSrc.getFileSize());
                         fIns.setFileType(fSrc.getFileType());
                         fIns.setFileDelDt(fSrc.getFileDelDt());
-                        fIns.setChatFileUploaderUserId(fSrc.getChatFileUploaderUserId());
+                        String uploaderUserId = "Y".equals(searchVO.getFileShareYn())
+                                ? userId
+                                : fSrc.getChatFileUploaderUserId();
+                        fIns.setChatFileUploaderUserId(uploaderUserId);
                         chatbotDAO.insertChatFileShareCopy(fIns);
                     }
                 }
@@ -1789,6 +1810,26 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         return resultMap;
+    }
+
+    /**
+     * 채팅 첨부 미리보기 (사용자 검증 없음 — 공유 페이지 전용)
+     */
+    public Map<String, Object> viewChatFileShare(ChatbotVO searchVO) throws Exception {
+        ChatbotVO row = chatbotDAO.selectChatFileById(searchVO);
+        if (row == null || row.getFilePath() == null || row.getFilePath().trim().isEmpty()) {
+            Map<String, Object> notFound = new HashMap<>();
+            notFound.put("viewType", "DOWNLOAD");
+            notFound.put("reason", "FILE_NOT_FOUND");
+            notFound.put("fileName", "");
+            notFound.put("downloadUrl", "");
+            return notFound;
+        }
+        FileVO fileVo = new FileVO();
+        fileVo.setFilePath(row.getFilePath());
+        fileVo.setFileName(row.getFileName());
+        fileVo.setFileType(row.getFileType());
+        return fileService.createViewPresignedUrlForStorageObject(fileVo);
     }
 
     /**

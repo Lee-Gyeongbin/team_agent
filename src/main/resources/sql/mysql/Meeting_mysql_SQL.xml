@@ -221,6 +221,12 @@
         WHERE SPEAKER_ID = #{speakerId}
     </delete>
 
+    <delete id="deleteSpeakersByMeetingId" parameterType="meetingVO">
+        /* 회의 화자 전체 삭제 ai.meeting.deleteSpeakersByMeetingId */
+        DELETE FROM TB_MEETING_SPEAKER
+        WHERE MEETING_ID = #{meetingId}
+    </delete>
+
     <!-- ===================== TB_MEETING_AUDIO ===================== -->
 
     <insert id="insertMeetingAudio" parameterType="meetingVO"
@@ -272,5 +278,68 @@
         WHERE USE_YN = 'Y'
         ORDER BY USER_NM ASC
     </select>
+
+    <!-- ===================== Heartbeat / 비정상종료 ===================== -->
+
+    <update id="updateMeetingHeartbeat" parameterType="meetingVO">
+        /* Heartbeat 수신 시 최종 일시 갱신 ai.meeting.updateMeetingHeartbeat */
+        UPDATE TB_MEETING SET
+            LAST_HEARTBEAT_DT = NOW()
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <update id="updateMeetingCancelAbnormal" parameterType="meetingVO">
+        /* Cancel Beacon: 비정상종료(취소) 처리 ai.meeting.updateMeetingCancelAbnormal */
+        UPDATE TB_MEETING SET
+            STATUS          = '003'
+            , ABNORMAL_YN   = 'Y'
+            , END_DT        = NOW()
+            , MODIFY_DT     = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <update id="updateExpiredMeetingsAbnormal">
+        /* 스케줄러: Heartbeat 미수신 진행중 회의 비정상종료 처리 ai.meeting.updateExpiredMeetingsAbnormal */
+        UPDATE TB_MEETING SET
+            ABNORMAL_YN = 'Y'
+            , STATUS    = '003'
+            , END_DT    = NOW()
+            , MODIFY_DT = NOW()
+        WHERE STATUS = '001'
+            AND USE_YN = 'Y'
+            AND LAST_HEARTBEAT_DT IS NOT NULL
+            AND LAST_HEARTBEAT_DT &lt; NOW() - INTERVAL 3 MINUTE
+    </update>
+
+    <update id="updateMeetingRecover" parameterType="meetingVO">
+        /* 복구 완료: 비정상종료 플래그 해제 및 종료 처리 ai.meeting.updateMeetingRecover */
+        UPDATE TB_MEETING SET
+            ABNORMAL_YN = 'N'
+            , STATUS    = '002'
+            , END_DT    = NOW()
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <select id="selectAbnormalMeetingList" resultType="meetingVO">
+        /* 비정상종료 회의 목록 조회 ai.meeting.selectAbnormalMeetingList */
+        SELECT
+            MEETING_ID      AS MEETING_ID
+            , MEETING_TITLE AS MEETING_TITLE
+            , START_DT      AS START_DT
+            , END_DT        AS END_DT
+        FROM TB_MEETING
+        WHERE USE_YN = 'Y'
+            AND ABNORMAL_YN = 'Y'
+            AND CREATE_USER_ID = #{createUserId}
+        ORDER BY CREATE_DT DESC
+    </select>
+
+    <delete id="deleteAudioByMeetingId" parameterType="meetingVO">
+        /* 회의 오디오 레코드 전체 삭제 (복구 전 정리) ai.meeting.deleteAudioByMeetingId */
+        DELETE FROM TB_MEETING_AUDIO
+        WHERE MEETING_ID = #{meetingId}
+    </delete>
 
 </mapper>

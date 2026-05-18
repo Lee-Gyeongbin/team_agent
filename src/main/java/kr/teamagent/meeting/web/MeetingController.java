@@ -11,8 +11,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
@@ -255,5 +257,124 @@ public class MeetingController extends BaseController {
             log.error("downloadMinutes error", e);
             throw new Exception("요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
+    }
+
+    // ── Heartbeat / 비정상종료 / 복구 ──────────────────────────────────────
+
+    /**
+     * Heartbeat 수신
+     * POST /api/meeting/{meetingId}/heartbeat
+     */
+    @RequestMapping(value = "/meeting/{meetingId}/heartbeat", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> heartbeat(@PathVariable("meetingId") Long meetingId) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.heartbeat(meetingId);
+        } catch (Exception e) {
+            log.error("heartbeat error - meetingId: {}", meetingId, e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * Cancel Beacon (beforeunload → sendBeacon)
+     * POST /api/meeting/{meetingId}/cancel
+     */
+    @RequestMapping(value = "/meeting/{meetingId}/cancel", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> cancelBeacon(@PathVariable("meetingId") Long meetingId) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.cancelBeacon(meetingId);
+        } catch (Exception e) {
+            log.error("cancelBeacon error - meetingId: {}", meetingId, e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 비정상종료 회의 목록 조회
+     * GET /api/meeting/abnormal
+     */
+    @RequestMapping(value = "/meeting/abnormal", method = RequestMethod.GET)
+    @ResponseBody
+    public Map<String, Object> selectAbnormalMeetingList() throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("list", meetingService.selectAbnormalMeetingList());
+        } catch (Exception e) {
+            log.error("selectAbnormalMeetingList error", e);
+            resultMap.put("list", new java.util.ArrayList<>());
+        }
+        return resultMap;
+    }
+
+    /**
+     * 백업 파일 병합 복구
+     * POST /api/meeting/{meetingId}/recover
+     */
+    @RequestMapping(value = "/meeting/{meetingId}/recover", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> recoverMeeting(@PathVariable("meetingId") Long meetingId) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.recoverMeeting(meetingId);
+        } catch (Exception e) {
+            log.error("recoverMeeting error - meetingId: {}", meetingId, e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "복구 처리 중 오류가 발생했습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 백업 파일 개수 조회
+     * GET /api/meeting/{meetingId}/backup-file-count
+     * 이어서 녹음 시 기존 백업 파일 개수를 조회해 auto-save 인덱스를 이어서 시작하기 위해 사용
+     */
+    @RequestMapping(value = "/meeting/{meetingId}/backup-file-count", method = RequestMethod.GET)
+    @ResponseBody
+    public Map<String, Object> getBackupFileCount(@PathVariable("meetingId") Long meetingId) {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("count", meetingService.getBackupFileCount(meetingId));
+            resultMap.put("successYn", true);
+        } catch (Exception e) {
+            log.error("getBackupFileCount error - meetingId: {}", meetingId, e);
+            resultMap.put("count", 0);
+            resultMap.put("successYn", false);
+        }
+        return resultMap;
+    }
+
+    /**
+     * 백업 오디오 파일 업로드
+     * POST /api/meeting/{meetingId}/backup-audio (multipart/form-data)
+     * 파일명은 originalFilename 그대로 사용 (backup_0.webm, backup_1.webm ...)
+     */
+    @RequestMapping(value = "/meeting/{meetingId}/backup-audio", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> uploadBackupAudio(
+            @PathVariable("meetingId") Long meetingId,
+            @RequestParam("audioFile") MultipartFile audioFile) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (audioFile == null || audioFile.isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "오디오 파일이 없습니다.");
+                return resultMap;
+            }
+            resultMap = meetingService.uploadBackupAudio(meetingId, audioFile);
+        } catch (Exception e) {
+            log.error("uploadBackupAudio error - meetingId: {}", meetingId, e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
     }
 }

@@ -107,6 +107,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return delete("ai.meeting.deleteSpeaker", dataVO);
     }
 
+    /** 회의 화자 전체 삭제 */
+    public int deleteSpeakersByMeetingId(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteSpeakersByMeetingId", dataVO);
+    }
+
     // ── 오디오 파일 ──────────────────────────────────────────────────
 
     /** 오디오 파일 등록 */
@@ -124,5 +129,37 @@ public class MeetingDAO extends EgovComAbstractDAO {
     /** 참석자 선택용 사용자 목록 */
     public List<MeetingVO> selectUserListForMeeting() throws Exception {
         return selectList("ai.meeting.selectUserListForMeeting");
+    }
+
+    // ── Heartbeat / 비정상종료 ─────────────────────────────────────────
+
+    /** Heartbeat 수신 일시 갱신 */
+    public int updateMeetingHeartbeat(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingHeartbeat", dataVO);
+    }
+
+    /** Cancel Beacon: STATUS=003, ABNORMAL_YN=Y */
+    public int updateMeetingCancelAbnormal(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingCancelAbnormal", dataVO);
+    }
+
+    /** 스케줄러: Heartbeat 미수신 회의 일괄 비정상종료 처리 */
+    public int updateExpiredMeetingsAbnormal() throws Exception {
+        return update("ai.meeting.updateExpiredMeetingsAbnormal");
+    }
+
+    /** 복구 완료: ABNORMAL_YN=N, STATUS=002 */
+    public int updateMeetingRecover(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingRecover", dataVO);
+    }
+
+    /** 비정상종료 회의 목록 조회 (현재 로그인 사용자) */
+    public List<MeetingVO> selectAbnormalMeetingList(MeetingVO searchVO) throws Exception {
+        return selectList("ai.meeting.selectAbnormalMeetingList", searchVO);
+    }
+
+    /** 오디오 레코드 전체 삭제 (복구 전 정리용) */
+    public int deleteAudioByMeetingId(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteAudioByMeetingId", dataVO);
     }
 }

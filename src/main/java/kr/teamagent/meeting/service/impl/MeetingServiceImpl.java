@@ -1,8 +1,15 @@
 package kr.teamagent.meeting.service.impl;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.PrintWriter;
 import java.net.URLEncoder;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,6 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -27,9 +35,13 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.model.ObjectListing;
 import com.amazonaws.services.s3.model.ObjectMetadata;
+import com.amazonaws.services.s3.model.S3Object;
+import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
+
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
@@ -139,10 +151,37 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         meetingDAO.insertMeetingAudio(dataVO);
         logger.info("[finishMeetingWithAudio] 오디오 레코드 저장 완료 - meetingId: {}, key: {}", dataVO.getMeetingId(), objectKey);
 
+        // 3. 백업 파일 정리 (정상 종료이므로 backup/ 경로 파일 전체 삭제)
+        deleteBackupFiles(dataVO.getMeetingId());
+
         // step 3-5는 SSE 스트림(streamMeetingProcessing)에서 비동기 처리
         result.put("successYn", true);
         result.put("meetingId", dataVO.getMeetingId());
         return result;
+    }
+
+    /**
+     * NCP backup/ 경로의 백업 파일 전체 삭제
+     * 정상 종료 시(finishMeetingWithAudio 성공) 호출
+     */
+    private void deleteBackupFiles(Long meetingId) {
+        try {
+            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String prefix = "meeting-audio/" + meetingId + "/backup/";
+            ObjectListing listing = amazonS3.listObjects(bucket, prefix);
+            List<S3ObjectSummary> summaries = listing.getObjectSummaries();
+            for (S3ObjectSummary s : summaries) {
+                if (!s.getKey().equals(prefix)) {
+                    amazonS3.deleteObject(bucket, s.getKey());
+                }
+            }
+            if (!summaries.isEmpty()) {
+                logger.info("[deleteBackupFiles] 백업 파일 {}건 삭제 완료 - meetingId: {}", summaries.size(), meetingId);
+            }
+        } catch (Exception e) {
+            // 백업 삭제 실패는 회의 종료 자체를 막지 않음 — 경고 로그만
+            logger.warn("[deleteBackupFiles] 백업 파일 삭제 실패 - meetingId: {}", meetingId, e);
+        }
     }
 
     /**
@@ -351,25 +390,45 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .build();
 
-            // 전사 세션 전용 엔드포인트 — /v1/realtime/sessions(대화 세션)와 다름
-            JSONObject inputTranscription = new JSONObject();
-            inputTranscription.put("model", "gpt-4o-mini-transcribe");
-            inputTranscription.put("language", "ko");
+            // --- audio.input.transcription ---
+            JSONObject transcription = new JSONObject();
+            transcription.put("model", "gpt-4o-mini-transcribe");
+            transcription.put("language", "ko");
 
+            // --- audio.input.noise_reduction ---
+            JSONObject noiseReduction = new JSONObject();
+            noiseReduction.put("type", "far_field");
+
+            // --- audio.input.turn_detection ---
             JSONObject turnDetection = new JSONObject();
             turnDetection.put("type", "server_vad");
             turnDetection.put("threshold", 0.5);
             turnDetection.put("prefix_padding_ms", 300);
             turnDetection.put("silence_duration_ms", 500);
 
-            JSONObject noiseReduction = new JSONObject();
-            noiseReduction.put("type", "far_field");
+            // --- audio.input ---
+            JSONObject audioInput = new JSONObject();
+            JSONObject inputFormat = new JSONObject();
+            inputFormat.put("type", "audio/pcm");
+            inputFormat.put("rate", 24000);
+            audioInput.put("format", inputFormat);
+            audioInput.put("transcription", transcription); // ← input_audio_transcription 대신
+            audioInput.put("noise_reduction", noiseReduction); // ← input_audio_noise_reduction 대신
+            audioInput.put("turn_detection", turnDetection);   // ← turn_detection 위치 이동
 
+            // --- audio ---
+            JSONObject audio = new JSONObject();
+            audio.put("input", audioInput);
+
+            // --- session ---
+            JSONObject sessionConfig = new JSONObject();
+            sessionConfig.put("type", "realtime");
+            sessionConfig.put("model", "gpt-4o-realtime-preview");
+            sessionConfig.put("audio", audio);
+
+            // --- 최상위 ---
             JSONObject requestJson = new JSONObject();
-            requestJson.put("input_audio_format", "pcm16");
-            requestJson.put("input_audio_transcription", inputTranscription);
-            requestJson.put("turn_detection", turnDetection);
-            requestJson.put("input_audio_noise_reduction", noiseReduction);
+            requestJson.put("session", sessionConfig);
 
             RequestBody body = RequestBody.create(
                 requestJson.toJSONString(),
@@ -377,7 +436,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             );
 
             Request request = new Request.Builder()
-                .url("https://api.openai.com/v1/realtime/transcription_sessions")
+                .url("https://api.openai.com/v1/realtime/client_secrets")
                 .post(body)
                 .addHeader("Authorization", "Bearer " + apiKey)
                 .addHeader("Content-Type", "application/json")
@@ -407,18 +466,17 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     JSONParser parser = new JSONParser();
                     JSONObject data = (JSONObject) parser.parse(raw.trim());
 
-                    JSONObject clientSecret = (JSONObject) data.get("client_secret");
-                    if (clientSecret != null) {
-                        String token = (String) clientSecret.get("value");
-                        Object expiresAt = clientSecret.get("expires_at");
+                    String token = (String) data.get("value");
+                    Object expiresAt = data.get("expires_at");
+
+                    if (token != null && !token.isEmpty()) {
                         logger.info("[Realtime] 임시 토큰 발급 완료");
                         result.put("successYn", true);
                         result.put("token", token);
                         result.put("expiresAt", expiresAt);
                         return result;
                     }
-
-                    logger.warn("[Realtime] 응답에 client_secret 없음: {}", raw);
+                    logger.warn("[Realtime] 응답에 token(value) 없음: {}", raw);
                 }
             }
         } catch (Exception e) {
@@ -531,12 +589,39 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
-    /** 회의 삭제 (USE_YN = 'N') */
+    /** 회의 삭제 (USE_YN = 'N') + NCP 오디오 파일 전체 삭제 */
     public Map<String, Object> deleteMeeting(MeetingVO dataVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
         meetingDAO.deleteMeeting(dataVO);
+        // NCP 오디오 파일 삭제 (메인 오디오 + 백업 파일 전체)
+        deleteMeetingAudioFiles(dataVO.getMeetingId());
         result.put("successYn", true);
         return result;
+    }
+
+    /**
+     * NCP meeting-audio/{meetingId}/ 경로의 모든 파일 삭제
+     * 회의 삭제 시 메인 오디오(meeting-audio/{id}/*.webm)와 백업 파일(backup/*.webm) 모두 정리
+     */
+    private void deleteMeetingAudioFiles(Long meetingId) {
+        if (meetingId == null) return;
+        try {
+            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String prefix = "meeting-audio/" + meetingId + "/";
+            ObjectListing listing = amazonS3.listObjects(bucket, prefix);
+            List<S3ObjectSummary> summaries = listing.getObjectSummaries();
+            for (S3ObjectSummary s : summaries) {
+                if (!s.getKey().equals(prefix)) {
+                    amazonS3.deleteObject(bucket, s.getKey());
+                }
+            }
+            if (!summaries.isEmpty()) {
+                logger.info("[deleteMeetingAudioFiles] 오디오 파일 {}건 삭제 완료 - meetingId: {}", summaries.size(), meetingId);
+            }
+        } catch (Exception e) {
+            // 스토리지 삭제 실패는 회의 삭제 자체를 막지 않음 — 경고 로그만
+            logger.warn("[deleteMeetingAudioFiles] 오디오 파일 삭제 실패 - meetingId: {}", meetingId, e);
+        }
     }
 
     /** 회의 제목 자동 생성 (LLM 호출) */
@@ -1088,6 +1173,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     @SuppressWarnings("unchecked")
     private void saveAudioDiarizedSpeakers(MeetingVO dataVO, JSONArray segments) {
         try {
+            // 기존 화자 데이터 삭제 (재처리 시 중복 방지)
+            meetingDAO.deleteSpeakersByMeetingId(dataVO);
+
             // 화자 등장 순서 유지 LinkedHashMap: speakerKey → utterances JSONArray
             java.util.LinkedHashMap<String, JSONArray> speakerMap = new java.util.LinkedHashMap<>();
             for (Object obj : segments) {
@@ -1178,6 +1266,275 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             default:
                 throw new IllegalArgumentException("지원하지 않는 형식입니다: " + format);
         }
+    }
+
+    // ── Heartbeat / 비정상종료 / 복구 ────────────────────────────────────────────
+
+    /**
+     * Heartbeat 수신: LAST_HEARTBEAT_DT = NOW() 갱신
+     * 본인 회의인지 검증 후 처리
+     */
+    public Map<String, Object> heartbeat(Long meetingId) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        MeetingVO searchVO = new MeetingVO();
+        searchVO.setMeetingId(meetingId);
+        MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
+        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", "권한이 없습니다.");
+            return result;
+        }
+        MeetingVO dataVO = new MeetingVO();
+        dataVO.setMeetingId(meetingId);
+        meetingDAO.updateMeetingHeartbeat(dataVO);
+        result.put("successYn", true);
+        return result;
+    }
+
+    /**
+     * Cancel Beacon: STATUS='003'(취소), ABNORMAL_YN='Y' 업데이트
+     * 브라우저 beforeunload 시 sendBeacon으로 호출됨
+     */
+    public Map<String, Object> cancelBeacon(Long meetingId) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        MeetingVO searchVO = new MeetingVO();
+        searchVO.setMeetingId(meetingId);
+        MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
+        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", "권한이 없습니다.");
+            return result;
+        }
+        MeetingVO dataVO = new MeetingVO();
+        dataVO.setMeetingId(meetingId);
+        meetingDAO.updateMeetingCancelAbnormal(dataVO);
+        result.put("successYn", true);
+        return result;
+    }
+
+    /**
+     * 비정상종료 감지 스케줄러 실행 메서드
+     * STATUS='001' 이고 LAST_HEARTBEAT_DT < NOW()-3분 인 회의를 일괄 처리
+     * @return 처리된 건수
+     */
+    public int detectAbnormalMeetings() {
+        try {
+            return meetingDAO.updateExpiredMeetingsAbnormal();
+        } catch (Exception e) {
+            logger.error("[detectAbnormalMeetings] 실행 오류", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 비정상종료 회의 목록 조회 (현재 로그인 사용자의 ABNORMAL_YN='Y' 회의)
+     */
+    public List<MeetingVO> selectAbnormalMeetingList() throws Exception {
+        MeetingVO searchVO = new MeetingVO();
+        searchVO.setCreateUserId(SessionUtil.getUserId());
+        return meetingDAO.selectAbnormalMeetingList(searchVO);
+    }
+
+    /**
+     * 백업 파일 개수 조회
+     * meeting-audio/{meetingId}/backup/ 경로의 파일 수 반환
+     * 이어서 녹음 시 auto-save 인덱스를 이어서 시작하기 위해 사용
+     */
+    public int getBackupFileCount(Long meetingId) {
+        try {
+            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String prefix = "meeting-audio/" + meetingId + "/backup/";
+            ObjectListing listing = amazonS3.listObjects(bucket, prefix);
+            return (int) listing.getObjectSummaries().stream()
+                .filter(s -> !s.getKey().equals(prefix))
+                .count();
+        } catch (Exception e) {
+            logger.warn("[getBackupFileCount] 조회 실패 - meetingId: {}", meetingId, e);
+            return 0;
+        }
+    }
+
+    /**
+     * 백업 오디오 파일 NCP 업로드
+     * meeting-audio/{meetingId}/backup/{originalFilename} 경로에 저장
+     */
+    public Map<String, Object> uploadBackupAudio(Long meetingId, MultipartFile file) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        MeetingVO searchVO = new MeetingVO();
+        searchVO.setMeetingId(meetingId);
+        MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
+        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", "권한이 없습니다.");
+            return result;
+        }
+        String filename = Optional.ofNullable(file.getOriginalFilename()).orElse("backup.webm");
+        String objectKey = "meeting-audio/" + meetingId + "/backup/" + filename;
+        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(file.getSize());
+        metadata.setContentType(Optional.ofNullable(file.getContentType()).orElse("audio/webm"));
+        amazonS3.putObject(bucket, objectKey, file.getInputStream(), metadata);
+        logger.info("[uploadBackupAudio] 업로드 완료 - meetingId: {}, key: {}", meetingId, objectKey);
+        result.put("successYn", true);
+        return result;
+    }
+
+    /**
+     * 백업 파일 병합 복구
+     * 1. NCP backup/ 경로 파일 목록 조회 및 정렬
+     * 2. 파일 다운로드 → ffmpeg -f concat merge
+     * 3. 병합 파일 NCP 업로드
+     * 4. TB_MEETING_AUDIO insert (STATUS='001')
+     * 5. TB_MEETING: ABNORMAL_YN='N', STATUS='002'
+     * @return audioId (이후 SSE 흐름에 전달)
+     */
+    public Map<String, Object> recoverMeeting(Long meetingId) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+        String prefix = "meeting-audio/" + meetingId + "/backup/";
+
+        // 소유권 검증
+        MeetingVO searchVO = new MeetingVO();
+        searchVO.setMeetingId(meetingId);
+        MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
+        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", "권한이 없습니다.");
+            return result;
+        }
+
+        // 백업 파일 목록 조회 및 파일명 오름차순 정렬 (backup_0.webm, backup_1.webm ...)
+        ObjectListing listing = amazonS3.listObjects(bucket, prefix);
+        List<S3ObjectSummary> summaries = listing.getObjectSummaries().stream()
+            .filter(s -> !s.getKey().equals(prefix))
+            .sorted(Comparator.comparing(s -> {
+                String name = s.getKey().substring(s.getKey().lastIndexOf('/') + 1);
+                try { return Integer.parseInt(name.replaceAll("[^0-9]", "")); }
+                catch (NumberFormatException e) { return Integer.MAX_VALUE; }
+            }))
+            .collect(Collectors.toList());
+
+        if (summaries.isEmpty()) {
+            result.put("successYn", false);
+            result.put("returnMsg", "복구할 백업 파일이 없습니다.");
+            return result;
+        }
+
+        // 임시 디렉토리 생성
+        Path tmpDir = Files.createTempDirectory("meeting_recover_" + meetingId + "_");
+        String mergedKey = null;
+        MeetingVO audioVO = new MeetingVO();
+
+        try {
+            // 백업 파일 개별 다운로드
+            List<File> localFiles = new ArrayList<>();
+            for (S3ObjectSummary s : summaries) {
+                String filename = s.getKey().substring(s.getKey().lastIndexOf('/') + 1);
+                File localFile = tmpDir.resolve(filename).toFile();
+                S3Object s3Object = amazonS3.getObject(bucket, s.getKey());
+                try (InputStream is = s3Object.getObjectContent();
+                     FileOutputStream fos = new FileOutputStream(localFile)) {
+                    byte[] buf = new byte[8192];
+                    int read;
+                    while ((read = is.read(buf)) != -1) fos.write(buf, 0, read);
+                }
+                localFiles.add(localFile);
+                logger.info("[recoverMeeting] 다운로드 완료 - {}", s.getKey());
+            }
+
+            // ffmpeg concat 리스트 파일 작성
+            File listFile = tmpDir.resolve("filelist.txt").toFile();
+            try (PrintWriter pw = new PrintWriter(listFile, "UTF-8")) {
+                for (File f : localFiles) {
+                    pw.println("file '" + f.getAbsolutePath().replace("'", "\\'") + "'");
+                }
+            }
+
+            // ffmpeg 실행: 파일 병합
+            File outputFile = tmpDir.resolve("merged.webm").toFile();
+            ProcessBuilder pb = new ProcessBuilder(
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", listFile.getAbsolutePath(),
+                "-c", "copy", outputFile.getAbsolutePath()
+            );
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            // ffmpeg stdout/stderr 소비 (블로킹 방지)
+            try (InputStream is = process.getInputStream()) {
+                byte[] buf = new byte[4096];
+                while (is.read(buf) != -1) {}
+            }
+            int exitCode = process.waitFor();
+            if (exitCode != 0 || !outputFile.exists() || outputFile.length() == 0) {
+                throw new RuntimeException("ffmpeg 병합 실패 (exit=" + exitCode + ")");
+            }
+            logger.info("[recoverMeeting] ffmpeg 병합 완료 - meetingId: {}, size: {}bytes", meetingId, outputFile.length());
+
+            // 병합 파일 NCP 업로드
+            String uuid = UUID.randomUUID().toString();
+            mergedKey = "meeting-audio/" + meetingId + "/" + uuid + ".webm";
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentLength(outputFile.length());
+            metadata.setContentType("audio/webm");
+            amazonS3.putObject(bucket, mergedKey, new FileInputStream(outputFile), metadata);
+            logger.info("[recoverMeeting] 업로드 완료 - meetingId: {}, key: {}", meetingId, mergedKey);
+
+            // 기존 오디오 레코드 정리 후 신규 삽입
+            meetingDAO.deleteAudioByMeetingId(searchVO);
+            audioVO.setMeetingId(meetingId);
+            audioVO.setFilePath(mergedKey);
+            audioVO.setOriginalFilename(uuid + ".webm");
+            audioVO.setFileExt("webm");
+            audioVO.setFileSize(outputFile.length());
+            meetingDAO.insertMeetingAudio(audioVO);
+            logger.info("[recoverMeeting] 오디오 레코드 저장 - audioId: {}", audioVO.getAudioId());
+
+            // TB_MEETING 복구 처리
+            MeetingVO updateVO = new MeetingVO();
+            updateVO.setMeetingId(meetingId);
+            meetingDAO.updateMeetingRecover(updateVO);
+
+            // 백업 파일 정리 (병합 성공 후)
+            deleteBackupFiles(meetingId);
+
+            result.put("successYn", true);
+            result.put("audioId", audioVO.getAudioId());
+
+        } catch (Exception e) {
+            logger.error("[recoverMeeting] 복구 실패 - meetingId: {}", meetingId, e);
+            // 실패 시 오디오 레코드에 에러 저장
+            try {
+                meetingDAO.deleteAudioByMeetingId(searchVO);
+                audioVO.setMeetingId(meetingId);
+                audioVO.setFilePath(mergedKey != null ? mergedKey : "");
+                audioVO.setOriginalFilename("recovery_failed.webm");
+                audioVO.setFileExt("webm");
+                audioVO.setFileSize(0L);
+                meetingDAO.insertMeetingAudio(audioVO);
+                MeetingVO errVO = new MeetingVO();
+                errVO.setMeetingId(meetingId);
+                errVO.setAudioStatus("004");
+                String errMsg = e.getMessage() != null ? e.getMessage() : "복구 처리 실패";
+                errVO.setErrorMsg(errMsg.length() > 1000 ? errMsg.substring(0, 1000) : errMsg);
+                meetingDAO.updateMeetingAudioStatus(errVO);
+            } catch (Exception ignore) {
+                logger.warn("[recoverMeeting] 에러 저장 실패", ignore);
+            }
+            result.put("successYn", false);
+            result.put("returnMsg", "복구 처리 중 오류가 발생했습니다. (" + e.getMessage() + ")");
+
+        } finally {
+            // 임시 파일 정리
+            try {
+                Files.walk(tmpDir)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+            } catch (Exception ignore) {}
+        }
+
+        return result;
     }
 
     private void downloadAsTxt(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
