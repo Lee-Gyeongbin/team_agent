@@ -263,8 +263,18 @@ public class ChatbotController extends BaseController {
     }
     
     /**
-         * 대화방 공유 토큰 발급 (TB_SHARE_TOKEN 저장, 만료 3일)
-         */
+     * 대화방 첨부파일 업로드 여부 사전 확인
+     */
+    @RequestMapping(value = "/ai/chatbot/checkRoomAttachment.do")
+    @ResponseBody
+    public ModelAndView checkRoomAttachment(@RequestBody ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(chatbotService.checkRoomAttachment(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 대화방 공유 토큰 발급 (TB_SHARE_TOKEN 저장, 만료 3일, FILE_SHARE_YN 포함)
+     */
     @RequestMapping(value = "/ai/chatbot/createShareToken.do")
     @ResponseBody
     public ModelAndView createShareToken(@RequestBody ChatbotVO searchVO) throws Exception {
@@ -333,6 +343,32 @@ public class ChatbotController extends BaseController {
     /**
      * 채팅 첨부 미리보기 (TB_CHAT_FILE + 대화방 소유자 검증 후 Presigned URL 등 반환)
      */
+    /** 공유 채팅방 첨부 미리보기 URL (소유자 사용자 검증 없음 — 공유 페이지 전용) */
+    @RequestMapping("/ai/chatbot/viewChatFile_share.do")
+    public @ResponseBody Map<String, Object> viewChatFileShare(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "INVALID");
+                return resultMap;
+            }
+            if (dataVO.getChatFileId() == null) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "MISSING_CHAT_FILE_ID");
+                return resultMap;
+            }
+            resultMap = chatbotService.viewChatFileShare(dataVO);
+        } catch (Exception e) {
+            log.error("viewChatFileShare failed", e);
+            resultMap.put("viewType", "DOWNLOAD");
+            resultMap.put("reason", "ERROR");
+        }
+
+        return resultMap;
+    }
+
     @RequestMapping("/ai/chatbot/viewChatFile.do")
     public @ResponseBody Map<String, Object> viewChatFile(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
