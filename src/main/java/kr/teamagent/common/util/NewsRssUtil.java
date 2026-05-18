@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -44,22 +45,58 @@ public final class NewsRssUtil {
         }
     }
 
+    /**
+     * 오늘의 뉴스픽 UI·큐레이션 관심 문자열 → 연합뉴스 RSS.
+     * {@code 생활/문화}는 하위 4피드를 묶어서 수집(기존 동작 유지).
+     */
     private static final Map<String, List<FeedSpec>> FEED_MAP = Map.ofEntries(
             Map.entry("정치", List.of(new FeedSpec("Globals.news.rss.yna.politics", "정치"))),
             Map.entry("경제", List.of(new FeedSpec("Globals.news.rss.yna.economy", "경제"))),
             Map.entry("사회", List.of(new FeedSpec("Globals.news.rss.yna.society", "사회"))),
+            Map.entry("산업", List.of(new FeedSpec("Globals.news.rss.yna.industry", "산업"))),
+            Map.entry("문화", List.of(new FeedSpec("Globals.news.rss.yna.culture", "문화"))),
+            Map.entry("세계", List.of(new FeedSpec("Globals.news.rss.yna.international", "세계"))),
+            Map.entry("건강", List.of(new FeedSpec("Globals.news.rss.yna.health", "건강"))),
+            Map.entry("연예", List.of(new FeedSpec("Globals.news.rss.yna.entertainment", "연예"))),
+            Map.entry("스포츠", List.of(new FeedSpec("Globals.news.rss.yna.sports", "스포츠"))),
+            Map.entry("주식", List.of(new FeedSpec("Globals.news.rss.yna.market", "주식"))),
             Map.entry("생활/문화", List.of(
                     new FeedSpec("Globals.news.rss.yna.health", "생활/문화"),
                     new FeedSpec("Globals.news.rss.yna.sports", "생활/문화"),
                     new FeedSpec("Globals.news.rss.yna.culture", "생활/문화"),
-                    new FeedSpec("Globals.news.rss.yna.entertainment", "생활/문화"))),
-            Map.entry("산업", List.of(new FeedSpec("Globals.news.rss.yna.industry", "산업"))));
+                    new FeedSpec("Globals.news.rss.yna.entertainment", "생활/문화"))));
+
+    /** 프론트 영문 키 등 → {@link #FEED_MAP} 키(한글). */
+    private static final Map<String, String> INTEREST_ALIASES = Map.ofEntries(
+            Map.entry("politics", "정치"),
+            Map.entry("economy", "경제"),
+            Map.entry("society", "사회"),
+            Map.entry("industry", "산업"),
+            Map.entry("culture", "문화"),
+            Map.entry("world", "세계"),
+            Map.entry("health", "건강"),
+            Map.entry("entertainment", "연예"),
+            Map.entry("sports", "스포츠"),
+            Map.entry("market", "주식"),
+            Map.entry("stock", "주식"));
 
     private static List<FeedSpec> feedsForInterest(String interest) {
         if (interest == null) {
             return Collections.emptyList();
         }
-        return FEED_MAP.getOrDefault(interest.trim(), Collections.emptyList());
+        String key = interest.trim();
+        if (key.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<FeedSpec> direct = FEED_MAP.get(key);
+        if (direct != null && !direct.isEmpty()) {
+            return direct;
+        }
+        String canonical = INTEREST_ALIASES.get(key.toLowerCase(Locale.ROOT));
+        if (canonical != null) {
+            return FEED_MAP.getOrDefault(canonical, Collections.emptyList());
+        }
+        return Collections.emptyList();
     }
 
     public static List<ChatbotVO.RssArticleRow> collectCandidates(RestApiManager restApiManager, Logger log,
