@@ -102,6 +102,8 @@ public class ChatbotVO extends CommonVO {
     private String webGroundingJson;
     // SQL
     private String sql;
+    // TEXT2SQL WHERE 조건 변수 스키마
+    private String ttsqParam;
 
     /* AI 서비스 사용자별 일일 사용량 */
     // 사용 일자 (YYYYMMDD)
