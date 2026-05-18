@@ -1,6 +1,8 @@
 package kr.teamagent.chat.web;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -420,6 +422,25 @@ public class ChatbotController extends BaseController {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "차트 데이터 생성 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
         }
+        return resultMap;
+    }
+
+    /**
+     * 점심 추천 카드용 — prompt(메뉴명)로 음식 이미지(data URL)를 생성해 반환한다.
+     */
+    @RequestMapping("/ai/chatbot/getLunchMenuImageData.do")
+    public @ResponseBody Map<String, Object> getLunchMenuImageData(@RequestBody Map<String, String> body) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        String prompt = body != null ? body.get("prompt") : null;
+        if (prompt == null || prompt.trim().isEmpty()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "prompt가 비어 있습니다.");
+            return resultMap;
+        }
+        List<String> menus = new ArrayList<>();
+        menus.add(prompt.trim());
+        resultMap.put("successYn", true);
+        resultMap.put("items", chatbotService.getLunchFoodImagesForMenus(menus));
         return resultMap;
     }
 

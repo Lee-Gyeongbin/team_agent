@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.lang.reflect.Type;
 import java.util.stream.Collectors;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.socket.WebSocketSession;
 
 import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.service.ChatbotVO.NewsRecommendCard;
@@ -52,10 +54,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
     private static final String LUNCH_MENU_AGENT_ID = "AG000009";
+
+    /** 점심 추천 카드와 동일 — 한 번에 요청할 수 있는 메뉴 이미지 개수 상한 */
+    private static final int LUNCH_FOOD_IMAGES_MAX_ITEMS = 3;
     /** summary_query 동기 호출 시 프롬프트·응답이 커 지연이 길어질 수 있는 경우의 OkHttp 읽기 타임아웃(초). */
     private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
     private static final String NEWS_CURATION_AGENT_ID = "AG000012";
-    private static final int NEWS_RECOMMEND_COUNT = 5;
     private static final Gson NEWS_CURATE_PROMPT_GSON = new Gson();
 
     @Autowired
@@ -492,7 +496,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     + "    \"location\": \"\",\n"
                     + "    \"menu\": \"\",\n"
                     + "    \"price\": \"\",\n"
-                    + "    \"address\": \"\"\n"
+                    + "    \"address\": \"\",\n"
                     + "  }\n"
                     + "]";
             return prompt;
@@ -530,11 +534,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 normalizedRow.put("location", location);
                 normalizedRow.put("menu", menu);
                 normalizedRow.put("price", price);
+                normalizedRow.put("imageUrl", "[음식이미지]");
 
                 String kakaoPlaceUrl = resolveKakaoPlaceUrlByKeyword(restaurant, location);
                 normalizedRow.put("address", CommonUtil.isNotEmpty(kakaoPlaceUrl) ? kakaoPlaceUrl : "");
-                String lunchImageUrl = resolveLunchMenuImageUrl(menu);
-                normalizedRow.put("imageUrl", CommonUtil.isNotEmpty(lunchImageUrl) ? lunchImageUrl : "");
                 normalizedRows.add(normalizedRow);
             }
             return normalizedRows.toJSONString();
@@ -545,10 +548,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 점심 추천 항목의 메뉴/식당명을 이용해 이미지 API를 호출하고,
+     * 점심 추천 항목의 메뉴명으로 이미지 API를 호출하고,
      * 프론트에서 바로 쓰는 data URL(data:image/...;base64,...)만 반환한다.
+     * ({@code /ai/chatbot/getLunchMenuImageData.do}의 항목별 생성에 사용한다.)
      */
-    private String resolveLunchMenuImageUrl(String menu) {
+    public String getLunchMenuImageData(String menu) {
         String prompt = "음식 사진 생성. 설명 없이 음식만 사실적으로 표현. 음식명: " + menu;
         String imageResult = callAiImageApi(prompt);
         if (CommonUtil.isEmpty(imageResult)) {
@@ -560,6 +564,34 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return normalized;
         }
         return "data:image/png;base64," + normalized;
+    }
+
+    /**
+     * 점심 카드용 — 메뉴명 목록에 대해 음식 이미지(data URL)를 생성한다.
+     * 스트리밍 JSON의 {@code imageUrl}(예: 플레이스홀더)과 별개로, 실제 이미지가 필요할 때 {@code /ai/chatbot/getLunchMenuImageData.do}에서 사용한다.
+     * 순서는 입력 {@code menus}와 동일하며, 최대 3개만 처리한다.
+     *
+     * @return 각 원소는 {@code menu}(String), {@code imageUrl}(String) 키를 가진 맵 목록
+     */
+    public List<Map<String, Object>> getLunchFoodImagesForMenus(List<String> menus) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        if (menus == null || menus.isEmpty()) {
+            return rows;
+        }
+        int limit = Math.min(menus.size(), LUNCH_FOOD_IMAGES_MAX_ITEMS);
+        for (int i = 0; i < limit; i++) {
+            String menu = menus.get(i) != null ? menus.get(i).trim() : "";
+            Map<String, Object> row = new HashMap<>();
+            row.put("menu", menu);
+            if (CommonUtil.isEmpty(menu)) {
+                row.put("imageUrl", "");
+            } else {
+                String lunchImageData = getLunchMenuImageData(menu);
+                row.put("imageUrl", CommonUtil.isNotEmpty(lunchImageData) ? lunchImageData : "");
+            }
+            rows.add(row);
+        }
+        return rows;
     }
 
     private String resolveKakaoPlaceUrlByKeyword(String restaurant, String location) {
@@ -1865,20 +1897,78 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * WebSocket {@code query} 첫 줄을 쉼표(, / ，)로 나눈 관심 카테고리 목록. 개행 뒤는 무시.
+     * 프론트 큐레이션 템플릿에서 {@code 사용자 관심 카테고리:} 뒤(같은 줄, 개행 전) JSON 문자열 배열만 파싱한다.
+     * 실패 시 빈 목록(레거시 첫 줄 쉼표 분해는 하지 않음).
      */
-    private static List<String> parseNewsKindsFromWebSocketQuery(String query) {
+    private static List<String> parseNewsCuratorCategoriesFromTemplate(String query) {
         if (CommonUtil.isEmpty(query)) {
             return Collections.emptyList();
         }
-        String trimmedWsQuery = query.trim();
-        String[] firstLineParts = trimmedWsQuery.split("\\r\\n|\\n|\\r", 2);
-        String interestLine = firstLineParts[0].trim();
-        if (CommonUtil.isEmpty(interestLine)) {
+        String trimmed = query.trim();
+        int marker = trimmed.indexOf("사용자 관심 카테고리");
+        if (marker < 0) {
             return Collections.emptyList();
         }
-        return Arrays.stream(interestLine.split("[,，]")).map(String::trim).filter(categoryToken -> !categoryToken.isEmpty())
-                .collect(Collectors.toList());
+        int colon = trimmed.indexOf(':', marker);
+        if (colon <= 0) {
+            return Collections.emptyList();
+        }
+        int endLine = indexOfNewline(trimmed, colon + 1);
+        String jsonPart = (endLine < 0 ? trimmed.substring(colon + 1) : trimmed.substring(colon + 1, endLine)).trim();
+        if (!jsonPart.startsWith("[") || !jsonPart.endsWith("]")) {
+            return Collections.emptyList();
+        }
+        try {
+            Type listType = new TypeToken<List<String>>() {
+            }.getType();
+            List<String> parsed = NEWS_CURATE_PROMPT_GSON.fromJson(jsonPart, listType);
+            if (parsed == null || parsed.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return parsed.stream().filter(s -> s != null && !s.trim().isEmpty()).map(String::trim).collect(Collectors.toList());
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static int indexOfNewline(String s, int from) {
+        int n = s.indexOf('\n', from);
+        if (n >= 0) {
+            return n;
+        }
+        return s.indexOf('\r', from);
+    }
+
+    private static final String NEWS_CURATOR_CANDIDATE_LIST_LINE_PREFIX = "- 후보 기사 목록(JSON 배열):";
+
+    private static String newsCurationUserQueryForChatLog(String webSocketQuery) {
+        if (webSocketQuery == null) {
+            return "";
+        }
+        int cut = webSocketQuery.indexOf(NEWS_CURATOR_CANDIDATE_LIST_LINE_PREFIX);
+        if (cut < 0) {
+            return webSocketQuery;
+        }
+        return webSocketQuery.substring(0, cut).trim();
+    }
+
+    private static String buildNewsCandidateArticlesMetadataBlock(List<RssArticleRow> candidates) {
+        List<Map<String, Object>> curatorInputArticles = new ArrayList<>(candidates.size());
+        for (RssArticleRow candidateRow : candidates) {
+            curatorInputArticles.add(NewsRssUtil.curatorPromptArticleMap(candidateRow));
+        }
+        String articlesJson = NEWS_CURATE_PROMPT_GSON.toJson(curatorInputArticles);
+        return NEWS_CURATOR_CANDIDATE_LIST_LINE_PREFIX + " " + articlesJson + "\n"
+                + "  각 항목의 rssCategory는 서버가 사용자 관심에 맞춰 선택한 RSS 피드 구분이다. 이를 바꾸거나 재분류하지 않고 그대로 사용한다.\n";
+    }
+
+    private static String appendNewsCandidateArticlesToCuratorQuery(String frontendTemplate, List<RssArticleRow> candidates) {
+        String block = buildNewsCandidateArticlesMetadataBlock(candidates);
+        int roleIdx = frontendTemplate.indexOf("[역할]");
+        if (roleIdx >= 0) {
+            return frontendTemplate.substring(0, roleIdx).trim() + "\n" + block + "\n" + frontendTemplate.substring(roleIdx);
+        }
+        return frontendTemplate.trim() + "\n\n" + block;
     }
 
     /**
@@ -1887,16 +1977,22 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private void deliverNewsRecommendationViaWebSocket(String query, String threadId, String userId, String svcTy,
             String modelId, String refId, String agentId, List<Long> attachmentFileIds,
             ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
-        Map<String, Object> newsRecommendPayload = recommendNews(parseNewsKindsFromWebSocketQuery(query));
+        String rawQuery = query != null ? query : "";
+        List<String> interestCategories = parseNewsCuratorCategoriesFromTemplate(rawQuery.trim());
+        List<RssArticleRow> rssCandidateRows = NewsRssUtil.collectCandidates(restApiManager, logger, interestCategories);
+        String curatorPrompt = appendNewsCandidateArticlesToCuratorQuery(rawQuery, rssCandidateRows);
+        Map<String, Object> newsRecommendPayload = runNewsCuratorAiAndParse(interestCategories, rssCandidateRows, curatorPrompt);
         String responseJson = new com.google.gson.Gson().toJson(newsRecommendPayload);
         callback.onChunk(responseJson, responseJson, null);
+        /** Q_CONTENT: 프론트 원문만(서버 후보 기사 블록이 query에 섞인 경우 제거). */
+        String qContentForDb = newsCurationUserQueryForChatLog(query);
         String savedLogId = "";
         if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
             try {
                 savedLogId = doInsertAiLog(
                         threadId,
                         agentId,
-                        query,
+                        qContentForDb,
                         responseJson,
                         0,
                         0,
@@ -1930,13 +2026,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null);
     }
 
-    public Map<String, Object> recommendNews(List<String> interests) {
-        List<String> interestCategories = interests != null ? interests : Collections.emptyList();
-        List<RssArticleRow> rssCandidateRows = NewsRssUtil.collectCandidates(restApiManager, logger, interestCategories);
-        if (rssCandidateRows.isEmpty()) {
-            return buildNewsRecommendResponse(interestCategories, new ArrayList<>(), false, "RSS에서 기사를 가져오지 못했습니다.");
-        }
-        String curatorPrompt = buildNewsCuratorPrompt(interestCategories, rssCandidateRows);
+    private Map<String, Object> runNewsCuratorAiAndParse(List<String> interestCategories, List<RssArticleRow> rssCandidateRows,
+            String curatorPrompt) {
         String curatorAiJson = callAiSummary(curatorPrompt, "news_curate");
         List<NewsRecommendCard> curatedCards = parseNewsCuratorJson(curatorAiJson, rssCandidateRows);
         if (curatedCards.isEmpty()) {
@@ -1955,64 +2046,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 "returnMsg", CommonUtil.nullToBlank(message),
                 "interests", interestsEcho,
                 "news", curatedNewsCards);
-    }
-
-    private String buildNewsCuratorPrompt(List<String> interests, List<RssArticleRow> candidates) {
-        List<Map<String, Object>> curatorInputArticles = new ArrayList<>(candidates.size());
-        for (RssArticleRow candidateRow : candidates) {
-            curatorInputArticles.add(NewsRssUtil.curatorPromptArticleMap(candidateRow));
-        }
-        String interestsJson = NEWS_CURATE_PROMPT_GSON.toJson(interests);
-        String articlesJson = NEWS_CURATE_PROMPT_GSON.toJson(curatorInputArticles);
-        String curatorSystemPrompt = "너는 뉴스 큐레이션 편집자이다.\n\n"
-
-                        + "[입력 데이터]\n"
-                        + "- 사용자 관심 카테고리: " + interestsJson + "\n"
-                        + "- 후보 기사 목록(JSON 배열): " + articlesJson + "\n"
-                        + "  각 항목의 rssCategory는 서버가 사용자 관심에 맞춰 선택한 RSS 피드 구분이다. 이를 바꾸거나 재분류하지 않고 그대로 사용한다.\n\n"
-
-                        + "[역할]\n"
-                        + "후보 기사 목록 중에서 사용자 관심 카테고리와 가장 관련성이 높은 기사 " + NEWS_RECOMMEND_COUNT + "개를 선정한다.\n\n"
-
-                        + "[전제 조건]\n"
-                        + "1. 반드시 후보 기사 목록 안에 존재하는 기사만 사용한다.\n"
-                        + "2. 존재하지 않는 기사나 값을 임의 생성하지 않는다.\n"
-                        + "3. source, title, sourceUrl, imageUrl 값은 입력 데이터를 그대로 사용한다.\n"
-                        + "4. imageUrl은 기사 원본 데이터의 imageUrl 값을 그대로 사용한다.\n"
-                        + "5. 받은 카테고리별로 1가지 이상의 기사를 선택해야 한다.\n\n"
-
-                        + "[작업 규칙]\n"
-                        + "1. 사용자 관심 카테고리와 일치하거나 가장 가까운 기사를 우선 선정한다.\n"
-                        + "2. 같은 주제 또는 유사한 내용의 기사는 중복 선택하지 않는다.\n"
-                        + "3. summary만 새롭게 작성하며, 기사 내용을 자연스럽게 축약한 한국어 두 문장으로 작성한다.\n"
-                        + "4. summary는 최대 150자 이내로 간결하게 작성한다.\n"
-                        + "5. summary에는 과장, 추측, 허위 표현을 사용하지 않는다.\n\n"
-
-                        + "[출력 규칙]\n"
-                        + "1. 반드시 JSON 배열만 출력한다.\n"
-                        + "2. 설명, 마크다운, 코드블록, 추가 텍스트는 절대 출력하지 않는다.\n"
-                        + "3. 배열 원소 개수는 반드시 정확히 " + NEWS_RECOMMEND_COUNT + "개이다.\n"
-                        + "4. rank 값은 반드시 1부터 " + NEWS_RECOMMEND_COUNT + "까지 순서로 출력한다.\n"
-                        + "5. 출력 필드는 아래만 사용한다.\n"
-                        + "   - rank\n"
-                        + "   - source\n"
-                        + "   - title\n"
-                        + "   - summary\n"
-                        + "   - sourceUrl\n"
-                        + "   - imageUrl\n\n"
-
-                        + "[출력 예시]\n"
-                        + "[\n"
-                        + "  {\n"
-                        + "    \"rank\": 1,\n"
-                        + "    \"source\": \"전자신문\",\n"
-                        + "    \"title\": \"삼성전자 AI 반도체 투자 확대\",\n"
-                        + "    \"summary\": \"삼성전자가 AI 반도체 투자를 확대한다. 생산 역량 강화에 나선다.\",\n"
-                        + "    \"sourceUrl\": \"https://www.etnews.com/20260507000353\",\n"
-                        + "    \"imageUrl\": \"https://image.example.com/sample.jpg\"\n"
-                        + "  }\n"
-                        + "]";
-        return curatorSystemPrompt;
     }
 
     private Map<String, RssArticleRow> buildUrlIndex(List<RssArticleRow> candidates) {

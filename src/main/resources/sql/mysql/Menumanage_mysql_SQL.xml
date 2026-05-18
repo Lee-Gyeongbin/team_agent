@@ -2,6 +2,37 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="menuManage">
 
+    <select id="selectMenuById" parameterType="String" resultType="kr.teamagent.menumanage.service.MenuManageVO">
+        /* 메뉴 단건 조회 menuManage.selectMenuById */
+        SELECT MENU_ID      AS menuId
+             , MENU_NAME    AS menuName
+             , PARN_MENU_ID AS parnMenuId
+             , MENU_LEVEL   AS menuLevel
+             , MENU_PATH    AS menuPath
+             , IS_LEAF      AS isLeaf
+             , SRC_PATH     AS srcPath
+             , ICON         AS icon
+             , SORT_ORD     AS sortOrd
+             , USE_YN       AS useYn
+             , DESCRIPTION  AS description
+          FROM TB_MENU
+         WHERE MENU_ID = #{menuId}
+    </select>
+
+    <select id="selectMaxSortOrdByParnMenuId" parameterType="String" resultType="Integer">
+        /* 동일 상위 메뉴 하위 최대 정렬순서 조회 menuManage.selectMaxSortOrdByParnMenuId */
+        SELECT COALESCE(MAX(SORT_ORD), 0)
+          FROM TB_MENU
+         <choose>
+            <when test="_parameter != null and _parameter != ''">
+                WHERE PARN_MENU_ID = #{parnMenuId}
+            </when>
+            <otherwise>
+                WHERE (PARN_MENU_ID IS NULL OR PARN_MENU_ID = '')
+            </otherwise>
+        </choose>
+    </select>
+
     <insert id="saveMenu" parameterType="kr.teamagent.menumanage.service.MenuManageVO$SaveMenuVO">
         /* 메뉴 등록/수정 (ON DUPLICATE KEY UPDATE) menuManage.saveMenu */
         INSERT INTO TB_MENU (
