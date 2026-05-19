@@ -82,10 +82,10 @@
       , #{passwd}
       , #{phone}
       , #{orgId}
-      , 'Y'
+      , #{useYn}
       , 0
       , 'N'
-      , '001'
+      , #{acctStatusCd}
       , NOW()
       , NULL
       , #{crtrId}
@@ -102,6 +102,8 @@
         ORG_ID = #{orgId},
         EMAIL = #{email},
         PHONE = #{phone},
+        USE_YN = #{useYn},
+        ACCT_STATUS_CD = #{acctStatusCd},
         MODIFY_DT = NOW(),
         MDFR_ID = #{mdfrId}
     WHERE USER_ID = #{userId}

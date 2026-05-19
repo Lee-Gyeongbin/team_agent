@@ -3,13 +3,17 @@ package kr.teamagent.usermanage.web;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.StandardPasswordEncoder;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 import org.apache.commons.lang3.RandomStringUtils;
 
@@ -17,6 +21,7 @@ import kr.teamagent.common.exception.DuplicateEmailException;
 import kr.teamagent.common.exception.DuplicateUserIdException;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.usermanage.service.UserManageVO;
 import kr.teamagent.usermanage.service.impl.UserManageServiceImpl;
@@ -199,5 +204,32 @@ public class UserManageController extends BaseController {
 
     private String generateTempPassword(int length) {
         return RandomStringUtils.randomAlphanumeric(length);
+    }
+
+    /**
+     * 사용자 엑셀 다운로드
+     */
+    @RequestMapping(value = "/downloadUserExcel.do", method = RequestMethod.GET)
+    public void downloadUserExcel(HttpServletResponse response) throws Exception {
+        userManageService.downloadUserExcel(response);
+    }
+
+    /**
+     * 사용자 엑셀 업로드
+     * @return jsonView (successYn, data: successCount/failDetails 등)
+     */
+    @RequestMapping(value = "/uploadUserExcel.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView uploadUserExcel(@RequestParam("uploadFile") MultipartFile uploadFile) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        Map<String, Object> uploadResult = userManageService.uploadUserExcel(uploadFile);
+        boolean hasUploadFail = ExcelUtil.hasUploadFailures(uploadResult);
+        resultMap.put("successYn", !hasUploadFail);
+        if (hasUploadFail) {
+            Object returnMsg = uploadResult.get("returnMsg");
+            resultMap.put("returnMsg", returnMsg != null ? returnMsg : "엑셀 업로드 검증에 실패했습니다.");
+        }
+        resultMap.put("data", uploadResult);
+        return new ModelAndView("jsonView", resultMap);
     }
 }
