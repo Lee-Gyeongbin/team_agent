@@ -1,13 +1,9 @@
 package kr.teamagent.orgmanage.service.impl;
 
-import java.net.URLEncoder;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -16,29 +12,12 @@ import java.util.Set;
 import javax.servlet.http.HttpServletResponse;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
-import org.apache.poi.ss.usermodel.BorderStyle;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.ConditionalFormattingRule;
-import org.apache.poi.ss.usermodel.DataValidation;
-import org.apache.poi.ss.usermodel.DataValidationConstraint;
 import org.apache.poi.ss.usermodel.DataFormatter;
-import org.apache.poi.ss.usermodel.FillPatternType;
-import org.apache.poi.ss.usermodel.HorizontalAlignment;
-import org.apache.poi.ss.usermodel.IndexedColors;
-import org.apache.poi.ss.usermodel.PatternFormatting;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.SheetConditionalFormatting;
-import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
-import org.apache.poi.ss.util.CellRangeAddress;
-import org.apache.poi.ss.util.CellRangeAddressList;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
-import org.apache.poi.xssf.usermodel.XSSFColor;
-import org.apache.poi.xssf.usermodel.XSSFDataValidation;
-import org.apache.poi.xssf.usermodel.XSSFDataValidationHelper;
-import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.orgmanage.service.OrgManageVO;
@@ -56,19 +36,24 @@ import kr.teamagent.orgmanage.service.OrgManageVO;
 public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
 
     private static final String[] ORG_EXCEL_HEADERS = { "조직ID", "조직명", "상위조직명", "조직레벨", "정렬순서", "사용여부" };
+    /** ExcelUtil.applyHeaderRow 회색 헤더용 — 삭제·변경 시 다운로드 헤더 스타일이 깨짐 */
     private static final int[] AUTO_GEN_HEADER_COLS = { 0, 3, 4 };
     private static final int USE_YN_COL_IDX = 5;
     private static final int ORIGIN_ORG_NM_COL_IDX = 7;
     private static final int ORIGIN_PARENT_ORG_NM_COL_IDX = 8;
     private static final int ORIGIN_USE_YN_COL_IDX = 9;
+    private static final int ORIGIN_ORG_ID_COL_IDX = 10;
+    private static final int ORIGIN_ORG_LEVEL_COL_IDX = 11;
+    private static final int ORIGIN_SORT_ORDER_COL_IDX = 12;
     private static final String ORG_NM_USE_YN_REQUIRED_MSG = "조직명과 사용여부는 필수값입니다.";
     private static final String PARENT_ORG_NM_HEADER = "상위조직명";
     private static final String PARENT_ORG_ID_HEADER = "상위조직ID";
     private static final String PARENT_ORG_FLEX_HEADER = "상위조직명 or 상위조직ID";
-    private static final int EXCEL_DATA_VALIDATION_MAX_ROW = 500;
-    private static final byte[] HEADER_BG_RGB = { (byte) 0x1F, (byte) 0x4E, (byte) 0x79 };
-    private static final byte[] AUTO_GEN_HEADER_BG_RGB = { (byte) 0xA6, (byte) 0xA6, (byte) 0xA6 };
-    private static final byte[] EVEN_ROW_BG_RGB = { (byte) 0xD6, (byte) 0xE4, (byte) 0xF0 };
+    /** 신규 행: 원본 조직명(H) 없음 + A~F 입력 있음. 수정 행: A~F 중 원본(K~M,H~J)과 하나라도 다름 */
+    private static final String ORG_CHANGE_HIGHLIGHT_FORMULA = "OR("
+            + "AND(LEN($H3)=0,COUNTA($A3:$F3)>0),"
+            + "AND(LEN($H3)>0,OR($A3<>$K3,$B3<>$H3,$C3<>$I3,$D3<>$L3,$E3<>$M3,$F3<>$J3))"
+            + ")";
     private static final String ORG_EXCEL_GUIDE_TEXT =
             "※ 조직ID가 있으면 수정, 비어 있으면 신규 등록됩니다. 조직레벨·정렬순서는 업로드 시 무시됩니다.\n"
                     + "  조직명(필수), 상위조직명(선택), 사용여부(Y/N) 만 입력하세요.";
@@ -206,85 +191,70 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
      */
     public void downloadOrgExcel(HttpServletResponse response) throws Exception {
         List<OrgManageVO> list = orderOrgListByTree(selectOrgList(new OrgManageVO()));
-
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
-            XSSFSheet sheet = workbook.createSheet("조직목록");
-            XSSFCellStyle headerStyle = createHeaderStyle(workbook, false);
-            XSSFCellStyle autoGenHeaderStyle = createHeaderStyle(workbook, true);
-            XSSFCellStyle guideStyle = createGuideStyle(workbook);
-            Map<String, XSSFCellStyle> dataStyleCache = new HashMap<>();
-            Map<String, String> orgNameMap = new HashMap<>();
-            for (OrgManageVO vo : list) {
-                orgNameMap.put(vo.getOrgId(), vo.getOrgNm());
-            }
-
-            Row guideRow = sheet.createRow(0);
-            Cell guideCell = guideRow.createCell(0);
-            guideCell.setCellValue(ORG_EXCEL_GUIDE_TEXT);
-            guideCell.setCellStyle(guideStyle);
-            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, ORG_EXCEL_HEADERS.length - 1));
-            guideRow.setHeightInPoints(36f);
-
-            Row header = sheet.createRow(1);
-            header.setHeightInPoints(22f);
-            for (int i = 0; i < ORG_EXCEL_HEADERS.length; i++) {
-                Cell cell = header.createCell(i);
-                cell.setCellValue(ORG_EXCEL_HEADERS[i]);
-                cell.setCellStyle(isAutoGenHeaderCol(i) ? autoGenHeaderStyle : headerStyle);
-            }
-
-            int rowNum = 2;
-            for (OrgManageVO vo : list) {
-                boolean evenRow = rowNum % 2 == 0;
-                XSSFCellStyle rowStyle = dataStyleCache.computeIfAbsent(String.valueOf(evenRow),
-                        k -> createDataStyle(workbook, evenRow));
-                String parentOrgNm = nvl(orgNameMap.get(vo.getParentOrgId()));
-
-                Row row = sheet.createRow(rowNum++);
-                applyDataCell(row, 0, nvl(vo.getOrgId()), rowStyle);
-                applyDataCell(row, 1, nvl(vo.getOrgNm()), rowStyle);
-                applyDataCell(row, 2, parentOrgNm, rowStyle);
-                applyDataCell(row, 3, nvl(vo.getOrgLevel()), rowStyle);
-                applyDataCell(row, 4, nvl(vo.getSortOrder()), rowStyle);
-                applyDataCell(row, 5, nvl(vo.getUseYn()), rowStyle);
-
-                row.createCell(ORIGIN_ORG_NM_COL_IDX).setCellValue(nvl(vo.getOrgNm()));
-                row.createCell(ORIGIN_PARENT_ORG_NM_COL_IDX).setCellValue(parentOrgNm);
-                row.createCell(ORIGIN_USE_YN_COL_IDX).setCellValue(nvl(vo.getUseYn()));
-            }
-            sheet.setColumnHidden(ORIGIN_ORG_NM_COL_IDX, true);
-            sheet.setColumnHidden(ORIGIN_PARENT_ORG_NM_COL_IDX, true);
-            sheet.setColumnHidden(ORIGIN_USE_YN_COL_IDX, true);
-            addChangeHighlightConditionalFormatting(sheet);
-
-            for (int i = 0; i < ORG_EXCEL_HEADERS.length; i++) {
-                sheet.autoSizeColumn(i);
-                int width = Math.max(sheet.getColumnWidth(i) + 2048, 4000);
-                sheet.setColumnWidth(i, width);
-            }
-            sheet.createFreezePane(0, 2);
-            addUseYnValidation(sheet);
-
-            String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String filename = URLEncoder.encode("조직목록_" + today + ".xlsx", "UTF-8");
-            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
-            workbook.write(response.getOutputStream());
-            response.getOutputStream().flush();
+            XSSFSheet sheet = createOrgExcelSheet(workbook, list);
+            applyOrgExcelSheetOptions(sheet);
+            ExcelUtil.writeXlsxResponse(response, workbook);
         }
+    }
+
+    private XSSFSheet createOrgExcelSheet(XSSFWorkbook workbook, List<OrgManageVO> list) {
+        XSSFSheet sheet = ExcelUtil.createSheetWithHeader(workbook, "조직목록", ORG_EXCEL_HEADERS, AUTO_GEN_HEADER_COLS,
+                ORG_EXCEL_GUIDE_TEXT);
+
+        Map<String, String> orgNameMap = new HashMap<>();
+        for (OrgManageVO vo : list) {
+            orgNameMap.put(vo.getOrgId(), vo.getOrgNm());
+        }
+        writeOrgExcelRows(workbook, sheet, list, orgNameMap);
+        return sheet;
+    }
+
+    private void writeOrgExcelRows(XSSFWorkbook workbook, XSSFSheet sheet, List<OrgManageVO> list,
+            Map<String, String> orgNameMap) {
+        XSSFCellStyle rowStyle = ExcelUtil.createDataStyle(workbook);
+        int rowNum = ExcelUtil.DATA_START_ROW;
+        for (OrgManageVO vo : list) {
+            String parentOrgNm = CommonUtil.nullToBlank(orgNameMap.get(vo.getParentOrgId()));
+
+            Row row = sheet.createRow(rowNum++);
+            ExcelUtil.applyDataCell(row, 0, CommonUtil.nullToBlank(vo.getOrgId()), rowStyle);
+            ExcelUtil.applyDataCell(row, 1, CommonUtil.nullToBlank(vo.getOrgNm()), rowStyle);
+            ExcelUtil.applyDataCell(row, 2, parentOrgNm, rowStyle);
+            ExcelUtil.applyDataCell(row, 3, CommonUtil.nullToBlank(vo.getOrgLevel()), rowStyle);
+            ExcelUtil.applyDataCell(row, 4, CommonUtil.nullToBlank(vo.getSortOrder()), rowStyle);
+            ExcelUtil.applyDataCell(row, 5, CommonUtil.nullToBlank(vo.getUseYn()), rowStyle);
+
+            row.createCell(ORIGIN_ORG_NM_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getOrgNm()));
+            row.createCell(ORIGIN_PARENT_ORG_NM_COL_IDX).setCellValue(parentOrgNm);
+            row.createCell(ORIGIN_USE_YN_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getUseYn()));
+            row.createCell(ORIGIN_ORG_ID_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getOrgId()));
+            row.createCell(ORIGIN_ORG_LEVEL_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getOrgLevel()));
+            row.createCell(ORIGIN_SORT_ORDER_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getSortOrder()));
+        }
+    }
+
+    private void applyOrgExcelSheetOptions(XSSFSheet sheet) {
+        ExcelUtil.hideColumns(sheet, ORIGIN_ORG_NM_COL_IDX, ORIGIN_PARENT_ORG_NM_COL_IDX, ORIGIN_USE_YN_COL_IDX,
+                ORIGIN_ORG_ID_COL_IDX, ORIGIN_ORG_LEVEL_COL_IDX, ORIGIN_SORT_ORDER_COL_IDX);
+        ExcelUtil.addChangeHighlight(sheet, ORG_CHANGE_HIGHLIGHT_FORMULA,
+                "A3:F" + (ExcelUtil.DATA_VALIDATION_MAX_ROW + 2));
+        ExcelUtil.adjustColumnWidths(sheet, ORG_EXCEL_HEADERS.length);
+        sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
+        ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
+                USE_YN_COL_IDX, new String[] { "Y", "N" }, null, ExcelUtil.USE_YN_INVALID_MSG);
     }
 
     /**
      * 조직 엑셀 업로드
      * @param file
-     * @return successCount, failCount, failDetails
+     * @return successCount, insertCount, updateCount, failDetails, returnMsg(실패 시)
      * @throws Exception
      */
     public Map<String, Object> uploadOrgExcel(MultipartFile file) throws Exception {
         int successCount = 0;
         int insertCount = 0;
         int updateCount = 0;
-        int failCount = 0;
         List<Map<String, Object>> failDetails = new ArrayList<>();
         List<OrgExcelRow> excelRows = new ArrayList<>();
         DataFormatter formatter = new DataFormatter();
@@ -292,18 +262,13 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = findHeaderRow(sheet, formatter);
+            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, "조직명");
             if (headerRow == null) {
                 throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (헤더 행 없음)");
             }
 
-            Map<String, Integer> colIdx = parseHeaderColumns(headerRow, formatter);
-            if (!colIdx.containsKey("조직명")) {
-                throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (조직명 컬럼 필수)");
-            }
-            if (!colIdx.containsKey("사용여부")) {
-                throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (사용여부 컬럼 필수)");
-            }
+            Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
+            ExcelUtil.validateRequiredHeaderColumns(colIdx, "조직", "조직명", "사용여부");
 
             Integer orgNmCol = colIdx.get("조직명");
             Integer orgIdCol = colIdx.get("조직ID");
@@ -317,10 +282,10 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                String orgNm = getCellString(row, orgNmCol, formatter);
-                String orgId = getCellString(row, orgIdCol, formatter);
-                String parentOrgNm = getCellString(row, parentOrgCol, formatter);
-                String useYn = getCellString(row, useYnCol, formatter);
+                String orgNm = ExcelUtil.getCellString(row, orgNmCol, formatter);
+                String orgId = ExcelUtil.getCellString(row, orgIdCol, formatter);
+                String parentOrgNm = ExcelUtil.getCellString(row, parentOrgCol, formatter);
+                String useYn = ExcelUtil.getCellString(row, useYnCol, formatter);
                 if (orgNm.startsWith("※")) {
                     continue;
                 }
@@ -331,7 +296,6 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                 boolean orgNmEmpty = orgNm.isEmpty();
                 boolean useYnEmpty = useYn.isEmpty();
                 if (orgNmEmpty != useYnEmpty) {
-                    failCount++;
                     failDetails.add(buildFailDetail(i + 1, orgNmEmpty ? parentOrgNm : orgNm, ORG_NM_USE_YN_REQUIRED_MSG));
                     continue;
                 }
@@ -339,9 +303,8 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                if (!"Y".equals(useYn) && !"N".equals(useYn)) {
-                    failCount++;
-                    failDetails.add(buildFailDetail(i + 1, orgNm, "사용여부는 Y 또는 N만 입력 가능합니다."));
+                if (!ExcelUtil.isValidUseYn(useYn)) {
+                    failDetails.add(buildFailDetail(i + 1, orgNm, ExcelUtil.USE_YN_INVALID_MSG));
                     continue;
                 }
 
@@ -370,7 +333,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                     vo.setUseYn(excelRow.useYn);
                     saveOrgExcelRow(vo);
                     if (vo.getOrgNm() != null && !vo.getOrgNm().trim().isEmpty()) {
-                        putOrgNameAlias(orgIdByName, vo.getOrgNm().trim(), vo.getOrgId());
+                        ExcelUtil.registerOrgName(orgIdByName, vo.getOrgNm(), vo.getOrgId());
                     }
                     successCount++;
                     if (updateRow) {
@@ -379,7 +342,6 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                         insertCount++;
                     }
                 } catch (Exception e) {
-                    failCount++;
                     failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.orgNm, e.getMessage()));
                 }
                 iterator.remove();
@@ -387,7 +349,6 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
             }
             if (!processed) {
                 for (OrgExcelRow excelRow : pendingRows) {
-                    failCount++;
                     failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.orgNm,
                             "존재하지 않는 상위조직(명/ID): " + excelRow.parentOrgNm));
                 }
@@ -395,13 +356,18 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("successCount", successCount);
-        result.put("insertCount", insertCount);
-        result.put("updateCount", updateCount);
-        result.put("failCount", failCount);
-        result.put("failDetails", failDetails);
-        return result;
+        String returnMsg = failDetails.isEmpty() ? null
+                : ExcelUtil.buildUploadFailReturnMsg(failDetails, OrgManageServiceImpl::orgFailDetailMessage);
+        return ExcelUtil.buildUploadResult(successCount, insertCount, updateCount, failDetails, returnMsg);
+    }
+
+    private static String orgFailDetailMessage(Map<String, Object> detail) {
+        Object reason = detail.get("reason");
+        if (reason == null) {
+            return ExcelUtil.UPLOAD_FAIL_DEFAULT_MSG;
+        }
+        String message = String.valueOf(reason).trim();
+        return message.isEmpty() ? ExcelUtil.UPLOAD_FAIL_DEFAULT_MSG : message;
     }
 
     /**
@@ -492,57 +458,6 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
         }
         String trimmedParentOrgId = parentOrgId.trim();
         return trimmedParentOrgId.isEmpty() ? null : trimmedParentOrgId;
-    }
-
-    private static String getCellString(Row row, Integer colIdx, DataFormatter formatter) {
-        if (colIdx == null) {
-            return "";
-        }
-        return formatter.formatCellValue(row.getCell(colIdx)).trim();
-    }
-
-    private static String nvl(String value) {
-        return value == null ? "" : value;
-    }
-
-    private static boolean isAutoGenHeaderCol(int colIdx) {
-        for (int autoGenCol : AUTO_GEN_HEADER_COLS) {
-            if (autoGenCol == colIdx) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static void applyDataCell(Row row, int colIdx, String value, XSSFCellStyle style) {
-        Cell cell = row.createCell(colIdx);
-        cell.setCellValue(value);
-        cell.setCellStyle(style);
-    }
-
-    private static Map<String, Integer> parseHeaderColumns(Row headerRow, DataFormatter formatter) {
-        Map<String, Integer> colIdx = new HashMap<>();
-        for (Cell cell : headerRow) {
-            String header = formatter.formatCellValue(cell).trim();
-            if (!header.isEmpty()) {
-                colIdx.put(header, cell.getColumnIndex());
-            }
-        }
-        return colIdx;
-    }
-
-    private static Row findHeaderRow(Sheet sheet, DataFormatter formatter) {
-        for (int i = 0; i <= sheet.getLastRowNum(); i++) {
-            Row row = sheet.getRow(i);
-            if (row == null) {
-                continue;
-            }
-            Map<String, Integer> colIdx = parseHeaderColumns(row, formatter);
-            if (colIdx.containsKey("조직명")) {
-                return row;
-            }
-        }
-        return null;
     }
 
     /**
@@ -659,23 +574,9 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
             if (orgNm.isEmpty()) {
                 continue;
             }
-            putOrgNameAlias(orgIdByName, orgNm, vo.getOrgId());
+            ExcelUtil.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
         }
         return orgIdByName;
-    }
-
-    private static void putOrgNameAlias(Map<String, String> orgIdByName, String orgNm, String orgId) {
-        if (!orgIdByName.containsKey(orgNm)) {
-            orgIdByName.put(orgNm, orgId);
-        }
-        String compactOrgNm = normalizeOrgNameKey(orgNm);
-        if (!compactOrgNm.isEmpty() && !orgIdByName.containsKey(compactOrgNm)) {
-            orgIdByName.put(compactOrgNm, orgId);
-        }
-    }
-
-    private static String normalizeOrgNameKey(String orgNm) {
-        return orgNm.replaceAll("\\s+", "");
     }
 
     private String resolveParentOrgId(String parentOrgValue, Map<String, String> orgIdByName, boolean idFirst)
@@ -695,11 +596,11 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
         if (parentById != null) {
             return parentById.getOrgId();
         }
-        return lookupParentOrgIdByName(trimmed, orgIdByName);
+        return ExcelUtil.resolveOrgIdByName(trimmed, orgIdByName);
     }
 
     private String resolveParentOrgIdByNameThenId(String trimmed, Map<String, String> orgIdByName) throws Exception {
-        String byName = lookupParentOrgIdByName(trimmed, orgIdByName);
+        String byName = ExcelUtil.resolveOrgIdByName(trimmed, orgIdByName);
         if (byName != null) {
             return byName;
         }
@@ -752,101 +653,10 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
         return raw;
     }
 
-    private static String lookupParentOrgIdByName(String trimmedParentValue, Map<String, String> orgIdByName) {
-        String orgId = orgIdByName.get(trimmedParentValue);
-        if (orgId != null) {
-            return orgId;
-        }
-        String compactParentValue = normalizeOrgNameKey(trimmedParentValue);
-        if (!compactParentValue.isEmpty()) {
-            orgId = orgIdByName.get(compactParentValue);
-            if (orgId != null) {
-                return orgId;
-            }
-        }
-        return null;
-    }
-
     private static Map<String, Object> buildFailDetail(int row, String orgNm, String reason) {
-        Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("row", row);
+        Map<String, Object> detail = ExcelUtil.buildFailDetail(row, reason);
         detail.put("orgNm", orgNm);
-        detail.put("reason", reason);
         return detail;
-    }
-
-    private static XSSFCellStyle createHeaderStyle(XSSFWorkbook workbook, boolean autoGen) {
-        XSSFCellStyle style = workbook.createCellStyle();
-        XSSFFont font = workbook.createFont();
-        font.setBold(true);
-        font.setColor(IndexedColors.WHITE.getIndex());
-        if (autoGen) {
-            font.setItalic(true);
-        }
-        style.setFont(font);
-        style.setAlignment(HorizontalAlignment.CENTER);
-        style.setVerticalAlignment(VerticalAlignment.CENTER);
-        applyThinBorder(style);
-        style.setFillForegroundColor(new XSSFColor(autoGen ? AUTO_GEN_HEADER_BG_RGB : HEADER_BG_RGB, null));
-        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        return style;
-    }
-
-    private static XSSFCellStyle createDataStyle(XSSFWorkbook workbook, boolean evenRow) {
-        XSSFCellStyle style = workbook.createCellStyle();
-        applyThinBorder(style);
-        byte[] bgRgb = evenRow ? EVEN_ROW_BG_RGB : new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF };
-        style.setFillForegroundColor(new XSSFColor(bgRgb, null));
-        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        return style;
-    }
-
-    private static XSSFCellStyle createGuideStyle(XSSFWorkbook workbook) {
-        XSSFCellStyle style = workbook.createCellStyle();
-        XSSFFont font = workbook.createFont();
-        font.setItalic(true);
-        font.setColor(IndexedColors.GREY_50_PERCENT.getIndex());
-        style.setFont(font);
-        style.setWrapText(true);
-        style.setVerticalAlignment(VerticalAlignment.CENTER);
-        return style;
-    }
-
-    private static void applyThinBorder(XSSFCellStyle style) {
-        style.setBorderTop(BorderStyle.THIN);
-        style.setBorderBottom(BorderStyle.THIN);
-        style.setBorderLeft(BorderStyle.THIN);
-        style.setBorderRight(BorderStyle.THIN);
-    }
-
-    private static void addUseYnValidation(XSSFSheet sheet) {
-        XSSFDataValidationHelper helper = new XSSFDataValidationHelper(sheet);
-        DataValidationConstraint constraint = helper.createExplicitListConstraint(new String[] { "Y", "N" });
-        CellRangeAddressList addressList = new CellRangeAddressList(2, EXCEL_DATA_VALIDATION_MAX_ROW + 1, USE_YN_COL_IDX,
-                USE_YN_COL_IDX);
-        XSSFDataValidation validation = (XSSFDataValidation) helper.createValidation(constraint, addressList);
-        validation.setSuppressDropDownArrow(true);
-        validation.setShowErrorBox(true);
-        validation.setErrorStyle(DataValidation.ErrorStyle.STOP);
-        validation.createErrorBox("입력 오류", "Y 또는 N만 입력 가능합니다.");
-        validation.setEmptyCellAllowed(true);
-        sheet.addValidationData(validation);
-    }
-
-    private static void addChangeHighlightConditionalFormatting(Sheet sheet) {
-        SheetConditionalFormatting scf = sheet.getSheetConditionalFormatting();
-        String formula = "OR("
-                + "AND(LEN($H3)=0,OR(LEN($B3)>0,LEN($F3)>0)),"
-                + "AND(LEN($H3)>0,OR($B3<>$H3,$C3<>$I3,$F3<>$J3))"
-                + ")";
-        ConditionalFormattingRule rule = scf.createConditionalFormattingRule(formula);
-        PatternFormatting fill = rule.createPatternFormatting();
-        fill.setFillBackgroundColor(IndexedColors.PALE_BLUE.getIndex());
-        fill.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
-        CellRangeAddress[] ranges = {
-                CellRangeAddress.valueOf("A3:F" + (EXCEL_DATA_VALIDATION_MAX_ROW + 2))
-        };
-        scf.addConditionalFormatting(ranges, rule);
     }
 
     /**

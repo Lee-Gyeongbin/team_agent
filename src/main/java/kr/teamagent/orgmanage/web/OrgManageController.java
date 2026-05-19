@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 
+import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.orgmanage.service.OrgManageVO;
 import kr.teamagent.orgmanage.service.impl.OrgManageServiceImpl;
@@ -129,28 +130,21 @@ public class OrgManageController extends BaseController {
 
     /**
      * 조직 엑셀 업로드
-     * @return jsonView (successYn, data: successCount/failCount/failDetails)
+     * @return jsonView (successYn, data: successCount/failDetails 등)
      */
     @RequestMapping(value = "/uploadOrgExcel.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView uploadOrgExcel(@RequestParam("uploadFile") MultipartFile uploadFile) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         Map<String, Object> uploadResult = orgManageService.uploadOrgExcel(uploadFile);
-        boolean hasUploadFail = hasUploadFail(uploadResult);
+        boolean hasUploadFail = ExcelUtil.hasUploadFailures(uploadResult);
         resultMap.put("successYn", !hasUploadFail);
         if (hasUploadFail) {
-            resultMap.put("returnMsg", "조직명 혹은 사용여부가 비어있거나 올바르지 않습니다.");
+            Object returnMsg = uploadResult.get("returnMsg");
+            resultMap.put("returnMsg", returnMsg != null ? returnMsg : "엑셀 업로드 검증에 실패했습니다.");
         }
         resultMap.put("data", uploadResult);
         return new ModelAndView("jsonView", resultMap);
-    }
-
-    private boolean hasUploadFail(Map<String, Object> uploadResult) {
-        Object failCount = uploadResult.get("failCount");
-        if (failCount instanceof Number) {
-            return ((Number) failCount).intValue() > 0;
-        }
-        return failCount != null && Integer.parseInt(String.valueOf(failCount)) > 0;
     }
 }
 
