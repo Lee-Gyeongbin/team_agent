@@ -3,12 +3,16 @@ package kr.teamagent.orgmanage.web;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 
 import kr.teamagent.common.web.BaseController;
@@ -113,6 +117,40 @@ public class OrgManageController extends BaseController {
         resultMap.put("successYn", true);
         resultMap.put("data", orgManageService.deleteOrg(orgManageVO));
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 조직 엑셀 다운로드
+     */
+    @RequestMapping(value = "/downloadOrgExcel.do", method = RequestMethod.GET)
+    public void downloadOrgExcel(HttpServletResponse response) throws Exception {
+        orgManageService.downloadOrgExcel(response);
+    }
+
+    /**
+     * 조직 엑셀 업로드
+     * @return jsonView (successYn, data: successCount/failCount/failDetails)
+     */
+    @RequestMapping(value = "/uploadOrgExcel.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView uploadOrgExcel(@RequestParam("uploadFile") MultipartFile uploadFile) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        Map<String, Object> uploadResult = orgManageService.uploadOrgExcel(uploadFile);
+        boolean hasUploadFail = hasUploadFail(uploadResult);
+        resultMap.put("successYn", !hasUploadFail);
+        if (hasUploadFail) {
+            resultMap.put("returnMsg", "조직명 혹은 사용여부가 비어있거나 올바르지 않습니다.");
+        }
+        resultMap.put("data", uploadResult);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    private boolean hasUploadFail(Map<String, Object> uploadResult) {
+        Object failCount = uploadResult.get("failCount");
+        if (failCount instanceof Number) {
+            return ((Number) failCount).intValue() > 0;
+        }
+        return failCount != null && Integer.parseInt(String.valueOf(failCount)) > 0;
     }
 }
 
