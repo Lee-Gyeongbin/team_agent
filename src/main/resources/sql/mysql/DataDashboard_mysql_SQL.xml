@@ -17,7 +17,8 @@
             , B.AGENT_NM
             , A.REF_ID                                               AS DATAMART_ID
             , C.DM_NM                                                AS DATAMART_NM
-            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s')         AS CREATED_AT
+            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s')          AS CREATED_AT
+            , A.CHART_OPTION
         FROM TB_CHAT_LOG A
             LEFT JOIN TB_AGT  B ON A.AGENT_ID = B.AGENT_ID
             LEFT JOIN TB_DM   C ON A.REF_ID   = C.DATAMART_ID

@@ -66,6 +66,9 @@ public class DataDashboardVO extends CommonVO {
     /** 정렬 순서 */
     private Integer sortOrd;
 
+    /** 차트 옵션 */
+    private String chartOption;
+
     // ===== 위젯 순서 변경 =====
 
     /** 순서 변경 항목 목록 */
