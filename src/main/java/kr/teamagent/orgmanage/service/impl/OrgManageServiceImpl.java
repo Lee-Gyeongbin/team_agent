@@ -1,14 +1,50 @@
 package kr.teamagent.orgmanage.service.impl;
 
+import java.net.URLEncoder;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+
+import javax.servlet.http.HttpServletResponse;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.ConditionalFormattingRule;
+import org.apache.poi.ss.usermodel.DataValidation;
+import org.apache.poi.ss.usermodel.DataValidationConstraint;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.usermodel.PatternFormatting;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.SheetConditionalFormatting;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.ss.util.CellRangeAddressList;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFColor;
+import org.apache.poi.xssf.usermodel.XSSFDataValidation;
+import org.apache.poi.xssf.usermodel.XSSFDataValidationHelper;
+import org.apache.poi.xssf.usermodel.XSSFFont;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
@@ -18,6 +54,24 @@ import kr.teamagent.orgmanage.service.OrgManageVO;
 
 @Service
 public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
+
+    private static final String[] ORG_EXCEL_HEADERS = { "조직ID", "조직명", "상위조직명", "조직레벨", "정렬순서", "사용여부" };
+    private static final int[] AUTO_GEN_HEADER_COLS = { 0, 3, 4 };
+    private static final int USE_YN_COL_IDX = 5;
+    private static final int ORIGIN_ORG_NM_COL_IDX = 7;
+    private static final int ORIGIN_PARENT_ORG_NM_COL_IDX = 8;
+    private static final int ORIGIN_USE_YN_COL_IDX = 9;
+    private static final String ORG_NM_USE_YN_REQUIRED_MSG = "조직명과 사용여부는 필수값입니다.";
+    private static final String PARENT_ORG_NM_HEADER = "상위조직명";
+    private static final String PARENT_ORG_ID_HEADER = "상위조직ID";
+    private static final String PARENT_ORG_FLEX_HEADER = "상위조직명 or 상위조직ID";
+    private static final int EXCEL_DATA_VALIDATION_MAX_ROW = 500;
+    private static final byte[] HEADER_BG_RGB = { (byte) 0x1F, (byte) 0x4E, (byte) 0x79 };
+    private static final byte[] AUTO_GEN_HEADER_BG_RGB = { (byte) 0xA6, (byte) 0xA6, (byte) 0xA6 };
+    private static final byte[] EVEN_ROW_BG_RGB = { (byte) 0xD6, (byte) 0xE4, (byte) 0xF0 };
+    private static final String ORG_EXCEL_GUIDE_TEXT =
+            "※ 조직ID가 있으면 수정, 비어 있으면 신규 등록됩니다. 조직레벨·정렬순서는 업로드 시 무시됩니다.\n"
+                    + "  조직명(필수), 상위조직명(선택), 사용여부(Y/N) 만 입력하세요.";
 
     @Autowired
     private OrgManageDAO orgManageDAO;
@@ -146,6 +200,249 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 조직 엑셀 다운로드
+     * @param response
+     * @throws Exception
+     */
+    public void downloadOrgExcel(HttpServletResponse response) throws Exception {
+        List<OrgManageVO> list = orderOrgListByTree(selectOrgList(new OrgManageVO()));
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            XSSFSheet sheet = workbook.createSheet("조직목록");
+            XSSFCellStyle headerStyle = createHeaderStyle(workbook, false);
+            XSSFCellStyle autoGenHeaderStyle = createHeaderStyle(workbook, true);
+            XSSFCellStyle guideStyle = createGuideStyle(workbook);
+            Map<String, XSSFCellStyle> dataStyleCache = new HashMap<>();
+            Map<String, String> orgNameMap = new HashMap<>();
+            for (OrgManageVO vo : list) {
+                orgNameMap.put(vo.getOrgId(), vo.getOrgNm());
+            }
+
+            Row guideRow = sheet.createRow(0);
+            Cell guideCell = guideRow.createCell(0);
+            guideCell.setCellValue(ORG_EXCEL_GUIDE_TEXT);
+            guideCell.setCellStyle(guideStyle);
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, ORG_EXCEL_HEADERS.length - 1));
+            guideRow.setHeightInPoints(36f);
+
+            Row header = sheet.createRow(1);
+            header.setHeightInPoints(22f);
+            for (int i = 0; i < ORG_EXCEL_HEADERS.length; i++) {
+                Cell cell = header.createCell(i);
+                cell.setCellValue(ORG_EXCEL_HEADERS[i]);
+                cell.setCellStyle(isAutoGenHeaderCol(i) ? autoGenHeaderStyle : headerStyle);
+            }
+
+            int rowNum = 2;
+            for (OrgManageVO vo : list) {
+                boolean evenRow = rowNum % 2 == 0;
+                XSSFCellStyle rowStyle = dataStyleCache.computeIfAbsent(String.valueOf(evenRow),
+                        k -> createDataStyle(workbook, evenRow));
+                String parentOrgNm = nvl(orgNameMap.get(vo.getParentOrgId()));
+
+                Row row = sheet.createRow(rowNum++);
+                applyDataCell(row, 0, nvl(vo.getOrgId()), rowStyle);
+                applyDataCell(row, 1, nvl(vo.getOrgNm()), rowStyle);
+                applyDataCell(row, 2, parentOrgNm, rowStyle);
+                applyDataCell(row, 3, nvl(vo.getOrgLevel()), rowStyle);
+                applyDataCell(row, 4, nvl(vo.getSortOrder()), rowStyle);
+                applyDataCell(row, 5, nvl(vo.getUseYn()), rowStyle);
+
+                row.createCell(ORIGIN_ORG_NM_COL_IDX).setCellValue(nvl(vo.getOrgNm()));
+                row.createCell(ORIGIN_PARENT_ORG_NM_COL_IDX).setCellValue(parentOrgNm);
+                row.createCell(ORIGIN_USE_YN_COL_IDX).setCellValue(nvl(vo.getUseYn()));
+            }
+            sheet.setColumnHidden(ORIGIN_ORG_NM_COL_IDX, true);
+            sheet.setColumnHidden(ORIGIN_PARENT_ORG_NM_COL_IDX, true);
+            sheet.setColumnHidden(ORIGIN_USE_YN_COL_IDX, true);
+            addChangeHighlightConditionalFormatting(sheet);
+
+            for (int i = 0; i < ORG_EXCEL_HEADERS.length; i++) {
+                sheet.autoSizeColumn(i);
+                int width = Math.max(sheet.getColumnWidth(i) + 2048, 4000);
+                sheet.setColumnWidth(i, width);
+            }
+            sheet.createFreezePane(0, 2);
+            addUseYnValidation(sheet);
+
+            String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            String filename = URLEncoder.encode("조직목록_" + today + ".xlsx", "UTF-8");
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + filename);
+            workbook.write(response.getOutputStream());
+            response.getOutputStream().flush();
+        }
+    }
+
+    /**
+     * 조직 엑셀 업로드
+     * @param file
+     * @return successCount, failCount, failDetails
+     * @throws Exception
+     */
+    public Map<String, Object> uploadOrgExcel(MultipartFile file) throws Exception {
+        int successCount = 0;
+        int insertCount = 0;
+        int updateCount = 0;
+        int failCount = 0;
+        List<Map<String, Object>> failDetails = new ArrayList<>();
+        List<OrgExcelRow> excelRows = new ArrayList<>();
+        DataFormatter formatter = new DataFormatter();
+        boolean parentOrgIdFirst = false;
+
+        try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+            Row headerRow = findHeaderRow(sheet, formatter);
+            if (headerRow == null) {
+                throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (헤더 행 없음)");
+            }
+
+            Map<String, Integer> colIdx = parseHeaderColumns(headerRow, formatter);
+            if (!colIdx.containsKey("조직명")) {
+                throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (조직명 컬럼 필수)");
+            }
+            if (!colIdx.containsKey("사용여부")) {
+                throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (사용여부 컬럼 필수)");
+            }
+
+            Integer orgNmCol = colIdx.get("조직명");
+            Integer orgIdCol = colIdx.get("조직ID");
+            Integer parentOrgCol = resolveParentOrgColumnIndex(colIdx);
+            parentOrgIdFirst = isParentOrgIdColumn(colIdx);
+            Integer useYnCol = colIdx.get("사용여부");
+
+            for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) {
+                    continue;
+                }
+
+                String orgNm = getCellString(row, orgNmCol, formatter);
+                String orgId = getCellString(row, orgIdCol, formatter);
+                String parentOrgNm = getCellString(row, parentOrgCol, formatter);
+                String useYn = getCellString(row, useYnCol, formatter);
+                if (orgNm.startsWith("※")) {
+                    continue;
+                }
+                if (isEmptyOrgExcelRow(orgId, orgNm, parentOrgNm, useYn)) {
+                    continue;
+                }
+
+                boolean orgNmEmpty = orgNm.isEmpty();
+                boolean useYnEmpty = useYn.isEmpty();
+                if (orgNmEmpty != useYnEmpty) {
+                    failCount++;
+                    failDetails.add(buildFailDetail(i + 1, orgNmEmpty ? parentOrgNm : orgNm, ORG_NM_USE_YN_REQUIRED_MSG));
+                    continue;
+                }
+                if (orgNmEmpty) {
+                    continue;
+                }
+
+                if (!"Y".equals(useYn) && !"N".equals(useYn)) {
+                    failCount++;
+                    failDetails.add(buildFailDetail(i + 1, orgNm, "사용여부는 Y 또는 N만 입력 가능합니다."));
+                    continue;
+                }
+
+                excelRows.add(new OrgExcelRow(i + 1, orgId, orgNm, parentOrgNm, useYn));
+            }
+        }
+
+        Map<String, String> orgIdByName = selectOrgIdByNameMap();
+        List<OrgExcelRow> pendingRows = new ArrayList<>(excelRows);
+        while (!pendingRows.isEmpty()) {
+            boolean processed = false;
+            Iterator<OrgExcelRow> iterator = pendingRows.iterator();
+            while (iterator.hasNext()) {
+                OrgExcelRow excelRow = iterator.next();
+                String parentOrgId = resolveParentOrgId(excelRow.parentOrgNm, orgIdByName, parentOrgIdFirst);
+                if (!excelRow.parentOrgNm.isEmpty() && parentOrgId == null) {
+                    continue;
+                }
+
+                try {
+                    boolean updateRow = !excelRow.orgId.isEmpty();
+                    OrgManageVO vo = new OrgManageVO();
+                    vo.setOrgId(excelRow.orgId);
+                    vo.setOrgNm(excelRow.orgNm);
+                    vo.setParentOrgId(parentOrgId);
+                    vo.setUseYn(excelRow.useYn);
+                    saveOrgExcelRow(vo);
+                    if (vo.getOrgNm() != null && !vo.getOrgNm().trim().isEmpty()) {
+                        putOrgNameAlias(orgIdByName, vo.getOrgNm().trim(), vo.getOrgId());
+                    }
+                    successCount++;
+                    if (updateRow) {
+                        updateCount++;
+                    } else {
+                        insertCount++;
+                    }
+                } catch (Exception e) {
+                    failCount++;
+                    failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.orgNm, e.getMessage()));
+                }
+                iterator.remove();
+                processed = true;
+            }
+            if (!processed) {
+                for (OrgExcelRow excelRow : pendingRows) {
+                    failCount++;
+                    failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.orgNm,
+                            "존재하지 않는 상위조직(명/ID): " + excelRow.parentOrgNm));
+                }
+                pendingRows.clear();
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("successCount", successCount);
+        result.put("insertCount", insertCount);
+        result.put("updateCount", updateCount);
+        result.put("failCount", failCount);
+        result.put("failDetails", failDetails);
+        return result;
+    }
+
+    /**
+     * 엑셀 업로드 행 저장. 조직ID가 있으면 기존 조직 수정, 없으면 신규 등록한다.
+     * @param orgManageVO
+     * @return
+     * @throws Exception
+     */
+    private int saveOrgExcelRow(OrgManageVO orgManageVO) throws Exception {
+        String orgId = orgManageVO.getOrgId();
+        if (orgId == null || orgId.trim().isEmpty()) {
+            orgManageVO.setOrgId(null);
+            return insertOrg(orgManageVO);
+        }
+
+        String trimmedOrgId = orgId.trim();
+        OrgManageVO currentOrg = selectOrgByOrgIdNormalized(trimmedOrgId);
+        if (currentOrg == null) {
+            throw new IllegalArgumentException("존재하지 않는 조직ID: " + trimmedOrgId);
+        }
+
+        String resolvedOrgId = currentOrg.getOrgId();
+        orgManageVO.setOrgId(resolvedOrgId);
+        if (Objects.equals(resolvedOrgId, orgManageVO.getParentOrgId())) {
+            throw new IllegalArgumentException("상위조직명은 자기 자신으로 지정할 수 없습니다.");
+        }
+
+        String currentParentOrgId = normalizeParentOrgId(currentOrg.getParentOrgId());
+        applyParentOrgAndLevel(orgManageVO);
+        if (Objects.equals(currentParentOrgId, orgManageVO.getParentOrgId())) {
+            orgManageVO.setSortOrder(currentOrg.getSortOrder());
+        } else if (orgManageVO.getParentOrgId() != null) {
+            int maxSortOrder = orgManageDAO.selectMaxSortOrderByParentOrgId(orgManageVO.getParentOrgId());
+            orgManageVO.setSortOrder(String.valueOf(maxSortOrder + 1));
+        } else {
+            orgManageVO.setSortOrder(String.valueOf(orgManageDAO.selectMaxSortOrderByTopLevel() + 1));
+        }
+        return orgManageDAO.updateOrg(orgManageVO);
+    }
+
+    /**
      * 조직 계층 값 적용
      * @param orgManageVO
      * @throws Exception
@@ -195,6 +492,361 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
         }
         String trimmedParentOrgId = parentOrgId.trim();
         return trimmedParentOrgId.isEmpty() ? null : trimmedParentOrgId;
+    }
+
+    private static String getCellString(Row row, Integer colIdx, DataFormatter formatter) {
+        if (colIdx == null) {
+            return "";
+        }
+        return formatter.formatCellValue(row.getCell(colIdx)).trim();
+    }
+
+    private static String nvl(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static boolean isAutoGenHeaderCol(int colIdx) {
+        for (int autoGenCol : AUTO_GEN_HEADER_COLS) {
+            if (autoGenCol == colIdx) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void applyDataCell(Row row, int colIdx, String value, XSSFCellStyle style) {
+        Cell cell = row.createCell(colIdx);
+        cell.setCellValue(value);
+        cell.setCellStyle(style);
+    }
+
+    private static Map<String, Integer> parseHeaderColumns(Row headerRow, DataFormatter formatter) {
+        Map<String, Integer> colIdx = new HashMap<>();
+        for (Cell cell : headerRow) {
+            String header = formatter.formatCellValue(cell).trim();
+            if (!header.isEmpty()) {
+                colIdx.put(header, cell.getColumnIndex());
+            }
+        }
+        return colIdx;
+    }
+
+    private static Row findHeaderRow(Sheet sheet, DataFormatter formatter) {
+        for (int i = 0; i <= sheet.getLastRowNum(); i++) {
+            Row row = sheet.getRow(i);
+            if (row == null) {
+                continue;
+            }
+            Map<String, Integer> colIdx = parseHeaderColumns(row, formatter);
+            if (colIdx.containsKey("조직명")) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 조직도 표시 순서(루트 → 하위, 형제는 정렬순서)로 목록을 재정렬한다.
+     */
+    private List<OrgManageVO> orderOrgListByTree(List<OrgManageVO> flatList) {
+        if (flatList == null || flatList.isEmpty()) {
+            return flatList;
+        }
+
+        Map<String, OrgManageVO> byId = new HashMap<>();
+        Map<String, List<OrgManageVO>> childrenByParentId = new HashMap<>();
+        for (OrgManageVO vo : flatList) {
+            byId.put(vo.getOrgId(), vo);
+        }
+
+        List<OrgManageVO> roots = new ArrayList<>();
+        for (OrgManageVO vo : flatList) {
+            String parentOrgId = normalizeParentOrgId(vo.getParentOrgId());
+            if (parentOrgId == null || !byId.containsKey(parentOrgId)) {
+                roots.add(vo);
+            } else {
+                childrenByParentId.computeIfAbsent(parentOrgId, k -> new ArrayList<>()).add(vo);
+            }
+        }
+        for (List<OrgManageVO> siblings : childrenByParentId.values()) {
+            siblings.sort(OrgManageServiceImpl::compareOrgSiblingOrder);
+        }
+        roots.sort(OrgManageServiceImpl::compareOrgSiblingOrder);
+
+        List<OrgManageVO> ordered = new ArrayList<>(flatList.size());
+        Set<String> visited = new HashSet<>();
+        for (OrgManageVO root : roots) {
+            appendOrgSubtreePreorder(root, childrenByParentId, ordered, visited);
+        }
+        for (OrgManageVO vo : flatList) {
+            if (!visited.contains(vo.getOrgId())) {
+                appendOrgSubtreePreorder(vo, childrenByParentId, ordered, visited);
+            }
+        }
+        return ordered;
+    }
+
+    private static void appendOrgSubtreePreorder(OrgManageVO node, Map<String, List<OrgManageVO>> childrenByParentId,
+            List<OrgManageVO> ordered, Set<String> visited) {
+        if (!visited.add(node.getOrgId())) {
+            return;
+        }
+        ordered.add(node);
+        List<OrgManageVO> children = childrenByParentId.get(node.getOrgId());
+        if (children == null) {
+            return;
+        }
+        for (OrgManageVO child : children) {
+            appendOrgSubtreePreorder(child, childrenByParentId, ordered, visited);
+        }
+    }
+
+    private static int compareOrgSiblingOrder(OrgManageVO a, OrgManageVO b) {
+        int sortCompare = Integer.compare(parseSortOrderValue(a.getSortOrder()), parseSortOrderValue(b.getSortOrder()));
+        if (sortCompare != 0) {
+            return sortCompare;
+        }
+        return Objects.compare(a.getOrgId(), b.getOrgId(), String::compareTo);
+    }
+
+    private static int parseSortOrderValue(String sortOrder) {
+        if (sortOrder == null || sortOrder.trim().isEmpty()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(sortOrder.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private static boolean isEmptyOrgExcelRow(String orgId, String orgNm, String parentOrgNm, String useYn) {
+        return orgId.isEmpty() && orgNm.isEmpty() && parentOrgNm.isEmpty() && useYn.isEmpty();
+    }
+
+    private static Integer resolveParentOrgColumnIndex(Map<String, Integer> colIdx) {
+        String parentOrgHeader = findParentOrgHeader(colIdx);
+        return parentOrgHeader == null ? null : colIdx.get(parentOrgHeader);
+    }
+
+    /** 상위조직ID(또는 혼합 헤더) 컬럼이면 ORG_ID 조회를 이름 맵보다 먼저 시도한다. */
+    private static boolean isParentOrgIdColumn(Map<String, Integer> colIdx) {
+        String parentOrgHeader = findParentOrgHeader(colIdx);
+        return PARENT_ORG_ID_HEADER.equals(parentOrgHeader) || PARENT_ORG_FLEX_HEADER.equals(parentOrgHeader);
+    }
+
+    private static String findParentOrgHeader(Map<String, Integer> colIdx) {
+        if (colIdx.containsKey(PARENT_ORG_NM_HEADER)) {
+            return PARENT_ORG_NM_HEADER;
+        }
+        if (colIdx.containsKey(PARENT_ORG_ID_HEADER)) {
+            return PARENT_ORG_ID_HEADER;
+        }
+        if (colIdx.containsKey(PARENT_ORG_FLEX_HEADER)) {
+            return PARENT_ORG_FLEX_HEADER;
+        }
+        return null;
+    }
+
+    private Map<String, String> selectOrgIdByNameMap() throws Exception {
+        Map<String, String> orgIdByName = new HashMap<>();
+        List<OrgManageVO> list = selectOrgList(new OrgManageVO());
+        for (OrgManageVO vo : list) {
+            if (vo.getOrgNm() == null) {
+                continue;
+            }
+            String orgNm = vo.getOrgNm().trim();
+            if (orgNm.isEmpty()) {
+                continue;
+            }
+            putOrgNameAlias(orgIdByName, orgNm, vo.getOrgId());
+        }
+        return orgIdByName;
+    }
+
+    private static void putOrgNameAlias(Map<String, String> orgIdByName, String orgNm, String orgId) {
+        if (!orgIdByName.containsKey(orgNm)) {
+            orgIdByName.put(orgNm, orgId);
+        }
+        String compactOrgNm = normalizeOrgNameKey(orgNm);
+        if (!compactOrgNm.isEmpty() && !orgIdByName.containsKey(compactOrgNm)) {
+            orgIdByName.put(compactOrgNm, orgId);
+        }
+    }
+
+    private static String normalizeOrgNameKey(String orgNm) {
+        return orgNm.replaceAll("\\s+", "");
+    }
+
+    private String resolveParentOrgId(String parentOrgValue, Map<String, String> orgIdByName, boolean idFirst)
+            throws Exception {
+        if (parentOrgValue == null || parentOrgValue.trim().isEmpty()) {
+            return null;
+        }
+        String trimmed = normalizeExcelParentToken(parentOrgValue.trim());
+        if (idFirst) {
+            return resolveParentOrgIdByIdThenName(trimmed, orgIdByName);
+        }
+        return resolveParentOrgIdByNameThenId(trimmed, orgIdByName);
+    }
+
+    private String resolveParentOrgIdByIdThenName(String trimmed, Map<String, String> orgIdByName) throws Exception {
+        OrgManageVO parentById = selectOrgByOrgIdNormalized(trimmed);
+        if (parentById != null) {
+            return parentById.getOrgId();
+        }
+        return lookupParentOrgIdByName(trimmed, orgIdByName);
+    }
+
+    private String resolveParentOrgIdByNameThenId(String trimmed, Map<String, String> orgIdByName) throws Exception {
+        String byName = lookupParentOrgIdByName(trimmed, orgIdByName);
+        if (byName != null) {
+            return byName;
+        }
+        OrgManageVO parentOrg = selectOrgByOrgIdNormalized(trimmed);
+        return parentOrg != null ? parentOrg.getOrgId() : null;
+    }
+
+    /**
+     * 엑셀 등에서 ORG 접두 조직ID가 소문자(org001)로 온 경우 DB 저장값(ORG001)과 맞춘다.
+     */
+    private OrgManageVO selectOrgByOrgIdNormalized(String raw) throws Exception {
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
+        }
+        String token = normalizeExcelParentToken(raw.trim());
+        if (token.isEmpty()) {
+            return null;
+        }
+        OrgManageVO vo = orgManageDAO.selectOrgByOrgId(token);
+        if (vo != null) {
+            return vo;
+        }
+        String canonical = canonicalOrgIdIfOrgNumeric(token);
+        if (!canonical.equals(token)) {
+            return orgManageDAO.selectOrgByOrgId(canonical);
+        }
+        return null;
+    }
+
+    /**
+     * KeyGenerate 기본 접두(ORG) + 일련번호 형태에서 접두 대소문자만 다른 입력을 정규화한다.
+     */
+    private static String canonicalOrgIdIfOrgNumeric(String token) {
+        if (token == null || token.length() <= 3) {
+            return token;
+        }
+        if (token.regionMatches(true, 0, "org", 0, 3)) {
+            String suffix = token.substring(3);
+            if (suffix.matches("\\d+")) {
+                return "ORG" + suffix;
+            }
+        }
+        return token;
+    }
+
+    private static String normalizeExcelParentToken(String raw) {
+        if (raw.matches("^\\d+\\.0+$")) {
+            return raw.substring(0, raw.indexOf('.'));
+        }
+        return raw;
+    }
+
+    private static String lookupParentOrgIdByName(String trimmedParentValue, Map<String, String> orgIdByName) {
+        String orgId = orgIdByName.get(trimmedParentValue);
+        if (orgId != null) {
+            return orgId;
+        }
+        String compactParentValue = normalizeOrgNameKey(trimmedParentValue);
+        if (!compactParentValue.isEmpty()) {
+            orgId = orgIdByName.get(compactParentValue);
+            if (orgId != null) {
+                return orgId;
+            }
+        }
+        return null;
+    }
+
+    private static Map<String, Object> buildFailDetail(int row, String orgNm, String reason) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("row", row);
+        detail.put("orgNm", orgNm);
+        detail.put("reason", reason);
+        return detail;
+    }
+
+    private static XSSFCellStyle createHeaderStyle(XSSFWorkbook workbook, boolean autoGen) {
+        XSSFCellStyle style = workbook.createCellStyle();
+        XSSFFont font = workbook.createFont();
+        font.setBold(true);
+        font.setColor(IndexedColors.WHITE.getIndex());
+        if (autoGen) {
+            font.setItalic(true);
+        }
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        applyThinBorder(style);
+        style.setFillForegroundColor(new XSSFColor(autoGen ? AUTO_GEN_HEADER_BG_RGB : HEADER_BG_RGB, null));
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private static XSSFCellStyle createDataStyle(XSSFWorkbook workbook, boolean evenRow) {
+        XSSFCellStyle style = workbook.createCellStyle();
+        applyThinBorder(style);
+        byte[] bgRgb = evenRow ? EVEN_ROW_BG_RGB : new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF };
+        style.setFillForegroundColor(new XSSFColor(bgRgb, null));
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private static XSSFCellStyle createGuideStyle(XSSFWorkbook workbook) {
+        XSSFCellStyle style = workbook.createCellStyle();
+        XSSFFont font = workbook.createFont();
+        font.setItalic(true);
+        font.setColor(IndexedColors.GREY_50_PERCENT.getIndex());
+        style.setFont(font);
+        style.setWrapText(true);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        return style;
+    }
+
+    private static void applyThinBorder(XSSFCellStyle style) {
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+    }
+
+    private static void addUseYnValidation(XSSFSheet sheet) {
+        XSSFDataValidationHelper helper = new XSSFDataValidationHelper(sheet);
+        DataValidationConstraint constraint = helper.createExplicitListConstraint(new String[] { "Y", "N" });
+        CellRangeAddressList addressList = new CellRangeAddressList(2, EXCEL_DATA_VALIDATION_MAX_ROW + 1, USE_YN_COL_IDX,
+                USE_YN_COL_IDX);
+        XSSFDataValidation validation = (XSSFDataValidation) helper.createValidation(constraint, addressList);
+        validation.setSuppressDropDownArrow(true);
+        validation.setShowErrorBox(true);
+        validation.setErrorStyle(DataValidation.ErrorStyle.STOP);
+        validation.createErrorBox("입력 오류", "Y 또는 N만 입력 가능합니다.");
+        validation.setEmptyCellAllowed(true);
+        sheet.addValidationData(validation);
+    }
+
+    private static void addChangeHighlightConditionalFormatting(Sheet sheet) {
+        SheetConditionalFormatting scf = sheet.getSheetConditionalFormatting();
+        String formula = "OR("
+                + "AND(LEN($H3)=0,OR(LEN($B3)>0,LEN($F3)>0)),"
+                + "AND(LEN($H3)>0,OR($B3<>$H3,$C3<>$I3,$F3<>$J3))"
+                + ")";
+        ConditionalFormattingRule rule = scf.createConditionalFormattingRule(formula);
+        PatternFormatting fill = rule.createPatternFormatting();
+        fill.setFillBackgroundColor(IndexedColors.PALE_BLUE.getIndex());
+        fill.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
+        CellRangeAddress[] ranges = {
+                CellRangeAddress.valueOf("A3:F" + (EXCEL_DATA_VALIDATION_MAX_ROW + 2))
+        };
+        scf.addConditionalFormatting(ranges, rule);
     }
 
     /**
@@ -273,5 +925,21 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
         }
         rest.add(insertIdx, moved);
         return rest;
+    }
+
+    private static class OrgExcelRow {
+        private final int rowNum;
+        private final String orgId;
+        private final String orgNm;
+        private final String parentOrgNm;
+        private final String useYn;
+
+        private OrgExcelRow(int rowNum, String orgId, String orgNm, String parentOrgNm, String useYn) {
+            this.rowNum = rowNum;
+            this.orgId = orgId;
+            this.orgNm = orgNm;
+            this.parentOrgNm = parentOrgNm;
+            this.useYn = useYn;
+        }
     }
 }
