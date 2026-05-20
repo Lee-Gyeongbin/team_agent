@@ -1202,7 +1202,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setSortOrd(1);
 
         chatbotVO.setSvcTy(chatLog.getSvcTy());
-        chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getRoomTitle()) ? generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()) : chatLog.getRoomTitle());
+        chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getQContent()) ? chatLog.getRoomTitle() : generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()));
         chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent()));
 
         chatbotVO.setThumbImg(generateSummaryThumbImg(chatLog.getQContent(), chatLog.getRContent()));
