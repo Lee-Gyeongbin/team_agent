@@ -54,6 +54,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
     private static final String LUNCH_MENU_AGENT_ID = "AG000009";
+    private static final String MEME_AGENT_ID = "AG000011";
 
     /** 점심 추천 카드와 동일 — 한 번에 요청할 수 있는 메뉴 이미지 개수 상한 */
     private static final int LUNCH_FOOD_IMAGES_MAX_ITEMS = 3;
@@ -197,7 +198,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 스트리밍 호출용 URL. 점심 에이전트는 전용 URL.
+     * 스트리밍 호출용 URL. 점심·밈 에이전트는 전용 URL.
      */
     private String resolveStreamingApiUrl(String svcTy, String agentId, List<Long> attachmentFileIds) {
         if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
@@ -205,6 +206,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             if (CommonUtil.isNotEmpty(lunchApiUrl)) {
                 logger.info("resolveStreamingApiUrl: lunch agent -> lunch_query URL");
                 return lunchApiUrl;
+            }
+        }
+
+        if ("C".equals(svcTy) && MEME_AGENT_ID.equals(agentId)) {
+            String searchOnlyApiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIpSearchOnly");
+            if (CommonUtil.isNotEmpty(searchOnlyApiUrl)) {
+                logger.info("resolveStreamingApiUrl: meme agent -> query_search_only URL");
+                return searchOnlyApiUrl;
             }
         }
 
@@ -766,6 +775,19 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
+                    if ("answer_image".equals(currentEvent)) {
+                        // 일반 채팅(svcTy=C)에서만 이미지 청크 전달
+                        if (!"C".equals(svcTy)) {
+                            continue;
+                        }
+                        String rawImage = getString(data.get("image"));
+                        String imageDataUrl = toImageDataUrl(rawImage);
+                        if (CommonUtil.isNotEmpty(imageDataUrl)) {
+                            callback.onChunk(imageDataUrl, accumulatedContent.toString(), "answer_image");
+                        }
+                        continue;
+                    }
+
                     if ("error".equals(currentEvent)) {
                         String errorCode = getString(data.get("errorCode"));
                         String errorContent = getString(data.get("errorContent"));
@@ -778,34 +800,34 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     }
 
                     if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
-                        String answer = getAnswerText(data);
-                        if (CommonUtil.isNotEmpty(answer)) {
-                            if (isLunchAgent) {
-                                answer = ensureLunchAddressUrlFormat(answer);
-                                callback.onChunk(answer, answer, null);
-                            } else if (accumulatedContent.length() == 0) {
-                                callback.onChunk(answer, answer, null);
+                            String answer = getAnswerText(data);
+                            if (CommonUtil.isNotEmpty(answer)) {
+                                if (isLunchAgent) {
+                                    answer = ensureLunchAddressUrlFormat(answer);
+                                    callback.onChunk(answer, answer, null);
+                                } else if (accumulatedContent.length() == 0) {
+                                    callback.onChunk(answer, answer, null);
                             }
-                            accumulatedContent = new StringBuilder(answer);
-                        }
+                                    accumulatedContent = new StringBuilder(answer);
+                            }
 
-                        mainDocFileId = getString(data.get("docFileId"));
-                        mainPage = getString(data.get("page"));
-                        inputTokens = parseTokenCount(data.get("input_token"));
-                        outputTokens = parseTokenCount(data.get("output_token"));
-                        tableData = toJsonIfExists(data.get("table_data"));
-                        chartOption = toJsonIfExists(data.get("chart_option"));
-                        sql = getString(data.get("sql"));
-                        ttsqParam = toJsonIfExists(data.get("ttsq_param"));
+                            mainDocFileId = getString(data.get("docFileId"));
+                            mainPage = getString(data.get("page"));
+                            inputTokens = parseTokenCount(data.get("input_token"));
+                            outputTokens = parseTokenCount(data.get("output_token"));
+                            tableData = toJsonIfExists(data.get("table_data"));
+                            chartOption = toJsonIfExists(data.get("chart_option"));
+                            sql = getString(data.get("sql"));
+                            ttsqParam = toJsonIfExists(data.get("ttsq_param"));
 
-                        chatRefItems = extractChatRefItems(data);
+                            chatRefItems = extractChatRefItems(data);
 
-                        Object doneItems = data.get("items");
-                        if (doneItems instanceof JSONArray && ((JSONArray) doneItems).size() > 0) {
-                            JSONObject fullPayload = new JSONObject();
-                            fullPayload.put("items", (JSONArray) doneItems);
-                            webGroundingJson = fullPayload.toJSONString();
-                        }
+                            Object doneItems = data.get("items");
+                            if (doneItems instanceof JSONArray && ((JSONArray) doneItems).size() > 0) {
+                                JSONObject fullPayload = new JSONObject();
+                                fullPayload.put("items", (JSONArray) doneItems);
+                                webGroundingJson = fullPayload.toJSONString();
+                            }
 
                         break;
                     }
@@ -958,6 +980,23 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     private String nvl(String str) {
         return str == null ? "" : str;
+    }
+
+    private String toImageDataUrl(String rawImage) {
+        if (CommonUtil.isEmpty(rawImage)) {
+            return "";
+        }
+
+        String trimmed = rawImage.trim().replace("\\/", "/");
+        if (trimmed.startsWith("data:")) {
+            return trimmed;
+        }
+
+        String base64Payload = stripDataUrlBase64Prefix(trimmed);
+        if (CommonUtil.isEmpty(base64Payload)) {
+            return "";
+        }
+        return "data:image/png;base64," + base64Payload;
     }
 
     /**
