@@ -69,6 +69,17 @@ public class DataDashboardVO extends CommonVO {
     /** 차트 옵션 */
     private String chartOption;
 
+    // ===== 코드 매핑 (TB_DM_COL_CODE) =====
+
+    /** 컬럼 ID */
+    private String colId;
+
+    /** 실제 저장 코드값 */
+    private String codeVal;
+
+    /** 코드 한국어 의미 */
+    private String codeKorNm;
+
     // ===== 위젯 순서 변경 =====
 
     /** 순서 변경 항목 목록 */

@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import kr.teamagent.common.util.KeyGenerate;
+import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.datadashboard.service.DataDashboardVO;
 import kr.teamagent.datamart.service.DatamartVO;
 import kr.teamagent.datamart.service.impl.DatamartServiceImpl;
@@ -61,13 +62,13 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
      * 위젯 저장 (신규 생성 또는 수정)
      */
     @Transactional(rollbackFor = Exception.class)
-    public DataDashboardVO saveDashboardWidget(DataDashboardVO widgetVO) throws Exception {
+    public void saveDashboardWidget(DataDashboardVO widgetVO) throws Exception {
+        widgetVO.setUserId(SessionUtil.getUserId());
         if (widgetVO.getWidgetId() == null || widgetVO.getWidgetId().trim().isEmpty()) {
             widgetVO.setWidgetId(keyGenerate.generateTableKey("WG", "TB_USER_DASHBOARD_WIDGET", "WIDGET_ID"));
             widgetVO.setSortOrd(selectMaxWidgetSortOrd(widgetVO) + 1);
         }
         dataDashboardDAO.saveDashboardWidget(widgetVO);
-        return selectSavedWidget(widgetVO);
     }
 
     /**
@@ -84,6 +85,16 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         if (searchVO.getOrderList() != null && !searchVO.getOrderList().isEmpty()) {
             dataDashboardDAO.updateDashboardWidgetOrder(searchVO);
         }
+    }
+
+    // ===== 코드 매핑 =====
+
+    /**
+     * 데이터마트 컬럼 코드 매핑 조회
+     * TB_DM_COL_CODE에서 datamartId 기준, USE_YN='Y'인 항목 반환
+     */
+    public List<DataDashboardVO> selectDashboardColCodeMap(DataDashboardVO searchVO) throws Exception {
+        return dataDashboardDAO.selectDashboardColCodeMap(searchVO);
     }
 
     // ===== SQL 실행 =====
@@ -111,10 +122,9 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         // 3. 파라미터 파싱 (JSON string → Map)
         Map<String, String> paramMap = parseJsonParams(searchVO.getSqlParams());
 
-        // 4. SQL에서 ':param_name' 패턴을 '?'로 치환하고 순서대로 값 추출
+        // 4. WHERE 조건 직접 치환 (TTSQ는 하드코딩된 값을 가진 SQL이므로 키 기반 치환 사용)
         String rawSql = info.getSqlContent().trim();
-        List<String> paramOrder = new ArrayList<>();
-        String execSql = replaceNamedParams(rawSql, paramMap, paramOrder);
+        String execSql = replaceWhereConditions(rawSql, paramMap);
 
         logger.info("[DataDashboard] execSql: {}", execSql);
 
@@ -126,9 +136,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
             conn = datamartService.openJdbcConnection(dm);
 
             ps = conn.prepareStatement(execSql);
-            for (int i = 0; i < paramOrder.size(); i++) {
-                ps.setString(i + 1, paramMap.getOrDefault(paramOrder.get(i), ""));
-            }
 
             rs = ps.executeQuery();
             return buildQueryResult(rs);
@@ -141,14 +148,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     // ===== private helpers =====
-
-    private DataDashboardVO selectSavedWidget(DataDashboardVO widgetVO) throws Exception {
-        List<DataDashboardVO> list = dataDashboardDAO.selectDashboardWidgetList(widgetVO);
-        return list.stream()
-                .filter(w -> widgetVO.getWidgetId().equals(w.getWidgetId()))
-                .findFirst()
-                .orElse(widgetVO);
-    }
 
     private int selectMaxWidgetSortOrd(DataDashboardVO widgetVO) {
         try {
@@ -163,25 +162,38 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * JSON 문자열 → Map<String,String> 파싱 (단순 구현, 중첩 없는 flat 객체 가정)
-     * 예: {"start_date":"2026-05-01","end_date":"2026-05-31"}
+     * JSON 문자열 → Map<String,String> 파싱 (flat 객체, 문자열·배열 값 지원)
+     * - 문자열: {"year":"2026"}           → {year: "2026"}
+     * - 배열:   {"regn_cd":["02","03"]}   → {regn_cd: "02,03"} (콤마 구분 문자열로 저장)
      */
-    @SuppressWarnings("unchecked")
     private Map<String, String> parseJsonParams(String jsonParams) {
         Map<String, String> result = new HashMap<>();
         if (jsonParams == null || jsonParams.trim().isEmpty()) return result;
         try {
-            // Jackson ObjectMapper가 없을 경우 수동 파싱
-            // JSON: {"key":"val","key2":"val2"}
             String content = jsonParams.trim();
-            if (content.startsWith("{") && content.endsWith("}")) {
-                content = content.substring(1, content.length() - 1);
-                // 쌍따옴표 키-값 파싱 (간단한 flat JSON)
-                Pattern p = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
-                Matcher m = p.matcher(content);
-                while (m.find()) {
-                    result.put(m.group(1), m.group(2));
+            if (!content.startsWith("{") || !content.endsWith("}")) return result;
+            content = content.substring(1, content.length() - 1);
+
+            // 배열 값: "key":["val1","val2",...] → key=val1,val2
+            Pattern arrayP = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\\[([^\\]]*)\\]");
+            Matcher arrayM = arrayP.matcher(content);
+            while (arrayM.find()) {
+                String key = arrayM.group(1);
+                String arrContent = arrayM.group(2);
+                Pattern valP = Pattern.compile("\"([^\"]*)\"");
+                Matcher valM = valP.matcher(arrContent);
+                List<String> vals = new ArrayList<>();
+                while (valM.find()) {
+                    vals.add(valM.group(1));
                 }
+                result.put(key, String.join(",", vals));
+            }
+
+            // 문자열 값: "key":"val" (배열로 이미 파싱된 키는 덮어쓰지 않음)
+            Pattern strP = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
+            Matcher strM = strP.matcher(content);
+            while (strM.find()) {
+                result.putIfAbsent(strM.group(1), strM.group(2));
             }
         } catch (Exception e) {
             logger.warn("[DataDashboard] JSON 파라미터 파싱 오류: {}", e.getMessage());
@@ -190,18 +202,61 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * SQL의 ':param_name' 패턴을 '?'로 치환하고 파라미터 순서 목록 반환
+     * WHERE 조건에서 paramMap 키(컬럼명)에 해당하는 조건을 직접 치환
+     * - 값이 있으면: IN('old') → IN('new'), = 'old' → = 'new'
+     * - 값이 비어있으면: AND [alias.]COLUMN IN(...) 또는 AND [alias.]COLUMN = ... 조건 전체 제거
+     *
+     * 주의: PreparedStatement를 거치지 않으므로 내부 관리 도구 전용으로만 사용할 것.
+     *       SQL 인젝션 최소 방어로 단따옴표 이스케이프만 적용.
      */
-    private String replaceNamedParams(String sql, Map<String, String> paramMap, List<String> paramOrder) {
-        Pattern p = Pattern.compile(":([a-zA-Z_][a-zA-Z0-9_]*)");
-        Matcher m = p.matcher(sql);
-        StringBuffer sb = new StringBuffer();
-        while (m.find()) {
-            String key = m.group(1);
-            paramOrder.add(key);
-            m.appendReplacement(sb, "?");
+    private String replaceWhereConditions(String sql, Map<String, String> paramMap) {
+        for (Map.Entry<String, String> entry : paramMap.entrySet()) {
+            String colName = entry.getKey().toUpperCase();
+            String value   = entry.getValue();
+
+            if (value == null || value.isEmpty()) {
+                // 빈값: AND [alias.]COL IN (...) 또는 AND [alias.]COL = '...' 조건 전체 제거
+                Pattern p = Pattern.compile(
+                    "\\s+AND\\s+(?:\\w+\\.)?"+colName+"\\s+(?:IN\\s*\\([^)]*\\)|=\\s*'[^']*'|=\\s*[0-9]+)",
+                    Pattern.CASE_INSENSITIVE
+                );
+                sql = p.matcher(sql).replaceAll("");
+            } else {
+                // IN 조건 치환: [alias.]COL IN ('old1','old2',...) → IN ('new1','new2',...)
+                Pattern inP = Pattern.compile(
+                    "((?:\\w+\\.)?"+colName+"\\s+IN\\s*\\()([^)]*)(\\))",
+                    Pattern.CASE_INSENSITIVE
+                );
+                Matcher inM = inP.matcher(sql);
+                if (inM.find()) {
+                    String inLiteral = buildInLiteral(value);
+                    sql = inM.replaceAll("$1" + Matcher.quoteReplacement(inLiteral) + "$3");
+                } else {
+                    // = 조건 치환: [alias.]COL = 'old' 또는 = 123 → = 'new'
+                    String safe = value.replace("'", "''");
+                    Pattern eqP = Pattern.compile(
+                        "((?:\\w+\\.)?"+colName+"\\s*=\\s*)('[^']*'|[0-9]+)",
+                        Pattern.CASE_INSENSITIVE
+                    );
+                    sql = eqP.matcher(sql).replaceAll("$1'" + Matcher.quoteReplacement(safe) + "'");
+                }
+            }
         }
-        m.appendTail(sb);
+        return sql;
+    }
+
+    /**
+     * 콤마 구분 값 문자열을 IN 리터럴로 변환
+     * "02,03"  → "'02','03'"
+     * "ST00031" → "'ST00031'"
+     */
+    private String buildInLiteral(String value) {
+        String[] parts = value.split(",");
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            if (sb.length() > 0) sb.append(",");
+            sb.append("'").append(part.trim().replace("'", "''")).append("'");
+        }
         return sb.toString();
     }
 

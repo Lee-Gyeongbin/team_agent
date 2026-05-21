@@ -57,4 +57,11 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
         return (DataDashboardVO) selectOne("dataDashboard.selectSqlDatamartInfo", searchVO);
     }
 
+    /**
+     * 데이터마트 컬럼 코드 매핑 조회 (TB_DM_COL_CODE, USE_YN='Y')
+     */
+    public List<DataDashboardVO> selectDashboardColCodeMap(DataDashboardVO searchVO) throws Exception {
+        return selectList("dataDashboard.selectDashboardColCodeMap", searchVO);
+    }
+
 }

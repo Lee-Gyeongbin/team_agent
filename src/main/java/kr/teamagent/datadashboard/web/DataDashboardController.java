@@ -58,16 +58,12 @@ public class DataDashboardController extends BaseController {
     /**
      * 위젯 저장 (신규/수정)
      * @param widgetVO { widgetId?, logId, title, vizType, vizConfig, colSpan, sortOrd? }
-     * @return { data: DataDashboardVO }
      */
     @RequestMapping(value = "/widgetSave.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView widgetSave(@RequestBody DataDashboardVO widgetVO) throws Exception {
-        widgetVO.setUserId(SessionUtil.getUserId());
-
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", dataDashboardService.saveDashboardWidget(widgetVO));
-        return new ModelAndView("jsonView", resultMap);
+        dataDashboardService.saveDashboardWidget(widgetVO);
+        return makeSuccessJsonData();
     }
 
     /**
@@ -94,6 +90,20 @@ public class DataDashboardController extends BaseController {
         searchVO.setUserId(SessionUtil.getUserId());
         dataDashboardService.updateDashboardWidgetOrder(searchVO);
         return makeSuccessJsonData();
+    }
+
+    /**
+     * 데이터마트 컬럼 코드 매핑 조회
+     * TB_DM_COL_CODE에서 datamartId 기준, USE_YN='Y' 항목 반환
+     * @param searchVO { datamartId }
+     * @return { list: [{ colId, codeVal, codeKorNm }] }
+     */
+    @RequestMapping(value = "/colCodeMap.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView colCodeMap(@RequestBody DataDashboardVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", dataDashboardService.selectDashboardColCodeMap(searchVO));
+        return new ModelAndView("jsonView", resultMap);
     }
 
     /**

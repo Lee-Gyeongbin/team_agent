@@ -74,6 +74,7 @@
             , TITLE
             , VIZ_TYPE
             , VIZ_CONFIG
+            , TTSQ_PARAM
             , COL_SPAN
             , SORT_ORD
             , CREATE_DT
@@ -84,6 +85,7 @@
             , #{title}
             , #{vizType}
             , #{vizConfig}
+            , #{ttsqParam}
             , #{colSpan, jdbcType=INTEGER}
             , #{sortOrd, jdbcType=INTEGER}
             , NOW()
@@ -142,6 +144,23 @@
           AND A.TTSQ           IS NOT NULL
           AND A.CREATE_USER_ID = #{userId}
         LIMIT 1
+    </select>
+
+
+    <!-- ================================================================
+         데이터마트 컬럼 코드 매핑 조회
+         TB_DM_COL_CODE (DATAMART_ID 기준, USE_YN='Y', SORT_ORD 정렬)
+         ================================================================ -->
+    <select id="selectDashboardColCodeMap" parameterType="dataDashboardVO" resultType="dataDashboardVO">
+        /* 컬럼 코드 매핑 조회 dataDashboard.selectDashboardColCodeMap */
+        SELECT
+              COL_ID
+            , CODE_VAL
+            , CODE_KOR_NM
+        FROM TB_DM_COL_CODE
+        WHERE DATAMART_ID = #{datamartId}
+          AND USE_YN      = 'Y'
+        ORDER BY COL_ID, SORT_ORD
     </select>
 
 </mapper>
