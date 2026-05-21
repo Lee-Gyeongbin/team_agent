@@ -696,6 +696,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String line;
         String currentEvent = null;
         StringBuilder accumulatedContent = new StringBuilder();
+        boolean imageDataUrlPrefixAppended = false;
         String responseThreadId = threadId;
         boolean isCompleteCalled = false;
         boolean hasStreamError = false;
@@ -781,9 +782,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             continue;
                         }
                         String rawImage = getString(data.get("image"));
-                        String imageDataUrl = toImageDataUrl(rawImage);
-                        if (CommonUtil.isNotEmpty(imageDataUrl)) {
-                            callback.onChunk(imageDataUrl, accumulatedContent.toString(), "answer_image");
+                        int contentLenBefore = accumulatedContent.length();
+                        imageDataUrlPrefixAppended = appendImageChunkToAccumulatedContent(
+                                accumulatedContent, imageDataUrlPrefixAppended, rawImage);
+                        if (accumulatedContent.length() > contentLenBefore) {
+                            callback.onChunk(
+                                    accumulatedContent.substring(contentLenBefore),
+                                    accumulatedContent.toString(),
+                                    "answer_image");
                         }
                         continue;
                     }
@@ -805,10 +811,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 if (isLunchAgent) {
                                     answer = ensureLunchAddressUrlFormat(answer);
                                     callback.onChunk(answer, answer, null);
+                                    accumulatedContent = new StringBuilder(answer);
                                 } else if (accumulatedContent.length() == 0) {
                                     callback.onChunk(answer, answer, null);
-                            }
                                     accumulatedContent = new StringBuilder(answer);
+                                }
                             }
 
                             mainDocFileId = getString(data.get("docFileId"));
@@ -840,13 +847,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             hasStreamError = true;
         } finally {
             try {
-                if (accumulatedContent.length() > 0 && !"llmTest".equals(svcTy)) {
+                String finalAnswerContent = accumulatedContent.toString();
+                if (CommonUtil.isNotEmpty(finalAnswerContent) && !"llmTest".equals(svcTy)) {
                     try {
                         savedLogId = this.doInsertAiLog(
                                 responseThreadId,
                                 agentId,
                                 query,
-                                accumulatedContent.toString(),
+                                finalAnswerContent,
                                 inputTokens,
                                 outputTokens,
                                 svcTy,
@@ -883,7 +891,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     }
                 }
 
-                if (!hasStreamError && !isCompleteCalled && accumulatedContent.length() > 0) {
+                if (!hasStreamError && !isCompleteCalled && CommonUtil.isNotEmpty(finalAnswerContent)) {
                     ChatRefItem firstRef = !chatRefItems.isEmpty() ? chatRefItems.get(0) : null;
 
                     List<Integer> relatedPageNos = firstRef != null ? new ArrayList<>(firstRef.relatedPageNos) : new ArrayList<>();
@@ -892,7 +900,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             : "thread-" + System.currentTimeMillis();
 
                     callback.onComplete(
-                            accumulatedContent.toString(),
+                            finalAnswerContent,
                             mainDocFileId,
                             mainPage,
                             relatedPageNos,
@@ -982,21 +990,31 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return str == null ? "" : str;
     }
 
-    private String toImageDataUrl(String rawImage) {
-        if (CommonUtil.isEmpty(rawImage)) {
-            return "";
+    /**
+     * answer_image 청크를 스트리밍 도착 순서대로 accumulatedContent에 삽입.
+     * 이후 answer_delta 텍스트는 이미지 뒤에 이어 붙여 R_CONTENT·화면 순서를 맞춘다.
+     *
+     * @return data URL 접두사를 이미 붙였으면 true
+     */
+    private boolean appendImageChunkToAccumulatedContent(
+            StringBuilder accumulatedContent, boolean imageDataUrlPrefixAppended, String rawImage) {
+        if (accumulatedContent == null || CommonUtil.isEmpty(rawImage)) {
+            return imageDataUrlPrefixAppended;
         }
-
         String trimmed = rawImage.trim().replace("\\/", "/");
-        if (trimmed.startsWith("data:")) {
-            return trimmed;
+        String chunk = stripDataUrlBase64Prefix(trimmed);
+        if (CommonUtil.isEmpty(chunk)) {
+            return imageDataUrlPrefixAppended;
         }
-
-        String base64Payload = stripDataUrlBase64Prefix(trimmed);
-        if (CommonUtil.isEmpty(base64Payload)) {
-            return "";
+        if (!imageDataUrlPrefixAppended) {
+            if (accumulatedContent.length() > 0) {
+                accumulatedContent.append("\n\n");
+            }
+            accumulatedContent.append("data:image/png;base64,");
+            imageDataUrlPrefixAppended = true;
         }
-        return "data:image/png;base64," + base64Payload;
+        accumulatedContent.append(chunk);
+        return imageDataUrlPrefixAppended;
     }
 
     /**
