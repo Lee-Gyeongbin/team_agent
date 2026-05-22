@@ -26,6 +26,10 @@
           AND A.TTSQ           IS NOT NULL
           AND A.TTSQ           != ''
           AND A.CREATE_USER_ID = #{userId}
+          AND A.CHART_OPTION   IS NOT NULL
+          AND A.CHART_OPTION   != ''
+          AND A.TTSQ_PARAM     IS NOT NULL
+          AND A.TTSQ_PARAM     != ''
         ORDER BY A.CREATE_DT DESC
         LIMIT 200
     </select>
