@@ -25,6 +25,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return selectOne("ai.meeting.selectMeetingMinutes", searchVO);
     }
 
+    /** 회의록 조회 */
+    public List<MeetingVO> selectMeetingMinutesByMeetingId(MeetingVO searchVO) throws Exception {
+        return selectList("ai.meeting.selectMeetingMinutesByMeetingId", searchVO);
+    }
+
     /** 오디오 파일 조회 */
     public MeetingVO selectMeetingAudio(MeetingVO searchVO) throws Exception {
         return selectOne("ai.meeting.selectMeetingAudio", searchVO);
@@ -161,5 +166,39 @@ public class MeetingDAO extends EgovComAbstractDAO {
     /** 오디오 레코드 전체 삭제 (복구 전 정리용) */
     public int deleteAudioByMeetingId(MeetingVO dataVO) throws Exception {
         return delete("ai.meeting.deleteAudioByMeetingId", dataVO);
+    }
+    /** 회의록 물리삭제 */
+    public int deleteMeetingMinutes(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteMeetingMinutes", dataVO);
+    }
+
+    /** 인포그래픽 물리삭제 */
+    public int deleteInfographicByMeetingIdPhysical(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteInfographicByMeetingIdPhysical", dataVO);
+    }
+
+    /** 해당 회의가 원본인 통합 회의록 조회 */
+    public List<MeetingVO> selectIntegrationByChildMeetingId(MeetingVO searchVO) throws Exception {
+        return selectList("ai.meeting.selectIntegrationByChildMeetingId", searchVO);
+    }
+
+    /** 통합 연결 삭제 (원본 삭제 시) */
+    public int deleteIntegrationByChildMeetingId(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteIntegrationByChildMeetingId", dataVO);
+    }
+
+    /** 통합 연결 삭제 (통합 회의록 삭제 시) */
+    public int deleteIntegrationByParentMeetingId(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteIntegrationByParentMeetingId", dataVO);
+    }
+
+    /** 통합 회의 원본 목록 조회 */
+    public List<MeetingVO> selectMeetingIntegrationList(MeetingVO searchVO) throws Exception {
+        return selectList("ai.meeting.selectMeetingIntegrationList", searchVO);
+    }
+
+    /** 회의록 통합 등록 */
+    public int insertMeetingIntegration(MeetingVO dataVO) throws Exception {
+        return insert("ai.meeting.insertMeetingIntegration", dataVO);
     }
 }
