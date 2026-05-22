@@ -81,6 +81,17 @@ public class DataDashboardController extends BaseController {
     }
 
     /**
+     * 위젯 너비만 변경 (VIZ_TYPE 등 다른 필드 불변)
+     * @param searchVO { widgetId, colSpan }
+     */
+    @RequestMapping(value = "/widgetColSpan.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView widgetColSpan(@RequestBody DataDashboardVO searchVO) throws Exception {
+        dataDashboardService.updateDashboardWidgetColSpan(searchVO);
+        return makeSuccessJsonData();
+    }
+
+    /**
      * 위젯 순서 일괄 저장
      * @param searchVO { orderList: [{ widgetId, sortOrd }] }
      */
@@ -127,6 +138,72 @@ public class DataDashboardController extends BaseController {
             resultMap.put("msg", e.getMessage());
         }
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 레이아웃 목록 조회
+     * TB_USER_DASHBOARD_LAYOUT (로그인 사용자 기준)
+     * @return { list: [{ layoutId, widgetId, sortOrd, rowPos, colPos, colSpan, rowSpan, widthPx, heightPx }] }
+     */
+    @RequestMapping(value = "/layoutList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView layoutList() throws Exception {
+        DataDashboardVO searchVO = new DataDashboardVO();
+        searchVO.setUserId(SessionUtil.getUserId());
+
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", dataDashboardService.selectDashboardLayoutList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 레이아웃 저장 (신규/수정)
+     * 위젯 생성 시 자동 생성되며, 개별 크기 조정 등 필요 시 호출.
+     * @param layoutVO { widgetId, sortOrd?, rowPos?, colPos?, colSpan?, rowSpan?, widthPx?, heightPx? }
+     */
+    @RequestMapping(value = "/layoutSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView layoutSave(@RequestBody DataDashboardVO layoutVO) throws Exception {
+        dataDashboardService.saveDashboardLayout(layoutVO);
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 레이아웃 순서/위치 일괄 저장 (드래그 종료 후 호출)
+     * @param searchVO { layoutOrderList: [{ widgetId, sortOrd, rowPos, colPos, colSpan }] }
+     */
+    @RequestMapping(value = "/layoutOrder.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView layoutOrder(@RequestBody DataDashboardVO searchVO) throws Exception {
+        searchVO.setUserId(SessionUtil.getUserId());
+        dataDashboardService.updateDashboardLayoutOrder(searchVO);
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 위젯 높이 초기화 (HEIGHT_PX = NULL — 기본값으로 되돌리기)
+     * @param searchVO { widgetId }
+     */
+    @RequestMapping(value = "/layoutResetHeight.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView layoutResetHeight(@RequestBody DataDashboardVO searchVO) throws Exception {
+        if (searchVO.getWidgetId() != null && !searchVO.getWidgetId().trim().isEmpty()) {
+            dataDashboardService.resetDashboardLayoutHeight(searchVO);
+        }
+        return makeSuccessJsonData();
+    }
+
+    /**
+     * 레이아웃 삭제 (위젯 삭제 시 FK CASCADE로 자동 처리; 명시적 삭제가 필요한 경우 사용)
+     * @param searchVO { widgetId }
+     */
+    @RequestMapping(value = "/layoutDelete.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView layoutDelete(@RequestBody DataDashboardVO searchVO) throws Exception {
+        if (searchVO.getWidgetId() != null && !searchVO.getWidgetId().trim().isEmpty()) {
+            dataDashboardService.deleteDashboardLayout(searchVO);
+        }
+        return makeSuccessJsonData();
     }
 
 }

@@ -59,23 +59,38 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 위젯 저장 (신규 생성 또는 수정)
+     * 위젯 저장 (신규 생성 또는 수정).
+     * 신규 위젯 생성 시 레이아웃 초기 레코드도 함께 생성.
      */
     @Transactional(rollbackFor = Exception.class)
     public void saveDashboardWidget(DataDashboardVO widgetVO) throws Exception {
         widgetVO.setUserId(SessionUtil.getUserId());
-        if (widgetVO.getWidgetId() == null || widgetVO.getWidgetId().trim().isEmpty()) {
+        boolean isNew = widgetVO.getWidgetId() == null || widgetVO.getWidgetId().trim().isEmpty();
+        if (isNew) {
             widgetVO.setWidgetId(keyGenerate.generateTableKey("WG", "TB_USER_DASHBOARD_WIDGET", "WIDGET_ID"));
             widgetVO.setSortOrd(selectMaxWidgetSortOrd(widgetVO) + 1);
         }
         dataDashboardDAO.saveDashboardWidget(widgetVO);
+        if (isNew) {
+            initDashboardLayout(widgetVO);
+        }
     }
 
     /**
-     * 위젯 삭제
+     * 위젯 삭제 (레이아웃 레코드도 함께 삭제)
      */
+    @Transactional(rollbackFor = Exception.class)
     public void deleteDashboardWidget(DataDashboardVO searchVO) throws Exception {
+        dataDashboardDAO.deleteDashboardLayout(searchVO);
         dataDashboardDAO.deleteDashboardWidget(searchVO);
+    }
+
+    /**
+     * 위젯 너비(COL_SPAN)만 변경 — VIZ_TYPE 등 다른 필드 불변
+     */
+    public void updateDashboardWidgetColSpan(DataDashboardVO searchVO) throws Exception {
+        searchVO.setUserId(SessionUtil.getUserId());
+        dataDashboardDAO.updateDashboardWidgetColSpan(searchVO);
     }
 
     /**
@@ -147,7 +162,78 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
+    // ===== 레이아웃 =====
+
+    /**
+     * 사용자 레이아웃 목록 조회
+     */
+    public List<DataDashboardVO> selectDashboardLayoutList(DataDashboardVO searchVO) throws Exception {
+        return dataDashboardDAO.selectDashboardLayoutList(searchVO);
+    }
+
+    /**
+     * 레이아웃 저장 (신규/수정)
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void saveDashboardLayout(DataDashboardVO layoutVO) throws Exception {
+        layoutVO.setUserId(SessionUtil.getUserId());
+        if (layoutVO.getLayoutId() == null || layoutVO.getLayoutId().trim().isEmpty()) {
+            layoutVO.setLayoutId(keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID"));
+        }
+        if (layoutVO.getRowPos()  == null) layoutVO.setRowPos(0);
+        if (layoutVO.getColPos()  == null) layoutVO.setColPos(0);
+        if (layoutVO.getColSpan() == null) layoutVO.setColSpan(1);
+        if (layoutVO.getRowSpan() == null) layoutVO.setRowSpan(1);
+        if (layoutVO.getSortOrd() == null) layoutVO.setSortOrd(1);
+        dataDashboardDAO.saveDashboardLayout(layoutVO);
+    }
+
+    /**
+     * 레이아웃 순서/위치 일괄 UPSERT (드래그·너비 변경 후 호출).
+     * 신규 INSERT 발생에 대비해 각 항목에 LI prefix 키를 미리 생성.
+     * ON DUPLICATE KEY UPDATE 시 layoutId는 무시되고 나머지 컬럼만 갱신됨.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void updateDashboardLayoutOrder(DataDashboardVO searchVO) throws Exception {
+        if (searchVO.getLayoutOrderList() == null || searchVO.getLayoutOrderList().isEmpty()) return;
+        for (DataDashboardVO.LayoutOrderItemVO item : searchVO.getLayoutOrderList()) {
+            item.setLayoutId(keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID"));
+        }
+        dataDashboardDAO.updateDashboardLayoutOrder(searchVO);
+    }
+
+    /**
+     * 높이 초기화 (HEIGHT_PX = NULL — 기본값으로 되돌리기)
+     */
+    public void resetDashboardLayoutHeight(DataDashboardVO searchVO) throws Exception {
+        searchVO.setUserId(SessionUtil.getUserId());
+        dataDashboardDAO.resetDashboardLayoutHeight(searchVO);
+    }
+
+    /**
+     * 레이아웃 삭제
+     */
+    public void deleteDashboardLayout(DataDashboardVO searchVO) throws Exception {
+        searchVO.setUserId(SessionUtil.getUserId());
+        dataDashboardDAO.deleteDashboardLayout(searchVO);
+    }
+
     // ===== private helpers =====
+
+    /** 신규 위젯 생성 시 레이아웃 초기 레코드 생성 (HEIGHT_PX 기본값 400 저장) */
+    private void initDashboardLayout(DataDashboardVO widgetVO) throws Exception {
+        DataDashboardVO layoutVO = new DataDashboardVO();
+        layoutVO.setUserId(widgetVO.getUserId());
+        layoutVO.setWidgetId(widgetVO.getWidgetId());
+        layoutVO.setLayoutId(keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID"));
+        layoutVO.setSortOrd(widgetVO.getSortOrd());
+        layoutVO.setRowPos(0);
+        layoutVO.setColPos(0);
+        layoutVO.setColSpan(widgetVO.getColSpan() != null ? widgetVO.getColSpan() : 1);
+        layoutVO.setRowSpan(1);
+        layoutVO.setHeightPx(400);
+        dataDashboardDAO.saveDashboardLayout(layoutVO);
+    }
 
     private int selectMaxWidgetSortOrd(DataDashboardVO widgetVO) {
         try {
