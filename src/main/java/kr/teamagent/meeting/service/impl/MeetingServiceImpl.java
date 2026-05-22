@@ -1627,6 +1627,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 dataVO.setIsAutoTitle("Y");
                 dataVO.setCreateUserId(SessionUtil.getUserId());
                 dataVO.setIntegrateYn("Y");
+                // 선택한 회의록의 참석자 조회(중복제거)
+                String attendees = meetingDAO.selectMeetingAttendees(dataVO);
+                if (attendees != null) {
+                    dataVO.setAttendees(attendees);
+                }
                 meetingDAO.insertMeeting(dataVO);
 
                 // 회의록 통합 등록
