@@ -93,10 +93,17 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     /** 회의 단건 + 회의록 + 화자 목록 조회 */
     public Map<String, Object> selectMeetingDetail(MeetingVO searchVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
-        result.put("meeting", meetingDAO.selectMeeting(searchVO));
+        MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
+        result.put("meeting", meeting);
         result.put("minutes", meetingDAO.selectMeetingMinutes(searchVO));
         result.put("infographicList", meetingDAO.selectMeetingInfographicList(searchVO));
         result.put("speakers", meetingDAO.selectSpeakerList(searchVO));
+        // 통합 회의인 경우 원본 회의 목록 포함
+        if (meeting != null && "Y".equals(meeting.getIntegrateYn())) {
+            result.put("integrationSources", meetingDAO.selectMeetingIntegrationList(searchVO));
+        } else {
+            result.put("integrationSources", new ArrayList<>());
+        }
         return result;
     }
 
@@ -111,6 +118,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         } else {
             dataVO.setIsAutoTitle("N");
         }
+        dataVO.setIntegrateYn("N");
         meetingDAO.insertMeeting(dataVO);
         result.put("successYn", true);
         result.put("meetingId", dataVO.getMeetingId());
@@ -589,12 +597,39 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
-    /** 회의 삭제 (USE_YN = 'N') + NCP 오디오 파일 전체 삭제 */
+    /** 해당 회의가 원본인 통합 회의록 목록 조회 */
+    public Map<String, Object> checkMeetingIntegration(MeetingVO searchVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        result.put("parentMeetings", meetingDAO.selectIntegrationByChildMeetingId(searchVO));
+        return result;
+    }
+
+    /**
+     * 회의 물리삭제
+     * 1. NCP 오디오 파일 삭제
+     * 2. TB_MEETING_INTEGRATION 연결 삭제 (원본/통합 회의록 양방향)
+     * 3. 연관 테이블 물리삭제 (AUDIO, SPEAKER, MINUTES, INFOGRAPHIC)
+     * 4. TB_MEETING 물리삭제
+     */
     public Map<String, Object> deleteMeeting(MeetingVO dataVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
-        meetingDAO.deleteMeeting(dataVO);
-        // NCP 오디오 파일 삭제 (메인 오디오 + 백업 파일 전체)
+
+        // 1. NCP 오디오 파일 삭제 (메인 오디오 + 백업 파일 전체)
         deleteMeetingAudioFiles(dataVO.getMeetingId());
+
+        // 2. 통합 연결 삭제 (이 회의가 원본이거나 통합 결과인 경우 모두 정리)
+        meetingDAO.deleteIntegrationByChildMeetingId(dataVO);
+        meetingDAO.deleteIntegrationByParentMeetingId(dataVO);
+
+        // 3. 연관 테이블 물리삭제
+        meetingDAO.deleteAudioByMeetingId(dataVO);
+        meetingDAO.deleteSpeakersByMeetingId(dataVO);
+        meetingDAO.deleteMeetingMinutes(dataVO);
+        meetingDAO.deleteInfographicByMeetingIdPhysical(dataVO);
+
+        // 4. TB_MEETING 물리삭제
+        meetingDAO.deleteMeeting(dataVO);
+
         result.put("successYn", true);
         return result;
     }
@@ -1572,5 +1607,67 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         
         response.getWriter().write(md);
     }
-    
+
+    /**
+     * 회의록 통합 등록
+     * @param dataVO
+     * @return
+     * @throws Exception
+     */
+    public Map<String, Object> integrateMeetingMinutes(MeetingVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        String fullText = "";
+        try {
+            if (dataVO.getMeetingIds() == null || dataVO.getMeetingIds().isEmpty()) {
+                result.put("successYn", false);
+                result.put("returnMsg", "회의 ID가 없습니다.");
+                return result;
+            }else{
+                // 회의 등록
+                dataVO.setIsAutoTitle("Y");
+                dataVO.setCreateUserId(SessionUtil.getUserId());
+                dataVO.setIntegrateYn("Y");
+                meetingDAO.insertMeeting(dataVO);
+
+                // 회의록 통합 등록
+                MeetingVO integrationVO = new MeetingVO();
+                // 통합된 결과 회의 ID (MEETING_ID) - 회의 등록 후 반환된 값
+                integrationVO.setMeetingId(dataVO.getMeetingId());
+                integrationVO.setParentMeetingId(dataVO.getMeetingId());
+                // 통합 대상이 된 원본 회의록 ID - MEETING_ID
+                integrationVO.setChildMeetingIds(dataVO.getMeetingIds());
+                meetingDAO.insertMeetingIntegration(integrationVO);
+                
+                // 회의록 조회
+                List<MeetingVO> meetingMinutesList = meetingDAO.selectMeetingMinutesByMeetingId(dataVO);
+                for (MeetingVO meetingMinutes : meetingMinutesList) {
+                    fullText += meetingMinutes.getFullText() + "\n";
+                }
+                // 회의록 등록
+                integrationVO.setFullText(fullText);
+                integrationVO.setIsAutoTitle("Y");
+                LibraryVO searchVO = new LibraryVO();
+                searchVO.setTmplId(MINUTES_TMPL_ID);
+                List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
+                String minutesAnswer = callLlmForMinutes(fullText, "Y", tmplFieldList);
+                if (minutesAnswer != null) {
+                    parseAndSaveMinutes(integrationVO, minutesAnswer, tmplFieldList);
+                }
+
+                // 통합 완료 후 회의 상태 종료(002)로 업데이트
+                MeetingVO statusVO = new MeetingVO();
+                statusVO.setMeetingId(dataVO.getMeetingId());
+                statusVO.setStatus("002");
+                meetingDAO.updateMeetingStatus(statusVO);
+
+                result.put("successYn", true);
+                result.put("meetingId", dataVO.getMeetingId());
+            }
+            return result;
+        } catch (Exception e) {
+            result.put("successYn", false);
+            result.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return result;
+    }
 }
