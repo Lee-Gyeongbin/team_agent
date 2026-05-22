@@ -41,6 +41,13 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 위젯 너비(COL_SPAN)만 변경
+     */
+    public int updateDashboardWidgetColSpan(DataDashboardVO searchVO) throws Exception {
+        return update("dataDashboard.updateDashboardWidgetColSpan", searchVO);
+    }
+
+    /**
      * 위젯 순서 일괄 변경
      */
     public int updateDashboardWidgetOrder(DataDashboardVO searchVO) throws Exception {
@@ -62,6 +69,47 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
      */
     public List<DataDashboardVO> selectDashboardColCodeMap(DataDashboardVO searchVO) throws Exception {
         return selectList("dataDashboard.selectDashboardColCodeMap", searchVO);
+    }
+
+    // ===== 레이아웃 =====
+
+    /**
+     * 사용자 레이아웃 목록 조회
+     */
+    public List<DataDashboardVO> selectDashboardLayoutList(DataDashboardVO searchVO) throws Exception {
+        return selectList("dataDashboard.selectDashboardLayoutList", searchVO);
+    }
+
+    /**
+     * 레이아웃 저장 (INSERT ... ON DUPLICATE KEY UPDATE)
+     */
+    public int saveDashboardLayout(DataDashboardVO layoutVO) throws Exception {
+        return (int) insert("dataDashboard.saveDashboardLayout", layoutVO);
+    }
+
+    /**
+     * 레이아웃 순서/위치 일괄 UPSERT (드래그 후)
+     * 레코드 없으면 INSERT, 있으면 UPDATE
+     */
+    public int updateDashboardLayoutOrder(DataDashboardVO searchVO) throws Exception {
+        HashMap<String, Object> paramMap = new HashMap<>();
+        paramMap.put("layoutOrderList", searchVO.getLayoutOrderList());
+        paramMap.put("userId", searchVO.getUserId());
+        return (int) insert("dataDashboard.updateDashboardLayoutOrder", paramMap);
+    }
+
+    /**
+     * 높이 초기화 (HEIGHT_PX = NULL)
+     */
+    public int resetDashboardLayoutHeight(DataDashboardVO searchVO) throws Exception {
+        return update("dataDashboard.resetDashboardLayoutHeight", searchVO);
+    }
+
+    /**
+     * 레이아웃 삭제
+     */
+    public int deleteDashboardLayout(DataDashboardVO searchVO) throws Exception {
+        return delete("dataDashboard.deleteDashboardLayout", searchVO);
     }
 
 }
