@@ -1563,6 +1563,58 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * 로그인 사용자 뉴스 관심 카테고리 조회 (TB_USER_INTEREST_NEWS_CATEGORY)
+     */
+    public Map<String, Object> selectUserNewsInterestCategory(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        String userId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(userId)) {
+            resultMap.put("codeIds", Collections.emptyList());
+            return resultMap;
+        }
+        ChatbotVO param = new ChatbotVO();
+        param.setUserId(userId);
+        ChatbotVO saved = chatbotDAO.selectUserNewsInterestCategory(param);
+        List<String> codeIds = parseNewsCategoryCdJson(saved != null ? saved.getNewsCategoryCd() : null);
+        resultMap.put("codeIds", codeIds);
+        if (saved != null) {
+            resultMap.put("modifyDt", saved.getModifyDt());
+        }
+        return resultMap;
+    }
+
+    /**
+     * 로그인 사용자 뉴스 관심 카테고리 저장 (사용자당 1행, NEWS_CATEGORY_CD JSON)
+     */
+    public Map<String, Object> saveUserNewsInterestCategories(ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        String userId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(userId)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            return resultMap;
+        }
+        List<String> codeIds = searchVO != null && searchVO.getNewsCategoryCodeIdList() != null
+                ? searchVO.getNewsCategoryCodeIdList()
+                : Collections.emptyList();
+        ChatbotVO param = new ChatbotVO();
+        param.setUserId(userId);
+        param.setNewsCategoryCd(NEWS_CURATE_PROMPT_GSON.toJson(codeIds));
+
+        ChatbotVO existing = chatbotDAO.selectUserNewsInterestCategory(param);
+        if (existing != null && CommonUtil.isNotEmpty(existing.getNewscgId())) {
+            param.setNewscgId(existing.getNewscgId());
+        } else {
+            param.setNewscgId(keyGenerate.generateTableKey("NI", "TB_USER_INTEREST_NEWS_CATEGORY", "NEWSCG_ID"));
+        }
+        chatbotDAO.upsertUserNewsInterestCategories(param);
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "");
+        resultMap.put("codeIds", codeIds);
+        return resultMap;
+    }
+
+    /**
      * 대화방 공유 토큰 발급
      * @param chatbotVO
      * @return
@@ -2001,6 +2053,27 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return s.indexOf('\r', from);
     }
 
+    private List<String> parseNewsCategoryCdJson(String newsCategoryCdJson) {
+        if (CommonUtil.isEmpty(newsCategoryCdJson)) {
+            return Collections.emptyList();
+        }
+        String trimmed = newsCategoryCdJson.trim();
+        if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+            return Collections.emptyList();
+        }
+        try {
+            Type listType = new TypeToken<List<String>>() {
+            }.getType();
+            List<String> parsed = NEWS_CURATE_PROMPT_GSON.fromJson(trimmed, listType);
+            if (parsed == null || parsed.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return parsed.stream().filter(s -> s != null && !s.trim().isEmpty()).map(String::trim).collect(Collectors.toList());
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
     private static final String NEWS_CURATOR_CANDIDATE_LIST_LINE_PREFIX = "- 후보 기사 목록(JSON 배열):";
 
     private static String newsCurationUserQueryForChatLog(String webSocketQuery) {
@@ -2038,7 +2111,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     private void deliverNewsRecommendationViaWebSocket(String query, String threadId, String userId, String svcTy,
             String modelId, String refId, String agentId, List<Long> attachmentFileIds,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
         String rawQuery = query != null ? query : "";
         List<String> interestCategories = parseNewsCuratorCategoriesFromTemplate(rawQuery.trim());
         List<RssArticleRow> rssCandidateRows = NewsRssUtil.collectCandidates(restApiManager, logger, interestCategories);

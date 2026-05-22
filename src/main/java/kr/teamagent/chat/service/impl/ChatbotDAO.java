@@ -282,4 +282,12 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public ChatbotVO selectChatFileById(ChatbotVO searchVO) throws Exception {
         return selectOne("ai.chatbot.selectChatFileById", searchVO);
     }
+
+    public ChatbotVO selectUserNewsInterestCategory(ChatbotVO searchVO) throws Exception {
+        return selectOne("ai.chatbot.selectUserNewsInterestCategory", searchVO);
+    }
+
+    public int upsertUserNewsInterestCategories(ChatbotVO searchVO) throws Exception {
+        return insert("ai.chatbot.upsertUserNewsInterestCategories", searchVO);
+    }
 }

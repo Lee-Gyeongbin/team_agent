@@ -151,6 +151,13 @@ public class ChatbotVO extends CommonVO {
 
     private String categoryId;
 
+    /** 뉴스 관심 카테고리 저장 요청용 NC000001 CODE_ID 목록 */
+    private List<String> newsCategoryCodeIdList;
+
+    /** TB_USER_INTEREST_NEWS_CATEGORY (사용자당 1행, JSON 배열 문자열) */
+    private String newscgId;
+    private String newsCategoryCd;
+
     // 지식 카드 정보(TB_KNOW_CARD)
     private String cardId;
     private String tags;

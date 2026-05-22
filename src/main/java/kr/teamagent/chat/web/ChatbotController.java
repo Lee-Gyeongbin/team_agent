@@ -12,6 +12,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
@@ -263,7 +264,30 @@ public class ChatbotController extends BaseController {
         resultMap.put("dataList", chatbotService.selectKnowledgeList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
-    
+
+    /**
+     * 뉴스 관심 카테고리 조회 (TB_USER_INTEREST_NEWS_CATEGORY)
+     * @return codeIds, modifyDt
+     */
+    @RequestMapping(value = "/ai/chatbot/selectUserNewsInterestCategory.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView selectUserNewsInterestCategory(@RequestBody(required = false) ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(chatbotService.selectUserNewsInterestCategory(
+                searchVO == null ? new ChatbotVO() : searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 뉴스 관심 카테고리 저장 (newsCategoryCodeIdList: ["001","002"])
+     */
+    @RequestMapping(value = "/ai/chatbot/saveUserNewsInterestCategories.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView saveUserNewsInterestCategories(@RequestBody(required = false) ChatbotVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(chatbotService.saveUserNewsInterestCategories(
+                searchVO == null ? new ChatbotVO() : searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
     /**
      * 대화방 첨부파일 업로드 여부 사전 확인
      */
