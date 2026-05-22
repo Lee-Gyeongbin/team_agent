@@ -7,7 +7,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -46,74 +45,50 @@ public final class NewsRssUtil {
     }
 
     /**
-     * 오늘의 뉴스픽 UI·큐레이션 관심 문자열 → 연합뉴스 RSS.
-     * {@code 생활/문화}는 하위 4피드를 묶어서 수집(기존 동작 유지).
+     * NC000001 {@code CODE_ID} → 연합뉴스 RSS
      */
     private static final Map<String, List<FeedSpec>> FEED_MAP = Map.ofEntries(
-            Map.entry("정치", List.of(new FeedSpec("Globals.news.rss.yna.politics", "정치"))),
-            Map.entry("경제", List.of(new FeedSpec("Globals.news.rss.yna.economy", "경제"))),
-            Map.entry("사회", List.of(new FeedSpec("Globals.news.rss.yna.society", "사회"))),
-            Map.entry("산업", List.of(new FeedSpec("Globals.news.rss.yna.industry", "산업"))),
-            Map.entry("문화", List.of(new FeedSpec("Globals.news.rss.yna.culture", "문화"))),
-            Map.entry("세계", List.of(new FeedSpec("Globals.news.rss.yna.international", "세계"))),
-            Map.entry("건강", List.of(new FeedSpec("Globals.news.rss.yna.health", "건강"))),
-            Map.entry("연예", List.of(new FeedSpec("Globals.news.rss.yna.entertainment", "연예"))),
-            Map.entry("스포츠", List.of(new FeedSpec("Globals.news.rss.yna.sports", "스포츠"))),
-            Map.entry("주식", List.of(new FeedSpec("Globals.news.rss.yna.market", "주식"))),
-            Map.entry("생활/문화", List.of(
-                    new FeedSpec("Globals.news.rss.yna.health", "생활/문화"),
-                    new FeedSpec("Globals.news.rss.yna.sports", "생활/문화"),
-                    new FeedSpec("Globals.news.rss.yna.culture", "생활/문화"),
-                    new FeedSpec("Globals.news.rss.yna.entertainment", "생활/문화"))));
+            Map.entry("001", List.of(new FeedSpec("Globals.news.rss.yna.politics", "정치"))),
+            Map.entry("002", List.of(new FeedSpec("Globals.news.rss.yna.economy", "경제"))),
+            Map.entry("003", List.of(new FeedSpec("Globals.news.rss.yna.society", "사회"))),
+            Map.entry("004", List.of(new FeedSpec("Globals.news.rss.yna.industry", "산업"))),
+            Map.entry("005", List.of(new FeedSpec("Globals.news.rss.yna.culture", "문화"))),
+            Map.entry("006", List.of(new FeedSpec("Globals.news.rss.yna.international", "세계"))),
+            Map.entry("007", List.of(new FeedSpec("Globals.news.rss.yna.health", "건강"))),
+            Map.entry("008", List.of(new FeedSpec("Globals.news.rss.yna.entertainment", "연예"))),
+            Map.entry("009", List.of(new FeedSpec("Globals.news.rss.yna.sports", "스포츠"))),
+            Map.entry("010", List.of(new FeedSpec("Globals.news.rss.yna.market", "주식"))));
 
-    /** 프론트 영문 키 등 → {@link #FEED_MAP} 키(한글). */
-    private static final Map<String, String> INTEREST_ALIASES = Map.ofEntries(
-            Map.entry("politics", "정치"),
-            Map.entry("economy", "경제"),
-            Map.entry("society", "사회"),
-            Map.entry("industry", "산업"),
-            Map.entry("culture", "문화"),
-            Map.entry("world", "세계"),
-            Map.entry("health", "건강"),
-            Map.entry("entertainment", "연예"),
-            Map.entry("sports", "스포츠"),
-            Map.entry("market", "주식"),
-            Map.entry("stock", "주식"));
-
-    private static List<FeedSpec> feedsForInterest(String interest) {
-        if (interest == null) {
+    private static List<FeedSpec> feedsForCodeId(String codeId) {
+        if (codeId == null) {
             return Collections.emptyList();
         }
-        String key = interest.trim();
+        String key = codeId.trim();
         if (key.isEmpty()) {
             return Collections.emptyList();
         }
-        List<FeedSpec> direct = FEED_MAP.get(key);
-        if (direct != null && !direct.isEmpty()) {
-            return direct;
-        }
-        String canonical = INTEREST_ALIASES.get(key.toLowerCase(Locale.ROOT));
-        if (canonical != null) {
-            return FEED_MAP.getOrDefault(canonical, Collections.emptyList());
-        }
-        return Collections.emptyList();
+        List<FeedSpec> specs = FEED_MAP.get(key);
+        return specs != null ? specs : Collections.emptyList();
     }
 
+    /**
+     * @param codeIds NC000001 {@code CODE_ID} 목록 (예: 001, 002)
+     */
     public static List<ChatbotVO.RssArticleRow> collectCandidates(RestApiManager restApiManager, Logger log,
-            List<String> interests) {
+            List<String> codeIds) {
         List<ChatbotVO.RssArticleRow> out = new ArrayList<>();
         Set<String> seenLinks = new HashSet<>();
         Map<String, String> header = new HashMap<>();
         header.put("User-Agent", "Mozilla/5.0 (compatible; TeamAgent/1.0; +https://example.invalid/news-bot)");
 
-        List<String> cats = interests != null ? interests : Collections.emptyList();
-        for (String interest : cats) {
-            if (interest == null || interest.trim().isEmpty()) {
+        List<String> ids = codeIds != null ? codeIds : Collections.emptyList();
+        for (String codeId : ids) {
+            if (codeId == null || codeId.trim().isEmpty()) {
                 continue;
             }
-            List<FeedSpec> specs = feedsForInterest(interest);
+            List<FeedSpec> specs = feedsForCodeId(codeId);
             if (specs.isEmpty()) {
-                log.warn("뉴스 RSS: 알 수 없는 관심 카테고리 무시: {}", interest);
+                log.warn("뉴스 RSS: 알 수 없는 관심 카테고리 CODE_ID 무시: {}", codeId);
                 continue;
             }
             for (FeedSpec feedSpec : specs) {

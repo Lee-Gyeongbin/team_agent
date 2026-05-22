@@ -691,4 +691,36 @@
         FROM TB_CHAT_FILE F
         WHERE F.CHAT_FILE_ID = #{chatFileId}
     </select>
+
+    <select id="selectUserNewsInterestCategory" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 사용자 뉴스 관심 카테고리 조회 ai.chatbot.selectUserNewsInterestCategory */
+        SELECT
+            NEWSCG_ID
+            , USER_ID
+            , NEWS_CATEGORY_CD
+            , CREATE_DT
+            , MODIFY_DT
+        FROM TB_USER_INTEREST_NEWS_CATEGORY
+        WHERE USER_ID = #{userId}
+    </select>
+
+    <insert id="upsertUserNewsInterestCategories" parameterType="chatbotVO">
+        /* 뉴스 관심 카테고리 저장 ai.chatbot.upsertUserNewsInterestCategories — UK(USER_ID), 목록은 NEWS_CATEGORY_CD JSON */
+        INSERT INTO TB_USER_INTEREST_NEWS_CATEGORY (
+            NEWSCG_ID
+            , USER_ID
+            , NEWS_CATEGORY_CD
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{newscgId}
+            , #{userId}
+            , #{newsCategoryCd}
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            NEWS_CATEGORY_CD = VALUES(NEWS_CATEGORY_CD)
+            , MODIFY_DT = NOW()
+    </insert>
 </mapper>
