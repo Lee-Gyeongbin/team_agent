@@ -220,7 +220,7 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
 
     // ===== private helpers =====
 
-    /** 신규 위젯 생성 시 레이아웃 초기 레코드 생성 (HEIGHT_PX 기본값 400 저장) */
+    /** 신규 위젯 생성 시 레이아웃 초기 레코드 생성 (HEIGHT_PX 기본값 320 저장) */
     private void initDashboardLayout(DataDashboardVO widgetVO) throws Exception {
         DataDashboardVO layoutVO = new DataDashboardVO();
         layoutVO.setUserId(widgetVO.getUserId());
@@ -231,7 +231,7 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         layoutVO.setColPos(0);
         layoutVO.setColSpan(widgetVO.getColSpan() != null ? widgetVO.getColSpan() : 1);
         layoutVO.setRowSpan(1);
-        layoutVO.setHeightPx(400);
+        layoutVO.setHeightPx(320);
         dataDashboardDAO.saveDashboardLayout(layoutVO);
     }
 
