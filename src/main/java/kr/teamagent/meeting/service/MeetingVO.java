@@ -25,6 +25,7 @@ public class MeetingVO extends CommonVO {
     private String createDt;
     private String modifyDt;
     private String isAutoTitle;
+    private String integrateYn;
 
     // TB_MEETING_MINUTES - 회의록
     private Long   minutesId;
@@ -80,4 +81,10 @@ public class MeetingVO extends CommonVO {
     private String jsonKey;
     private String fieldNm;
     private String multilineYn;
+
+    private List<Long> meetingIds;
+    private Long integrationId;
+    private Long parentMeetingId;
+    private List<Long> childMeetingIds;
+    private Long childMeetingId;
 }

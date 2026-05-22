@@ -171,6 +171,20 @@ public class MeetingController extends BaseController {
         return resultMap;
     }
 
+    /** 해당 회의가 원본인 통합 회의록 목록 조회 (삭제 전 확인용) */
+    @RequestMapping("/ai/meeting/checkMeetingIntegration.do")
+    @ResponseBody
+    public Map<String, Object> checkMeetingIntegration(@RequestBody MeetingVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.checkMeetingIntegration(searchVO);
+        } catch (Exception e) {
+            log.error("checkMeetingIntegration error", e);
+            resultMap.put("parentMeetings", new java.util.ArrayList<>());
+        }
+        return resultMap;
+    }
+
     /** 회의 삭제 */
     @RequestMapping("/ai/meeting/deleteMeeting.do")
     @ResponseBody
@@ -372,6 +386,20 @@ public class MeetingController extends BaseController {
             resultMap = meetingService.uploadBackupAudio(meetingId, audioFile);
         } catch (Exception e) {
             log.error("uploadBackupAudio error - meetingId: {}", meetingId, e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    @RequestMapping("/ai/meeting/integrateMeeting.do")
+    @ResponseBody
+    public Map<String, Object> integrateMeetingMinutes(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.integrateMeetingMinutes(dataVO);
+        } catch (Exception e) {
+            log.error("integrateMeetingMinutes error", e);
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
