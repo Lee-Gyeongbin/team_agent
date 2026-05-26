@@ -28,7 +28,6 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
 import kr.teamagent.chat.service.ChatbotVO;
-import kr.teamagent.chat.service.ChatbotVO.NewsRecommendCard;
 import kr.teamagent.chat.service.ChatbotVO.RssArticleRow;
 import kr.teamagent.chat.socket.ChatbotWebSocketHandler;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
@@ -56,8 +55,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final String LUNCH_MENU_AGENT_ID = "AG000009";
     private static final String MEME_AGENT_ID = "AG000011";
 
-    /** 점심 추천 카드와 동일 — 한 번에 요청할 수 있는 메뉴 이미지 개수 상한 */
-    private static final int LUNCH_FOOD_IMAGES_MAX_ITEMS = 3;
     /** summary_query 동기 호출 시 프롬프트·응답이 커 지연이 길어질 수 있는 경우의 OkHttp 읽기 타임아웃(초). */
     private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
     private static final String NEWS_CURATION_AGENT_ID = "AG000012";
@@ -587,7 +584,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         if (menus == null || menus.isEmpty()) {
             return rows;
         }
-        int limit = Math.min(menus.size(), LUNCH_FOOD_IMAGES_MAX_ITEMS);
+        int limit = Math.min(menus.size(), 3);
         for (int i = 0; i < limit; i++) {
             String menu = menus.get(i) != null ? menus.get(i).trim() : "";
             Map<String, Object> row = new HashMap<>();
@@ -2011,116 +2008,27 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 프론트 큐레이션 템플릿에서 {@code 사용자 관심 카테고리:} 뒤(같은 줄, 개행 전) JSON 문자열 배열만 파싱한다.
-     * 실패 시 빈 목록(레거시 첫 줄 쉼표 분해는 하지 않음).
-     */
-    private static List<String> parseNewsCuratorCategoriesFromTemplate(String query) {
-        if (CommonUtil.isEmpty(query)) {
-            return Collections.emptyList();
-        }
-        String trimmed = query.trim();
-        int marker = trimmed.indexOf("사용자 관심 카테고리");
-        if (marker < 0) {
-            return Collections.emptyList();
-        }
-        int colon = trimmed.indexOf(':', marker);
-        if (colon <= 0) {
-            return Collections.emptyList();
-        }
-        int endLine = indexOfNewline(trimmed, colon + 1);
-        String jsonPart = (endLine < 0 ? trimmed.substring(colon + 1) : trimmed.substring(colon + 1, endLine)).trim();
-        if (!jsonPart.startsWith("[") || !jsonPart.endsWith("]")) {
-            return Collections.emptyList();
-        }
-        try {
-            Type listType = new TypeToken<List<String>>() {
-            }.getType();
-            List<String> parsed = NEWS_CURATE_PROMPT_GSON.fromJson(jsonPart, listType);
-            if (parsed == null || parsed.isEmpty()) {
-                return Collections.emptyList();
-            }
-            return parsed.stream().filter(s -> s != null && !s.trim().isEmpty()).map(String::trim).collect(Collectors.toList());
-        } catch (Exception e) {
-            return Collections.emptyList();
-        }
-    }
-
-    private static int indexOfNewline(String s, int from) {
-        int n = s.indexOf('\n', from);
-        if (n >= 0) {
-            return n;
-        }
-        return s.indexOf('\r', from);
-    }
-
-    private List<String> parseNewsCategoryCdJson(String newsCategoryCdJson) {
-        if (CommonUtil.isEmpty(newsCategoryCdJson)) {
-            return Collections.emptyList();
-        }
-        String trimmed = newsCategoryCdJson.trim();
-        if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-            return Collections.emptyList();
-        }
-        try {
-            Type listType = new TypeToken<List<String>>() {
-            }.getType();
-            List<String> parsed = NEWS_CURATE_PROMPT_GSON.fromJson(trimmed, listType);
-            if (parsed == null || parsed.isEmpty()) {
-                return Collections.emptyList();
-            }
-            return parsed.stream().filter(s -> s != null && !s.trim().isEmpty()).map(String::trim).collect(Collectors.toList());
-        } catch (Exception e) {
-            return Collections.emptyList();
-        }
-    }
-
-    private static final String NEWS_CURATOR_CANDIDATE_LIST_LINE_PREFIX = "- 후보 기사 목록(JSON 배열):";
-
-    private static String newsCurationUserQueryForChatLog(String webSocketQuery) {
-        if (webSocketQuery == null) {
-            return "";
-        }
-        int cut = webSocketQuery.indexOf(NEWS_CURATOR_CANDIDATE_LIST_LINE_PREFIX);
-        if (cut < 0) {
-            return webSocketQuery;
-        }
-        return webSocketQuery.substring(0, cut).trim();
-    }
-
-    private static String buildNewsCandidateArticlesMetadataBlock(List<RssArticleRow> candidates) {
-        List<Map<String, Object>> curatorInputArticles = new ArrayList<>(candidates.size());
-        for (RssArticleRow candidateRow : candidates) {
-            curatorInputArticles.add(NewsRssUtil.curatorPromptArticleMap(candidateRow));
-        }
-        String articlesJson = NEWS_CURATE_PROMPT_GSON.toJson(curatorInputArticles);
-        return NEWS_CURATOR_CANDIDATE_LIST_LINE_PREFIX + " " + articlesJson + "\n"
-                + "  각 항목의 rssCategory는 서버가 사용자 관심에 맞춰 선택한 RSS 피드 구분이다. 이를 바꾸거나 재분류하지 않고 그대로 사용한다.\n";
-    }
-
-    private static String appendNewsCandidateArticlesToCuratorQuery(String frontendTemplate, List<RssArticleRow> candidates) {
-        String block = buildNewsCandidateArticlesMetadataBlock(candidates);
-        int roleIdx = frontendTemplate.indexOf("[역할]");
-        if (roleIdx >= 0) {
-            return frontendTemplate.substring(0, roleIdx).trim() + "\n" + block + "\n" + frontendTemplate.substring(roleIdx);
-        }
-        return frontendTemplate.trim() + "\n\n" + block;
-    }
-
-    /**
-     * 뉴스 큐레이션 에이전트 전용
+     * 뉴스 큐레이션 에이전트 전용.
      */
     private void deliverNewsRecommendationViaWebSocket(String query, String threadId, String userId, String svcTy,
             String modelId, String refId, String agentId, List<Long> attachmentFileIds,
             ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
         String rawQuery = query != null ? query : "";
-        List<String> interestCategories = parseNewsCuratorCategoriesFromTemplate(rawQuery.trim());
+        List<String> interestCategories = selectNewsInterestCategoryCodeIds(userId);
+        if (interestCategories.isEmpty()) {
+            callback.onError("뉴스 관심 카테고리가 설정되지 않았습니다.");
+            return;
+        }
         List<RssArticleRow> rssCandidateRows = NewsRssUtil.collectCandidates(restApiManager, logger, interestCategories);
         String curatorPrompt = appendNewsCandidateArticlesToCuratorQuery(rawQuery, rssCandidateRows);
-        Map<String, Object> newsRecommendPayload = runNewsCuratorAiAndParse(interestCategories, rssCandidateRows, curatorPrompt);
-        String responseJson = new com.google.gson.Gson().toJson(newsRecommendPayload);
-        callback.onChunk(responseJson, responseJson, null);
-        /** Q_CONTENT: 프론트 원문만(서버 후보 기사 블록이 query에 섞인 경우 제거). */
-        String qContentForDb = newsCurationUserQueryForChatLog(query);
+        String curatorAiJson = runNewsCuratorAi(curatorPrompt, rssCandidateRows);
+        if (CommonUtil.isEmpty(curatorAiJson)) {
+            String msg = "AI가 선정한 뉴스를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+            callback.onError(msg);
+            return;
+        }
+        callback.onChunk(curatorAiJson, curatorAiJson, null);
+        String qContentForDb = rawQuery.trim();
         String savedLogId = "";
         if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
             try {
@@ -2128,7 +2036,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         threadId,
                         agentId,
                         qContentForDb,
-                        responseJson,
+                        curatorAiJson,
                         0,
                         0,
                         svcTy,
@@ -2158,33 +2066,99 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
             }
         }
-        callback.onComplete(responseJson, "", "", new ArrayList<>(), CommonUtil.nullToBlank(threadId),
+        callback.onComplete(curatorAiJson, "", "", new ArrayList<>(), CommonUtil.nullToBlank(threadId),
                 CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null);
     }
 
-    private Map<String, Object> runNewsCuratorAiAndParse(List<String> interestCategories, List<RssArticleRow> rssCandidateRows,
-            String curatorPrompt) {
+    /** AI 큐레이션 JSON 배열 응답. 후보 목록 검증 실패 시 빈 문자열. */
+    private String runNewsCuratorAi(String curatorPrompt, List<RssArticleRow> rssCandidateRows) {
         String curatorAiJson = callAiSummary(curatorPrompt, "news_curate");
-        List<NewsRecommendCard> curatedCards = parseNewsCuratorJson(curatorAiJson, rssCandidateRows);
-        if (curatedCards.isEmpty()) {
-            String msg = CommonUtil.isEmpty(curatorAiJson)
-                    ? "뉴스 큐레이션 AI 응답이 없습니다. 서버 지연 또는 타임아웃일 수 있으니 잠시 후 다시 시도해 주세요."
-                    : "AI가 선정한 뉴스를 확인하지 못했습니다. 응답 형식 오류일 수 있으니 다시 시도해 주세요.";
-            return buildNewsRecommendResponse(interestCategories, new ArrayList<>(), false, msg);
+        if (CommonUtil.isEmpty(curatorAiJson)) {
+            return "";
         }
-        return buildNewsRecommendResponse(interestCategories, curatedCards, true, null);
+        String trimmed = curatorAiJson.trim();
+        if (!isValidNewsCuratorAiJson(trimmed, rssCandidateRows)) {
+            return "";
+        }
+        return trimmed;
     }
 
-    private Map<String, Object> buildNewsRecommendResponse(List<String> interestsEcho, List<NewsRecommendCard> curatedNewsCards,
-            boolean success, String message) {
-        return Map.of(
-                "successYn", success,
-                "returnMsg", CommonUtil.nullToBlank(message),
-                "interests", interestsEcho,
-                "news", curatedNewsCards);
+    private static String appendNewsCandidateArticlesToCuratorQuery(String frontendTemplate, List<RssArticleRow> candidates) {
+        String block = buildNewsCandidateArticlesMetadataBlock(candidates);
+        int roleIdx = frontendTemplate.indexOf("[역할]");
+        if (roleIdx >= 0) {
+            return frontendTemplate.substring(0, roleIdx).trim() + "\n" + block + "\n" + frontendTemplate.substring(roleIdx);
+        }
+        return frontendTemplate.trim() + "\n\n" + block;
     }
 
-    private Map<String, RssArticleRow> buildUrlIndex(List<RssArticleRow> candidates) {
+    private static String buildNewsCandidateArticlesMetadataBlock(List<RssArticleRow> candidates) {
+        List<Map<String, Object>> curatorInputArticles = new ArrayList<>(candidates.size());
+        for (RssArticleRow candidateRow : candidates) {
+            curatorInputArticles.add(NewsRssUtil.curatorPromptArticleMap(candidateRow));
+        }
+        String articlesJson = NEWS_CURATE_PROMPT_GSON.toJson(curatorInputArticles);
+        return "- 후보 기사 목록(JSON 배열): " + articlesJson;
+    }
+
+    /** TB_USER_INTEREST_NEWS_CATEGORY.NEWS_CATEGORY_CD → RSS용 codeId 목록 */
+    private List<String> selectNewsInterestCategoryCodeIds(String userId) throws Exception {
+        if (CommonUtil.isEmpty(userId)) {
+            return Collections.emptyList();
+        }
+        ChatbotVO param = new ChatbotVO();
+        param.setUserId(userId);
+        ChatbotVO saved = chatbotDAO.selectUserNewsInterestCategory(param);
+        return parseNewsCategoryCdJson(saved != null ? saved.getNewsCategoryCd() : null);
+    }
+
+    private List<String> parseNewsCategoryCdJson(String newsCategoryCdJson) {
+        if (CommonUtil.isEmpty(newsCategoryCdJson)) {
+            return Collections.emptyList();
+        }
+        String trimmed = newsCategoryCdJson.trim();
+        if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+            return Collections.emptyList();
+        }
+        try {
+            Type listType = new TypeToken<List<String>>() {
+            }.getType();
+            List<String> parsed = NEWS_CURATE_PROMPT_GSON.fromJson(trimmed, listType);
+            if (parsed == null || parsed.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return parsed.stream().filter(s -> s != null && !s.trim().isEmpty()).map(String::trim).collect(Collectors.toList());
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    /** AI JSON 배열이 후보 기사 sourceUrl과 일치하는지 검증. */
+    private boolean isValidNewsCuratorAiJson(String curatorAiJson, List<RssArticleRow> candidates) {
+        if (CommonUtil.isEmpty(curatorAiJson)) {
+            return false;
+        }
+        try {
+            JSONParser parser = new JSONParser();
+            JSONArray curatorItems = (JSONArray) parser.parse(curatorAiJson.trim());
+            if (curatorItems == null || curatorItems.isEmpty()) {
+                return false;
+            }
+            Map<String, RssArticleRow> articleRowBySourceUrl = buildNewsCandidateUrlIndex(candidates);
+            for (Object curatorItem : curatorItems) {
+                JSONObject curatorObject = (JSONObject) curatorItem;
+                String sourceUrl = curatorObject.get("sourceUrl") == null ? "" : String.valueOf(curatorObject.get("sourceUrl")).trim();
+                if (!articleRowBySourceUrl.containsKey(sourceUrl)) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private Map<String, RssArticleRow> buildNewsCandidateUrlIndex(List<RssArticleRow> candidates) {
         Map<String, RssArticleRow> articleRowBySourceUrl = new HashMap<>();
         for (RssArticleRow candidateRow : candidates) {
             String sourceUrlKey = candidateRow.getLink() != null ? candidateRow.getLink().trim() : "";
@@ -2195,49 +2169,4 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return articleRowBySourceUrl;
     }
 
-    private List<NewsRecommendCard> parseNewsCuratorJson(String curatorAiJson, List<RssArticleRow> candidates) {
-        if (CommonUtil.isEmpty(curatorAiJson)) {
-            return new ArrayList<>();
-        }
-        try {
-            JSONParser parser = new JSONParser();
-            JSONArray curatorItems = (JSONArray) parser.parse(curatorAiJson.trim());
-            Map<String, RssArticleRow> articleRowBySourceUrl = buildUrlIndex(candidates);
-            List<NewsRecommendCard> curatedCards = new ArrayList<>();
-            for (Object curatorItem : curatorItems) {
-                JSONObject curatorObject = (JSONObject) curatorItem;
-                String sourceUrl = curatorObject.get("sourceUrl") == null ? "" : String.valueOf(curatorObject.get("sourceUrl")).trim();
-                RssArticleRow matchedRow = articleRowBySourceUrl.get(sourceUrl);
-                if (matchedRow == null) {
-                    return new ArrayList<>();
-                }
-                String aiSummary = curatorObject.get("summary") == null ? "" : String.valueOf(curatorObject.get("summary")).trim();
-                curatedCards.add(buildNewsRecommendCard(matchedRow, aiSummary));
-            }
-            for (int rankIndex = 0; rankIndex < curatedCards.size(); rankIndex++) {
-                curatedCards.get(rankIndex).setRank(rankIndex + 1);
-            }
-            return curatedCards;
-        } catch (Exception e) {
-            return new ArrayList<>();
-        }
-    }
-
-    /** RSS 후보 행 1건을 뉴스 카드로 변환한다. rank는 호출부에서 일괄 부여한다. */
-    private NewsRecommendCard buildNewsRecommendCard(RssArticleRow row, String aiSummary) {
-        NewsRecommendCard card = new NewsRecommendCard();
-        card.setCategory(CommonUtil.nullToBlank(row.getRssCategory()));
-        card.setSource(CommonUtil.nullToBlank(row.getPressLabel()));
-        card.setTitle(CommonUtil.nullToBlank(row.getTitle()));
-        card.setSourceUrl(CommonUtil.nullToBlank(row.getLink()));
-        card.setImageUrl(CommonUtil.nullToBlank(row.getImageUrl()));
-        String snippet = CommonUtil.nullToBlank(row.getSnippet());
-        String titleFallback = CommonUtil.nullToBlank(row.getTitle());
-        String displaySummary = Arrays.asList(aiSummary, snippet, titleFallback).stream().filter(CommonUtil::isNotEmpty).findFirst()
-                .orElse("");
-        card.setSummary(displaySummary);
-        return card;
-    }
-
 }
-

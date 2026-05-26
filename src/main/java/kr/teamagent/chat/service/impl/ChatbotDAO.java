@@ -283,10 +283,16 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return selectOne("ai.chatbot.selectChatFileById", searchVO);
     }
 
+    /**
+     * 사용자 뉴스 관심 카테고리 조회
+     */
     public ChatbotVO selectUserNewsInterestCategory(ChatbotVO searchVO) throws Exception {
         return selectOne("ai.chatbot.selectUserNewsInterestCategory", searchVO);
     }
 
+    /**
+     * 사용자 뉴스 관심 카테고리 등록/수정
+     */
     public int upsertUserNewsInterestCategories(ChatbotVO searchVO) throws Exception {
         return insert("ai.chatbot.upsertUserNewsInterestCategories", searchVO);
     }
