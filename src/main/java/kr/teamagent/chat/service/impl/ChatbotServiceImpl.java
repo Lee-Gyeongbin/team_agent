@@ -85,7 +85,55 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @throws Exception
      */
     public List<ChatbotVO> selectAgentListForChat(ChatbotVO searchVO) throws Exception {
-        return chatbotDAO.selectAgentListForChat(searchVO);
+        List<ChatbotVO> agentList = chatbotDAO.selectAgentListForChat(searchVO);
+        if (agentList == null || agentList.isEmpty()) {
+            return agentList;
+        }
+
+        List<String> agentIdList = agentList.stream()
+                .map(ChatbotVO::getAgentId)
+                .filter(id -> !CommonUtil.isEmpty(id))
+                .collect(Collectors.toList());
+        if (agentIdList.isEmpty()) {
+            return agentList;
+        }
+
+        ChatbotVO subCfgParam = new ChatbotVO();
+        subCfgParam.setAgentIdList(agentIdList);
+        List<ChatbotVO.AgtSubCfgVO> subCfgList = chatbotDAO.selectAgentSubCfgListByAgentIds(subCfgParam);
+
+        Map<String, ChatbotVO.AgtSubCfgVO> subCfgByAgentId = new HashMap<>();
+        if (subCfgList != null) {
+            for (ChatbotVO.AgtSubCfgVO subCfg : subCfgList) {
+                if (subCfg == null || CommonUtil.isEmpty(subCfg.getAgentId())) {
+                    continue;
+                }
+                parseAgentSubAdditionalConfig(subCfg);
+                subCfgByAgentId.put(subCfg.getAgentId(), subCfg);
+            }
+        }
+
+        for (ChatbotVO agent : agentList) {
+            agent.setSubCfg(subCfgByAgentId.get(agent.getAgentId()));
+        }
+        return agentList;
+    }
+
+    /**
+     * Agent 서브 설정 파싱
+     * @param subCfg
+     */
+    private void parseAgentSubAdditionalConfig(ChatbotVO.AgtSubCfgVO subCfg) {
+        if (subCfg == null) {
+            return;
+        }
+        String json = subCfg.getAdditionalConfig();
+        if (CommonUtil.isEmpty(json)) {
+            subCfg.setAdditionalConfigMap(null);
+            return;
+        }
+        Type type = new TypeToken<Map<String, Object>>() {}.getType();
+        subCfg.setAdditionalConfigMap(NEWS_CURATE_PROMPT_GSON.fromJson(json, type));
     }
     
     /**

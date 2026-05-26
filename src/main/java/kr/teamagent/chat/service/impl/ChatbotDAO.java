@@ -21,6 +21,16 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * Agent ID 목록으로 서브 설정 일괄 조회 (TB_AGT_SUB_CFG)
+     * @param searchVO agentIdList
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO.AgtSubCfgVO> selectAgentSubCfgListByAgentIds(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectAgentSubCfgListByAgentIds", searchVO);
+    }
+
+    /**
      * CHAT 대화방 목록 조회
      * @param searchVO
      * @return
