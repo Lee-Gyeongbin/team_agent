@@ -2070,17 +2070,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null);
     }
 
-    /** AI 큐레이션 JSON 배열 응답. 후보 목록 검증 실패 시 빈 문자열. */
+    /** AI 큐레이션 JSON 배열 응답. */
     private String runNewsCuratorAi(String curatorPrompt, List<RssArticleRow> rssCandidateRows) {
         String curatorAiJson = callAiSummary(curatorPrompt, "news_curate");
         if (CommonUtil.isEmpty(curatorAiJson)) {
             return "";
         }
-        String trimmed = curatorAiJson.trim();
-        if (!isValidNewsCuratorAiJson(trimmed, rssCandidateRows)) {
-            return "";
-        }
-        return trimmed;
+        return curatorAiJson.trim();
     }
 
     private static String appendNewsCandidateArticlesToCuratorQuery(String frontendTemplate, List<RssArticleRow> candidates) {
@@ -2131,42 +2127,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         } catch (Exception e) {
             return Collections.emptyList();
         }
-    }
-
-    /** AI JSON 배열이 후보 기사 sourceUrl과 일치하는지 검증. */
-    private boolean isValidNewsCuratorAiJson(String curatorAiJson, List<RssArticleRow> candidates) {
-        if (CommonUtil.isEmpty(curatorAiJson)) {
-            return false;
-        }
-        try {
-            JSONParser parser = new JSONParser();
-            JSONArray curatorItems = (JSONArray) parser.parse(curatorAiJson.trim());
-            if (curatorItems == null || curatorItems.isEmpty()) {
-                return false;
-            }
-            Map<String, RssArticleRow> articleRowBySourceUrl = buildNewsCandidateUrlIndex(candidates);
-            for (Object curatorItem : curatorItems) {
-                JSONObject curatorObject = (JSONObject) curatorItem;
-                String sourceUrl = curatorObject.get("sourceUrl") == null ? "" : String.valueOf(curatorObject.get("sourceUrl")).trim();
-                if (!articleRowBySourceUrl.containsKey(sourceUrl)) {
-                    return false;
-                }
-            }
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private Map<String, RssArticleRow> buildNewsCandidateUrlIndex(List<RssArticleRow> candidates) {
-        Map<String, RssArticleRow> articleRowBySourceUrl = new HashMap<>();
-        for (RssArticleRow candidateRow : candidates) {
-            String sourceUrlKey = candidateRow.getLink() != null ? candidateRow.getLink().trim() : "";
-            if (!sourceUrlKey.isEmpty() && !articleRowBySourceUrl.containsKey(sourceUrlKey)) {
-                articleRowBySourceUrl.put(sourceUrlKey, candidateRow);
-            }
-        }
-        return articleRowBySourceUrl;
     }
 
 }
