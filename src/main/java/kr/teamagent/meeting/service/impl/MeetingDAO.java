@@ -30,6 +30,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return selectList("ai.meeting.selectMeetingMinutesByMeetingId", searchVO);
     }
 
+    /** 회의 참석자 조회 */
+    public String selectMeetingAttendees(MeetingVO searchVO) throws Exception {
+        return selectOne("ai.meeting.selectMeetingAttendees", searchVO);
+    }
+
     /** 오디오 파일 조회 */
     public MeetingVO selectMeetingAudio(MeetingVO searchVO) throws Exception {
         return selectOne("ai.meeting.selectMeetingAudio", searchVO);

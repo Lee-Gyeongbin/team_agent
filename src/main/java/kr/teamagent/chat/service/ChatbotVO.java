@@ -1,6 +1,11 @@
 package kr.teamagent.chat.service;
 
 import java.util.List;
+import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import kr.teamagent.common.CommonVO;
 import lombok.Getter;
 import lombok.Setter;
@@ -18,6 +23,11 @@ public class ChatbotVO extends CommonVO {
     private String colorId;
     private String iconClassNm;
     private String colorHex;
+
+    private AgtSubCfgVO subCfg;
+
+    /** Agent ID 목록 일괄 조회 파라미터 */
+    private List<String> agentIdList;
 
     // CHAT 대화방 정보(TB_CHAT_ROOM)
     // 대화방 ID
@@ -168,6 +178,23 @@ public class ChatbotVO extends CommonVO {
     private String sqlCode;
     private String thumbImg;
 
+
+    /** Agent 서브 설정 (TB_AGT_SUB_CFG) */
+    @Getter
+    @Setter
+    public static class AgtSubCfgVO {
+        private String subCfgId;
+        private String agentId;
+        private String subTy;
+        /** MyBatis JSON 컬럼(ADDITIONAL_CONFIG) 매핑용 */
+        @JsonIgnore
+        private String additionalConfig;
+        @JsonProperty("additionalConfig")
+        private Map<String, Object> additionalConfigMap;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
 
     @Getter
     @Setter

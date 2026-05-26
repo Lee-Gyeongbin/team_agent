@@ -36,6 +36,24 @@
         ORDER BY A.SORT_ORD, A.AGENT_ID
     </select>
 
+    <select id="selectAgentSubCfgListByAgentIds" resultType="kr.teamagent.chat.service.ChatbotVO$AgtSubCfgVO">
+        /* Agent 서브 설정 일괄 조회 ai.chatbot.selectAgentSubCfgListByAgentIds */
+        SELECT
+            S.SUB_CFG_ID
+            , S.AGENT_ID
+            , S.SUB_TY
+            , S.ADDITIONAL_CONFIG
+            , S.USE_YN
+            , S.CREATE_DT
+            , S.MODIFY_DT
+        FROM TB_AGT_SUB_CFG S
+        WHERE 1=1
+            AND S.AGENT_ID IN
+            <foreach collection="agentIdList" item="agentId" open="(" separator="," close=")">
+                #{agentId}
+            </foreach>
+    </select>
+
     <select id="selectChatRoomList" resultType="chatbotVO">
         /* CHAT 대화방 목록 조회 ai.chatbot.selectChatRoomList */
         SELECT

@@ -127,6 +127,29 @@
         </foreach>
     </select>
 
+    <select id="selectMeetingAttendees" resultType="String">
+        /* 회의 참석자 조회 ai.meeting.selectMeetingAttendees */
+        SELECT
+            JSON_ARRAYAGG(
+                JSON_OBJECT('userId', JT.user_id, 'userNm', JT.user_nm)
+            ) AS INTEGRATED_ATTENDEES
+        FROM (
+            SELECT DISTINCT sub.user_id, sub.user_nm
+            FROM TB_MEETING M,
+            JSON_TABLE(
+                M.ATTENDEES,
+                '$[*]' COLUMNS (
+                    user_id VARCHAR(100) PATH '$.userId',
+                    user_nm VARCHAR(100) PATH '$.userNm'
+                )
+            ) AS sub
+            WHERE M.MEETING_ID IN
+                <foreach collection="meetingIds" item="id" open="(" separator="," close=")">
+                    #{id}
+                </foreach>
+        ) JT
+    </select>
+
     <insert id="insertMeetingMinutes" parameterType="meetingVO">
         /* 회의록 등록 ai.meeting.insertMeetingMinutes */
         INSERT INTO TB_MEETING_MINUTES
