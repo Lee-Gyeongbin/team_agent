@@ -1,7 +1,6 @@
 package kr.teamagent.datadashboard.web;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,8 +55,9 @@ public class DataDashboardController extends BaseController {
     }
 
     /**
-     * 위젯 저장 (신규/수정)
-     * @param widgetVO { widgetId?, logId, title, vizType, vizConfig, colSpan, sortOrd? }
+     * 위젯 저장 (신규/수정).
+     * 신규 생성 시 GridStack 기본 레이아웃 레코드(x=0, y=0, w=3, h=4)도 함께 생성.
+     * @param widgetVO { widgetId?, logId, title, vizType, vizConfig, sortOrd? }
      */
     @RequestMapping(value = "/widgetSave.do", method = RequestMethod.POST)
     @ResponseBody
@@ -77,29 +77,6 @@ public class DataDashboardController extends BaseController {
         if (searchVO.getWidgetId() != null && !searchVO.getWidgetId().trim().isEmpty()) {
             dataDashboardService.deleteDashboardWidget(searchVO);
         }
-        return makeSuccessJsonData();
-    }
-
-    /**
-     * 위젯 너비만 변경 (VIZ_TYPE 등 다른 필드 불변)
-     * @param searchVO { widgetId, colSpan }
-     */
-    @RequestMapping(value = "/widgetColSpan.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView widgetColSpan(@RequestBody DataDashboardVO searchVO) throws Exception {
-        dataDashboardService.updateDashboardWidgetColSpan(searchVO);
-        return makeSuccessJsonData();
-    }
-
-    /**
-     * 위젯 순서 일괄 저장
-     * @param searchVO { orderList: [{ widgetId, sortOrd }] }
-     */
-    @RequestMapping(value = "/widgetOrder.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView widgetOrder(@RequestBody DataDashboardVO searchVO) throws Exception {
-        searchVO.setUserId(SessionUtil.getUserId());
-        dataDashboardService.updateDashboardWidgetOrder(searchVO);
         return makeSuccessJsonData();
     }
 
@@ -143,7 +120,7 @@ public class DataDashboardController extends BaseController {
     /**
      * 레이아웃 목록 조회
      * TB_USER_DASHBOARD_LAYOUT (로그인 사용자 기준)
-     * @return { list: [{ layoutId, widgetId, sortOrd, rowPos, colPos, colSpan, rowSpan, widthPx, heightPx }] }
+     * @return { list: [{ layoutId, widgetId, sortOrd, x, y, w, h, minW, maxW, minH, maxH, isVisible }] }
      */
     @RequestMapping(value = "/layoutList.do", method = RequestMethod.POST)
     @ResponseBody
@@ -157,9 +134,9 @@ public class DataDashboardController extends BaseController {
     }
 
     /**
-     * 레이아웃 저장 (신규/수정)
-     * 위젯 생성 시 자동 생성되며, 개별 크기 조정 등 필요 시 호출.
-     * @param layoutVO { widgetId, sortOrd?, rowPos?, colPos?, colSpan?, rowSpan?, widthPx?, heightPx? }
+     * 레이아웃 저장 (신규/수정) — 개별 위젯 레이아웃 단건 수정 시 사용.
+     * 위젯 일괄 저장은 layoutSaveBatch.do 사용.
+     * @param layoutVO { widgetId, sortOrd?, x?, y?, w?, h?, minW?, maxW?, minH?, maxH?, isVisible? }
      */
     @RequestMapping(value = "/layoutSave.do", method = RequestMethod.POST)
     @ResponseBody
@@ -169,27 +146,26 @@ public class DataDashboardController extends BaseController {
     }
 
     /**
-     * 레이아웃 순서/위치 일괄 저장 (드래그 종료 후 호출)
-     * @param searchVO { layoutOrderList: [{ widgetId, sortOrd, rowPos, colPos, colSpan }] }
+     * 레이아웃 일괄 저장 (GridStack "레이아웃 저장" 버튼 클릭 시).
+     * 드래그·리사이즈 완료 후 전체 위젯의 x/y/w/h/isVisible을 한 번에 저장.
+     * @param searchVO { layoutBatchList: [{ widgetId, sortOrd, x, y, w, h, minW, maxW, minH, maxH, isVisible }] }
      */
-    @RequestMapping(value = "/layoutOrder.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/layoutSaveBatch.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView layoutOrder(@RequestBody DataDashboardVO searchVO) throws Exception {
-        searchVO.setUserId(SessionUtil.getUserId());
-        dataDashboardService.updateDashboardLayoutOrder(searchVO);
+    public ModelAndView layoutSaveBatch(@RequestBody DataDashboardVO searchVO) throws Exception {
+        dataDashboardService.saveLayoutBatch(searchVO);
         return makeSuccessJsonData();
     }
 
     /**
-     * 위젯 높이 초기화 (HEIGHT_PX = NULL — 기본값으로 되돌리기)
-     * @param searchVO { widgetId }
+     * 레이아웃 전체 초기화.
+     * 사용자의 모든 레이아웃 레코드를 삭제하며, 프론트엔드 재로드 시 GridStack 기본 배치로 복원됨.
      */
-    @RequestMapping(value = "/layoutResetHeight.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/layoutResetAll.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView layoutResetHeight(@RequestBody DataDashboardVO searchVO) throws Exception {
-        if (searchVO.getWidgetId() != null && !searchVO.getWidgetId().trim().isEmpty()) {
-            dataDashboardService.resetDashboardLayoutHeight(searchVO);
-        }
+    public ModelAndView layoutResetAll() throws Exception {
+        DataDashboardVO searchVO = new DataDashboardVO();
+        dataDashboardService.resetAllLayouts(searchVO);
         return makeSuccessJsonData();
     }
 
