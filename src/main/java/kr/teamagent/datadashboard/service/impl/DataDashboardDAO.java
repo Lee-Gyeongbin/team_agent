@@ -48,6 +48,13 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 데이터마트 컬럼명 한국어 매핑 조회 (TB_DM_COL, USE_YN='Y', COL_ID 당 1건)
+     */
+    public List<DataDashboardVO> selectDashboardColNmMap(DataDashboardVO searchVO) throws Exception {
+        return selectList("dataDashboard.selectDashboardColNmMap", searchVO);
+    }
+
+    /**
      * 데이터마트 컬럼 코드 매핑 조회 (TB_DM_COL_CODE, USE_YN='Y')
      */
     public List<DataDashboardVO> selectDashboardColCodeMap(DataDashboardVO searchVO) throws Exception {

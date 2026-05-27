@@ -74,8 +74,11 @@ public class DataDashboardVO extends CommonVO {
     /** 실제 저장 코드값 */
     private String codeVal;
 
-    /** 코드 한국어 의미 */
+    /** 코드 한국어 의미 (TB_DM_COL_CODE.CODE_KOR_NM) */
     private String codeKorNm;
+
+    /** 컬럼 한국어명 (TB_DM_COL.COL_KOR_NM) */
+    private String colKorNm;
 
     // ===== 레이아웃 (GridStack x/y/w/h 기반) =====
 
