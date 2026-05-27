@@ -63,6 +63,12 @@ public class DataDashboardVO extends CommonVO {
     /** 정렬 순서 */
     private Integer sortOrd;
 
+    /** 마지막 SQL 실행 시 사용한 WHERE 변수값 JSON (LAST_SQL_PARAMS) */
+    private String lastTtsqParams;
+
+    /** 마지막 SQL 실행 일시 (LAST_EXEC_DT) */
+    private String lastExecDt;
+
     /** 차트 옵션 */
     private String chartOption;
 

@@ -41,7 +41,7 @@ public class DataDashboardController extends BaseController {
 
     /**
      * 나의 위젯 목록 조회
-     * @return { list: DataDashboardVO[] }
+     * @return { list: [{ widgetId, logId, title, vizType, vizConfig, sortOrd, lastTtsqParams, lastExecDt, ... }] }
      */
     @RequestMapping(value = "/widgetList.do", method = RequestMethod.POST)
     @ResponseBody
@@ -78,6 +78,21 @@ public class DataDashboardController extends BaseController {
             dataDashboardService.deleteDashboardWidget(searchVO);
         }
         return makeSuccessJsonData();
+    }
+
+    /**
+     * 위젯 마지막 SQL 실행 파라미터 저장 (LAST_SQL_PARAMS, LAST_EXEC_DT)
+     * SQL 실행 성공 후 호출
+     * @param searchVO { widgetId, lastTtsqParams: "{\"key\":\"value\",...}" }
+     * @return { lastExecDt: "yyyy-MM-dd HH:mm:ss" }
+     */
+    @RequestMapping(value = "/widgetLastParamsSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView widgetLastParamsSave(@RequestBody DataDashboardVO searchVO) throws Exception {
+        String lastExecDt = dataDashboardService.saveWidgetLastParams(searchVO);
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("lastExecDt", lastExecDt);
+        return makeSuccessJsonData(resultMap);
     }
 
     /**

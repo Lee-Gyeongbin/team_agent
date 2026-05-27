@@ -41,6 +41,20 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 위젯 마지막 SQL 실행 파라미터 저장 (LAST_SQL_PARAMS, LAST_EXEC_DT)
+     */
+    public int updateWidgetLastParams(DataDashboardVO searchVO) throws Exception {
+        return update("dataDashboard.updateWidgetLastParams", searchVO);
+    }
+
+    /**
+     * 위젯 마지막 SQL 실행 일시 조회
+     */
+    public String selectWidgetLastExecDt(DataDashboardVO searchVO) throws Exception {
+        return (String) selectOne("dataDashboard.selectWidgetLastExecDt", searchVO);
+    }
+
+    /**
      * SQL 실행에 필요한 채팅 로그 + 데이터마트 ID 조회
      */
     public DataDashboardVO selectSqlDatamartInfo(DataDashboardVO searchVO) throws Exception {
