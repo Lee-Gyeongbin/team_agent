@@ -46,7 +46,6 @@
             , W.TITLE
             , W.VIZ_TYPE
             , W.VIZ_CONFIG
-            , W.COL_SPAN
             , W.SORT_ORD
             , A.Q_CONTENT                                            AS SQL_TITLE
             , A.TTSQ                                                 AS SQL_CONTENT
@@ -79,7 +78,6 @@
             , VIZ_TYPE
             , VIZ_CONFIG
             , TTSQ_PARAM
-            , COL_SPAN
             , SORT_ORD
             , CREATE_DT
         ) VALUES (
@@ -90,7 +88,6 @@
             , #{vizType}
             , #{vizConfig}
             , #{ttsqParam}
-            , #{colSpan, jdbcType=INTEGER}
             , #{sortOrd, jdbcType=INTEGER}
             , NOW()
         )
@@ -98,7 +95,6 @@
               TITLE      = #{title}
             , VIZ_TYPE   = #{vizType}
             , VIZ_CONFIG = #{vizConfig}
-            , COL_SPAN   = #{colSpan, jdbcType=INTEGER}
             , SORT_ORD   = #{sortOrd, jdbcType=INTEGER}
             , MODIFY_DT  = NOW()
     </insert>
@@ -112,37 +108,6 @@
         WHERE WIDGET_ID = #{widgetId}
           AND USER_ID   = #{userId}
     </delete>
-
-    <!-- ================================================================
-         위젯 너비(COL_SPAN)만 변경 — VIZ_TYPE 등 다른 필드 불변
-         ================================================================ -->
-    <update id="updateDashboardWidgetColSpan" parameterType="dataDashboardVO">
-        /* 위젯 너비 변경 dataDashboard.updateDashboardWidgetColSpan */
-        UPDATE TB_USER_DASHBOARD_WIDGET
-        SET COL_SPAN  = #{colSpan}
-          , MODIFY_DT = NOW()
-        WHERE WIDGET_ID = #{widgetId}
-          AND USER_ID   = #{userId}
-    </update>
-
-    <!-- ================================================================
-         위젯 순서 일괄 변경
-         ================================================================ -->
-    <update id="updateDashboardWidgetOrder" parameterType="hashmap">
-        /* 위젯 순서 변경 dataDashboard.updateDashboardWidgetOrder */
-        UPDATE TB_USER_DASHBOARD_WIDGET
-        SET SORT_ORD = CASE WIDGET_ID
-            <foreach collection="orderList" item="item">
-                WHEN #{item.widgetId} THEN #{item.sortOrd}
-            </foreach>
-        END
-        , MODIFY_DT = NOW()
-        WHERE USER_ID = #{userId}
-          AND WIDGET_ID IN
-        <foreach collection="orderList" item="item" open="(" separator="," close=")">
-            #{item.widgetId}
-        </foreach>
-    </update>
 
     <!-- ================================================================
          SQL 실행용 채팅 로그 + 데이터마트 ID 조회
@@ -162,7 +127,6 @@
         LIMIT 1
     </select>
 
-
     <!-- ================================================================
          데이터마트 컬럼 코드 매핑 조회
          TB_DM_COL_CODE (DATAMART_ID 기준, USE_YN='Y', SORT_ORD 정렬)
@@ -179,7 +143,6 @@
         ORDER BY COL_ID, SORT_ORD
     </select>
 
-
     <!-- ================================================================
          레이아웃 목록 조회
          TB_USER_DASHBOARD_LAYOUT (USER_ID 기준, SORT_ORD 정렬)
@@ -190,29 +153,38 @@
               LAYOUT_ID
             , WIDGET_ID
             , SORT_ORD
-            , ROW_POS
-            , COL_POS
-            , COL_SPAN
-            , ROW_SPAN
-            , WIDTH_PX
-            , HEIGHT_PX
+            , X
+            , Y
+            , W
+            , H
+            , MIN_W
+            , MAX_W
+            , MIN_H
+            , MAX_H
+            , IS_VISIBLE
         FROM TB_USER_DASHBOARD_LAYOUT
         WHERE USER_ID = #{userId}
         ORDER BY SORT_ORD, LAYOUT_ID
     </select>
 
+    <!-- ================================================================
+         위젯별 레이아웃 단건 조회 (UPSERT 시 기존 LAYOUT_ID 재사용 목적)
+         ================================================================ -->
     <select id="selectDashboardLayoutByWidget" parameterType="dataDashboardVO" resultType="dataDashboardVO">
         /* 위젯별 레이아웃 조회 dataDashboard.selectDashboardLayoutByWidget */
         SELECT
               LAYOUT_ID
             , WIDGET_ID
             , SORT_ORD
-            , ROW_POS
-            , COL_POS
-            , COL_SPAN
-            , ROW_SPAN
-            , WIDTH_PX
-            , HEIGHT_PX
+            , X
+            , Y
+            , W
+            , H
+            , MIN_W
+            , MAX_W
+            , MIN_H
+            , MAX_H
+            , IS_VISIBLE
         FROM TB_USER_DASHBOARD_LAYOUT
         WHERE USER_ID   = #{userId}
           AND WIDGET_ID = #{widgetId}
@@ -221,7 +193,8 @@
 
     <!-- ================================================================
          레이아웃 저장 (INSERT ... ON DUPLICATE KEY UPDATE)
-         UNIQUE KEY (USER_ID, WIDGET_ID) 기준으로 upsert
+         위젯 신규 생성 시 초기 레코드 생성 및 단건 수정에 사용.
+         UNIQUE KEY (USER_ID, WIDGET_ID) 기준으로 upsert.
          ================================================================ -->
     <insert id="saveDashboardLayout" parameterType="dataDashboardVO">
         /* 레이아웃 저장 dataDashboard.saveDashboardLayout */
@@ -230,72 +203,99 @@
             , USER_ID
             , WIDGET_ID
             , SORT_ORD
-            , ROW_POS
-            , COL_POS
-            , COL_SPAN
-            , ROW_SPAN
-            , WIDTH_PX
-            , HEIGHT_PX
+            , X
+            , Y
+            , W
+            , H
+            , MIN_W
+            , MAX_W
+            , MIN_H
+            , MAX_H
+            , IS_VISIBLE
             , CREATE_DT
         ) VALUES (
               #{layoutId}
             , #{userId}
             , #{widgetId}
-            , #{sortOrd,  jdbcType=INTEGER}
-            , #{rowPos,   jdbcType=INTEGER}
-            , #{colPos,   jdbcType=INTEGER}
-            , #{colSpan,  jdbcType=INTEGER}
-            , #{rowSpan,  jdbcType=INTEGER}
-            , #{widthPx,  jdbcType=INTEGER}
-            , #{heightPx, jdbcType=INTEGER}
+            , #{sortOrd,   jdbcType=INTEGER}
+            , #{x,         jdbcType=INTEGER}
+            , #{y,         jdbcType=INTEGER}
+            , #{w,         jdbcType=INTEGER}
+            , #{h,         jdbcType=INTEGER}
+            , #{minW,      jdbcType=INTEGER}
+            , #{maxW,      jdbcType=INTEGER}
+            , #{minH,      jdbcType=INTEGER}
+            , #{maxH,      jdbcType=INTEGER}
+            , #{isVisible, jdbcType=TINYINT}
             , NOW()
         )
         ON DUPLICATE KEY UPDATE
-              SORT_ORD  = COALESCE(#{sortOrd,  jdbcType=INTEGER}, SORT_ORD)
-            , ROW_POS   = COALESCE(#{rowPos,   jdbcType=INTEGER}, ROW_POS)
-            , COL_POS   = COALESCE(#{colPos,   jdbcType=INTEGER}, COL_POS)
-            , COL_SPAN  = COALESCE(#{colSpan,  jdbcType=INTEGER}, COL_SPAN)
-            , ROW_SPAN  = COALESCE(#{rowSpan,  jdbcType=INTEGER}, ROW_SPAN)
-            , WIDTH_PX  = COALESCE(#{widthPx,  jdbcType=INTEGER}, WIDTH_PX)
-            , HEIGHT_PX = COALESCE(#{heightPx, jdbcType=INTEGER}, HEIGHT_PX)
-            , MODIFY_DT = NOW()
+              SORT_ORD   = COALESCE(#{sortOrd,   jdbcType=INTEGER}, SORT_ORD)
+            , X          = COALESCE(#{x,         jdbcType=INTEGER}, X)
+            , Y          = COALESCE(#{y,         jdbcType=INTEGER}, Y)
+            , W          = COALESCE(#{w,         jdbcType=INTEGER}, W)
+            , H          = COALESCE(#{h,         jdbcType=INTEGER}, H)
+            , MIN_W      = COALESCE(#{minW,      jdbcType=INTEGER}, MIN_W)
+            , MAX_W      = COALESCE(#{maxW,      jdbcType=INTEGER}, MAX_W)
+            , MIN_H      = COALESCE(#{minH,      jdbcType=INTEGER}, MIN_H)
+            , MAX_H      = COALESCE(#{maxH,      jdbcType=INTEGER}, MAX_H)
+            , IS_VISIBLE = COALESCE(#{isVisible, jdbcType=TINYINT}, IS_VISIBLE)
+            , MODIFY_DT  = NOW()
     </insert>
 
     <!-- ================================================================
-         레이아웃 순서/위치 일괄 UPSERT (드래그 후 호출)
+         레이아웃 일괄 UPSERT (GridStack "레이아웃 저장" 버튼 클릭 시)
+         전체 위젯의 x/y/w/h/isVisible을 한 번에 저장.
          레코드가 없으면 INSERT, 있으면 UPDATE (UNIQUE KEY: USER_ID + WIDGET_ID)
-         LAYOUT_ID는 신규 삽입 시 UUID()로 생성 (중복 시 버려짐)
          ================================================================ -->
-    <insert id="updateDashboardLayoutOrder" parameterType="hashmap">
-        /* 레이아웃 순서/위치 UPSERT dataDashboard.updateDashboardLayoutOrder */
+    <insert id="saveLayoutBatch" parameterType="hashmap">
+        /* 레이아웃 일괄 저장 dataDashboard.saveLayoutBatch */
         INSERT INTO TB_USER_DASHBOARD_LAYOUT
-            (LAYOUT_ID, USER_ID, WIDGET_ID, SORT_ORD, ROW_POS, COL_POS, COL_SPAN, ROW_SPAN, CREATE_DT)
+            (LAYOUT_ID, USER_ID, WIDGET_ID, SORT_ORD, X, Y, W, H, MIN_W, MAX_W, MIN_H, MAX_H, IS_VISIBLE, CREATE_DT)
         VALUES
-        <foreach collection="layoutOrderList" item="item" separator=",">
-            (#{item.layoutId}, #{userId}, #{item.widgetId}, #{item.sortOrd}, #{item.rowPos}, #{item.colPos}, #{item.colSpan}, 1, NOW())
+        <foreach collection="layoutBatchList" item="item" separator=",">
+            (
+              #{item.layoutId}
+            , #{userId}
+            , #{item.widgetId}
+            , #{item.sortOrd,   jdbcType=INTEGER}
+            , #{item.x,         jdbcType=INTEGER}
+            , #{item.y,         jdbcType=INTEGER}
+            , #{item.w,         jdbcType=INTEGER}
+            , #{item.h,         jdbcType=INTEGER}
+            , #{item.minW,      jdbcType=INTEGER}
+            , #{item.maxW,      jdbcType=INTEGER}
+            , #{item.minH,      jdbcType=INTEGER}
+            , #{item.maxH,      jdbcType=INTEGER}
+            , #{item.isVisible, jdbcType=TINYINT}
+            , NOW()
+            )
         </foreach>
         ON DUPLICATE KEY UPDATE
-              SORT_ORD  = VALUES(SORT_ORD)
-            , ROW_POS   = VALUES(ROW_POS)
-            , COL_POS   = VALUES(COL_POS)
-            , COL_SPAN  = VALUES(COL_SPAN)
-            , MODIFY_DT = NOW()
+              SORT_ORD   = VALUES(SORT_ORD)
+            , X          = VALUES(X)
+            , Y          = VALUES(Y)
+            , W          = VALUES(W)
+            , H          = VALUES(H)
+            , MIN_W      = VALUES(MIN_W)
+            , MAX_W      = VALUES(MAX_W)
+            , MIN_H      = VALUES(MIN_H)
+            , MAX_H      = VALUES(MAX_H)
+            , IS_VISIBLE = VALUES(IS_VISIBLE)
+            , MODIFY_DT  = NOW()
     </insert>
 
     <!-- ================================================================
-         높이 초기화 — HEIGHT_PX = NULL (기본값으로 되돌리기)
+         전체 레이아웃 삭제 (레이아웃 초기화)
          ================================================================ -->
-    <update id="resetDashboardLayoutHeight" parameterType="dataDashboardVO">
-        /* 높이 초기화 dataDashboard.resetDashboardLayoutHeight */
-        UPDATE TB_USER_DASHBOARD_LAYOUT
-        SET HEIGHT_PX  = NULL
-          , MODIFY_DT  = NOW()
-        WHERE WIDGET_ID = #{widgetId}
-          AND USER_ID   = #{userId}
-    </update>
+    <delete id="deleteAllLayouts" parameterType="dataDashboardVO">
+        /* 전체 레이아웃 초기화 dataDashboard.deleteAllLayouts */
+        DELETE FROM TB_USER_DASHBOARD_LAYOUT
+        WHERE USER_ID = #{userId}
+    </delete>
 
     <!-- ================================================================
-         레이아웃 삭제 (위젯 삭제 시 FK CASCADE로 자동 처리됨)
+         레이아웃 삭제 (위젯 삭제 시 함께 호출, FK CASCADE로 자동 처리됨)
          ================================================================ -->
     <delete id="deleteDashboardLayout" parameterType="dataDashboardVO">
         /* 레이아웃 삭제 dataDashboard.deleteDashboardLayout */

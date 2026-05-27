@@ -41,24 +41,7 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 위젯 너비(COL_SPAN)만 변경
-     */
-    public int updateDashboardWidgetColSpan(DataDashboardVO searchVO) throws Exception {
-        return update("dataDashboard.updateDashboardWidgetColSpan", searchVO);
-    }
-
-    /**
-     * 위젯 순서 일괄 변경
-     */
-    public int updateDashboardWidgetOrder(DataDashboardVO searchVO) throws Exception {
-        HashMap<String, Object> paramMap = new HashMap<>();
-        paramMap.put("orderList", searchVO.getOrderList());
-        paramMap.put("userId", searchVO.getUserId());
-        return update("dataDashboard.updateDashboardWidgetOrder", paramMap);
-    }
-
-    /**
-     * SQL 실행에 필요한 채팅 로그 + 데이터마트 연결 정보 조회
+     * SQL 실행에 필요한 채팅 로그 + 데이터마트 ID 조회
      */
     public DataDashboardVO selectSqlDatamartInfo(DataDashboardVO searchVO) throws Exception {
         return (DataDashboardVO) selectOne("dataDashboard.selectSqlDatamartInfo", searchVO);
@@ -88,32 +71,32 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 레이아웃 저장 (INSERT ... ON DUPLICATE KEY UPDATE)
+     * 레이아웃 저장 (INSERT ... ON DUPLICATE KEY UPDATE) — 위젯 신규 생성 시 초기 레코드 생성
      */
     public int saveDashboardLayout(DataDashboardVO layoutVO) throws Exception {
         return (int) insert("dataDashboard.saveDashboardLayout", layoutVO);
     }
 
     /**
-     * 레이아웃 순서/위치 일괄 UPSERT (드래그 후)
-     * 레코드 없으면 INSERT, 있으면 UPDATE
+     * 레이아웃 일괄 UPSERT (GridStack 레이아웃 저장 버튼 클릭 시)
+     * UNIQUE KEY (USER_ID, WIDGET_ID) 기준으로 없으면 INSERT, 있으면 UPDATE
      */
-    public int updateDashboardLayoutOrder(DataDashboardVO searchVO) throws Exception {
+    public int saveLayoutBatch(DataDashboardVO searchVO) throws Exception {
         HashMap<String, Object> paramMap = new HashMap<>();
-        paramMap.put("layoutOrderList", searchVO.getLayoutOrderList());
+        paramMap.put("layoutBatchList", searchVO.getLayoutBatchList());
         paramMap.put("userId", searchVO.getUserId());
-        return (int) insert("dataDashboard.updateDashboardLayoutOrder", paramMap);
+        return (int) insert("dataDashboard.saveLayoutBatch", paramMap);
     }
 
     /**
-     * 높이 초기화 (HEIGHT_PX = NULL)
+     * 사용자의 전체 레이아웃 삭제 (레이아웃 초기화)
      */
-    public int resetDashboardLayoutHeight(DataDashboardVO searchVO) throws Exception {
-        return update("dataDashboard.resetDashboardLayoutHeight", searchVO);
+    public int deleteAllLayouts(DataDashboardVO searchVO) throws Exception {
+        return delete("dataDashboard.deleteAllLayouts", searchVO);
     }
 
     /**
-     * 레이아웃 삭제
+     * 레이아웃 삭제 (위젯 삭제 시 함께 호출)
      */
     public int deleteDashboardLayout(DataDashboardVO searchVO) throws Exception {
         return delete("dataDashboard.deleteDashboardLayout", searchVO);
