@@ -201,6 +201,24 @@
         ORDER BY SORT_ORD, LAYOUT_ID
     </select>
 
+    <select id="selectDashboardLayoutByWidget" parameterType="dataDashboardVO" resultType="dataDashboardVO">
+        /* 위젯별 레이아웃 조회 dataDashboard.selectDashboardLayoutByWidget */
+        SELECT
+              LAYOUT_ID
+            , WIDGET_ID
+            , SORT_ORD
+            , ROW_POS
+            , COL_POS
+            , COL_SPAN
+            , ROW_SPAN
+            , WIDTH_PX
+            , HEIGHT_PX
+        FROM TB_USER_DASHBOARD_LAYOUT
+        WHERE USER_ID   = #{userId}
+          AND WIDGET_ID = #{widgetId}
+        LIMIT 1
+    </select>
+
     <!-- ================================================================
          레이아웃 저장 (INSERT ... ON DUPLICATE KEY UPDATE)
          UNIQUE KEY (USER_ID, WIDGET_ID) 기준으로 upsert

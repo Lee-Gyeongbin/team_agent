@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -178,7 +179,7 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     public void saveDashboardLayout(DataDashboardVO layoutVO) throws Exception {
         layoutVO.setUserId(SessionUtil.getUserId());
         if (layoutVO.getLayoutId() == null || layoutVO.getLayoutId().trim().isEmpty()) {
-            layoutVO.setLayoutId(keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID"));
+            layoutVO.setLayoutId(resolveLayoutId(layoutVO.getUserId(), layoutVO.getWidgetId()));
         }
         if (layoutVO.getRowPos()  == null) layoutVO.setRowPos(0);
         if (layoutVO.getColPos()  == null) layoutVO.setColPos(0);
@@ -196,9 +197,8 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     @Transactional(rollbackFor = Exception.class)
     public void updateDashboardLayoutOrder(DataDashboardVO searchVO) throws Exception {
         if (searchVO.getLayoutOrderList() == null || searchVO.getLayoutOrderList().isEmpty()) return;
-        for (DataDashboardVO.LayoutOrderItemVO item : searchVO.getLayoutOrderList()) {
-            item.setLayoutId(keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID"));
-        }
+        searchVO.setUserId(SessionUtil.getUserId());
+        assignLayoutIdsForOrder(searchVO);
         dataDashboardDAO.updateDashboardLayoutOrder(searchVO);
     }
 
@@ -219,6 +219,49 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     // ===== private helpers =====
+
+    /**
+     * 기존 레이아웃 ID 재사용, 없을 때만 신규 키 생성.
+     * colspan 등 개별 저장이 동시에 들어올 때 MAX 조회 경합·deadlock 방지.
+     */
+    private String resolveLayoutId(String userId, String widgetId) throws Exception {
+        if (widgetId == null || widgetId.trim().isEmpty()) {
+            return keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID");
+        }
+        DataDashboardVO searchVO = new DataDashboardVO();
+        searchVO.setUserId(userId);
+        searchVO.setWidgetId(widgetId);
+        DataDashboardVO existing = dataDashboardDAO.selectDashboardLayoutByWidget(searchVO);
+        if (existing != null && existing.getLayoutId() != null && !existing.getLayoutId().trim().isEmpty()) {
+            return existing.getLayoutId();
+        }
+        return keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID");
+    }
+
+    /**
+     * layoutOrder 일괄 UPSERT용 layoutId 할당.
+     * 기존 위젯은 DB layoutId 재사용, 신규만 MAX 1회 조회 후 순번 증가.
+     */
+    private void assignLayoutIdsForOrder(DataDashboardVO searchVO) throws Exception {
+        List<DataDashboardVO> existingLayouts = dataDashboardDAO.selectDashboardLayoutList(searchVO);
+        Map<String, String> layoutIdByWidget = existingLayouts.stream()
+                .filter(l -> l.getWidgetId() != null && l.getLayoutId() != null)
+                .collect(Collectors.toMap(DataDashboardVO::getWidgetId, DataDashboardVO::getLayoutId, (a, b) -> a));
+
+        int nextNum = -1;
+        for (DataDashboardVO.LayoutOrderItemVO item : searchVO.getLayoutOrderList()) {
+            String existingId = layoutIdByWidget.get(item.getWidgetId());
+            if (existingId != null) {
+                item.setLayoutId(existingId);
+            } else {
+                if (nextNum < 0) {
+                    String firstKey = keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID");
+                    nextNum = Integer.parseInt(firstKey.substring(2));
+                }
+                item.setLayoutId("LI" + String.format("%06d", nextNum++));
+            }
+        }
+    }
 
     /** 신규 위젯 생성 시 레이아웃 초기 레코드 생성 (HEIGHT_PX 기본값 320 저장) */
     private void initDashboardLayout(DataDashboardVO widgetVO) throws Exception {
