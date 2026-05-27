@@ -28,6 +28,15 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
      * @return 치환 완료된 HTML
      */
     public String renderTemplateHtml(String tmplHtml, JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
+        return renderTemplateHtml(tmplHtml, json, tmplFieldList, true);
+    }
+
+    /**
+     * showSpeaker=false 이면 MULTILINE 필드의 각 항목 끝에 붙은 (발언자) 패턴을 제거한다.
+     * LLM은 항상 발언자를 포함해 생성하고, 표시 여부는 렌더링 시점에 결정한다.
+     * @param showSpeaker true: 발언자 표시, false: 발언자 숨김
+     */
+    public String renderTemplateHtml(String tmplHtml, JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList, boolean showSpeaker) throws Exception {
         if (CommonUtil.isEmpty(tmplHtml)) {
             return "";
         }
@@ -41,13 +50,14 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
                 continue;
             }
             String key = field.getJsonKey();
+            boolean multiline = "Y".equals(field.getMultilineYn());
             // table 레이아웃은 동일 row 복제 규칙이 필요하므로 전용 처리.
             if ("table".equalsIgnoreCase(stringValue(field.getLayoutType()))) {
-                html = renderTableRows(html, key, json.get(key), "Y".equals(field.getMultilineYn()));
+                html = renderTableRows(html, key, json.get(key), multiline, showSpeaker);
                 continue;
             }
             // table 외 레이아웃은 placeholder 1:1 치환.
-            String value = renderTemplateValue(json.get(key), "Y".equals(field.getMultilineYn()));
+            String value = renderTemplateValue(json.get(key), multiline, showSpeaker);
             html = html.replace("{{" + key + "}}", value);
         }
         // 모든 치환 완료 후 잔여 {{no}}가 있으면 제거한다.
@@ -63,6 +73,10 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
      * 매칭되는 tr이 없으면 문서 전체 replace fallback을 수행한다.
      */
     private String renderTableRows(String html, String key, Object value, boolean multiline) {
+        return renderTableRows(html, key, value, multiline, true);
+    }
+
+    private String renderTableRows(String html, String key, Object value, boolean multiline, boolean showSpeaker) {
         if (CommonUtil.isEmpty(html) || CommonUtil.isEmpty(key)) {
             return html;
         }
@@ -97,14 +111,15 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
                 } else {
                     // 배열 길이만큼 동일한 tr을 복제하며 {{no}}에 순번(1부터)을 채운다.
                     for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
-                        String cellValue = escapeHtml(rows.get(rowIdx)).replace("\r\n", "\n").replace("\n", "<br/>");
+                        String rowText = showSpeaker ? rows.get(rowIdx) : stripSpeakerAnnotation(rows.get(rowIdx));
+                        String cellValue = escapeHtml(rowText).replace("\r\n", "\n").replace("\n", "<br/>");
                         out.append(tr.replace(placeholder, cellValue)
                                      .replace("{{no}}", String.valueOf(rowIdx + 1)));
                     }
                 }
             } else {
                 // 같은 row에 placeholder가 여러 개 섞여 있으면 복제 로직보다 단일 치환이 안전하다.
-                String singleValue = renderTemplateValue(value, multiline);
+                String singleValue = renderTemplateValue(value, multiline, showSpeaker);
                 out.append(tr.replace(placeholder, singleValue).replace("{{no}}", ""));
             }
             lastEnd = matcher.end();
@@ -112,7 +127,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
         out.append(html.substring(lastEnd));
 
         if (!matchedRow) {
-            String fallback = renderTemplateValue(value, multiline);
+            String fallback = renderTemplateValue(value, multiline, showSpeaker);
             return html.replace(placeholder, fallback).replace("{{no}}", "");
         }
         return out.toString();
@@ -123,6 +138,10 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
      * 배열/문자열/null을 공통 규칙으로 정규화하고, 최종적으로 XSS 방지를 위해 HTML escape 처리한다.
      */
     private String renderTemplateValue(Object value, boolean multiline) {
+        return renderTemplateValue(value, multiline, true);
+    }
+
+    private String renderTemplateValue(Object value, boolean multiline, boolean showSpeaker) {
         if (value == null) {
             return "";
         }
@@ -130,7 +149,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
             JSONArray arr = (JSONArray) value;
             if (multiline) {
                 // 멀티라인 배열은 목록 형태로 출력(줄 구분 유지).
-                return renderTemplateListValue(arr);
+                return renderTemplateListValue(arr, showSpeaker);
             }
             // 일반 배열은 콤마 구분 단일 라인으로 출력.
             StringBuilder sb = new StringBuilder();
@@ -148,7 +167,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
                 // 문자열로 들어온 JSON 배열도 동일 규칙으로 처리.
                 Object parsed = new JSONParser().parse(text);
                 if (parsed instanceof JSONArray) {
-                    return renderTemplateListValue((JSONArray) parsed);
+                    return renderTemplateListValue((JSONArray) parsed, showSpeaker);
                 }
             } catch (Exception ignore) {
                 // 배열 문자열이 아니면 일반 문자열로 처리한다.
@@ -161,8 +180,13 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
      * MULTILINE_YN=Y 배열 값을 리스트 형태의 HTML 문자열로 렌더링한다.
      * 각 원소는 줄 단위로 분해한 뒤 빈 줄을 제거한다.
      * 리스트 마커가 없으면 기본 "- "를 붙이고, 항목 사이는 "<br/>"로 구분한다.
+     * showSpeaker=false 이면 각 항목 끝의 (발언자) 패턴을 제거한다.
      */
     private String renderTemplateListValue(JSONArray arr) {
+        return renderTemplateListValue(arr, true);
+    }
+
+    private String renderTemplateListValue(JSONArray arr, boolean showSpeaker) {
         if (arr == null || arr.isEmpty()) {
             return "";
         }
@@ -183,11 +207,24 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
                 if (sb.length() > 0) {
                     sb.append("<br/>");
                 }
-                // 마커 정규화 후 escape를 적용해 템플릿 삽입 시 안전성을 확보한다.
-                sb.append(escapeHtml(normalizeListMarker(normalized)));
+                // 발언자 숨김: 항목 끝의 (이름) 패턴 제거 후 마커 정규화 → escape
+                String processed = showSpeaker ? normalized : stripSpeakerAnnotation(normalized);
+                sb.append(escapeHtml(normalizeListMarker(processed)));
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * 문자열 끝의 (발언자) 패턴을 제거한다.
+     * 예: "출시 일정 확정 (홍길동)" → "출시 일정 확정"
+     *     "- 예산 증액 (김철수)" → "- 예산 증액"
+     * 마지막 괄호쌍만 제거하므로 중간의 괄호는 유지된다.
+     */
+    private static String stripSpeakerAnnotation(String text) {
+        if (text == null) return "";
+        // 끝에 위치한 \s*(한글/영문/공백 포함 괄호)\s* 패턴 제거
+        return text.replaceAll("\\s*\\([^)]*\\)\\s*$", "").trim();
     }
 
     /**

@@ -26,6 +26,7 @@ public class MeetingVO extends CommonVO {
     private String modifyDt;
     private String isAutoTitle;
     private String integrateYn;
+    private String showSpeakerYn;   // 결정사항 내 발언자 표시 여부 (Y: 표시, N: 숨김)
 
     // TB_MEETING_MINUTES - 회의록
     private Long   minutesId;

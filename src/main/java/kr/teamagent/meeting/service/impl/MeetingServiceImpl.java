@@ -119,6 +119,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             dataVO.setIsAutoTitle("N");
         }
         dataVO.setIntegrateYn("N");
+        // SHOW_SPEAKER_YN: Y 또는 N만 저장 (미입력 시 기본 Y)
+        String showSpeaker = dataVO.getShowSpeakerYn();
+        dataVO.setShowSpeakerYn((showSpeaker != null && "N".equalsIgnoreCase(showSpeaker.trim())) ? "N" : "Y");
         meetingDAO.insertMeeting(dataVO);
         result.put("successYn", true);
         result.put("meetingId", dataVO.getMeetingId());
@@ -253,10 +256,12 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 }
                 logger.info("[streamMeetingProcessing] 전사 완료 - meetingId: {}, {}자", meetingId, fullText.length());
 
-                // DB에서 IS_AUTO_TITLE 조회 후 회의 상태 종료(002)로 변경
+                // DB에서 IS_AUTO_TITLE, SHOW_SPEAKER_YN 조회 후 회의 상태 종료(002)로 변경
                 MeetingVO dbMeeting = meetingDAO.selectMeeting(dataVO);
-                if (dbMeeting != null && dbMeeting.getIsAutoTitle() != null) {
-                    dataVO.setIsAutoTitle(dbMeeting.getIsAutoTitle());
+                if (dbMeeting != null) {
+                    if (dbMeeting.getIsAutoTitle() != null) dataVO.setIsAutoTitle(dbMeeting.getIsAutoTitle());
+                    if (dbMeeting.getShowSpeakerYn() != null) dataVO.setShowSpeakerYn(dbMeeting.getShowSpeakerYn());
+                    if (dbMeeting.getMeetingTitle() != null) dataVO.setMeetingTitle(dbMeeting.getMeetingTitle());
                 }
                 dataVO.setStatus("002");
                 meetingDAO.updateMeetingStatus(dataVO);
@@ -267,7 +272,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 LibraryVO searchVO = new LibraryVO();
                 searchVO.setTmplId(MINUTES_TMPL_ID);
                 List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
-                String minutesAnswer = callLlmForMinutes(fullText, dataVO.getIsAutoTitle(), tmplFieldList);
+                String labeledFullText = replaceSpeakerLabels(fullText, diarizedSegments);
+                String minutesAnswer = callLlmForMinutes(labeledFullText, dataVO.getIsAutoTitle(), tmplFieldList, dataVO.getShowSpeakerYn());
 
                 // step 5: 저장
                 sendSseEvent(emitter, "progress", buildSseStepData("save"));
@@ -593,8 +599,142 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
+        // showSpeakerYn='Y'이면 회의록 결정사항의 화자 레이블을 실명으로 업데이트
+        MeetingVO meetingInfo = meetingDAO.selectMeeting(dataVO);
+        if (meetingInfo != null && "Y".equals(meetingInfo.getShowSpeakerYn())) {
+            updateDecisionsSpeakerLabels(dataVO.getMeetingId(), dataVO.getSpeakerList());
+        }
+
         result.put("successYn", true);
         return result;
+    }
+
+    /** 화자 편집 후 회의록 FLAT_DATA 업데이트 (decisions 화자명 치환 + attendees 덮어쓰기) */
+    private void updateDecisionsSpeakerLabels(Long meetingId, List<MeetingVO> speakerList) {
+        try {
+            MeetingVO searchVO = new MeetingVO();
+            searchVO.setMeetingId(meetingId);
+            MeetingVO minutes = meetingDAO.selectMeetingMinutes(searchVO);
+            if (minutes == null || CommonUtil.isEmpty(minutes.getFlatData())) return;
+
+            // DB에서 speakerId → speakerLabel 조회 (프론트에서 label을 안 보낼 수 있으므로)
+            List<MeetingVO> dbSpeakers = meetingDAO.selectSpeakerList(searchVO);
+            Map<Long, String> labelById = new HashMap<>();
+            for (MeetingVO dbSpk : dbSpeakers) {
+                if (!CommonUtil.isEmpty(dbSpk.getSpeakerLabel())) {
+                    labelById.put(dbSpk.getSpeakerId(), dbSpk.getSpeakerLabel());
+                }
+            }
+
+            // speakerId → 새 이름 맵 (저장 요청 기준)
+            Map<Long, String> nameById = new HashMap<>();
+            for (MeetingVO spk : speakerList) {
+                if (spk.getSpeakerId() != null && !CommonUtil.isEmpty(spk.getSpeakerNm())) {
+                    nameById.put(spk.getSpeakerId(), spk.getSpeakerNm());
+                }
+            }
+
+            JSONParser parser = new JSONParser();
+            JSONObject flat = (JSONObject) parser.parse(minutes.getFlatData());
+
+            // decisions: (화자N) → (실명) 치환
+            Map<String, String> replaceMap = new LinkedHashMap<>();
+            for (MeetingVO spk : speakerList) {
+                String label = labelById.get(spk.getSpeakerId());
+                String nm = nameById.get(spk.getSpeakerId());
+                if (!CommonUtil.isEmpty(label) && !CommonUtil.isEmpty(nm)) {
+                    replaceMap.put("(" + label + ")", "(" + nm + ")");
+                }
+            }
+            if (!replaceMap.isEmpty()) {
+                Object decisionsObj = flat.get("decisions");
+                if (decisionsObj instanceof String) {
+                    String decisionsStr = (String) decisionsObj;
+                    for (Map.Entry<String, String> e : replaceMap.entrySet()) {
+                        decisionsStr = decisionsStr.replace(e.getKey(), e.getValue());
+                    }
+                    flat.put("decisions", decisionsStr);
+                }
+            }
+
+            // attendees: DB 화자 순서대로 이름 목록으로 덮어쓰기
+            // (새 이름이 있으면 사용, 없으면 speakerLabel 유지)
+            JSONArray attendeesArr = new JSONArray();
+            for (MeetingVO dbSpk : dbSpeakers) {
+                String nm = nameById.get(dbSpk.getSpeakerId());
+                if (CommonUtil.isEmpty(nm)) {
+                    nm = dbSpk.getSpeakerLabel();
+                }
+                if (!CommonUtil.isEmpty(nm)) {
+                    attendeesArr.add(nm);
+                }
+            }
+            flat.put("attendees", attendeesArr.toJSONString());
+
+            // 업데이트된 FLAT_DATA로 HTML 재렌더링
+            // flat은 배열을 문자열로 저장하므로, 렌더링 전에 multiline 필드를 JSONArray로 복원
+            LibraryVO searchLibVO = new LibraryVO();
+            searchLibVO.setTmplId(MINUTES_TMPL_ID);
+            List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchLibVO);
+            JSONObject renderJson = inflateJsonForRender(flat, tmplFieldList);
+            MeetingVO meetingInfo = meetingDAO.selectMeeting(searchVO);
+            String showSpeakerYn = meetingInfo != null ? meetingInfo.getShowSpeakerYn() : "Y";
+            String newHtml = renderMinutesTemplateHtml(renderJson, tmplFieldList, showSpeakerYn);
+
+            minutes.setFlatData(flat.toJSONString());
+            minutes.setGeneratedContent(newHtml);
+            meetingDAO.updateMeetingMinutes(minutes);
+
+            logger.info("회의록 화자 정보 업데이트 완료 - meetingId: {}", meetingId);
+        } catch (Exception e) {
+            logger.error("회의록 화자 정보 업데이트 실패 - meetingId: {}", meetingId, e);
+        }
+    }
+
+    /** diarize 세그먼트 기반으로 fullText의 SPEAKER_XX를 화자N 레이블로 치환 */
+    private String replaceSpeakerLabels(String fullText, JSONArray segments) {
+        if (segments == null || segments.isEmpty() || fullText == null) return fullText;
+
+        // 첫 등장 순서대로 SPEAKER_XX → 화자N 맵 구성
+        Map<String, String> labelMap = new LinkedHashMap<>();
+        for (Object seg : segments) {
+            JSONObject s = (JSONObject) seg;
+            String spk = String.valueOf(s.get("speaker"));
+            if (!labelMap.containsKey(spk)) {
+                labelMap.put(spk, "화자" + (labelMap.size() + 1));
+            }
+        }
+
+        String result = fullText;
+        for (Map.Entry<String, String> e : labelMap.entrySet()) {
+            result = result.replace(e.getKey(), e.getValue());
+        }
+        return result;
+    }
+
+    /**
+     * flat JSON(배열이 문자열로 저장됨)을 렌더링용 JSON으로 변환.
+     * multiline 필드의 문자열 값을 JSONArray로 파싱하여 렌더러가 올바르게 처리하도록 함.
+     */
+    @SuppressWarnings("unchecked")
+    private JSONObject inflateJsonForRender(JSONObject flat, List<LibraryVO.TmplFieldItem> tmplFieldList) {
+        JSONObject renderJson = new JSONObject();
+        JSONParser parser = new JSONParser();
+        for (LibraryVO.TmplFieldItem field : tmplFieldList) {
+            String key = field.getJsonKey();
+            Object val = flat.get(key);
+            if (val == null) continue;
+            if ("Y".equals(field.getMultilineYn()) && val instanceof String) {
+                try {
+                    renderJson.put(key, parser.parse((String) val));
+                } catch (Exception e) {
+                    renderJson.put(key, val);
+                }
+            } else {
+                renderJson.put(key, val);
+            }
+        }
+        return renderJson;
     }
 
     /** 해당 회의가 원본인 통합 회의록 목록 조회 */
@@ -763,9 +903,10 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      * LLM 호출 - 회의록 생성.
      * 응답 JSON 키만 사용해 설명한다(마크다운 별도 출력 금지). IS_AUTO_TITLE=Y 이면 meeting_title 포함.
      */
-    private String callLlmForMinutes(String fullText, String isAutoTitle, 
-        List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
+    private String callLlmForMinutes(String fullText, String isAutoTitle,
+        List<LibraryVO.TmplFieldItem> tmplFieldList, String showSpeakerYn) throws Exception {
         boolean wantTitle = isAutoTitleYn(isAutoTitle);
+        boolean showSpeaker = "Y".equals(showSpeakerYn);
 
         LibraryVO searchVO = new LibraryVO();
         searchVO.setTmplId(MINUTES_TMPL_ID);
@@ -793,7 +934,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                             .append("\". LLM이 임의로 변경 금지)\n");
                     continue;
                 }
-                if ("Y".equals(field.getMultilineYn())) {
+                if ("decisions".equals(key) && showSpeaker) {
+                    fieldList.append("- decisions: 결정사항")
+                            .append(" (JSON 문자열 배열. 각 항목 끝에 핵심 발언자를 '(화자명)' 형식으로 추가.")
+                            .append(" 예: [\"예산 증액 (화자1)\", \"일정 확정 (화자2)\"])\n");
+                } else if ("Y".equals(field.getMultilineYn())) {
                     fieldList.append("- ").append(key).append(": ")
                             .append(nm).append(" (JSON 문자열 배열로 응답. 예: [\"항목1\", \"항목2\"])\n");
                 } else {
@@ -849,9 +994,13 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     flat.put(key, String.valueOf(val));
                 }
             }
+            // 수기 제목인 경우 LLM이 title을 생성하지 않으므로 직접 flat에 추가
+            if (!isAutoTitleYn(dataVO.getIsAutoTitle()) && !CommonUtil.isEmpty(dataVO.getMeetingTitle())) {
+                flat.put("title", dataVO.getMeetingTitle());
+            }
             dataVO.setFlatData(flat.toJSONString());
-    
-            String renderedHtml = renderMinutesTemplateHtml(json, tmplFieldList);
+
+            String renderedHtml = renderMinutesTemplateHtml(json, tmplFieldList, dataVO.getShowSpeakerYn());
             if (!CommonUtil.isEmpty(renderedHtml)) {
                 dataVO.setGeneratedContent(renderedHtml);
             }
@@ -889,8 +1038,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * TB_TMPL.TMPL_HTML의 {{jsonKey}} 자리에 LLM JSON 값을 채운다.
+     * showSpeakerYn: Y 또는 null이면 발언자 표시, N이면 (이름) 패턴 제거
      */
-    private String renderMinutesTemplateHtml(JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
+    private String renderMinutesTemplateHtml(JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList, String showSpeakerYn) throws Exception {
         LibraryVO searchVO = new LibraryVO();
         searchVO.setTmplId(MINUTES_TMPL_ID);
         LibraryVO.TmplItem tmpl = libraryDAO.selectTmpl(searchVO);
@@ -898,7 +1048,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             logger.warn("회의록 HTML 템플릿 없음 (tmplId={})", searchVO.getTmplId());
             return "";
         }
-        return tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), json, tmplFieldList);
+        boolean showSpeaker = !"N".equalsIgnoreCase(showSpeakerYn != null ? showSpeakerYn.trim() : "");
+        return tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), json, tmplFieldList, showSpeaker);
     }
 
     /**
@@ -1627,6 +1778,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 dataVO.setIsAutoTitle("Y");
                 dataVO.setCreateUserId(SessionUtil.getUserId());
                 dataVO.setIntegrateYn("Y");
+                // SHOW_SPEAKER_YN: 프론트에서 전달받은 값 정규화 (미입력 시 기본 Y)
+                String integrateShowSpeaker = dataVO.getShowSpeakerYn();
+                dataVO.setShowSpeakerYn((integrateShowSpeaker != null && "N".equalsIgnoreCase(integrateShowSpeaker.trim())) ? "N" : "Y");
                 // 선택한 회의록의 참석자 조회(중복제거)
                 String attendees = meetingDAO.selectMeetingAttendees(dataVO);
                 if (attendees != null) {
@@ -1651,10 +1805,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 // 회의록 등록
                 integrationVO.setFullText(fullText);
                 integrationVO.setIsAutoTitle("Y");
+                integrationVO.setShowSpeakerYn(dataVO.getShowSpeakerYn());
                 LibraryVO searchVO = new LibraryVO();
                 searchVO.setTmplId(MINUTES_TMPL_ID);
                 List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
-                String minutesAnswer = callLlmForMinutes(fullText, "Y", tmplFieldList);
+                String minutesAnswer = callLlmForMinutes(fullText, "Y", tmplFieldList, integrationVO.getShowSpeakerYn());
                 if (minutesAnswer != null) {
                     parseAndSaveMinutes(integrationVO, minutesAnswer, tmplFieldList);
                 }
