@@ -81,6 +81,20 @@ public class DataDashboardController extends BaseController {
     }
 
     /**
+     * 데이터마트 컬럼명 한국어 매핑 조회
+     * TB_DM_COL에서 datamartId 기준, USE_YN='Y', COL_ID당 SORT_ORD 최소값 1건 반환
+     * @param searchVO { datamartId }
+     * @return { list: [{ colId, colKorNm }] }
+     */
+    @RequestMapping(value = "/colNmMap.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView colNmMap(@RequestBody DataDashboardVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", dataDashboardService.selectDashboardColNmMap(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 데이터마트 컬럼 코드 매핑 조회
      * TB_DM_COL_CODE에서 datamartId 기준, USE_YN='Y' 항목 반환
      * @param searchVO { datamartId }

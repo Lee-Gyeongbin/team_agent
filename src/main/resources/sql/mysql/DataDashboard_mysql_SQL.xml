@@ -128,6 +128,25 @@
     </select>
 
     <!-- ================================================================
+         데이터마트 컬럼명 한국어 매핑 조회
+         TB_DM_COL (DATAMART_ID 기준, USE_YN='Y')
+         동일 COL_ID가 여러 테이블에 존재할 수 있으므로 GROUP BY로 COL_ID당 1건만 반환
+         (테이블별 SORT_ORD가 달라 MIN(SORT_ORD)만 쓰면 COL_KOR_NM 빈 행이 선택될 수 있어,
+          비어 있지 않은 COL_KOR_NM을 우선 집계)
+         ================================================================ -->
+    <select id="selectDashboardColNmMap" parameterType="dataDashboardVO" resultType="dataDashboardVO">
+        /* 컬럼명 한국어 매핑 조회 dataDashboard.selectDashboardColNmMap */
+        SELECT
+              COL_ID
+            , MAX(NULLIF(TRIM(COL_KOR_NM), '')) AS COL_KOR_NM
+        FROM TB_DM_COL
+        WHERE DATAMART_ID = #{datamartId}
+          AND USE_YN      = 'Y'
+        GROUP BY COL_ID
+        ORDER BY COL_ID
+    </select>
+
+    <!-- ================================================================
          데이터마트 컬럼 코드 매핑 조회
          TB_DM_COL_CODE (DATAMART_ID 기준, USE_YN='Y', SORT_ORD 정렬)
          ================================================================ -->

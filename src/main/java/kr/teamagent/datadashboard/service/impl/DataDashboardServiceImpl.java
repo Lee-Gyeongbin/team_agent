@@ -88,6 +88,13 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     // ===== 코드 매핑 =====
 
     /**
+     * 데이터마트 컬럼명 한국어 매핑 조회 (TB_DM_COL, COL_ID 당 1건)
+     */
+    public List<DataDashboardVO> selectDashboardColNmMap(DataDashboardVO searchVO) throws Exception {
+        return dataDashboardDAO.selectDashboardColNmMap(searchVO);
+    }
+
+    /**
      * 데이터마트 컬럼 코드 매핑 조회
      */
     public List<DataDashboardVO> selectDashboardColCodeMap(DataDashboardVO searchVO) throws Exception {
