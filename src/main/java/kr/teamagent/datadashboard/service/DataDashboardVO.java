@@ -60,9 +60,6 @@ public class DataDashboardVO extends CommonVO {
     /** 컬럼 매핑 설정 JSON */
     private String vizConfig;
 
-    /** 너비 (1=절반, 2=전체) */
-    private Integer colSpan;
-
     /** 정렬 순서 */
     private Integer sortOrd;
 
@@ -77,54 +74,64 @@ public class DataDashboardVO extends CommonVO {
     /** 실제 저장 코드값 */
     private String codeVal;
 
-    /** 코드 한국어 의미 */
+    /** 코드 한국어 의미 (TB_DM_COL_CODE.CODE_KOR_NM) */
     private String codeKorNm;
 
-    // ===== 위젯 순서 변경 =====
+    /** 컬럼 한국어명 (TB_DM_COL.COL_KOR_NM) */
+    private String colKorNm;
 
-    /** 순서 변경 항목 목록 */
-    private List<WidgetOrderItemVO> orderList;
-
-    @Getter
-    @Setter
-    public static class WidgetOrderItemVO {
-        private String widgetId;
-        private Integer sortOrd;
-    }
-
-    // ===== 레이아웃 =====
+    // ===== 레이아웃 (GridStack x/y/w/h 기반) =====
 
     /** 레이아웃 ID */
     private String layoutId;
 
-    /** 행 위치 (0-based 그리드 행 인덱스) */
-    private Integer rowPos;
+    /** GridStack 열 시작 위치 (0-based, 6열 그리드) */
+    private Integer x;
 
-    /** 열 위치 (0=좌, 1=우, 2-컬럼 그리드 기준) */
-    private Integer colPos;
+    /** GridStack 행 시작 위치 (0-based) */
+    private Integer y;
 
-    /** 행 높이 배수 (기본 1) */
-    private Integer rowSpan;
+    /** GridStack 열 너비 (1~6) */
+    private Integer w;
 
-    /** 커스텀 너비 픽셀 (NULL=colSpan 기본값 사용) */
-    private Integer widthPx;
+    /** GridStack 행 높이 (셀 단위) */
+    private Integer h;
 
-    /** 커스텀 높이 픽셀 (NULL=기본 높이 사용) */
-    private Integer heightPx;
+    /** GridStack 최소 열 너비 */
+    private Integer minW;
 
-    /** 레이아웃 순서/위치 일괄 변경 항목 목록 */
-    private List<LayoutOrderItemVO> layoutOrderList;
+    /** GridStack 최대 열 너비 */
+    private Integer maxW;
+
+    /** GridStack 최소 행 높이 */
+    private Integer minH;
+
+    /** GridStack 최대 행 높이 */
+    private Integer maxH;
+
+    /** 위젯 표시 여부 (true=표시, false=숨김) */
+    private Boolean isVisible;
+
+    /** 레이아웃 일괄 저장 항목 목록 (layoutSaveBatch 전용) */
+    private List<LayoutBatchItemVO> layoutBatchList;
 
     @Getter
     @Setter
-    public static class LayoutOrderItemVO {
-        /** 신규 INSERT 시 사용할 레이아웃 ID (서비스에서 LI prefix로 생성, ON DUPLICATE KEY UPDATE 시 무시됨) */
+    public static class LayoutBatchItemVO {
+        /** UPSERT용 레이아웃 ID (서비스에서 기존 재사용 또는 신규 생성) */
         private String layoutId;
         private String widgetId;
         private Integer sortOrd;
-        private Integer rowPos;
-        private Integer colPos;
-        private Integer colSpan;
+        private Integer x;
+        private Integer y;
+        private Integer w;
+        private Integer h;
+        private Integer minW;
+        private Integer maxW;
+        private Integer minH;
+        private Integer maxH;
+        /** 위젯 표시 여부 (true=표시, false=숨김) */
+        private Boolean isVisible;
     }
 
 }

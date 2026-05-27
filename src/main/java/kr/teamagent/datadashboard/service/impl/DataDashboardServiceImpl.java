@@ -44,7 +44,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 현재 사용자의 TextToSQL 쿼리 목록 조회
-     * TB_CHAT_LOG (SVC_TY='S', TTSQ NOT NULL, CREATE_USER_ID=userId)
      */
     public List<DataDashboardVO> selectDashboardSqlList(DataDashboardVO searchVO) throws Exception {
         return dataDashboardDAO.selectDashboardSqlList(searchVO);
@@ -86,28 +85,17 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         dataDashboardDAO.deleteDashboardWidget(searchVO);
     }
 
-    /**
-     * 위젯 너비(COL_SPAN)만 변경 — VIZ_TYPE 등 다른 필드 불변
-     */
-    public void updateDashboardWidgetColSpan(DataDashboardVO searchVO) throws Exception {
-        searchVO.setUserId(SessionUtil.getUserId());
-        dataDashboardDAO.updateDashboardWidgetColSpan(searchVO);
-    }
-
-    /**
-     * 위젯 순서 일괄 변경
-     */
-    public void updateDashboardWidgetOrder(DataDashboardVO searchVO) throws Exception {
-        if (searchVO.getOrderList() != null && !searchVO.getOrderList().isEmpty()) {
-            dataDashboardDAO.updateDashboardWidgetOrder(searchVO);
-        }
-    }
-
     // ===== 코드 매핑 =====
 
     /**
+     * 데이터마트 컬럼명 한국어 매핑 조회 (TB_DM_COL, COL_ID 당 1건)
+     */
+    public List<DataDashboardVO> selectDashboardColNmMap(DataDashboardVO searchVO) throws Exception {
+        return dataDashboardDAO.selectDashboardColNmMap(searchVO);
+    }
+
+    /**
      * 데이터마트 컬럼 코드 매핑 조회
-     * TB_DM_COL_CODE에서 datamartId 기준, USE_YN='Y'인 항목 반환
      */
     public List<DataDashboardVO> selectDashboardColCodeMap(DataDashboardVO searchVO) throws Exception {
         return dataDashboardDAO.selectDashboardColCodeMap(searchVO);
@@ -138,7 +126,7 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         // 3. 파라미터 파싱 (JSON string → Map)
         Map<String, String> paramMap = parseJsonParams(searchVO.getSqlParams());
 
-        // 4. WHERE 조건 직접 치환 (TTSQ는 하드코딩된 값을 가진 SQL이므로 키 기반 치환 사용)
+        // 4. WHERE 조건 직접 치환
         String rawSql = info.getSqlContent().trim();
         String execSql = replaceWhereConditions(rawSql, paramMap);
 
@@ -150,12 +138,9 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         ResultSet rs = null;
         try {
             conn = datamartService.openJdbcConnection(dm);
-
             ps = conn.prepareStatement(execSql);
-
             rs = ps.executeQuery();
             return buildQueryResult(rs);
-
         } finally {
             if (rs != null) try { rs.close(); } catch (Exception ignored) {}
             if (ps != null) try { ps.close(); } catch (Exception ignored) {}
@@ -173,7 +158,7 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 레이아웃 저장 (신규/수정)
+     * 레이아웃 저장 (신규/수정) — 위젯 생성 시 초기 레코드 생성 및 단건 수정 시 사용
      */
     @Transactional(rollbackFor = Exception.class)
     public void saveDashboardLayout(DataDashboardVO layoutVO) throws Exception {
@@ -181,33 +166,41 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         if (layoutVO.getLayoutId() == null || layoutVO.getLayoutId().trim().isEmpty()) {
             layoutVO.setLayoutId(resolveLayoutId(layoutVO.getUserId(), layoutVO.getWidgetId()));
         }
-        if (layoutVO.getRowPos()  == null) layoutVO.setRowPos(0);
-        if (layoutVO.getColPos()  == null) layoutVO.setColPos(0);
-        if (layoutVO.getColSpan() == null) layoutVO.setColSpan(1);
-        if (layoutVO.getRowSpan() == null) layoutVO.setRowSpan(1);
-        if (layoutVO.getSortOrd() == null) layoutVO.setSortOrd(1);
+        // 기본값 적용
+        if (layoutVO.getX()        == null) layoutVO.setX(0);
+        if (layoutVO.getY()        == null) layoutVO.setY(0);
+        if (layoutVO.getW()        == null) layoutVO.setW(3);
+        if (layoutVO.getH()        == null) layoutVO.setH(4);
+        if (layoutVO.getMinW()     == null) layoutVO.setMinW(2);
+        if (layoutVO.getMaxW()     == null) layoutVO.setMaxW(6);
+        if (layoutVO.getMinH()     == null) layoutVO.setMinH(2);
+        if (layoutVO.getMaxH()     == null) layoutVO.setMaxH(12);
+        if (layoutVO.getIsVisible() == null) layoutVO.setIsVisible(true);
+        if (layoutVO.getSortOrd()  == null) layoutVO.setSortOrd(1);
         dataDashboardDAO.saveDashboardLayout(layoutVO);
     }
 
     /**
-     * 레이아웃 순서/위치 일괄 UPSERT (드래그·너비 변경 후 호출).
-     * 신규 INSERT 발생에 대비해 각 항목에 LI prefix 키를 미리 생성.
+     * 레이아웃 일괄 UPSERT (GridStack "레이아웃 저장" 버튼 클릭 시).
+     * 신규 INSERT에 대비해 각 항목에 LI prefix 키를 미리 할당.
      * ON DUPLICATE KEY UPDATE 시 layoutId는 무시되고 나머지 컬럼만 갱신됨.
      */
     @Transactional(rollbackFor = Exception.class)
-    public void updateDashboardLayoutOrder(DataDashboardVO searchVO) throws Exception {
-        if (searchVO.getLayoutOrderList() == null || searchVO.getLayoutOrderList().isEmpty()) return;
+    public void saveLayoutBatch(DataDashboardVO searchVO) throws Exception {
+        if (searchVO.getLayoutBatchList() == null || searchVO.getLayoutBatchList().isEmpty()) return;
         searchVO.setUserId(SessionUtil.getUserId());
-        assignLayoutIdsForOrder(searchVO);
-        dataDashboardDAO.updateDashboardLayoutOrder(searchVO);
+        assignLayoutIdsForBatch(searchVO);
+        dataDashboardDAO.saveLayoutBatch(searchVO);
     }
 
     /**
-     * 높이 초기화 (HEIGHT_PX = NULL — 기본값으로 되돌리기)
+     * 사용자의 전체 레이아웃 삭제 (레이아웃 초기화).
+     * 삭제 후 프론트엔드가 페이지를 다시 로드하면 모든 위젯이 GridStack 기본 레이아웃으로 표시됨.
      */
-    public void resetDashboardLayoutHeight(DataDashboardVO searchVO) throws Exception {
+    @Transactional(rollbackFor = Exception.class)
+    public void resetAllLayouts(DataDashboardVO searchVO) throws Exception {
         searchVO.setUserId(SessionUtil.getUserId());
-        dataDashboardDAO.resetDashboardLayoutHeight(searchVO);
+        dataDashboardDAO.deleteAllLayouts(searchVO);
     }
 
     /**
@@ -222,7 +215,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 기존 레이아웃 ID 재사용, 없을 때만 신규 키 생성.
-     * colspan 등 개별 저장이 동시에 들어올 때 MAX 조회 경합·deadlock 방지.
      */
     private String resolveLayoutId(String userId, String widgetId) throws Exception {
         if (widgetId == null || widgetId.trim().isEmpty()) {
@@ -239,17 +231,17 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * layoutOrder 일괄 UPSERT용 layoutId 할당.
+     * 일괄 UPSERT용 layoutId 할당.
      * 기존 위젯은 DB layoutId 재사용, 신규만 MAX 1회 조회 후 순번 증가.
      */
-    private void assignLayoutIdsForOrder(DataDashboardVO searchVO) throws Exception {
+    private void assignLayoutIdsForBatch(DataDashboardVO searchVO) throws Exception {
         List<DataDashboardVO> existingLayouts = dataDashboardDAO.selectDashboardLayoutList(searchVO);
         Map<String, String> layoutIdByWidget = existingLayouts.stream()
                 .filter(l -> l.getWidgetId() != null && l.getLayoutId() != null)
                 .collect(Collectors.toMap(DataDashboardVO::getWidgetId, DataDashboardVO::getLayoutId, (a, b) -> a));
 
         int nextNum = -1;
-        for (DataDashboardVO.LayoutOrderItemVO item : searchVO.getLayoutOrderList()) {
+        for (DataDashboardVO.LayoutBatchItemVO item : searchVO.getLayoutBatchList()) {
             String existingId = layoutIdByWidget.get(item.getWidgetId());
             if (existingId != null) {
                 item.setLayoutId(existingId);
@@ -263,18 +255,25 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** 신규 위젯 생성 시 레이아웃 초기 레코드 생성 (HEIGHT_PX 기본값 320 저장) */
+    /**
+     * 신규 위젯 생성 시 레이아웃 초기 레코드 생성.
+     * GridStack 기본 레이아웃(w=3, h=4)으로 초기화.
+     */
     private void initDashboardLayout(DataDashboardVO widgetVO) throws Exception {
         DataDashboardVO layoutVO = new DataDashboardVO();
         layoutVO.setUserId(widgetVO.getUserId());
         layoutVO.setWidgetId(widgetVO.getWidgetId());
         layoutVO.setLayoutId(keyGenerate.generateTableKey("LI", "TB_USER_DASHBOARD_LAYOUT", "LAYOUT_ID"));
         layoutVO.setSortOrd(widgetVO.getSortOrd());
-        layoutVO.setRowPos(0);
-        layoutVO.setColPos(0);
-        layoutVO.setColSpan(widgetVO.getColSpan() != null ? widgetVO.getColSpan() : 1);
-        layoutVO.setRowSpan(1);
-        layoutVO.setHeightPx(320);
+        layoutVO.setX(0);
+        layoutVO.setY(0);
+        layoutVO.setW(3);
+        layoutVO.setH(4);
+        layoutVO.setMinW(2);
+        layoutVO.setMaxW(6);
+        layoutVO.setMinH(2);
+        layoutVO.setMaxH(12);
+        layoutVO.setIsVisible(true);
         dataDashboardDAO.saveDashboardLayout(layoutVO);
     }
 
@@ -292,8 +291,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * JSON 문자열 → Map<String,String> 파싱 (flat 객체, 문자열·배열 값 지원)
-     * - 문자열: {"year":"2026"}           → {year: "2026"}
-     * - 배열:   {"regn_cd":["02","03"]}   → {regn_cd: "02,03"} (콤마 구분 문자열로 저장)
      */
     private Map<String, String> parseJsonParams(String jsonParams) {
         Map<String, String> result = new HashMap<>();
@@ -331,12 +328,8 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * WHERE 조건에서 paramMap 키(컬럼명)에 해당하는 조건을 직접 치환
-     * - 값이 있으면: IN('old') → IN('new'), = 'old' → = 'new'
-     * - 값이 비어있으면: AND [alias.]COLUMN IN(...) 또는 AND [alias.]COLUMN = ... 조건 전체 제거
-     *
+     * WHERE 조건에서 paramMap 키(컬럼명)에 해당하는 조건을 직접 치환.
      * 주의: PreparedStatement를 거치지 않으므로 내부 관리 도구 전용으로만 사용할 것.
-     *       SQL 인젝션 최소 방어로 단따옴표 이스케이프만 적용.
      */
     private String replaceWhereConditions(String sql, Map<String, String> paramMap) {
         for (Map.Entry<String, String> entry : paramMap.entrySet()) {
@@ -344,14 +337,12 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
             String value   = entry.getValue();
 
             if (value == null || value.isEmpty()) {
-                // 빈값: AND [alias.]COL IN (...) 또는 AND [alias.]COL = '...' 조건 전체 제거
                 Pattern p = Pattern.compile(
                     "\\s+AND\\s+(?:\\w+\\.)?"+colName+"\\s+(?:IN\\s*\\([^)]*\\)|=\\s*'[^']*'|=\\s*[0-9]+)",
                     Pattern.CASE_INSENSITIVE
                 );
                 sql = p.matcher(sql).replaceAll("");
             } else {
-                // IN 조건 치환: [alias.]COL IN ('old1','old2',...) → IN ('new1','new2',...)
                 Pattern inP = Pattern.compile(
                     "((?:\\w+\\.)?"+colName+"\\s+IN\\s*\\()([^)]*)(\\))",
                     Pattern.CASE_INSENSITIVE
@@ -361,7 +352,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
                     String inLiteral = buildInLiteral(value);
                     sql = inM.replaceAll("$1" + Matcher.quoteReplacement(inLiteral) + "$3");
                 } else {
-                    // = 조건 치환: [alias.]COL = 'old' 또는 = 123 → = 'new'
                     String safe = value.replace("'", "''");
                     Pattern eqP = Pattern.compile(
                         "((?:\\w+\\.)?"+colName+"\\s*=\\s*)('[^']*'|[0-9]+)",
@@ -374,11 +364,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         return sql;
     }
 
-    /**
-     * 콤마 구분 값 문자열을 IN 리터럴로 변환
-     * "02,03"  → "'02','03'"
-     * "ST00031" → "'ST00031'"
-     */
     private String buildInLiteral(String value) {
         String[] parts = value.split(",");
         StringBuilder sb = new StringBuilder();
@@ -389,9 +374,6 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         return sb.toString();
     }
 
-    /**
-     * ResultSet → {columns: [...], rows: [...]} 변환
-     */
     private Map<String, Object> buildQueryResult(ResultSet rs) throws Exception {
         ResultSetMetaData meta = rs.getMetaData();
         int colCount = meta.getColumnCount();
