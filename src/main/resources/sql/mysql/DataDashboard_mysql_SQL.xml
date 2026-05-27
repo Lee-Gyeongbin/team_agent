@@ -47,6 +47,8 @@
             , W.VIZ_TYPE
             , W.VIZ_CONFIG
             , W.SORT_ORD
+            , W.LAST_SQL_PARAMS                                      AS LAST_TTSQ_PARAMS
+            , DATE_FORMAT(W.LAST_EXEC_DT, '%Y-%m-%d %H:%i:%s')       AS LAST_EXEC_DT
             , A.Q_CONTENT                                            AS SQL_TITLE
             , A.TTSQ                                                 AS SQL_CONTENT
             , A.TTSQ_PARAM
@@ -108,6 +110,28 @@
         WHERE WIDGET_ID = #{widgetId}
           AND USER_ID   = #{userId}
     </delete>
+
+    <!-- ================================================================
+         위젯 마지막 SQL 실행 파라미터 저장 (LAST_SQL_PARAMS, LAST_EXEC_DT)
+         ================================================================ -->
+    <update id="updateWidgetLastParams" parameterType="dataDashboardVO">
+        /* 위젯 마지막 SQL 파라미터 저장 dataDashboard.updateWidgetLastParams */
+        UPDATE TB_USER_DASHBOARD_WIDGET
+        SET LAST_SQL_PARAMS = #{lastTtsqParams}
+          , LAST_EXEC_DT    = NOW()
+          , MODIFY_DT       = NOW()
+        WHERE WIDGET_ID = #{widgetId}
+          AND USER_ID   = #{userId}
+    </update>
+
+    <select id="selectWidgetLastExecDt" parameterType="dataDashboardVO" resultType="string">
+        /* 위젯 마지막 SQL 실행 일시 조회 dataDashboard.selectWidgetLastExecDt */
+        SELECT DATE_FORMAT(LAST_EXEC_DT, '%Y-%m-%d %H:%i:%s')
+        FROM TB_USER_DASHBOARD_WIDGET
+        WHERE WIDGET_ID = #{widgetId}
+          AND USER_ID   = #{userId}
+        LIMIT 1
+    </select>
 
     <!-- ================================================================
          SQL 실행용 채팅 로그 + 데이터마트 ID 조회

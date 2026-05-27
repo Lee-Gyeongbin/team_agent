@@ -85,6 +85,24 @@ public class DataDashboardServiceImpl extends EgovAbstractServiceImpl {
         dataDashboardDAO.deleteDashboardWidget(searchVO);
     }
 
+    /**
+     * 위젯 마지막 SQL 실행 파라미터 저장 (LAST_SQL_PARAMS, LAST_EXEC_DT).
+     * SQL 실행 성공 후 호출.
+     * @return 저장된 LAST_EXEC_DT (yyyy-MM-dd HH:mm:ss)
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public String saveWidgetLastParams(DataDashboardVO searchVO) throws Exception {
+        if (searchVO.getWidgetId() == null || searchVO.getWidgetId().trim().isEmpty()) {
+            throw new Exception("위젯 ID가 필요합니다.");
+        }
+        searchVO.setUserId(SessionUtil.getUserId());
+        int updated = dataDashboardDAO.updateWidgetLastParams(searchVO);
+        if (updated == 0) {
+            throw new Exception("위젯을 찾을 수 없습니다.");
+        }
+        return dataDashboardDAO.selectWidgetLastExecDt(searchVO);
+    }
+
     // ===== 코드 매핑 =====
 
     /**
