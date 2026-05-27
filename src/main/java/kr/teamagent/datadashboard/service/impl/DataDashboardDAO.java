@@ -81,6 +81,13 @@ public class DataDashboardDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 위젯별 레이아웃 단건 조회 (USER_ID + WIDGET_ID)
+     */
+    public DataDashboardVO selectDashboardLayoutByWidget(DataDashboardVO searchVO) throws Exception {
+        return (DataDashboardVO) selectOne("dataDashboard.selectDashboardLayoutByWidget", searchVO);
+    }
+
+    /**
      * 레이아웃 저장 (INSERT ... ON DUPLICATE KEY UPDATE)
      */
     public int saveDashboardLayout(DataDashboardVO layoutVO) throws Exception {
