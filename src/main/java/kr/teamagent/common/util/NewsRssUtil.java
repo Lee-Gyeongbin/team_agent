@@ -72,6 +72,19 @@ public final class NewsRssUtil {
     }
 
     /**
+     * 관심 카테고리 1개에 대한 RSS 후보 기사 수집.
+     *
+     * @param codeId NC000001 {@code CODE_ID} (예: 001)
+     */
+    public static List<ChatbotVO.RssArticleRow> collectCandidatesForCodeId(RestApiManager restApiManager, Logger log,
+            String codeId) {
+        if (codeId == null || codeId.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        return collectCandidates(restApiManager, log, Collections.singletonList(codeId.trim()));
+    }
+
+    /**
      * @param codeIds NC000001 {@code CODE_ID} 목록 (예: 001, 002)
      */
     public static List<ChatbotVO.RssArticleRow> collectCandidates(RestApiManager restApiManager, Logger log,

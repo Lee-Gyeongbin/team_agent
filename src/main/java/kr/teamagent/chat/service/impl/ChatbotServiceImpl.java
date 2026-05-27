@@ -2057,6 +2057,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /**
      * 뉴스 큐레이션 에이전트 전용.
+     * 관심 카테고리마다 RSS 수집 → AI 호출 → 서버에서 JSON 배열 병합.
      */
     private void deliverNewsRecommendationViaWebSocket(String query, String threadId, String userId, String svcTy,
             String modelId, String refId, String agentId, List<Long> attachmentFileIds,
@@ -2067,16 +2068,28 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             callback.onError("뉴스 관심 카테고리가 설정되지 않았습니다.");
             return;
         }
-        List<RssArticleRow> rssCandidateRows = NewsRssUtil.collectCandidates(restApiManager, logger, interestCategories);
-        String curatorPrompt = appendNewsCandidateArticlesToCuratorQuery(rawQuery, rssCandidateRows);
-        String curatorAiJson = runNewsCuratorAi(curatorPrompt, rssCandidateRows);
+        List<String> categoryJsonList = new ArrayList<>();
+        for (String codeId : interestCategories) {
+            List<RssArticleRow> categoryRows = NewsRssUtil.collectCandidatesForCodeId(restApiManager, logger, codeId);
+            if (categoryRows.isEmpty()) {
+                continue;
+            }
+            String categoryLabel = categoryRows.get(0).getRssCategory();
+            String curatorPrompt = appendNewsCandidateArticlesToCuratorQuery(rawQuery, categoryRows, codeId, categoryLabel);
+            String categoryAiJson = runNewsCuratorAi(curatorPrompt, categoryRows);
+            if (CommonUtil.isEmpty(categoryAiJson)) {
+                continue;
+            }
+            categoryJsonList.add(categoryAiJson.trim());
+        }
+        String curatorAiJson = categoryJsonList.isEmpty() ? "" : mergeNewsCuratorCategoryResponses(categoryJsonList);
         if (CommonUtil.isEmpty(curatorAiJson)) {
             String msg = "AI가 선정한 뉴스를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
             callback.onError(msg);
             return;
         }
         callback.onChunk(curatorAiJson, curatorAiJson, null);
-        String qContentForDb = rawQuery.trim();
+        String qContentForDb = buildNewsCurationQContentForDb(rawQuery, interestCategories);
         String savedLogId = "";
         if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
             try {
@@ -2127,8 +2140,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return curatorAiJson.trim();
     }
 
-    private static String appendNewsCandidateArticlesToCuratorQuery(String frontendTemplate, List<RssArticleRow> candidates) {
-        String block = buildNewsCandidateArticlesMetadataBlock(candidates);
+    private static String appendNewsCandidateArticlesToCuratorQuery(String frontendTemplate, List<RssArticleRow> candidates,
+            String codeId, String categoryLabel) {
+        String block = buildNewsCandidateArticlesMetadataBlock(candidates, codeId, categoryLabel);
         int roleIdx = frontendTemplate.indexOf("[역할]");
         if (roleIdx >= 0) {
             return frontendTemplate.substring(0, roleIdx).trim() + "\n" + block + "\n" + frontendTemplate.substring(roleIdx);
@@ -2136,13 +2150,63 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return frontendTemplate.trim() + "\n\n" + block;
     }
 
-    private static String buildNewsCandidateArticlesMetadataBlock(List<RssArticleRow> candidates) {
+    /** TB_CHAT_LOG.Q_CONTENT — 프롬프트 템플릿 + 관심 카테고리 CODE_ID 목록 */
+    private static String buildNewsCurationQContentForDb(String rawQuery, List<String> categoryCodeIds) {
+        String base = rawQuery != null ? rawQuery.trim() : "";
+        String categoryLine = "- 선정 대상 카테고리: " + NEWS_CURATE_PROMPT_GSON.toJson(categoryCodeIds);
+        if (CommonUtil.isEmpty(base)) {
+            return categoryLine;
+        }
+        return base + "\n\n" + categoryLine;
+    }
+
+    private static String buildNewsCandidateArticlesMetadataBlock(List<RssArticleRow> candidates, String codeId,
+            String categoryLabel) {
         List<Map<String, Object>> curatorInputArticles = new ArrayList<>(candidates.size());
         for (RssArticleRow candidateRow : candidates) {
             curatorInputArticles.add(NewsRssUtil.curatorPromptArticleMap(candidateRow));
         }
         String articlesJson = NEWS_CURATE_PROMPT_GSON.toJson(curatorInputArticles);
-        return "- 후보 기사 목록(JSON 배열): " + articlesJson;
+        String normalizedCodeId = codeId != null ? codeId.trim() : "";
+        String normalizedCategoryLabel = categoryLabel != null ? categoryLabel.trim() : "";
+        if (normalizedCategoryLabel.isEmpty()) {
+            normalizedCategoryLabel = CommonUtil.isNotEmpty(normalizedCodeId) ? normalizedCodeId : "미분류";
+        }
+        StringBuilder block = new StringBuilder();
+        block.append("- 선정 대상 카테고리: ").append(normalizedCategoryLabel)
+                .append(" (CODE_ID: ").append(normalizedCodeId).append(")\n");
+        block.append("- 후보 기사 목록(JSON 배열): ").append(articlesJson);
+        return block.toString();
+    }
+
+    /**
+     * 카테고리별 AI 응답 JSON 문자열을 파싱 없이 문자열 그대로 이어 붙여 하나의 JSON 배열로 만든다.
+     * 각 응답이 이미 배열 형태([ ... ])라고 가정하며, 그렇지 않으면 원문 그대로 하나의 원소로 포함한다.
+     */
+    private static String mergeNewsCuratorCategoryResponses(List<String> categoryJsonList) {
+        StringBuilder sb = new StringBuilder("[");
+        boolean firstItem = true;
+        for (String json : categoryJsonList) {
+            String trimmed = json.trim();
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                String inner = trimmed.substring(1, trimmed.length() - 1).trim();
+                if (inner.isEmpty()) {
+                    continue;
+                }
+                if (!firstItem) {
+                    sb.append(",");
+                }
+                sb.append(inner);
+            } else {
+                if (!firstItem) {
+                    sb.append(",");
+                }
+                sb.append(trimmed);
+            }
+            firstItem = false;
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     /** TB_USER_INTEREST_NEWS_CATEGORY.NEWS_CATEGORY_CD → RSS용 codeId 목록 */
