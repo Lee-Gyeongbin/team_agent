@@ -37,10 +37,11 @@
             , B.CODE_NM         AS STATUS_NM
             , A.START_DT        AS START_DT
             , A.END_DT          AS END_DT
-            , A.IS_AUTO_TITLE   AS IS_AUTO_TITLE
-            , A.INTEGRATE_YN    AS INTEGRATE_YN
-            , A.CREATE_USER_ID  AS CREATE_USER_ID
-            , A.CREATE_DT       AS CREATE_DT
+            , A.IS_AUTO_TITLE    AS IS_AUTO_TITLE
+            , A.INTEGRATE_YN     AS INTEGRATE_YN
+            , A.SHOW_SPEAKER_YN  AS SHOW_SPEAKER_YN
+            , A.CREATE_USER_ID   AS CREATE_USER_ID
+            , A.CREATE_DT        AS CREATE_DT
         FROM TB_MEETING A
         LEFT JOIN TB_CODE B
             ON B.CODE_GRP_ID = 'MT000001'
@@ -54,9 +55,9 @@
         useGeneratedKeys="true" keyProperty="meetingId">
         /* 회의 등록 ai.meeting.insertMeeting */
         INSERT INTO TB_MEETING
-        (MEETING_TITLE, ATTENDEES, STATUS, START_DT, USE_YN, CREATE_USER_ID, CREATE_DT, IS_AUTO_TITLE, INTEGRATE_YN)
+        (MEETING_TITLE, ATTENDEES, STATUS, START_DT, USE_YN, CREATE_USER_ID, CREATE_DT, IS_AUTO_TITLE, INTEGRATE_YN, SHOW_SPEAKER_YN)
         VALUES
-        (#{meetingTitle}, #{attendees}, '001', NOW(), 'Y', #{createUserId}, NOW(), #{isAutoTitle}, #{integrateYn})
+        (#{meetingTitle}, #{attendees}, '001', NOW(), 'Y', #{createUserId}, NOW(), #{isAutoTitle}, #{integrateYn}, #{showSpeakerYn})
     </insert>
 
     <update id="updateMeetingStatus" parameterType="meetingVO">

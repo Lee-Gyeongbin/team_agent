@@ -1,6 +1,10 @@
 package kr.teamagent.agent.service;
 
 import java.util.List;
+import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -38,6 +42,11 @@ public class AgentVO {
     /** 데이터셋/데이터마트 연결 건수 */
     private Integer connCount;
 
+    /** TB_AGT_SUB_CFG (조회 응답·detail 등 요청 역직렬화 제외) */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private AgtSubCfgVO subCfg;
+
+    @JsonIgnore
     private String dynamicQuery;
 
     @Getter
@@ -67,6 +76,18 @@ public class AgentVO {
     public static class SaveFormVO extends AgentVO {
         private List<DsVO> datasetList;
         private List<DmVO> datamartList;
+
+        @Override
+        @JsonProperty(value = "subCfg", access = JsonProperty.Access.READ_WRITE)
+        public AgtSubCfgVO getSubCfg() {
+            return super.getSubCfg();
+        }
+
+        @Override
+        @JsonProperty(value = "subCfg", access = JsonProperty.Access.READ_WRITE)
+        public void setSubCfg(AgtSubCfgVO subCfg) {
+            super.setSubCfg(subCfg);
+        }
     }
 
     /** 에이전트 순서 변경 항목 */
@@ -75,6 +96,23 @@ public class AgentVO {
     public static class OrderItemVO {
         private String agentId;
         private Integer sortOrd;
+    }
+
+    /** TB_AGT_SUB_CFG */
+    @Getter
+    @Setter
+    public static class AgtSubCfgVO {
+        private String subCfgId;
+        private String agentId;
+        private String subTy;
+        /** MyBatis JSON 컬럼(ADDITIONAL_CONFIG) 매핑용 */
+        @JsonIgnore
+        private String additionalConfig;
+        @JsonProperty("additionalConfig")
+        private Map<String, Object> additionalConfigMap;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
     }
 
     /** TB_AGT_DM */

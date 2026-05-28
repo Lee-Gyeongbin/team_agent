@@ -316,4 +316,44 @@
         WHERE AGENT_ID = #{agentId}
     </delete>
 
+    <select id="selectAgentSubCfg" parameterType="agentVO" resultType="kr.teamagent.agent.service.AgentVO$AgtSubCfgVO">
+        /* 에이전트 서브 설정 조회 agent.selectAgentSubCfg */
+        SELECT
+            S.SUB_CFG_ID
+            , S.AGENT_ID
+            , S.SUB_TY
+            , S.ADDITIONAL_CONFIG
+            , S.USE_YN
+            , S.CREATE_DT
+            , S.MODIFY_DT
+        FROM TB_AGT_SUB_CFG S
+        WHERE S.AGENT_ID = #{agentId}
+    </select>
+
+    <insert id="saveAgentSubCfg" parameterType="kr.teamagent.agent.service.AgentVO$AgtSubCfgVO">
+        /* 에이전트 서브 설정 저장 agent.saveAgentSubCfg */
+        INSERT INTO TB_AGT_SUB_CFG (
+            SUB_CFG_ID
+            , AGENT_ID
+            , SUB_TY
+            , ADDITIONAL_CONFIG
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{subCfgId}
+            , #{agentId}
+            , #{subTy, jdbcType=VARCHAR}
+            , #{additionalConfig, jdbcType=VARCHAR}
+            , IFNULL(#{useYn, jdbcType=VARCHAR}, 'Y')
+            , NOW()
+            , NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            SUB_TY = VALUES(SUB_TY)
+            , ADDITIONAL_CONFIG = VALUES(ADDITIONAL_CONFIG)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
+
 </mapper>
