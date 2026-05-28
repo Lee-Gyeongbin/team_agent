@@ -53,6 +53,16 @@ public class AgentDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 에이전트 서브 설정 조회 (TB_AGT_SUB_CFG)
+     * @param searchVO agentId
+     * @return
+     * @throws Exception
+     */
+    public AgentVO.AgtSubCfgVO selectAgentSubCfg(AgentVO searchVO) throws Exception {
+        return (AgentVO.AgtSubCfgVO) selectOne("agent.selectAgentSubCfg", searchVO);
+    }
+
+    /**
      * 모델 옵션 목록 조회
      * @return
      * @throws Exception
@@ -89,6 +99,16 @@ public class AgentDAO extends EgovComAbstractDAO {
      */
     public int saveAgent(AgentVO agentVO) throws Exception {
         return (int) insert("agent.saveAgent", agentVO);
+    }
+
+    /**
+     * 에이전트 서브 설정 저장 (TB_AGT_SUB_CFG upsert)
+     * @param subCfg subCfgId, agentId, subTy, additionalConfig, useYn
+     * @return
+     * @throws Exception
+     */
+    public int saveAgentSubCfg(AgentVO.AgtSubCfgVO subCfg) throws Exception {
+        return (int) insert("agent.saveAgentSubCfg", subCfg);
     }
 
     /**

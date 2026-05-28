@@ -1,7 +1,9 @@
 package kr.teamagent.agent.service.impl;
 
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -9,11 +11,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
 import kr.teamagent.agent.service.AgentVO;
+import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 
 @Service
 public class AgentServiceImpl extends EgovAbstractServiceImpl {
+
+    private static final Gson SUB_CFG_GSON = new Gson();
 
     @Autowired
     private AgentDAO agentDAO;
@@ -65,7 +73,17 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
      */
     public AgentVO selectAgent(AgentVO searchVO) throws Exception {
         searchVO.setDynamicQuery(buildDynamicQuery(searchVO));
-        return agentDAO.selectAgent(searchVO);
+        AgentVO agent = agentDAO.selectAgent(searchVO);
+        if (agent == null || CommonUtil.isEmpty(agent.getAgentId())) {
+            return agent;
+        }
+
+        AgentVO.AgtSubCfgVO subCfg = agentDAO.selectAgentSubCfg(agent);
+        if (subCfg != null) {
+            parseAgentSubAdditionalConfig(subCfg);
+            agent.setSubCfg(subCfg);
+        }
+        return agent;
     }
 
     /**
@@ -126,6 +144,10 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
+        if (formVO.getSubCfg() != null) {
+            saveAgentSubCfg(formVO);
+        }
+
         AgentVO result = new AgentVO();
         result.setAgentId(formVO.getAgentId());
         result.setSvcTy(formVO.getSvcTy());
@@ -157,6 +179,34 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
      * @return
      * @throws Exception
      */
+    private void saveAgentSubCfg(AgentVO.SaveFormVO formVO) throws Exception {
+        AgentVO.AgtSubCfgVO subCfg = formVO.getSubCfg();
+        if (subCfg.getSubCfgId() == null || subCfg.getSubCfgId().trim().isEmpty()) {
+            subCfg.setSubCfgId(keyGenerate.generateTableKey("SG", "TB_AGT_SUB_CFG", "SUB_CFG_ID"));
+        }
+        subCfg.setAgentId(formVO.getAgentId());
+        if (subCfg.getAdditionalConfigMap() != null) {
+            subCfg.setAdditionalConfig(SUB_CFG_GSON.toJson(subCfg.getAdditionalConfigMap()));
+        }
+        if (CommonUtil.isEmpty(subCfg.getUseYn())) {
+            subCfg.setUseYn("Y");
+        }
+        agentDAO.saveAgentSubCfg(subCfg);
+    }
+
+    private void parseAgentSubAdditionalConfig(AgentVO.AgtSubCfgVO subCfg) {
+        if (subCfg == null) {
+            return;
+        }
+        String json = subCfg.getAdditionalConfig();
+        if (CommonUtil.isEmpty(json)) {
+            subCfg.setAdditionalConfigMap(null);
+            return;
+        }
+        Type type = new TypeToken<Map<String, Object>>() {}.getType();
+        subCfg.setAdditionalConfigMap(SUB_CFG_GSON.fromJson(json, type));
+    }
+
     private String buildDynamicQuery(AgentVO searchVO) throws Exception {
         StringBuffer sb = new StringBuffer();
         if(searchVO == null || searchVO.getSvcTy() == null || searchVO.getSvcTy().isEmpty()){
