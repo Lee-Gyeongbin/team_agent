@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
@@ -571,40 +571,46 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 보고서 인사이트 분석: 참고 rContent와 currentHtml로 AI 인사이트를 생성하고 로그를 적재한다.
      *
-     * @param searchVO roomId, insightPlacement(NEW_SECTION|REPLACE), rContent, currentHtml 필수 / REPLACE 시 targetValueKey 필수
+     * @param requestBody body: { roomId, insightPlacement, rcontent, currentHtml, targetValueKey? }
      * @return successYn, returnMsg, data (AI 응답 문자열)
      * @throws Exception
      */
-    public Map<String, Object> insightReport(LibraryVO searchVO) throws Exception {
+    public Map<String, Object> insightReport(Map<String, Object> requestBody) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
-        if (searchVO == null || CommonUtil.isEmpty(searchVO.getRoomId())
-                || CommonUtil.isEmpty(searchVO.getInsightPlacement())
-                || CommonUtil.isEmpty(searchVO.getRContent())) {
+        String roomId = getRequestString(requestBody, "roomId");
+        String insightPlacement = getRequestString(requestBody, "insightPlacement");
+        String rContent = getRequestString(requestBody, "rcontent", "rContent", "RContent");
+        String currentHtml = getRequestString(requestBody, "currentHtml");
+        String targetValueKey = getRequestString(requestBody, "targetValueKey");
+
+        if (CommonUtil.isEmpty(roomId) || CommonUtil.isEmpty(insightPlacement) || CommonUtil.isEmpty(rContent)) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "roomId, insightPlacement, rContent가 필요합니다.");
+            resultMap.put("returnMsg", "roomId, insightPlacement, rcontent가 필요합니다.");
             resultMap.put("data", null);
             return resultMap;
         }
-        String placement = searchVO.getInsightPlacement().trim();
+        String placement = insightPlacement.trim();
         if (!INSIGHT_PLACEMENT_NEW_SECTION.equals(placement) && !INSIGHT_PLACEMENT_REPLACE.equals(placement)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "insightPlacement는 NEW_SECTION 또는 REPLACE여야 합니다.");
             resultMap.put("data", null);
             return resultMap;
         }
-        if (INSIGHT_PLACEMENT_REPLACE.equals(placement) && CommonUtil.isEmpty(searchVO.getTargetValueKey())) {
+        if (INSIGHT_PLACEMENT_REPLACE.equals(placement) && CommonUtil.isEmpty(targetValueKey)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "REPLACE일 때 targetValueKey가 필요합니다.");
             resultMap.put("data", null);
             return resultMap;
         }
-        String currentHtml = searchVO.getCurrentHtml();
         if (CommonUtil.isEmpty(currentHtml)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "currentHtml이 필요합니다.");
             resultMap.put("data", null);
             return resultMap;
         }
+
+        LibraryVO searchVO = new LibraryVO();
+        searchVO.setRoomId(roomId);
 
         LibraryVO lastLog = libraryDAO.selectLastReportChatLog(searchVO);
         Integer lastIdx = (lastLog != null && lastLog.getIdxNo() != null) ? lastLog.getIdxNo() : 0;
@@ -615,11 +621,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         String promptId = INSIGHT_PLACEMENT_NEW_SECTION.equals(placement)
                 ? PROMPT_ID_INSIGHT_NEW_SECTION
                 : PROMPT_ID_INSIGHT_REPLACE;
-        String targetValueKey = INSIGHT_PLACEMENT_REPLACE.equals(placement)
-                ? searchVO.getTargetValueKey()
-                : null;
+        String resolvedTargetValueKey = INSIGHT_PLACEMENT_REPLACE.equals(placement) ? targetValueKey : null;
         String insightFieldId = INSIGHT_PLACEMENT_NEW_SECTION.equals(placement) ? INSIGHT_FIELD_ID : null;
-        String prompt = buildInsightReportPrompt(promptId, strippedHtml, searchVO.getRContent(), targetValueKey, insightFieldId);
+        String prompt = buildInsightReportPrompt(promptId, strippedHtml, rContent, resolvedTargetValueKey, insightFieldId);
         if (CommonUtil.isEmpty(prompt)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "인사이트 분석 프롬프트가 없습니다.");
@@ -640,11 +644,11 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         }
 
         StringBuilder askQuery = new StringBuilder("INSIGHT:").append(placement);
-        if (!CommonUtil.isEmpty(targetValueKey)) {
-            askQuery.append(":").append(targetValueKey);
+        if (!CommonUtil.isEmpty(resolvedTargetValueKey)) {
+            askQuery.append(":").append(resolvedTargetValueKey);
         }
         LibraryVO reportLog = new LibraryVO();
-        reportLog.setRoomId(searchVO.getRoomId());
+        reportLog.setRoomId(roomId);
         reportLog.setIdxNo(lastIdx + 1);
         reportLog.setUserId(SessionUtil.getUserId());
         reportLog.setReportData(res);
@@ -773,6 +777,20 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("roomId", vo.getRoomId());
         return resultMap;
+    }
+
+    private String getRequestString(Map<String, Object> requestBody, String... keys) {
+        if (requestBody == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (key == null || requestBody.get(key) == null) {
+                continue;
+            }
+            Object value = requestBody.get(key);
+            return value instanceof String ? (String) value : String.valueOf(value);
+        }
+        return null;
     }
 
 }

@@ -146,34 +146,46 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
             return "";
         }
         if (value instanceof JSONArray) {
-            JSONArray arr = (JSONArray) value;
-            if (multiline) {
-                // 멀티라인 배열은 목록 형태로 출력(줄 구분 유지).
-                return renderTemplateListValue(arr, showSpeaker);
-            }
-            // 일반 배열은 콤마 구분 단일 라인으로 출력.
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < arr.size(); i++) {
-                if (i > 0) {
-                    sb.append(", ");
-                }
-                sb.append(escapeHtml(stringValue(arr.get(i))));
-            }
-            return sb.toString();
+            return renderJsonArrayValue((JSONArray) value, multiline, showSpeaker);
         }
         String text = stringValue(value);
-        if (multiline && text.startsWith("[") && text.endsWith("]")) {
-            try {
-                // 문자열로 들어온 JSON 배열도 동일 규칙으로 처리.
-                Object parsed = new JSONParser().parse(text);
-                if (parsed instanceof JSONArray) {
-                    return renderTemplateListValue((JSONArray) parsed, showSpeaker);
-                }
-            } catch (Exception ignore) {
-                // 배열 문자열이 아니면 일반 문자열로 처리한다.
-            }
+        // FLAT_DATA·LLM이 배열을 문자열("[\"a\",\"b\"]")로 넘겨도 JSONArray와 동일 규칙 적용
+        JSONArray parsedArr = tryParseJsonArray(text);
+        if (parsedArr != null) {
+            return renderJsonArrayValue(parsedArr, multiline, showSpeaker);
         }
         return escapeHtml(text).replace("\r\n", "\n").replace("\n", multiline ? "<br/>" : " ");
+    }
+
+    /** JSONArray 또는 JSON 배열 문자열을 MULTILINE_YN에 맞게 HTML로 변환한다. */
+    private String renderJsonArrayValue(JSONArray arr, boolean multiline, boolean showSpeaker) {
+        if (multiline) {
+            return renderTemplateListValue(arr, showSpeaker);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < arr.size(); i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(escapeHtml(stringValue(arr.get(i))));
+        }
+        return sb.toString();
+    }
+
+    /** "[...]" 형태 문자열을 JSON 배열로 파싱. 실패 시 null. */
+    private JSONArray tryParseJsonArray(String text) {
+        if (text.isEmpty() || !text.startsWith("[") || !text.endsWith("]")) {
+            return null;
+        }
+        try {
+            Object parsed = new JSONParser().parse(text);
+            if (parsed instanceof JSONArray) {
+                return (JSONArray) parsed;
+            }
+        } catch (Exception ignore) {
+            // 배열 문자열이 아니면 일반 문자열로 처리한다.
+        }
+        return null;
     }
 
     /**
