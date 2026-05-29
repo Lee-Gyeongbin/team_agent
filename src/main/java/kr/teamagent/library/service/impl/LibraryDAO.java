@@ -11,6 +11,26 @@ import kr.teamagent.library.service.LibraryVO;
 public class LibraryDAO extends EgovComAbstractDAO {
 
     /**
+     * 라이브러리용 에이전트 목록 조회 (USE_YN 무관 전체)
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.AgentItem> selectAgentListForLibrary(LibraryVO searchVO) throws Exception {
+        return selectList("library.selectAgentListForLibrary", searchVO);
+    }
+
+    /**
+     * Agent 서브 설정 일괄 조회
+     * @param searchVO agentIdList 필수
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.AgtSubCfgVO> selectAgentSubCfgListByAgentIds(LibraryVO searchVO) throws Exception {
+        return selectList("library.selectAgentSubCfgListByAgentIds", searchVO);
+    }
+
+    /**
      * 카테고리 목록 조회
      * @param searchVO userId 필수 (세션에서 설정됨)
      * @return

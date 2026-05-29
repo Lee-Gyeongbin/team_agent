@@ -1,5 +1,6 @@
 package kr.teamagent.library.service.impl;
 
+import java.lang.reflect.Type;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -10,6 +11,9 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -39,6 +43,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     private static final String PROMPT_ID_INSIGHT_NEW_SECTION = "PI000019";
     private static final String PROMPT_ID_INSIGHT_REPLACE = "PI000020";
     private static final String INSIGHT_FIELD_ID = "insight";
+    private static final Gson AGENT_SUB_CFG_GSON = new Gson();
 
     private static final Logger logger = LoggerFactory.getLogger(LibraryServiceImpl.class);
 
@@ -59,6 +64,64 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     TmplHtmlRenderService tmplHtmlRenderService;
+
+    /**
+     * 라이브러리용 에이전트 목록 조회 (USE_YN 무관, 서브 설정 포함)
+     * @param searchVO
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.AgentItem> selectAgentListForLibrary(LibraryVO searchVO) throws Exception {
+        List<LibraryVO.AgentItem> agentList = libraryDAO.selectAgentListForLibrary(searchVO);
+        if (agentList == null || agentList.isEmpty()) {
+            return agentList;
+        }
+
+        List<String> agentIdList = agentList.stream()
+                .map(LibraryVO.AgentItem::getAgentId)
+                .filter(id -> !CommonUtil.isEmpty(id))
+                .collect(Collectors.toList());
+        if (agentIdList.isEmpty()) {
+            return agentList;
+        }
+
+        LibraryVO subCfgParam = new LibraryVO();
+        subCfgParam.setAgentIdList(agentIdList);
+        List<LibraryVO.AgtSubCfgVO> subCfgList = libraryDAO.selectAgentSubCfgListByAgentIds(subCfgParam);
+
+        Map<String, LibraryVO.AgtSubCfgVO> subCfgByAgentId = new HashMap<>();
+        if (subCfgList != null) {
+            for (LibraryVO.AgtSubCfgVO subCfg : subCfgList) {
+                if (subCfg == null || CommonUtil.isEmpty(subCfg.getAgentId())) {
+                    continue;
+                }
+                parseAgentSubAdditionalConfig(subCfg);
+                subCfgByAgentId.put(subCfg.getAgentId(), subCfg);
+            }
+        }
+
+        for (LibraryVO.AgentItem agent : agentList) {
+            agent.setSubCfg(subCfgByAgentId.get(agent.getAgentId()));
+        }
+        return agentList;
+    }
+
+    /**
+     * Agent 서브 설정 파싱
+     * @param subCfg
+     */
+    private void parseAgentSubAdditionalConfig(LibraryVO.AgtSubCfgVO subCfg) {
+        if (subCfg == null) {
+            return;
+        }
+        String json = subCfg.getAdditionalConfig();
+        if (CommonUtil.isEmpty(json)) {
+            subCfg.setAdditionalConfigMap(null);
+            return;
+        }
+        Type type = new TypeToken<Map<String, Object>>() {}.getType();
+        subCfg.setAdditionalConfigMap(AGENT_SUB_CFG_GSON.fromJson(json, type));
+    }
 
     /**
      * 카테고리 목록 조회 (세션 userId 자동 설정)
