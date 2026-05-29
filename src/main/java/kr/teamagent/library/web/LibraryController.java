@@ -285,6 +285,19 @@ public class LibraryController extends BaseController {
     }
 
     /**
+     * 보고서 인사이트 분석 API (참고 rContent + currentHtml로 AI 인사이트 생성)
+     * @param searchVO body: { roomId, insightPlacement, rContent, currentHtml, targetValueKey? }
+     * @return jsonView successYn, returnMsg, data
+     * @throws Exception
+     */
+    @RequestMapping(value = "/insightReport.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView insightReport(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(libraryService.insightReport(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 리포트 채팅방 생성
      * @return
      * @throws Exception

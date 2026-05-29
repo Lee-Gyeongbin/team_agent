@@ -34,8 +34,13 @@ import kr.teamagent.tmpl.service.impl.TmplHtmlRenderService;
 @Service
 public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
+    private static final String INSIGHT_PLACEMENT_NEW_SECTION = "NEW_SECTION";
+    private static final String INSIGHT_PLACEMENT_REPLACE = "REPLACE";
+    private static final String PROMPT_ID_INSIGHT_NEW_SECTION = "PI000019";
+    private static final String PROMPT_ID_INSIGHT_REPLACE = "PI000020";
+    private static final String INSIGHT_FIELD_ID = "insight";
+
     private static final Logger logger = LoggerFactory.getLogger(LibraryServiceImpl.class);
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     LibraryDAO libraryDAO;
@@ -561,6 +566,111 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         resultMap.put("returnMsg", "AI 보고서 보완 요청 성공");
         resultMap.put("data", res);
         return resultMap;
+    }
+
+    /**
+     * 보고서 인사이트 분석: 참고 rContent와 currentHtml로 AI 인사이트를 생성하고 로그를 적재한다.
+     *
+     * @param searchVO roomId, insightPlacement(NEW_SECTION|REPLACE), rContent, currentHtml 필수 / REPLACE 시 targetValueKey 필수
+     * @return successYn, returnMsg, data (AI 응답 문자열)
+     * @throws Exception
+     */
+    public Map<String, Object> insightReport(LibraryVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getRoomId())
+                || CommonUtil.isEmpty(searchVO.getInsightPlacement())
+                || CommonUtil.isEmpty(searchVO.getRContent())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "roomId, insightPlacement, rContent가 필요합니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+        String placement = searchVO.getInsightPlacement().trim();
+        if (!INSIGHT_PLACEMENT_NEW_SECTION.equals(placement) && !INSIGHT_PLACEMENT_REPLACE.equals(placement)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "insightPlacement는 NEW_SECTION 또는 REPLACE여야 합니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+        if (INSIGHT_PLACEMENT_REPLACE.equals(placement) && CommonUtil.isEmpty(searchVO.getTargetValueKey())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "REPLACE일 때 targetValueKey가 필요합니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+        String currentHtml = searchVO.getCurrentHtml();
+        if (CommonUtil.isEmpty(currentHtml)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "currentHtml이 필요합니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+
+        LibraryVO lastLog = libraryDAO.selectLastReportChatLog(searchVO);
+        Integer lastIdx = (lastLog != null && lastLog.getIdxNo() != null) ? lastLog.getIdxNo() : 0;
+
+        List<String> extractedImgTags = new ArrayList<>();
+        String strippedHtml = stripImgTags(currentHtml, extractedImgTags);
+
+        String promptId = INSIGHT_PLACEMENT_NEW_SECTION.equals(placement)
+                ? PROMPT_ID_INSIGHT_NEW_SECTION
+                : PROMPT_ID_INSIGHT_REPLACE;
+        String targetValueKey = INSIGHT_PLACEMENT_REPLACE.equals(placement)
+                ? searchVO.getTargetValueKey()
+                : null;
+        String insightFieldId = INSIGHT_PLACEMENT_NEW_SECTION.equals(placement) ? INSIGHT_FIELD_ID : null;
+        String prompt = buildInsightReportPrompt(promptId, strippedHtml, searchVO.getRContent(), targetValueKey, insightFieldId);
+        if (CommonUtil.isEmpty(prompt)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "인사이트 분석 프롬프트가 없습니다.");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+        logger.info("insightReport prompt (placement={}): {}", placement, prompt);
+        String res = chatbotService.callAiSummary(prompt, "insightReport");
+        if (CommonUtil.isEmpty(res)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "AI 보고서 인사이트 분석 실패");
+            resultMap.put("data", null);
+            return resultMap;
+        }
+
+        if (!extractedImgTags.isEmpty()) {
+            res = restoreImgTags(res, extractedImgTags);
+        }
+
+        StringBuilder askQuery = new StringBuilder("INSIGHT:").append(placement);
+        if (!CommonUtil.isEmpty(targetValueKey)) {
+            askQuery.append(":").append(targetValueKey);
+        }
+        LibraryVO reportLog = new LibraryVO();
+        reportLog.setRoomId(searchVO.getRoomId());
+        reportLog.setIdxNo(lastIdx + 1);
+        reportLog.setUserId(SessionUtil.getUserId());
+        reportLog.setReportData(res);
+        reportLog.setAskQuery(askQuery.toString());
+        libraryDAO.insertReportChatLog(reportLog);
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "AI 보고서 인사이트 분석 성공");
+        resultMap.put("data", res);
+        return resultMap;
+    }
+
+    /**
+     * 보고서 인사이트 분석 프롬프트 생성 (DB 템플릿의 {{R_CONTENT}}, {{CURRENT_HTML}} 등 치환)
+     */
+    private String buildInsightReportPrompt(String promptId, String currentHtml, String rContent,
+            String targetValueKey, String insightFieldId) throws Exception {
+        String promptTemplate = CommonUtil.nullToBlank(promptService.getPrompt(promptId, "N"));
+        if (CommonUtil.isEmpty(promptTemplate)) {
+            return "";
+        }
+        return promptTemplate
+                .replace("{{R_CONTENT}}", rContent == null ? "" : rContent)
+                .replace("{{CURRENT_HTML}}", currentHtml == null ? "" : currentHtml)
+                .replace("{{TARGET_VALUE_KEY}}", targetValueKey == null ? "" : targetValueKey)
+                .replace("{{INSIGHT_FIELD_ID}}", insightFieldId == null ? "" : insightFieldId);
     }
 
     /**
