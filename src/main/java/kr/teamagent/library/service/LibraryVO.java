@@ -2,6 +2,8 @@ package kr.teamagent.library.service;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -36,8 +38,12 @@ public class LibraryVO {
     private String searchTitle;
     private String searchSort;
 
-    /** TB_CHAT_LOG 조인 필드 */
+    /** TB_CHAT_LOG 조인 필드 (Jackson: rContent/qContent는 JavaBeans 규칙상 RContent로 역직렬화되는 문제 방지) */
+    @JsonProperty("qContent")
+    @JsonAlias("QContent")
     private String qContent;
+    @JsonProperty("rContent")
+    @JsonAlias("RContent")
     private String rContent;
     private String ttsq;
     private String agentId;
@@ -159,6 +165,12 @@ public class LibraryVO {
 
     /** TB_REPORT_CHAT_LOG.ASK_QUERY */
     private String askQuery;
+
+    /** insightReport API: NEW_SECTION | REPLACE */
+    private String insightPlacement;
+
+    /** insightReport API: REPLACE일 때 data-value-key */
+    private String targetValueKey;
 
     /** TB_REPORT_CHAT_LOG.IDX_NO */
     private Integer idxNo;
