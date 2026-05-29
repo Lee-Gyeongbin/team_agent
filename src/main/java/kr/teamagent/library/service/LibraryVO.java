@@ -39,11 +39,7 @@ public class LibraryVO {
     private String searchSort;
 
     /** TB_CHAT_LOG 조인 필드 (Jackson: rContent/qContent는 JavaBeans 규칙상 RContent로 역직렬화되는 문제 방지) */
-    @JsonProperty("qContent")
-    @JsonAlias("QContent")
     private String qContent;
-    @JsonProperty("rContent")
-    @JsonAlias("RContent")
     private String rContent;
     private String ttsq;
     private String agentId;
