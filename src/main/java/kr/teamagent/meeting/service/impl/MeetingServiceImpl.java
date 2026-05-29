@@ -637,22 +637,20 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             JSONParser parser = new JSONParser();
             JSONObject flat = (JSONObject) parser.parse(minutes.getFlatData());
 
-            // decisions: (화자N) → (실명) 치환
-            Map<String, String> replaceMap = new LinkedHashMap<>();
+            // decisions: (화자N) 또는 (화자1, 화자2) → (실명) 치환
+            // label → name 맵 구성 (단일/복합 패턴 모두 대응)
+            Map<String, String> labelNameMap = new LinkedHashMap<>();
             for (MeetingVO spk : speakerList) {
                 String label = labelById.get(spk.getSpeakerId());
                 String nm = nameById.get(spk.getSpeakerId());
                 if (!CommonUtil.isEmpty(label) && !CommonUtil.isEmpty(nm)) {
-                    replaceMap.put("(" + label + ")", "(" + nm + ")");
+                    labelNameMap.put(label, nm);
                 }
             }
-            if (!replaceMap.isEmpty()) {
+            if (!labelNameMap.isEmpty()) {
                 Object decisionsObj = flat.get("decisions");
                 if (decisionsObj instanceof String) {
-                    String decisionsStr = (String) decisionsObj;
-                    for (Map.Entry<String, String> e : replaceMap.entrySet()) {
-                        decisionsStr = decisionsStr.replace(e.getKey(), e.getValue());
-                    }
+                    String decisionsStr = replaceLabelsInAnnotations((String) decisionsObj, labelNameMap);
                     flat.put("decisions", decisionsStr);
                 }
             }
@@ -689,6 +687,31 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         } catch (Exception e) {
             logger.error("회의록 화자 정보 업데이트 실패 - meetingId: {}", meetingId, e);
         }
+    }
+
+    /**
+     * decisions 문자열에서 (라벨) 또는 (라벨1, 라벨2) 패턴 내 개별 라벨을 실명으로 치환.
+     * 단순 replace는 복합 패턴 "(화자1, 화자2)"에서 "(화자1)"을 찾지 못하므로,
+     * 정규식으로 모든 (...) 블록을 추출한 뒤 쉼표 분리 → 개별 치환 → 재조합.
+     */
+    private String replaceLabelsInAnnotations(String text, Map<String, String> labelNameMap) {
+        if (text == null || labelNameMap.isEmpty()) return text;
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("\\(([^)]+)\\)");
+        java.util.regex.Matcher m = p.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String inner = m.group(1);
+            String[] parts = inner.split(",\\s*");
+            // LinkedHashSet: 삽입 순서 유지 + 중복 제거
+            // 머지된 화자(화자1·화자3 → 김충환)가 같은 괄호 안에 있으면 이름 하나로 합산
+            java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+            for (String part : parts) {
+                names.add(labelNameMap.getOrDefault(part.trim(), part.trim()));
+            }
+            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement("(" + String.join(", ", names) + ")"));
+        }
+        m.appendTail(sb);
+        return sb.toString();
     }
 
     /** diarize 세그먼트 기반으로 fullText의 SPEAKER_XX를 화자N 레이블로 치환 */
