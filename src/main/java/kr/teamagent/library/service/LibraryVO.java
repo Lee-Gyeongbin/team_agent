@@ -1,8 +1,10 @@
 package kr.teamagent.library.service;
 
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
@@ -186,6 +188,47 @@ public class LibraryVO {
         private String tmplType;
         private String llmPrompt;
         private String tmplHtml;
+    }
+
+    /** Agent 서브 설정 일괄 조회 파라미터 */
+    private List<String> agentIdList;
+
+    /** 에이전트 정보 [TB_AGT] — selectAgentListForLibrary 응답 */
+    @Getter
+    @Setter
+    public static class AgentItem {
+        private String agentId;
+        private String agentNm;
+        private String svcTy;
+        private String svcTyNm;
+        private String description;
+        private String apiPort;
+        private String apiEndpoint;
+        private String apiUrlCd;
+        private Integer sortOrd;
+        private String useYn;
+        private String iconId;
+        private String colorId;
+        private String iconClassNm;
+        private String colorHex;
+        private AgtSubCfgVO subCfg;
+    }
+
+    /** Agent 서브 설정 [TB_AGT_SUB_CFG] */
+    @Getter
+    @Setter
+    public static class AgtSubCfgVO {
+        private String subCfgId;
+        private String agentId;
+        private String subTy;
+        /** MyBatis JSON 컬럼(ADDITIONAL_CONFIG) 매핑용 */
+        @JsonIgnore
+        private String additionalConfig;
+        @JsonProperty("additionalConfig")
+        private Map<String, Object> additionalConfigMap;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
     }
 
     /** 카드 공유 요청 payload [TB_KNOW_CARD_SHARE, TB_NOTIFY] */

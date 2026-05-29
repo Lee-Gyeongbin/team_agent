@@ -26,6 +26,20 @@ public class LibraryController extends BaseController {
     private LibraryServiceImpl libraryService;
 
     /**
+     * 라이브러리용 에이전트 목록 조회 (USE_YN 무관, 서브 설정 포함)
+     * @param searchVO
+     * @return agentList
+     * @throws Exception
+     */
+    @RequestMapping(value = "/selectAgentListForLibrary.do")
+    @ResponseBody
+    public ModelAndView selectAgentListForLibrary(LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("agentList", libraryService.selectAgentListForLibrary(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 카테고리 목록 조회
      * @param searchVO
      * @return
