@@ -54,6 +54,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
     private static final String LUNCH_MENU_AGENT_ID = "AG000009";
     private static final String MEME_AGENT_ID = "AG000011";
+    private static final String RECOMMEND_SUB_TY = "RECOMMEND";
 
     /** summary_query 동기 호출 시 프롬프트·응답이 커 지연이 길어질 수 있는 경우의 OkHttp 읽기 타임아웃(초). */
     private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
@@ -246,6 +247,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 스트리밍 호출용 URL. 점심·밈 에이전트는 전용 URL.
      */
     private String resolveStreamingApiUrl(String svcTy, String agentId, List<Long> attachmentFileIds) {
+        // RECOMMEND 에이전트: 전용 URL이 설정된 경우 사용, 없으면 기본 chat API 사용
+        if (isRecommendAgent(agentId)) {
+            String recommendApiUrl = PropertyUtil.getProperty("Globals.chatbot.recommend.apiUrl");
+            if (CommonUtil.isNotEmpty(recommendApiUrl)) {
+                logger.info("resolveStreamingApiUrl: recommend agent -> recommend_query URL");
+                return recommendApiUrl;
+            }
+            logger.info("resolveStreamingApiUrl: recommend agent -> default chat URL");
+            return getApiUrl(svcTy);
+        }
+
         if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
             String lunchApiUrl = PropertyUtil.getProperty("Globals.chatbot.lunch.apiUrl");
             if (CommonUtil.isNotEmpty(lunchApiUrl)) {
@@ -522,7 +534,31 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
     }
 
+    /**
+     * SUB_TY=RECOMMEND 에이전트 여부 판별 — 기존 selectAgentSubCfgListByAgentIds 재사용
+     * RECOMMEND 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
+     */
+    private boolean isRecommendAgent(String agentId) {
+        if (CommonUtil.isEmpty(agentId)) return false;
+        try {
+            ChatbotVO searchVO = new ChatbotVO();
+            searchVO.setAgentIdList(java.util.Collections.singletonList(agentId));
+            List<ChatbotVO.AgtSubCfgVO> list = chatbotDAO.selectAgentSubCfgListByAgentIds(searchVO);
+            if (list == null || list.isEmpty()) return false;
+            ChatbotVO.AgtSubCfgVO subCfg = list.get(0);
+            return RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+        } catch (Exception e) {
+            logger.warn("isRecommendAgent 조회 중 오류 (agentId={}): {}", agentId, e.getMessage());
+            return false;
+        }
+    }
+
     private String buildRequestQueryByAgent(String query, String agentId) {
+        // RECOMMEND 에이전트: Frontend에서 완성형 프롬프트 전달 — 래핑 없이 그대로 반환
+        if (isRecommendAgent(agentId)) {
+            return query;
+        }
+
         if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
             String userInput = CommonUtil.isNotEmpty(query) ? query : "";
             String prompt =
@@ -737,6 +773,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
         boolean isLunchAgent = LUNCH_MENU_AGENT_ID.equals(agentId);
+        if (!isLunchAgent && isRecommendAgent(agentId)) {
+            logger.info("processStreamingResponse: RECOMMEND agent (agentId={}) — 일반 스트리밍 처리", agentId);
+        }
 
         String line;
         String currentEvent = null;
