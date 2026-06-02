@@ -175,4 +175,45 @@ public class DatamartVO {
         private String modifyDt;
     }
 
+    @Getter
+    @Setter
+    public static class MetaSynonymRowVO {
+        private String datamartId;
+        private String synonymId;
+        private String synonymWord;
+        private String representYn;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
+    @Getter
+    @Setter
+    public static class MetaSynonymSavePayloadVO {
+        private String datamartId;
+        private List<MetaSynonymRowVO> synonymList;
+    }
+
+    @Getter
+    @Setter
+    public static class MetaFewshotRowVO {
+        private String datamartId;
+        private String fewshotId;
+        private String userQuestion;
+        private String aiUnderstand;
+        private String aiRefExam;
+        private String sqlExam;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
+    @Getter
+    @Setter
+    public static class MetaFewshotSavePayloadVO {
+        private String datamartId;
+        private List<MetaFewshotRowVO> fewshotList;
+    }
 }

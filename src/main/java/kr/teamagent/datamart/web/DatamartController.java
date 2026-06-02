@@ -185,4 +185,55 @@ public class DatamartController extends BaseController {
         return makeSuccessJsonData();
     }
 
+    /**
+     * 메타 관리 > 동의어 목록 조회 API
+     * @param searchVO datamartId 필수
+     * @return { datamartId, synonymList: MetaSynonymRowVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaSynonymList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaSynonymList(@RequestBody DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.selectMetaSynonymList(searchVO);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 메타 관리 > 동의어 저장 API (등록/수정)
+     * @param payload datamartId, synonymList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaSynonymSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaSynonymSave(@RequestBody DatamartVO.MetaSynonymSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.saveMetaSynonymList(payload);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 메타 관리 > 퓨샷 목록 조회 API
+     * @param searchVO datamartId 필수
+     * @return { datamartId, fewshotList: MetaFewshotRowVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaFewshotList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaFewshotList(@RequestBody DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.selectMetaFewshotList(searchVO);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 메타 관리 > 퓨샷 저장 API
+     * @param payload datamartId, fewshotList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaFewshotSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaFewshotSave(@RequestBody DatamartVO.MetaFewshotSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.saveMetaFewshotList(payload);
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

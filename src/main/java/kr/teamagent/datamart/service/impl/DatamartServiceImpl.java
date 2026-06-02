@@ -627,4 +627,453 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
+    /**
+     * 데이터마트 동의어 목록 조회
+     * @param searchVO datamartId 필수
+     * @return { datamartId, synonymList: MetaSynonymRowVO[] }
+     * @throws Exception
+     */
+    public HashMap<String, Object> selectMetaSynonymList(DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        List<DatamartVO.MetaSynonymRowVO> synonymList = datamartDAO.selectMetaSynonymList(searchVO);
+        resultMap.put("datamartId", searchVO != null ? searchVO.getDatamartId() : "");
+        resultMap.put("synonymList", synonymList != null ? synonymList : new ArrayList<DatamartVO.MetaSynonymRowVO>());
+        return resultMap;
+    }
+
+    /**
+     * 데이터마트 동의어 저장(목록)
+     * @param payload datamartId, synonymList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @Transactional
+    public HashMap<String, Object> saveMetaSynonymList(DatamartVO.MetaSynonymSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        List<DatamartVO.MetaSynonymRowVO> synonymList = payload != null ? payload.getSynonymList() : null;
+        if (synonymList == null || synonymList.isEmpty()) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "동의어 목록이 비어 있습니다.");
+            return resultMap;
+        }
+
+        String payloadDatamartId = payload.getDatamartId();
+        List<DatamartVO.MetaSynonymRowVO> validRows = new ArrayList<>();
+        for (DatamartVO.MetaSynonymRowVO row : synonymList) {
+            if (row == null || CommonUtil.isEmpty(row.getSynonymWord())) {
+                continue;
+            }
+            if (CommonUtil.isEmpty(row.getDatamartId())) {
+                row.setDatamartId(payloadDatamartId);
+            }
+            validRows.add(row);
+        }
+        if (validRows.isEmpty()) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "동의어 목록이 비어 있습니다.");
+            return resultMap;
+        }
+
+        String synonymDuplicateMsg = validateMetaSynonymUniqueness(payloadDatamartId, validRows);
+        if (synonymDuplicateMsg != null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", synonymDuplicateMsg);
+            return resultMap;
+        }
+
+        assignSynonymIdsForSave(validRows);
+        applyMetaSynonymSortOrd(validRows);
+        for (DatamartVO.MetaSynonymRowVO row : validRows) {
+            applyMetaSynonymRowDefaults(row);
+            datamartDAO.updateMetaSynonym(row);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "데이터마트 동의어 저장 성공");
+        return resultMap;
+    }
+
+    /**
+     * 저장 payload 기준으로 SYNONYM_ID를 채운다.
+     * - synonymId가 있으면 유지
+     * - ID가 없는 일반 동의어(REPRESENT_YN!=Y)는 직전 그룹 ID 상속
+     * - ID가 없는 대표(REPRESENT_YN=Y)는 동일 단어의 기존 대표 행 ID 재사용, 없으면 신규 그룹 ID
+     * - 신규 ID는 한 요청 내에서 로컬 시퀀스로 발급 (generateTableKey 반복 호출 시 동일 ID 중복 방지)
+     */
+    private void assignSynonymIdsForSave(List<DatamartVO.MetaSynonymRowVO> rows) throws Exception {
+        String currentSynonymId = null;
+        int[] batchNextSeq = new int[] { -1 };
+
+        for (DatamartVO.MetaSynonymRowVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+
+            if (CommonUtil.isNotEmpty(row.getSynonymId())) {
+                currentSynonymId = row.getSynonymId().trim();
+                continue;
+            }
+
+            boolean isRepresent = "Y".equalsIgnoreCase(CommonUtil.nullToBlank(row.getRepresentYn()));
+            if (!isRepresent && CommonUtil.isNotEmpty(currentSynonymId)) {
+                row.setSynonymId(currentSynonymId);
+                continue;
+            }
+
+            DatamartVO.MetaSynonymRowVO existsRow = datamartDAO.selectMetaSynonymByWord(row);
+            boolean reuseExistingGroupId = existsRow != null
+                    && CommonUtil.isNotEmpty(existsRow.getSynonymId())
+                    && (!isRepresent || "Y".equalsIgnoreCase(CommonUtil.nullToBlank(existsRow.getRepresentYn())));
+
+            if (reuseExistingGroupId) {
+                currentSynonymId = existsRow.getSynonymId().trim();
+            } else {
+                currentSynonymId = allocateSynonymIdInBatch(batchNextSeq);
+            }
+            row.setSynonymId(currentSynonymId);
+        }
+    }
+
+    /**
+     * 동일 저장 요청에서 신규 SYNONYM_ID를 중복 없이 발급한다.
+     */
+    private String allocateSynonymIdInBatch(int[] batchNextSeq) throws Exception {
+        if (batchNextSeq[0] < 0) {
+            String seedKey = keyGenerate.generateTableKey("DS", "TB_DM_SYNONYM", "SYNONYM_ID");
+            batchNextSeq[0] = Integer.parseInt(seedKey.substring(2)) + 1;
+            return seedKey;
+        }
+        String key = "DS" + String.format("%06d", batchNextSeq[0]);
+        batchNextSeq[0]++;
+        return key;
+    }
+
+    /**
+     * SORT_ORD 순서 지정 (저장 시에만 사용)
+     * - 대표(REPRESENT_YN=Y): 전역 순번 1..N
+     * - 일반 동의어(REPRESENT_YN!=Y): SYNONYM_ID 그룹별 순번 1..N
+     */
+    private void applyMetaSynonymSortOrd(List<DatamartVO.MetaSynonymRowVO> rows) {
+        List<DatamartVO.MetaSynonymRowVO> sortedList = new ArrayList<>();
+        for (DatamartVO.MetaSynonymRowVO row : rows) {
+            if (row != null) {
+                sortedList.add(row);
+            }
+        }
+
+        sortedList.sort((a, b) -> {
+            String aRepresentYn = CommonUtil.nullToBlank(a.getRepresentYn());
+            String bRepresentYn = CommonUtil.nullToBlank(b.getRepresentYn());
+            boolean aIsRepresent = "Y".equalsIgnoreCase(aRepresentYn);
+            boolean bIsRepresent = "Y".equalsIgnoreCase(bRepresentYn);
+
+            // 1) 대표값 먼저
+            if (aIsRepresent != bIsRepresent) {
+                return aIsRepresent ? -1 : 1;
+            }
+
+            int aSortOrd = a.getSortOrd() != null ? a.getSortOrd() : Integer.MAX_VALUE;
+            int bSortOrd = b.getSortOrd() != null ? b.getSortOrd() : Integer.MAX_VALUE;
+
+            // 2) 대표값끼리는 기존 sortOrd 기준
+            if (aIsRepresent && bIsRepresent) {
+                return Integer.compare(aSortOrd, bSortOrd);
+            }
+
+            // 3) 같은 동의어 ID끼리 묶기
+            String aSynonymId = CommonUtil.nullToBlank(a.getSynonymId());
+            String bSynonymId = CommonUtil.nullToBlank(b.getSynonymId());
+            int idCompare = aSynonymId.compareTo(bSynonymId);
+            if (idCompare != 0) {
+                return idCompare;
+            }
+
+            // 4) 같은 동의어 ID 내 일반 동의어 정렬
+            return Integer.compare(aSortOrd, bSortOrd);
+        });
+
+        int representOrd = 1;
+        Map<String, Integer> normalOrdMap = new HashMap<>();
+        for (DatamartVO.MetaSynonymRowVO row : sortedList) {
+            boolean isRepresent = "Y".equalsIgnoreCase(CommonUtil.nullToBlank(row.getRepresentYn()));
+            if (isRepresent) {
+                row.setSortOrd(representOrd++);
+                continue;
+            }
+
+            String key = CommonUtil.nullToBlank(row.getSynonymId());
+            int normalOrd = normalOrdMap.getOrDefault(key, 1);
+            row.setSortOrd(normalOrd);
+            normalOrdMap.put(key, normalOrd + 1);
+        }
+
+        rows.clear();
+        rows.addAll(sortedList);
+    }
+
+    private void applyMetaSynonymRowDefaults(DatamartVO.MetaSynonymRowVO datamartVO) {
+        if (CommonUtil.isEmpty(datamartVO.getRepresentYn())) {
+            datamartVO.setRepresentYn("N");
+        }
+        if (CommonUtil.isEmpty(datamartVO.getUseYn())) {
+            datamartVO.setUseYn("Y");
+        }
+    }
+
+    /**
+     * 데이터마트 퓨샷 목록 조회
+     * @param searchVO datamartId 필수
+     * @return { datamartId, fewshotList: MetaFewshotRowVO[] }
+     * @throws Exception
+     */
+    public HashMap<String, Object> selectMetaFewshotList(DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        List<DatamartVO.MetaFewshotRowVO> fewshotList = datamartDAO.selectMetaFewshotList(searchVO);
+        resultMap.put("datamartId", searchVO != null ? searchVO.getDatamartId() : "");
+        resultMap.put("fewshotList", fewshotList != null ? fewshotList : new ArrayList<DatamartVO.MetaFewshotRowVO>());
+        return resultMap;
+    }
+
+    /**
+     * 데이터마트 퓨샷 저장(목록)
+     * @param payload datamartId, fewshotList (useYn: Y=저장, N=삭제(프론트 전달))
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @Transactional
+    public HashMap<String, Object> saveMetaFewshotList(DatamartVO.MetaFewshotSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        List<DatamartVO.MetaFewshotRowVO> fewshotList = payload.getFewshotList();
+        if (fewshotList == null || fewshotList.isEmpty()) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "퓨샷 목록이 비어 있습니다.");
+            return resultMap;
+        }
+
+        String payloadDatamartId = payload.getDatamartId();
+        List<DatamartVO.MetaFewshotRowVO> validRows = new ArrayList<>();
+        for (DatamartVO.MetaFewshotRowVO row : fewshotList) {
+            if (row == null) {
+                continue;
+            }
+            if (CommonUtil.isEmpty(row.getDatamartId())) {
+                row.setDatamartId(payloadDatamartId);
+            }
+            normalizeMetaFewshotUseYn(row);
+
+            if (isMetaFewshotDeleteRow(row)) {
+                if (CommonUtil.isEmpty(row.getFewshotId())) {
+                    continue;
+                }
+                validRows.add(row);
+                continue;
+            }
+            if (CommonUtil.isEmpty(row.getUserQuestion())) {
+                continue;
+            }
+            validRows.add(row);
+        }
+        if (validRows.isEmpty()) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "퓨샷 목록이 비어 있습니다.");
+            return resultMap;
+        }
+
+        String fewshotDuplicateMsg = validateMetaFewshotUniqueness(payloadDatamartId, validRows);
+        if (fewshotDuplicateMsg != null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", fewshotDuplicateMsg);
+            return resultMap;
+        }
+
+        assignFewshotIdsForSave(payloadDatamartId, validRows);
+        for (DatamartVO.MetaFewshotRowVO row : validRows) {
+            datamartDAO.saveMetaFewshot(row);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "데이터마트 퓨샷 저장 성공");
+        return resultMap;
+    }
+
+    private boolean isMetaFewshotDeleteRow(DatamartVO.MetaFewshotRowVO row) {
+        return row != null && "N".equalsIgnoreCase(CommonUtil.nullToBlank(row.getUseYn()));
+    }
+
+    private void normalizeMetaFewshotUseYn(DatamartVO.MetaFewshotRowVO row) {
+        if (row == null) {
+            return;
+        }
+        String useYn = CommonUtil.nullToBlank(row.getUseYn()).trim();
+        if (CommonUtil.isEmpty(useYn)) {
+            row.setUseYn("Y");
+            return;
+        }
+        row.setUseYn(useYn.toUpperCase());
+    }
+
+    /**
+     * 동의어 (DATAMART_ID, SYNONYM_WORD) UNIQUE 검증
+     * @return 중복 시 FAIL 메시지, 없으면 null
+     */
+    private String validateMetaSynonymUniqueness(String datamartId, List<DatamartVO.MetaSynonymRowVO> rows)
+            throws Exception {
+        Set<String> seenWords = new HashSet<>();
+        for (DatamartVO.MetaSynonymRowVO row : rows) {
+            if (row == null || CommonUtil.isEmpty(row.getSynonymWord())) {
+                continue;
+            }
+            String synonymWord = row.getSynonymWord().trim();
+            if (!seenWords.add(synonymWord)) {
+                return "동일한 동의어가 중복되었습니다: " + synonymWord;
+            }
+        }
+
+        for (DatamartVO.MetaSynonymRowVO row : rows) {
+            if (row == null || CommonUtil.isEmpty(row.getSynonymWord())) {
+                continue;
+            }
+            if (CommonUtil.isEmpty(row.getDatamartId())) {
+                row.setDatamartId(datamartId);
+            }
+            DatamartVO.MetaSynonymRowVO existsRow = datamartDAO.selectMetaSynonymByWord(row);
+            if (existsRow == null || CommonUtil.isEmpty(existsRow.getSynonymWord())) {
+                continue;
+            }
+            String existingWord = existsRow.getSynonymWord().trim();
+            String rowWord = row.getSynonymWord().trim();
+            if (!existingWord.equals(rowWord)) {
+                continue;
+            }
+            String existingSynonymId = CommonUtil.nullToBlank(existsRow.getSynonymId()).trim();
+            String rowSynonymId = CommonUtil.nullToBlank(row.getSynonymId()).trim();
+            if (CommonUtil.isNotEmpty(rowSynonymId) && !existingSynonymId.equals(rowSynonymId)) {
+                return "이미 등록된 동의어입니다: " + rowWord;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 퓨샷 (DATAMART_ID, USER_QUESTION) UNIQUE 검증
+     * @return 중복 시 FAIL 메시지, 없으면 null
+     */
+    private String validateMetaFewshotUniqueness(String datamartId, List<DatamartVO.MetaFewshotRowVO> rows)
+            throws Exception {
+        Set<String> seenQuestions = new HashSet<>();
+        Set<String> seenFewshotIds = new HashSet<>();
+        for (DatamartVO.MetaFewshotRowVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+            if (isMetaFewshotDeleteRow(row)) {
+                if (CommonUtil.isNotEmpty(row.getFewshotId())) {
+                    String fewshotId = row.getFewshotId().trim();
+                    if (!seenFewshotIds.add(fewshotId)) {
+                        return "동일한 퓨샷 ID가 중복되었습니다: " + fewshotId;
+                    }
+                }
+                continue;
+            }
+            String userQuestion = CommonUtil.nullToBlank(row.getUserQuestion()).trim();
+            if (CommonUtil.isEmpty(userQuestion)) {
+                continue;
+            }
+            if (!seenQuestions.add(userQuestion)) {
+                return "동일한 사용자 질문이 중복되었습니다: " + userQuestion;
+            }
+            if (CommonUtil.isNotEmpty(row.getFewshotId())) {
+                String fewshotId = row.getFewshotId().trim();
+                if (!seenFewshotIds.add(fewshotId)) {
+                    return "동일한 퓨샷 ID가 중복되었습니다: " + fewshotId;
+                }
+            }
+        }
+
+        for (DatamartVO.MetaFewshotRowVO row : rows) {
+            if (row == null || isMetaFewshotDeleteRow(row)) {
+                continue;
+            }
+            String userQuestion = CommonUtil.nullToBlank(row.getUserQuestion()).trim();
+            if (CommonUtil.isEmpty(userQuestion)) {
+                continue;
+            }
+            if (CommonUtil.isEmpty(row.getDatamartId())) {
+                row.setDatamartId(datamartId);
+            }
+            DatamartVO.MetaFewshotRowVO existsRow = datamartDAO.selectMetaFewshotByQuestion(row);
+            if (existsRow == null || CommonUtil.isEmpty(existsRow.getUserQuestion())) {
+                continue;
+            }
+            String existingQuestion = existsRow.getUserQuestion().trim();
+            if (!existingQuestion.equals(userQuestion)) {
+                continue;
+            }
+            String existingFewshotId = CommonUtil.nullToBlank(existsRow.getFewshotId()).trim();
+            String rowFewshotId = CommonUtil.nullToBlank(row.getFewshotId()).trim();
+            if (CommonUtil.isEmpty(rowFewshotId) || !existingFewshotId.equals(rowFewshotId)) {
+                return "이미 등록된 사용자 질문입니다: " + userQuestion;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 저장 payload 기준으로 신규 행에 FEWSHOT_ID·SORT_ORD를 채운다.
+     * - ID: allocateSynonymIdInBatch / allocateFewshotIdInBatch와 동일(로컬 시퀀스)
+     * - SORT_ORD: AgentServiceImpl.saveAgent 신규 등록과 동일(MAX+1, datamartId 단위)
+     */
+    private void assignFewshotIdsForSave(String datamartId, List<DatamartVO.MetaFewshotRowVO> rows) throws Exception {
+        Set<String> reservedIds = new HashSet<>();
+        for (DatamartVO.MetaFewshotRowVO row : rows) {
+            if (row != null && CommonUtil.isNotEmpty(row.getFewshotId())) {
+                reservedIds.add(row.getFewshotId().trim());
+            }
+        }
+
+        int[] batchNextSeq = new int[] { -1 };
+        int[] batchNextSortOrd = new int[] { -1 };
+        for (DatamartVO.MetaFewshotRowVO row : rows) {
+            if (row == null || CommonUtil.isNotEmpty(row.getFewshotId())) {
+                continue;
+            }
+            if (isMetaFewshotDeleteRow(row)) {
+                continue;
+            }
+
+            String newId;
+            do {
+                newId = allocateFewshotIdInBatch(batchNextSeq);
+            } while (reservedIds.contains(newId));
+            reservedIds.add(newId);
+            row.setFewshotId(newId);
+
+            if (batchNextSortOrd[0] < 0) {
+                DatamartVO searchVO = new DatamartVO();
+                searchVO.setDatamartId(datamartId);
+                batchNextSortOrd[0] = datamartDAO.selectMetaFewshotMaxSortOrd(searchVO) + 1;
+            }
+            row.setSortOrd(batchNextSortOrd[0]++);
+        }
+    }
+
+    /**
+     * 동일 저장 요청에서 신규 FEWSHOT_ID를 중복 없이 발급한다.
+     */
+    private String allocateFewshotIdInBatch(int[] batchNextSeq) throws Exception {
+        if (batchNextSeq[0] < 0) {
+            String seedKey = keyGenerate.generateTableKey("FW", "TB_DM_FEWSHOT", "FEWSHOT_ID");
+            batchNextSeq[0] = Integer.parseInt(seedKey.substring(2)) + 1;
+            return seedKey;
+        }
+        String key = "FW" + String.format("%06d", batchNextSeq[0]);
+        batchNextSeq[0]++;
+        return key;
+    }
 }
