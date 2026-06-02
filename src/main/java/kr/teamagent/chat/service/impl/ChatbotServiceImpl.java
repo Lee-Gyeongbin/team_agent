@@ -814,6 +814,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     JSONParser jsonParser = new JSONParser();
                     JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
 
+                    
+                    if ("status".equals(currentEvent)) {
+                        String code = (String) data.get("code");
+                        String message = (String) data.get("message");
+                        JSONObject status = new JSONObject();
+                        status.put("statusCode", code);
+                        status.put("statusMessage", message);
+                        callback.onStatus(code, message);
+                        continue;
+                    }
+
                     if ("answer_delta".equals(currentEvent)) {
                         String text = (String) data.get("text");
                         if (text != null && text.length() > 0) {

@@ -263,6 +263,16 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
          * 실제 응답 전송 방식은 구현체(WebSocketHandler)에서 결정한다.
          */
         ChatbotStreamingCallback callback = new ChatbotStreamingCallback() {
+
+            @Override
+            public void onStatus(String statusCode, String statusMessage) {
+                JSONObject message = new JSONObject();
+                message.put("type", "status");
+                message.put("statusCode", statusCode);
+                message.put("statusMessage", statusMessage);
+                sendMessage(session, message.toJSONString());
+            }
+            
             @Override
             public void onChunk(String content, String accumulated, String chunkEvent) {
                 // chunk 메시지: content는 새로 추가된 글자만 전송 (GPT처럼 한 글자씩 실시간 표시)
@@ -361,6 +371,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
         /**
          * @param chunkEvent null 또는 빈 문자열이면 답변 텍스트 델타(answer_delta). "answer_source" 등이면 구조화 청크.
          */
+        void onStatus(String statusCode, String statusMessage);
         void onChunk(String content, String accumulated, String chunkEvent);
         void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData, String chartOption);
         void onError(String error);
