@@ -395,4 +395,165 @@
         FROM TB_DM A
     </select>
 
+    <select id="selectDatamartSynonymList" parameterType="datamartVO" resultType="kr.teamagent.datamart.service.DatamartVO$MetaSynonymRowVO">
+        /* 데이터마트 동의어 목록 조회 datamart.selectDatamartSynonYmList */
+        SELECT
+            A.DATAMART_ID AS datamartId
+            , A.SYNONYM_ID AS synonymId
+            , A.SYNONYM_WORD AS synonymWord
+            , A.REPRESENT_YN AS representYn
+            , A.SORT_ORD AS sortOrd
+            , A.USE_YN AS useYn
+            , A.CREATE_DT AS createDt
+            , A.MODIFY_DT AS modifyDt
+        FROM TB_DM_SYNONYM A
+        WHERE A.DATAMART_ID = #{datamartId}
+        AND A.USE_YN = 'Y'
+        ORDER BY
+            COALESCE((
+                SELECT MIN(R.SORT_ORD)
+                FROM TB_DM_SYNONYM R
+                WHERE R.DATAMART_ID = A.DATAMART_ID
+                AND R.SYNONYM_ID = A.SYNONYM_ID
+                AND R.REPRESENT_YN = 'Y'
+                AND R.USE_YN = 'Y'
+            ), A.SORT_ORD) DESC
+            , CASE WHEN A.REPRESENT_YN = 'Y' THEN 0 ELSE 1 END
+            , A.SORT_ORD
+            , A.SYNONYM_WORD
+    </select>
+
+    <select id="selectDatamartSynonymByWord" parameterType="kr.teamagent.datamart.service.DatamartVO$MetaSynonymRowVO"
+            resultType="kr.teamagent.datamart.service.DatamartVO$MetaSynonymRowVO">
+        /* 데이터마트 동의어 단건 조회 datamart.selectDatamartSynonymByWord */
+        SELECT
+            A.DATAMART_ID AS datamartId
+            , A.SYNONYM_ID AS synonymId
+            , A.SYNONYM_WORD AS synonymWord
+            , A.REPRESENT_YN AS representYn
+            , A.SORT_ORD AS sortOrd
+            , A.USE_YN AS useYn
+            , A.CREATE_DT AS createDt
+            , A.MODIFY_DT AS modifyDt
+        FROM TB_DM_SYNONYM A
+        WHERE A.DATAMART_ID = #{datamartId}
+        AND A.SYNONYM_WORD = #{synonymWord}
+        ORDER BY
+            CASE WHEN A.USE_YN = 'Y' THEN 0 ELSE 1 END
+            , COALESCE(A.MODIFY_DT, A.CREATE_DT) DESC
+        LIMIT 1
+    </select>
+
+    <insert id="updateDatamartSynonym" parameterType="kr.teamagent.datamart.service.DatamartVO$MetaSynonymRowVO">
+        /* 메타 관리 > 동의어 등록/수정(upsert) datamart.updateDatamartSynonym */
+        INSERT INTO TB_DM_SYNONYM (
+            DATAMART_ID
+            , SYNONYM_ID
+            , SYNONYM_WORD
+            , REPRESENT_YN
+            , SORT_ORD
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{datamartId}
+            , #{synonymId}
+            , #{synonymWord}
+            , #{representYn}
+            , #{sortOrd}
+            , #{useYn}
+            , NOW()
+            , NULL
+        )
+        ON DUPLICATE KEY UPDATE
+            SYNONYM_ID = VALUES(SYNONYM_ID)
+            , SYNONYM_WORD = VALUES(SYNONYM_WORD)
+            , REPRESENT_YN = VALUES(REPRESENT_YN)
+            , SORT_ORD = VALUES(SORT_ORD)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
+
+    <select id="selectDatamartFewshotList" parameterType="datamartVO" resultType="kr.teamagent.datamart.service.DatamartVO$MetaFewshotRowVO">
+        /* 메타 관리 > 퓨샷 목록 조회 datamart.selectDatamartFewshotList */
+        SELECT
+            DATAMART_ID AS datamartId
+            , FEWSHOT_ID AS fewshotId
+            , USER_QUESTION AS userQuestion
+            , AI_UNDERSTAND AS aiUnderstand
+            , AI_REF_EXAM AS aiRefExam
+            , SQL_EXAM AS sqlExam
+            , SORT_ORD AS sortOrd
+            , USE_YN AS useYn
+            , CREATE_DT AS createDt
+            , MODIFY_DT AS modifyDt
+        FROM TB_DM_FEWSHOT
+        WHERE DATAMART_ID = #{datamartId}
+        AND USE_YN = 'Y'
+        ORDER BY SORT_ORD DESC
+    </select>
+
+    <select id="selectMetaFewshotByQuestion" parameterType="kr.teamagent.datamart.service.DatamartVO$MetaFewshotRowVO"
+            resultType="kr.teamagent.datamart.service.DatamartVO$MetaFewshotRowVO">
+        /* 메타 관리 > 퓨샷 단건 조회 (DATAMART_ID + USER_QUESTION) datamart.selectMetaFewshotByQuestion */
+        SELECT
+            DATAMART_ID AS datamartId
+            , FEWSHOT_ID AS fewshotId
+            , USER_QUESTION AS userQuestion
+            , AI_UNDERSTAND AS aiUnderstand
+            , AI_REF_EXAM AS aiRefExam
+            , SQL_EXAM AS sqlExam
+            , SORT_ORD AS sortOrd
+            , USE_YN AS useYn
+            , CREATE_DT AS createDt
+            , MODIFY_DT AS modifyDt
+        FROM TB_DM_FEWSHOT
+        WHERE DATAMART_ID = #{datamartId}
+        AND USER_QUESTION = #{userQuestion}
+        ORDER BY
+            CASE WHEN USE_YN = 'Y' THEN 0 ELSE 1 END
+            , COALESCE(MODIFY_DT, CREATE_DT) DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectMetaFewshotMaxSortOrd" parameterType="datamartVO" resultType="int">
+        /* 메타 관리 > 퓨샷 SORT_ORD 최대값 datamart.selectMetaFewshotMaxSortOrd */
+        SELECT IFNULL(MAX(SORT_ORD), 0)
+        FROM TB_DM_FEWSHOT
+        WHERE DATAMART_ID = #{datamartId}
+    </select>
+
+    <insert id="saveMetaFewshot" parameterType="kr.teamagent.datamart.service.DatamartVO$MetaFewshotRowVO">
+        /* 메타 관리 > 퓨샷 등록/수정(upsert) datamart.saveMetaFewshot */
+        INSERT INTO TB_DM_FEWSHOT (
+            DATAMART_ID
+            , FEWSHOT_ID
+            , USER_QUESTION
+            , AI_UNDERSTAND
+            , AI_REF_EXAM
+            , SQL_EXAM
+            , SORT_ORD
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{datamartId}
+            , #{fewshotId}
+            , #{userQuestion}
+            , #{aiUnderstand}
+            , #{aiRefExam}
+            , #{sqlExam}
+            , IFNULL(#{sortOrd}, 0)
+            , #{useYn}
+            , NOW()
+            , NULL
+        )
+        ON DUPLICATE KEY UPDATE
+            USER_QUESTION = VALUES(USER_QUESTION)
+            , AI_UNDERSTAND = VALUES(AI_UNDERSTAND)
+            , AI_REF_EXAM = VALUES(AI_REF_EXAM)
+            , SQL_EXAM = VALUES(SQL_EXAM)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
+    </insert>
 </mapper>
