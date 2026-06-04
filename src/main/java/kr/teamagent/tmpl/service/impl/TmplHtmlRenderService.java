@@ -17,6 +17,40 @@ import kr.teamagent.library.service.LibraryVO;
 @Service
 public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
 
+    /** createDoc 채팅 이미지 전용. 템플릿/reAskReport의 data-img-placeholder와 충돌하지 않도록 분리한다. */
+    public static final String CREATE_DOC_IMG_TOKEN = "CDOC_IMG";
+    public static final String CREATE_DOC_IMG_ATTR = "data-createdoc-img";
+
+    private static final Pattern CREATE_DOC_IMG_TOKEN_PATTERN =
+            Pattern.compile("\\[\\[" + CREATE_DOC_IMG_TOKEN + ":(\\d+)\\]\\]");
+    private static final Pattern CREATE_DOC_IMG_TAG_PATTERN = Pattern.compile(
+            "<img\\s+" + CREATE_DOC_IMG_ATTR + "=\"(\\d+)\">", Pattern.CASE_INSENSITIVE);
+
+    /** 마크다운 파이프 표 행 (| col | col |) */
+    private static final Pattern MARKDOWN_TABLE_ROW_PATTERN = Pattern.compile("^\\s*\\|.+\\|\\s*$");
+
+    /**
+     * 텍스트에 마크다운 파이프 표가 2행 이상 연속으로 포함되어 있는지 확인한다.
+     */
+    public static boolean containsMarkdownPipeTable(String text) {
+        if (CommonUtil.isEmpty(text)) {
+            return false;
+        }
+        String[] lines = text.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        int consecutive = 0;
+        for (String line : lines) {
+            if (isMarkdownTableRow(line)) {
+                consecutive++;
+                if (consecutive >= 2) {
+                    return true;
+                }
+            } else {
+                consecutive = 0;
+            }
+        }
+        return false;
+    }
+
     /**
      * 템플릿 HTML 문자열의 placeholder({{jsonKey}})를 LLM 응답 JSON 값으로 치환한다.
      * 필드 메타(`tmplFieldList`)를 기준으로 렌더링 규칙을 결정한다.
@@ -112,7 +146,7 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
                     // 배열 길이만큼 동일한 tr을 복제하며 {{no}}에 순번(1부터)을 채운다.
                     for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
                         String rowText = showSpeaker ? rows.get(rowIdx) : stripSpeakerAnnotation(rows.get(rowIdx));
-                        String cellValue = escapeHtml(rowText).replace("\r\n", "\n").replace("\n", "<br/>");
+                        String cellValue = formatTemplateCellHtml(rowText);
                         out.append(tr.replace(placeholder, cellValue)
                                      .replace("{{no}}", String.valueOf(rowIdx + 1)));
                     }
@@ -209,22 +243,59 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
             if (item.isEmpty()) {
                 continue;
             }
-
-            String[] lines = item.replace("\r\n", "\n").replace('\r', '\n').split("\n");
-            for (String line : lines) {
-                String normalized = line == null ? "" : line.trim();
-                if (normalized.isEmpty()) {
-                    continue;
-                }
-                if (sb.length() > 0) {
-                    sb.append("<br/>");
-                }
-                // 발언자 숨김: 항목 끝의 (이름) 패턴 제거 후 마커 정규화 → escape
-                String processed = showSpeaker ? normalized : stripSpeakerAnnotation(normalized);
-                sb.append(escapeHtml(normalizeListMarker(processed)));
+            if (sb.length() > 0) {
+                sb.append("<br/>");
             }
+            String processed = showSpeaker ? item : stripSpeakerAnnotationPerLine(item);
+            sb.append(formatTemplateCellHtml(processed));
         }
         return sb.toString();
+    }
+
+    /** 항목 단위로 (발언자) 제거 — 줄 단위 분해 없이 표·문단 구조를 유지한다. */
+    private static String stripSpeakerAnnotationPerLine(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String line : text.replace("\r\n", "\n").replace('\r', '\n').split("\n")) {
+            if (sb.length() > 0) {
+                sb.append("\n");
+            }
+            sb.append(stripSpeakerAnnotation(line));
+        }
+        return sb.toString();
+    }
+
+    private static boolean containsHtmlTableTag(String text) {
+        return text != null && text.toLowerCase().contains("<table");
+    }
+
+    /**
+     * 텍스트 + HTML table 혼합 본문: table 태그는 그대로 두고 앞뒤만 escape한다.
+     */
+    private static String renderTextWithEmbeddedHtmlTables(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
+        Pattern tablePattern = Pattern.compile("(?is)<table\\b[^>]*>.*?</table>");
+        Matcher matcher = tablePattern.matcher(normalized);
+        StringBuilder out = new StringBuilder();
+        int lastEnd = 0;
+        while (matcher.find()) {
+            String before = normalized.substring(lastEnd, matcher.start());
+            if (!before.isEmpty()) {
+                appendWithBr(out, renderPlainTextWithMarkdownTables(before));
+            }
+            appendWithBr(out, matcher.group());
+            lastEnd = matcher.end();
+        }
+        String tail = normalized.substring(lastEnd);
+        if (!tail.isEmpty()) {
+            appendWithBr(out, renderPlainTextWithMarkdownTables(tail));
+        }
+        return out.toString();
     }
 
     /**
@@ -319,6 +390,143 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
 
     private static String stringValue(Object obj) {
         return obj == null ? "" : String.valueOf(obj).trim();
+    }
+
+    /**
+     * 셀/리스트 텍스트를 HTML로 변환한다.
+     * [[CDOC_IMG:N]] 토큰만 escape 없이 createDoc 전용 img 플레이스홀더로 치환한다.
+     */
+    private static String formatTemplateCellHtml(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n').trim();
+        if (containsHtmlTableTag(normalized)) {
+            return renderTextWithEmbeddedHtmlTables(normalized);
+        }
+        if (!CREATE_DOC_IMG_TOKEN_PATTERN.matcher(normalized).find()
+                && !CREATE_DOC_IMG_TAG_PATTERN.matcher(normalized).find()) {
+            return renderPlainTextWithMarkdownTables(normalized);
+        }
+        StringBuilder sb = new StringBuilder();
+        Pattern combined = Pattern.compile(
+                "\\[\\[" + CREATE_DOC_IMG_TOKEN + ":(\\d+)\\]\\]|<img\\s+" + CREATE_DOC_IMG_ATTR + "=\"(\\d+)\">",
+                Pattern.CASE_INSENSITIVE);
+        Matcher matcher = combined.matcher(normalized);
+        int lastEnd = 0;
+        while (matcher.find()) {
+            String plain = normalized.substring(lastEnd, matcher.start());
+            if (!plain.isEmpty()) {
+                sb.append(renderPlainTextWithMarkdownTables(plain));
+            }
+            String idx = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+            sb.append("<img ").append(CREATE_DOC_IMG_ATTR).append("=\"").append(idx).append("\">");
+            lastEnd = matcher.end();
+        }
+        String tail = normalized.substring(lastEnd);
+        if (!tail.isEmpty()) {
+            sb.append(renderPlainTextWithMarkdownTables(tail));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 일반 텍스트는 escape·줄바꿈 처리하고, 연속된 마크다운 파이프 표는 &lt;table&gt; HTML로 변환한다.
+     */
+    private static String renderPlainTextWithMarkdownTables(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
+        String[] lines = normalized.split("\n", -1);
+        StringBuilder out = new StringBuilder();
+        List<String> tableLines = new ArrayList<>();
+
+        for (String line : lines) {
+            if (isMarkdownTableRow(line)) {
+                tableLines.add(line);
+                continue;
+            }
+            if (!tableLines.isEmpty()) {
+                appendWithBr(out, renderMarkdownTableBlock(tableLines));
+                tableLines.clear();
+            }
+            if (!line.isEmpty() || out.length() > 0) {
+                appendWithBr(out, escapeHtml(line));
+            }
+        }
+        if (!tableLines.isEmpty()) {
+            appendWithBr(out, renderMarkdownTableBlock(tableLines));
+        }
+        return out.toString();
+    }
+
+    private static void appendWithBr(StringBuilder out, String chunk) {
+        if (chunk == null || chunk.isEmpty()) {
+            return;
+        }
+        if (out.length() > 0) {
+            out.append("<br/>");
+        }
+        out.append(chunk);
+    }
+
+    private static boolean isMarkdownTableRow(String line) {
+        return line != null && MARKDOWN_TABLE_ROW_PATTERN.matcher(line).matches();
+    }
+
+    private static boolean isMarkdownSeparatorRow(String line) {
+        if (line == null) {
+            return false;
+        }
+        String t = line.trim();
+        return t.startsWith("|") && t.contains("-") && t.matches("^\\|?[\\s|:\\-]+\\|?$");
+    }
+
+    private static String[] parseMarkdownTableCells(String line) {
+        String t = line.trim();
+        if (t.startsWith("|")) {
+            t = t.substring(1);
+        }
+        if (t.endsWith("|")) {
+            t = t.substring(0, t.length() - 1);
+        }
+        String[] parts = t.split("\\|", -1);
+        for (int i = 0; i < parts.length; i++) {
+            parts[i] = parts[i].trim();
+        }
+        return parts;
+    }
+
+    private static String renderMarkdownTableBlock(List<String> lines) {
+        List<String> bodyLines = new ArrayList<>();
+        boolean hasSeparator = false;
+        for (String line : lines) {
+            if (isMarkdownSeparatorRow(line)) {
+                hasSeparator = true;
+                continue;
+            }
+            bodyLines.add(line);
+        }
+        if (bodyLines.isEmpty()) {
+            return escapeHtml(String.join("\n", lines)).replace("\n", "<br/>");
+        }
+        StringBuilder table = new StringBuilder("<table><tbody>");
+        for (int i = 0; i < bodyLines.size(); i++) {
+            boolean headerRow = hasSeparator && i == 0;
+            String[] cells = parseMarkdownTableCells(bodyLines.get(i));
+            table.append("<tr>");
+            for (String cell : cells) {
+                if (headerRow) {
+                    table.append("<th>").append(escapeHtml(cell)).append("</th>");
+                } else {
+                    table.append("<td>").append(escapeHtml(cell)).append("</td>");
+                }
+            }
+            table.append("</tr>");
+        }
+        table.append("</tbody></table>");
+        return table.toString();
     }
 
     /** 템플릿 렌더링 결과를 HTML 문맥에 안전하게 삽입하기 위한 최소 escape. */
