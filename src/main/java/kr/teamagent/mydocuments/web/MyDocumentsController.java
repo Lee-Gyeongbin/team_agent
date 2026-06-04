@@ -22,8 +22,21 @@ public class MyDocumentsController extends BaseController {
     private MyDocumentsServiceImpl myDocumentsService;
 
     /**
+     * 내 문서 목록 조회
+     * @param searchVO searchDocNm?, docStatus?, svcTy?, searchSort?
+     * @return jsonView dataList: MyDocumentsVO[]
+     */
+    @RequestMapping(value = "/list.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView list(@RequestBody(required = false) MyDocumentsVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", myDocumentsService.selectMyDocList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 나의 문서 보고서 저장 (신규/수정, INSERT ... ON DUPLICATE KEY UPDATE)
-     * @param searchVO docId?, tmplId?, docNm, docHtml, originHtml, svcTy?, rContent?, docStatus?, sortOrd?
+     * @param searchVO docId?, tmplId?, agentId?, docNm, docHtml, originHtml, svcTy?, rContent?, docStatus?, sortOrd?
      * @return jsonView successYn, returnMsg, data: { docId }
      */
     @RequestMapping(value = "/saveReport.do", method = RequestMethod.POST)

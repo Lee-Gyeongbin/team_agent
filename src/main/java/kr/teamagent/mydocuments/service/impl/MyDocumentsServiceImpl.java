@@ -1,6 +1,7 @@
 package kr.teamagent.mydocuments.service.impl;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -25,6 +26,20 @@ public class MyDocumentsServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private KeyGenerate keyGenerate;
+
+    /**
+     * 내 문서 목록 조회 (세션 사용자 기준).
+     *
+     * @param searchVO searchDocNm?, docStatus?, svcTy?, searchSort?
+     * @return 목록
+     */
+    public List<MyDocumentsVO> selectMyDocList(MyDocumentsVO searchVO) throws Exception {
+        if (searchVO == null) {
+            searchVO = new MyDocumentsVO();
+        }
+        searchVO.setUserId(SessionUtil.getUserId());
+        return myDocumentsDAO.selectMyDocList(searchVO);
+    }
 
     /**
      * 나의 문서 보고서 저장.
