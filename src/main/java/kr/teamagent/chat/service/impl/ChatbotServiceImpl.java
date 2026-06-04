@@ -794,6 +794,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String chartOption = "";
         String sql = "";
         String ttsqParam = "";
+        String ttsqPeriodParam = "";
         List<ChatRefItem> chatRefItems = new ArrayList<>();
         /** answer_source 스트림에서 누적 — done.data.items 가 있으면 그쪽이 최종 우선 */
         String webGroundingJson = "";
@@ -921,6 +922,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             chartOption = toJsonIfExists(data.get("chart_option"));
                             sql = getString(data.get("sql"));
                             ttsqParam = toJsonIfExists(data.get("ttsq_param"));
+                            Object ttsqPeriodParamObj = data.get("ttsq_period_param");
+                            if (ttsqPeriodParamObj == null) {
+                                ttsqPeriodParamObj = data.get("ttsq_period_param ");
+                            }
+                            ttsqPeriodParam = toJsonIfExists(ttsqPeriodParamObj);
 
                             chatRefItems = extractChatRefItems(data);
 
@@ -959,6 +965,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 tableData,
                                 sql,
                                 ttsqParam,
+                                ttsqPeriodParam,
                                 mainDocFileId,
                                 mainPage,
                                 chatRefItems,
@@ -1203,6 +1210,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             String tableData,
             String sql,
             String ttsqParam,
+            String ttsqPeriodParam,
             String mainDocFileId,
             String mainPage,
             List<ChatRefItem> chatRefItems,
@@ -1224,6 +1232,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setChartOption(CommonUtil.isNotEmpty(chartOption) ? chartOption : null);
         chatbotVO.setSql(CommonUtil.isNotEmpty(sql) ? sql : null);
         chatbotVO.setTtsqParam(CommonUtil.isNotEmpty(ttsqParam) ? ttsqParam : null);
+        chatbotVO.setTtsqPeriodParam(CommonUtil.isNotEmpty(ttsqPeriodParam) ? ttsqPeriodParam : null);
         chatbotVO.setWebGroundingJson(CommonUtil.isNotEmpty(webGroundingJson) ? webGroundingJson : null);
         chatbotVO.setMainDocFileId(CommonUtil.isNotEmpty(mainDocFileId) ? mainDocFileId : null);
         chatbotVO.setMainPage(CommonUtil.isNotEmpty(mainPage) ? mainPage : null);
@@ -2154,6 +2163,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         modelId,
                         refId,
                         userId,
+                        "",
                         "",
                         "",
                         "",

@@ -39,6 +39,7 @@
         <typeAlias alias="myPageVO"                          type="kr.teamagent.mypage.service.MyPageVO"/>
         <typeAlias alias="meetingVO"                         type="kr.teamagent.meeting.service.MeetingVO"/>
         <typeAlias alias="dataDashboardVO"                   type="kr.teamagent.datadashboard.service.DataDashboardVO"/>
+        <typeAlias alias="myDocumentsVO"                     type="kr.teamagent.mydocuments.service.MyDocumentsVO"/>
     </typeAliases>
 
     <typeHandlers>

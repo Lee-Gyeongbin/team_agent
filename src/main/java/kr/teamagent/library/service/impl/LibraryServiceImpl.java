@@ -1,8 +1,11 @@
 package kr.teamagent.library.service.impl;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.lang.reflect.Type;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -17,6 +20,8 @@ import com.google.gson.reflect.TypeToken;
 
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import javax.imageio.ImageIO;
+
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
@@ -43,6 +48,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     private static final String PROMPT_ID_INSIGHT_NEW_SECTION = "PI000019";
     private static final String PROMPT_ID_INSIGHT_REPLACE = "PI000020";
     private static final String INSIGHT_FIELD_ID = "insight";
+    private static final Pattern INLINE_DATA_URL_PATTERN = Pattern.compile(
+            "data:image/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\\r\\n]+",
+            Pattern.CASE_INSENSITIVE);
     private static final Gson AGENT_SUB_CFG_GSON = new Gson();
 
     private static final Logger logger = LoggerFactory.getLogger(LibraryServiceImpl.class);
@@ -461,13 +469,32 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
             String qContent = cardContent.getQContent() == null ? "" : cardContent.getQContent();
             String rContent = cardContent.getRContent() == null ? "" : cardContent.getRContent();
+            if (!multilineJsonKeys.isEmpty()
+                    && (TmplHtmlRenderService.containsMarkdownPipeTable(qContent)
+                            || TmplHtmlRenderService.containsMarkdownPipeTable(rContent))) {
+                htmlFieldInstruction += " 단, 답변에 마크다운 파이프 표가 있으면 "
+                        + "표 구간만 HTML <table><tbody><tr><th>또는<td>...</table> 로 변환해 넣을 것(마크다운 | 파이프 표 금지). "
+                        + "<p>, <li> 등 그 외 HTML은 포함하지 말고 <table> 관련 태그만 예외로 허용. "
+                        + "표는 content(본문내용) 등 해당 필드 JSON 배열 항목 안에 넣어 보고서 본문 표 셀에 그려지게 할 것.";
+            }
+            List<String> extractedImgTags = new ArrayList<>();
+            String strippedQContent = stripCreateDocContentImages(qContent, extractedImgTags);
+            String strippedRContent = stripCreateDocContentImages(rContent, extractedImgTags);
             String prompt = promptTemplate
-                    .replace("{{Q_CONTENT}}", qContent)
-                    .replace("{{R_CONTENT}}", rContent)
+                    .replace("{{Q_CONTENT}}", strippedQContent)
+                    .replace("{{R_CONTENT}}", strippedRContent)
                     .replace("{{TODAY}}", today)
                     .replace("{{USER_NM}}", userNm)
                     .replace("{{HTML_FIELD_INSTRUCTION}}", htmlFieldInstruction)
                     .replace("{{FIELD_LIST}}", fieldList.toString());
+            String base64ImageInstruction = buildBase64ImageInstruction(!extractedImgTags.isEmpty());
+            if (!CommonUtil.isEmpty(base64ImageInstruction)) {
+                prompt = prompt + "\n\n" + base64ImageInstruction;
+            }
+            String markdownTableInstruction = buildMarkdownTableInstruction(qContent, rContent);
+            if (!CommonUtil.isEmpty(markdownTableInstruction)) {
+                prompt = prompt + "\n\n" + markdownTableInstruction;
+            }
 
             // STEP5 : AI 호출
             logger.info("prompt: {}", prompt);
@@ -486,6 +513,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             JSONObject aiJson = parseAiTemplateJson(res);
             if (aiJson != null) {
                 renderedHtml = tmplHtmlRenderService.renderTemplateHtml(renderedHtml, aiJson, tmplFieldList);
+                if (!extractedImgTags.isEmpty()) {
+                    renderedHtml = restoreCreateDocImages(renderedHtml, extractedImgTags);
+                }
             } else {
                 logger.warn("createDoc HTML 렌더링 생략 - AI 응답 JSON 파싱 실패 (tmplId={})", searchVO.getTmplId());
             }
@@ -516,11 +546,18 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             // STEP2 : 플레이스홀더 치환 (필드 관련 변수는 사용하지 않으므로 공백 처리)
             String qContent = cardContent.getQContent() == null ? "" : cardContent.getQContent();
             String rContent = cardContent.getRContent() == null ? "" : cardContent.getRContent();
+            List<String> extractedImgTags = new ArrayList<>();
+            String strippedQContent = stripCreateDocContentImages(qContent, extractedImgTags);
+            String strippedRContent = stripCreateDocContentImages(rContent, extractedImgTags);
             String prompt = promptTemplate
-                    .replace("{{Q_CONTENT}}", qContent)
-                    .replace("{{R_CONTENT}}", rContent)
+                    .replace("{{Q_CONTENT}}", strippedQContent)
+                    .replace("{{R_CONTENT}}", strippedRContent)
                     .replace("{{TODAY}}", today)
                     .replace("{{USER_NM}}", userNm);
+            String base64ImageInstruction = buildBase64ImageInstruction(!extractedImgTags.isEmpty());
+            if (!CommonUtil.isEmpty(base64ImageInstruction)) {
+                prompt = prompt + "\n\n" + base64ImageInstruction;
+            }
 
             // STEP3 : AI 호출
             logger.info("prompt: {}", prompt);
@@ -531,6 +568,10 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                 resultMap.put("returnMsg", "AI 문서 생성 실패");
                 resultMap.put("data", null);
                 return resultMap;
+            }
+
+            if (!extractedImgTags.isEmpty()) {
+                res = restoreCreateDocImages(res, extractedImgTags);
             }
 
             resultMap.put("successYn", true);
@@ -763,18 +804,148 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * createDoc 프롬프트용: Q/R에서 이미지를 추출·플레이스홀더 치환한다.
+     */
+    private String stripCreateDocContentImages(String content, List<String> extractedImgTags) {
+        if (CommonUtil.isEmpty(content)) {
+            return content;
+        }
+        String stripped = stripImgTags(content, extractedImgTags, true);
+        return stripStandaloneBase64DataUrls(stripped, extractedImgTags, true);
+    }
+
+    /**
+     * &lt;img&gt; 없이 본문에 직접 포함된 data:image/...;base64,... 문자열을 플레이스홀더로 치환한다.
+     */
+    private String stripStandaloneBase64DataUrls(String content, List<String> extractedImgTags, boolean useImgToken) {
+        if (CommonUtil.isEmpty(content)) {
+            return content;
+        }
+        StringBuffer sb = new StringBuffer();
+        Matcher matcher = INLINE_DATA_URL_PATTERN.matcher(content);
+        int idx = extractedImgTags.size();
+        while (matcher.find()) {
+            String dataUrl = matcher.group();
+            extractedImgTags.add(buildImgTagFromDataUrl(dataUrl));
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(imgPlaceholderReplacement(idx, useImgToken)));
+            idx++;
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
+    }
+
+    private static String imgPlaceholderReplacement(int idx, boolean useImgToken) {
+        if (useImgToken) {
+            return "[[" + TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN + ":" + idx + "]]";
+        }
+        return "<img data-img-placeholder=\"" + idx + "\">";
+    }
+
+    /**
+     * data URL만 있는 경우 원본 픽셀 크기를 읽어 width/height를 img 태그에 반영한다.
+     * 이미 &lt;img&gt; 태그로 저장된 경우는 stripImgTags가 전체 태그(style 등)를 그대로 보존한다.
+     */
+    private String buildImgTagFromDataUrl(String dataUrl) {
+        if (CommonUtil.isEmpty(dataUrl)) {
+            return "<img src=\"\">";
+        }
+        try {
+            String base64 = dataUrl;
+            int comma = base64.indexOf("base64,");
+            if (comma >= 0) {
+                base64 = base64.substring(comma + "base64,".length());
+            }
+            base64 = base64.replaceAll("\\s+", "");
+            byte[] bytes = Base64.getDecoder().decode(base64);
+            BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
+            if (image != null && image.getWidth() > 0 && image.getHeight() > 0) {
+                int w = image.getWidth();
+                int h = image.getHeight();
+                return "<img src=\"" + dataUrl + "\" width=\"" + w + "\" height=\"" + h
+                        + "\" style=\"width:" + w + "px;height:" + h + "px;\">";
+            }
+        } catch (Exception e) {
+            logger.debug("createDoc 이미지 크기 추출 실패: {}", e.getMessage());
+        }
+        return "<img src=\"" + dataUrl + "\">";
+    }
+
+    /**
+     * R/Q에 마크다운 파이프 표가 있을 때 AI가 응답 JSON에 HTML table을 넣도록 지시한다.
+     */
+    private String buildMarkdownTableInstruction(String qContent, String rContent) {
+        if (!TmplHtmlRenderService.containsMarkdownPipeTable(qContent)
+                && !TmplHtmlRenderService.containsMarkdownPipeTable(rContent)) {
+            return "";
+        }
+        return "참고: 답변(R_CONTENT)에 마크다운 파이프 표(| 열1 | 열2 |, |---|---|, 데이터 행)가 있습니다. "
+                + "보고서 JSON의 content(본문내용) 등 multiline 배열 필드에 반영할 때 "
+                + "표는 반드시 HTML <table> 형식으로 변환해 넣을 것. 마크다운 파이프 표(| ... |)는 응답에 넣지 말 것. "
+                + "예: \"<table><tbody><tr><th>기간</th><th>상품유형</th><th>개통 건수</th></tr>"
+                + "<tr><td>2025-6</td><td>8VSB</td><td>4,804</td></tr>...</tbody></table>\". "
+                + "첫 행은 <th>, 데이터 행은 <td>로 작성. 열·행·수치를 변경·생략·합치지 말 것. "
+                + "표를 요약 문장·불릿 목록으로 바꾸지 말 것. "
+                + "표 앞·뒤 설명(제목, ■ 소제목, 본문 설명, ▶ 관련 통계 정보 등)은 일반 텍스트로 같은 배열 항목 또는 인접 항목에 두고, "
+                + "표 HTML은 해당 설명과 인접한 위치(보통 표 직전·직후)의 배열 항목에 넣어 본문 표 셀 안에 표가 그려지게 할 것. "
+                + "표가 여러 개이면 각각 별도 <table>...</table> 블록으로 넣을 것.";
+    }
+
+    /**
+     * createDoc: 추출된 이미지가 있을 때 AI가 플레이스홀더만 출력하도록 지시한다.
+     */
+    private String buildBase64ImageInstruction(boolean hasExtractedImages) {
+        if (!hasExtractedImages) {
+            return "";
+        }
+        String token = TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN;
+        return "참고: 대화 내용에 인라인 이미지 토큰([[" + token + ":0]] 등)이 포함되어 있습니다. "
+                + "JSON 문자열 배열 필드(overview, content, conclusion 등)에 이미지를 넣을 때 "
+                + "HTML 태그 대신 [[" + token + ":0]], [[" + token + ":1]] 토큰만 단독 문자열 항목으로 넣을 것. "
+                + "예: [\"그래프 설명\", \"[[" + token + ":0]]\", \"분석 내용\"]. "
+                + "data:image/...;base64,... 데이터를 응답에 직접 출력·복사·생성하지 말 것. "
+                + "이미지를 텍스트 설명·요약·[이미지] 표기 등으로 대체하거나 생략하지 말 것. "
+                + "각 [[" + token + ":N]] 토큰은 대화에서 해당 이미지가 등장한 맥락·주제와 의미상 가장 가까운 배열 항목 위치에 배치할 것. "
+                + "보고서 맨 아래·별도 부록·무관한 섹션에만 몰아 넣지 말 것.";
+    }
+
+    /**
+     * createDoc 렌더 결과에서 createDoc 전용 토큰/플레이스홀더만 채팅에서 추출한 &lt;img&gt;로 복원한다.
+     * 템플릿에 포함된 일반 &lt;img src=\"...\"&gt; 또는 reAsk용 data-img-placeholder는 건드리지 않는다.
+     */
+    private String restoreCreateDocImages(String text, List<String> extractedImgTags) {
+        if (CommonUtil.isEmpty(text) || extractedImgTags.isEmpty()) {
+            return text;
+        }
+        String attr = TmplHtmlRenderService.CREATE_DOC_IMG_ATTR;
+        String token = TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN;
+        String restored = text;
+        for (int i = 0; i < extractedImgTags.size(); i++) {
+            String imgTag = extractedImgTags.get(i);
+            restored = restored.replace("[[" + token + ":" + i + "]]", imgTag);
+            restored = restored.replace("<img " + attr + "=\"" + i + "\">", imgTag);
+            restored = restored.replace("&lt;img " + attr + "=&quot;" + i + "&quot;&gt;", imgTag);
+            restored = restored.replace("&lt;img " + attr + "=\"" + i + "\"&gt;", imgTag);
+        }
+        return restored;
+    }
+
+    /**
      * HTML에서 <img> 태그를 추출하고 플레이스홀더로 교체한다.
      * base64 이미지 등이 포함된 경우 AI 전송 payload 크기를 줄이기 위해 사용한다.
      */
     private String stripImgTags(String html, List<String> extractedImgTags) {
+        return stripImgTags(html, extractedImgTags, false);
+    }
+
+    private String stripImgTags(String html, List<String> extractedImgTags, boolean useImgToken) {
         if (CommonUtil.isEmpty(html)) return html;
         StringBuffer sb = new StringBuffer();
         Pattern imgPattern = Pattern.compile("<img(?:\\s[^>]*)?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
         Matcher matcher = imgPattern.matcher(html);
-        int idx = 0;
+        int idx = extractedImgTags.size();
         while (matcher.find()) {
             extractedImgTags.add(matcher.group());
-            matcher.appendReplacement(sb, Matcher.quoteReplacement("<img data-img-placeholder=\"" + idx + "\">"));
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(imgPlaceholderReplacement(idx, useImgToken)));
             idx++;
         }
         matcher.appendTail(sb);
