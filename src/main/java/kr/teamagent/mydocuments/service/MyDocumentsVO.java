@@ -25,6 +25,14 @@ public class MyDocumentsVO extends CommonVO {
     private String originHtml;
     /** 서비스 타입 */
     private String svcTy;
+    /** 에이전트 ID [TB_MY_DOC.AGENT_ID] */
+    private String agentId;
+    /** 에이전트명 [TB_AGT.AGENT_NM] */
+    private String agentNm;
+    /** 에이전트 아이콘 클래스명 [TB_ICON.ICON_CLASS_NM] */
+    private String iconClassNm;
+    /** 에이전트 색상 HEX [TB_COLOR.COLOR_HEX] */
+    private String colorHex;
     /** 참조/원문 콘텐츠 (제목 생성·저장용). Jackson JavaBeans: getRContent → JSON 키 RContent로 인식되는 문제 방지 */
     @JsonProperty("rContent")
     @JsonAlias("RContent")
@@ -35,5 +43,14 @@ public class MyDocumentsVO extends CommonVO {
     private Integer sortOrd;
     /** 신규 여부 [TB_MY_DOC.NEW_YN] */
     private String newYn;
+    /** 생성일시 */
+    private String createDt;
+    /** 수정일시 */
+    private String modifyDt;
+
+    /** 목록 검색: 문서명 */
+    private String searchDocNm;
+    /** 목록 정렬 (latest | oldest | name, custom=수동 SORT_ORD) */
+    private String searchSort;
 
 }
