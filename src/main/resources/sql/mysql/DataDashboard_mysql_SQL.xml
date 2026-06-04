@@ -172,18 +172,22 @@
 
     <!-- ================================================================
          데이터마트 컬럼 코드 매핑 조회
-         TB_DM_COL_CODE (DATAMART_ID 기준, USE_YN='Y', SORT_ORD 정렬)
+         TB_DM_COL_CODE + TB_CODE (CODE_GRP_ID 조인, DATAMART_ID 기준, USE_YN='Y')
+         동일 COL_ID가 여러 테이블에 매핑될 수 있어 COL_ID+코드 기준 GROUP BY
          ================================================================ -->
     <select id="selectDashboardColCodeMap" parameterType="dataDashboardVO" resultType="dataDashboardVO">
         /* 컬럼 코드 매핑 조회 dataDashboard.selectDashboardColCodeMap */
         SELECT
-              COL_ID
-            , CODE_VAL
-            , CODE_KOR_NM
-        FROM TB_DM_COL_CODE
-        WHERE DATAMART_ID = #{datamartId}
-          AND USE_YN      = 'Y'
-        ORDER BY COL_ID, SORT_ORD
+              A.COL_ID
+            , B.CODE_ID AS CODE_VAL
+            , B.CODE_NM AS CODE_KOR_NM
+        FROM TB_DM_COL_CODE A
+            JOIN TB_CODE B ON B.CODE_GRP_ID = A.CODE_GRP_ID
+        WHERE A.DATAMART_ID = #{datamartId}
+          AND A.USE_YN      = 'Y'
+          AND B.USE_YN      = 'Y'
+        GROUP BY A.COL_ID, B.CODE_ID, B.CODE_NM, B.SORT_ORD
+        ORDER BY A.COL_ID, B.SORT_ORD, B.CODE_ID
     </select>
 
     <!-- ================================================================

@@ -794,6 +794,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String chartOption = "";
         String sql = "";
         String ttsqParam = "";
+        String ttsqPeriodParam = "";
         List<ChatRefItem> chatRefItems = new ArrayList<>();
         /** answer_source 스트림에서 누적 — done.data.items 가 있으면 그쪽이 최종 우선 */
         String webGroundingJson = "";
@@ -921,6 +922,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             chartOption = toJsonIfExists(data.get("chart_option"));
                             sql = getString(data.get("sql"));
                             ttsqParam = toJsonIfExists(data.get("ttsq_param"));
+                            // ttsqPeriodParam = toJsonIfExists(data.get("ttsq_period_param ")); // TODO : 기간 param
 
                             chatRefItems = extractChatRefItems(data);
 
