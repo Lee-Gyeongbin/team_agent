@@ -114,6 +114,8 @@ public class ChatbotVO extends CommonVO {
     private String sql;
     // TEXT2SQL WHERE 조건 변수 스키마
     private String ttsqParam;
+    // TEXT2SQL 기간 파라미터 JSON
+    private String ttsqPeriodParam;
 
     /* AI 서비스 사용자별 일일 사용량 */
     // 사용 일자 (YYYYMMDD)
