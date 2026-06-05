@@ -35,6 +35,19 @@ public class MyDocumentsController extends BaseController {
     }
 
     /**
+     * 내 문서 상세 조회
+     * @param searchVO docId
+     * @return jsonView data: MyDocumentsVO
+     */
+    @RequestMapping(value = "/detail.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView detail(@RequestBody MyDocumentsVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", myDocumentsService.selectMyDocDetail(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 나의 문서 보고서 저장 (신규/수정, INSERT ... ON DUPLICATE KEY UPDATE)
      * @param searchVO docId?, tmplId?, agentId?, docNm, docHtml, originHtml, svcTy?, rContent?, docStatus?, sortOrd?
      * @return jsonView successYn, returnMsg, data: { docId }
@@ -43,6 +56,18 @@ public class MyDocumentsController extends BaseController {
     @ResponseBody
     public ModelAndView saveReport(@RequestBody MyDocumentsVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>(myDocumentsService.saveReport(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 내 문서 신규 여부(NEW_YN) 변경
+     * @param searchVO docId, newYn (Y/N)
+     * @return jsonView successYn, returnMsg, data: { docId }
+     */
+    @RequestMapping(value = "/updateNewYn.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateNewYn(@RequestBody MyDocumentsVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(myDocumentsService.updateNewYn(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
