@@ -42,6 +42,20 @@ public class MyDocumentsServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 내 문서 상세 조회 (세션 사용자·docId 기준).
+     *
+     * @param searchVO docId
+     * @return 상세 VO, docId 없거나 미존재 시 null
+     */
+    public MyDocumentsVO selectMyDocDetail(MyDocumentsVO searchVO) throws Exception {
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getDocId())) {
+            return null;
+        }
+        searchVO.setUserId(SessionUtil.getUserId());
+        return myDocumentsDAO.selectMyDocDetail(searchVO);
+    }
+
+    /**
      * 나의 문서 보고서 저장.
      * docNm이 null·공백·빈문자열이면 rContent로 AI 제목 생성 (신규·수정 공통).
      *
@@ -68,9 +82,8 @@ public class MyDocumentsServiceImpl extends EgovAbstractServiceImpl {
                 myDocumentsDAO.incrementSortOrdByUserId(searchVO);
                 searchVO.setSortOrd(1);
             }
-        } else if (searchVO.getSortOrd() == null || searchVO.getSortOrd() == 0) {
-            // 수정 시 프론트 기본값 0은 정렬 변경 없음
-            searchVO.setSortOrd(null);
+        } else {
+            searchVO.setNewYn("N");
         }
 
         // 문서명 비어있는 경우 rContent로 제목 생성
@@ -79,6 +92,49 @@ public class MyDocumentsServiceImpl extends EgovAbstractServiceImpl {
         }
 
         myDocumentsDAO.saveReport(searchVO);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("docId", searchVO.getDocId());
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        resultMap.put("data", data);
+        return resultMap;
+    }
+
+    /**
+     * 내 문서 신규 여부(NEW_YN) 변경.
+     *
+     * @param searchVO docId, newYn (Y/N)
+     * @return successYn, returnMsg, data(docId)
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateNewYn(MyDocumentsVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청 본문이 없습니다.");
+            return resultMap;
+        }
+        if (CommonUtil.isEmpty(searchVO.getDocId())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "문서 ID가 없습니다.");
+            return resultMap;
+        }
+        if (CommonUtil.isEmpty(searchVO.getNewYn()) || (!"Y".equals(searchVO.getNewYn()) && !"N".equals(searchVO.getNewYn()))) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "신규 여부 값이 올바르지 않습니다.");
+            return resultMap;
+        }
+
+        searchVO.setUserId(SessionUtil.getUserId());
+        int updated = myDocumentsDAO.updateNewYn(searchVO);
+        if (updated == 0) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "변경할 문서를 찾을 수 없습니다.");
+            return resultMap;
+        }
 
         Map<String, Object> data = new HashMap<>();
         data.put("docId", searchVO.getDocId());
