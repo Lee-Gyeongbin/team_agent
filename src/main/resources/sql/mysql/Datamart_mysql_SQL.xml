@@ -305,21 +305,15 @@
         </foreach>
     </insert>
 
-    <delete id="deleteDmColCodeByDatamartId" parameterType="datamartVO">
-        /* 메타 관리 > 코드값 매핑 저장 전 삭제 datamart.deleteDmColCodeByDatamartId */
-        DELETE FROM TB_DM_COL_CODE
-        WHERE DATAMART_ID = #{datamartId}
-    </delete>
-
-    <insert id="insertDmColCodeBatch" parameterMap="metaCodeMappingSaveParamMap">
-        /* 메타 관리 > 코드값 매핑 일괄 등록 datamart.insertDmColCodeBatch */
+    <insert id="upsertDmColCodeBatch" parameterMap="metaCodeMappingSaveParamMap">
+        /* 메타 관리 > 코드값 매핑 일괄 등록/수정 datamart.upsertDmColCodeBatch
+           UK: DATAMART_ID + TBL_ID + COL_ID 기준 merge (soft delete USE_YN='N' 유지) */
         INSERT INTO TB_DM_COL_CODE (
             DATAMART_ID
             , TBL_ID
             , COL_ID
-            , CODE_VAL
-            , CODE_KOR_NM
-            , CODE_DESC
+            , AI_HINT
+            , CODE_GRP_ID
             , SORT_ORD
             , USE_YN
             , CREATE_DT
@@ -327,39 +321,44 @@
         )
         VALUES
         <foreach collection="codeColumnMappingList" item="mapping" separator=",">
-        <foreach collection="mapping.entries" item="entry" separator=",">
         (
             #{datamartId}
             , #{mapping.tblId}
             , #{mapping.colId}
-            , #{entry.codeVal}
-            , #{entry.codeKorNm}
-            , #{entry.codeDesc}
-            , #{entry.sortOrd}
-            , #{entry.useYn}
+            , #{mapping.aiHint}
+            , #{mapping.codeGrpId}
+            , #{mapping.sortOrd}
+            , #{mapping.useYn}
             , NOW()
             , NOW()
         )
         </foreach>
-        </foreach>
+        ON DUPLICATE KEY UPDATE
+            AI_HINT = VALUES(AI_HINT)
+            , CODE_GRP_ID = VALUES(CODE_GRP_ID)
+            , SORT_ORD = VALUES(SORT_ORD)
+            , USE_YN = VALUES(USE_YN)
+            , MODIFY_DT = NOW()
     </insert>
 
-    <select id="selectMetaCodeMappingRows" parameterType="datamartVO" resultType="kr.teamagent.datamart.service.DatamartVO$MetaCodeValueRowVO">
-        /* 메타 관리 > 코드 매핑 메타데이터 목록 조회 datamart.selectMetaCodeMappingRows */
+    <select id="selectMetaCodeMappingRows" parameterType="datamartVO" resultType="kr.teamagent.datamart.service.DatamartVO$MetaCodeColumnMappingVO">
+        /* 메타 관리 > 코드 매핑 메타데이터 목록 조회 datamart.selectMetaCodeMappingRows
+           TB_DM_COL_CODE + TB_CODE_GRP (컬럼↔코드그룹 매핑 + 그룹 설명) */
         SELECT
-            A.DATAMART_ID AS datamartId
-            , A.TBL_ID AS tblId
+            A.TBL_ID AS tblId
             , A.COL_ID AS colId
-            , A.CODE_VAL AS codeVal
-            , A.CODE_KOR_NM AS codeKorNm
-            , A.CODE_DESC AS codeDesc
+            , A.CODE_GRP_ID AS codeGrpId
+            , A.AI_HINT AS aiHint
             , A.SORT_ORD AS sortOrd
             , A.USE_YN AS useYn
-            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS createDt
-            , DATE_FORMAT(A.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS modifyDt
+            , G.CODE_GRP_NM AS codeGrpNm
+            , G.DESCRIPTION AS description
         FROM TB_DM_COL_CODE A
+        LEFT JOIN TB_CODE_GRP G
+            ON G.CODE_GRP_ID = A.CODE_GRP_ID
         WHERE A.DATAMART_ID = #{datamartId}
-        ORDER BY A.TBL_ID, A.COL_ID, A.SORT_ORD, A.CODE_VAL
+          AND A.USE_YN = 'Y'
+        ORDER BY A.SORT_ORD, A.TBL_ID, A.COL_ID
     </select>
 
     <select id="selectMetaRelationshipList" parameterType="datamartVO" resultType="kr.teamagent.datamart.service.DatamartVO$MetaRelationshipRowVO">
