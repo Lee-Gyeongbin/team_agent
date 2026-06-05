@@ -126,32 +126,19 @@ public class DatamartVO {
     }
 
     /**
-     * 코드성 컬럼별 매핑 묶음 (tblId + colId + entries)
+     * TB_DM_COL_CODE 컬럼↔코드그룹 매핑 (조회: TB_CODE_GRP JOIN)
      */
     @Getter
     @Setter
     public static class MetaCodeColumnMappingVO {
         private String tblId;
         private String colId;
-        private List<MetaCodeValueRowVO> entries;
-    }
-
-    /**
-     * TB_DM_COL_CODE 저장용 코드값 행
-     */
-    @Getter
-    @Setter
-    public static class MetaCodeValueRowVO {
-        private String datamartId;
-        private String tblId;
-        private String colId;
-        private String codeVal;
-        private String codeKorNm;
-        private String codeDesc;
+        private String codeGrpId;
+        private String codeGrpNm;
+        private String description;
+        private String aiHint;
         private Integer sortOrd;
         private String useYn;
-        private String createDt;
-        private String modifyDt;
     }
 
     /**
