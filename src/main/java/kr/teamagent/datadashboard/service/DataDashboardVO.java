@@ -26,6 +26,9 @@ public class DataDashboardVO extends CommonVO {
     /** LLM이 추출한 파라미터 스키마 JSON (= TTSQ_PARAM) */
     private String ttsqParam;
 
+    /** LLM이 추출한 기간 파라미터 스키마 JSON (= TTSQ_PERIOD_PARAM) */
+    private String ttsqPeriodParam;
+
     /** 에이전트 ID */
     private String agentId;
 
