@@ -313,10 +313,11 @@
             , A.USE_YN
             , A.CREATE_DT
             , A.MODIFY_DT
-            , C.SAVE_YN
+            , COALESCE(C.SAVE_YN, D.SAVE_YN) AS SAVE_YN
         FROM TB_NOTIFY A
         LEFT JOIN TB_USER B ON B.USER_ID = A.SEND_USER_ID
         LEFT JOIN TB_KNOW_CARD_SHARE C ON A.NOTIFY_TY_CD = 'KS' AND C.SHARE_ID = A.REF_ID
+        LEFT JOIN TB_MY_DOC_SHARE D ON A.NOTIFY_TY_CD = 'MD' AND D.SHARE_ID = A.REF_ID
         WHERE A.USER_ID = #{userId}
           AND A.USE_YN = 'Y'
         ORDER BY A.CREATE_DT DESC
