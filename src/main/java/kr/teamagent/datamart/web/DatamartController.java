@@ -131,9 +131,9 @@ public class DatamartController extends BaseController {
     }
 
     /**
-     * 메타 관리 > 코드값 매핑 저장 API (TB_DM_COL_CODE DATAMART_ID 단위 전체 삭제 후 INSERT)
+     * 메타 관리 > 코드그룹 매핑 저장 API (TB_DM_COL_CODE UK merge upsert, soft delete USE_YN=N)
      * @param payload datamartId, codeColumnMappingList
-     * @return { result, msg }
+     * @return { result, msg, dataList }
      * @throws Exception
      */
     @RequestMapping(value = "/metaCodeMappingSave.do", method = RequestMethod.POST)
@@ -144,7 +144,7 @@ public class DatamartController extends BaseController {
     }
 
     /**
-     * 메타 관리 > 코드 매핑 메타데이터 목록 조회 API (TB_DM_COL_CODE)
+     * 메타 관리 > 코드 매핑 메타데이터 목록 조회 API (TB_DM_COL_CODE + TB_CODE_GRP)
      * @param searchVO datamartId 필수
      * @return { result, msg, dataList: MetaCodeColumnMappingVO[] }
      * @throws Exception

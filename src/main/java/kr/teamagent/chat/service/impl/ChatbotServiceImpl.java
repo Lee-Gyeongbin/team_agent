@@ -1009,7 +1009,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             fallbackThreadId,
                             CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
                             tableData,
-                            chartOption);
+                            chartOption,
+                            sql);
                     isCompleteCalled = true;
                 }
             } finally {
@@ -2188,7 +2189,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             }
         }
         callback.onComplete(curatorAiJson, "", "", new ArrayList<>(), CommonUtil.nullToBlank(threadId),
-                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null);
+                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null, null);
     }
 
     /** AI 큐레이션 JSON 배열 응답. */

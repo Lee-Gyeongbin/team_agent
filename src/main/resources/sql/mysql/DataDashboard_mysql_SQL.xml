@@ -13,6 +13,7 @@
             , A.Q_CONTENT                                            AS SQL_TITLE
             , A.TTSQ                                                 AS SQL_CONTENT
             , A.TTSQ_PARAM
+            , A.TTSQ_PERIOD_PARAM
             , A.AGENT_ID
             , B.AGENT_NM
             , A.REF_ID                                               AS DATAMART_ID
@@ -52,6 +53,7 @@
             , A.Q_CONTENT                                            AS SQL_TITLE
             , A.TTSQ                                                 AS SQL_CONTENT
             , A.TTSQ_PARAM
+            , A.TTSQ_PERIOD_PARAM
             , A.AGENT_ID
             , B.AGENT_NM
             , A.REF_ID                                               AS DATAMART_ID
