@@ -1,5 +1,7 @@
 package kr.teamagent.mydocuments.service;
 
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -52,5 +54,19 @@ public class MyDocumentsVO extends CommonVO {
     private String searchDocNm;
     /** 목록 정렬 (latest | oldest | name, custom=수동 SORT_ORD) */
     private String searchSort;
+
+    /** 내 문서 공유 요청 payload [TB_MY_DOC_SHARE, TB_NOTIFY] */
+    @Getter
+    @Setter
+    public static class ShareDocPayload {
+        /** 요청 필드 */
+        private String docId;
+        private List<String> userIds;
+        private String shareMsg;
+        /** 서비스 내부 사용 필드 */
+        private String shareId;
+        private String fromUserId;
+        private String toUserId;
+    }
 
 }
