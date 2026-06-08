@@ -288,7 +288,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             }
             
             @Override
-            public void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String responseThreadId, String logId, String tableData, String chartOption) {
+            public void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String responseThreadId, String logId, String tableData, String chartOption, String sql) {
                 // complete 메시지: 최종 내용과 threadId, logId 전송
                 JSONObject message = new JSONObject();
                 message.put("type", "complete");
@@ -309,6 +309,9 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
                 }
                 if (chartOption != null) {
                     message.put("chartOption", chartOption);
+                }
+                if (sql != null) {
+                    message.put("sql", sql);
                 }
                 sendMessage(session, message.toJSONString());
             }
@@ -373,7 +376,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
          */
         void onStatus(String statusCode, String statusMessage);
         void onChunk(String content, String accumulated, String chunkEvent);
-        void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData, String chartOption);
+        void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData, String chartOption, String sql);
         void onError(String error);
     }
 }
