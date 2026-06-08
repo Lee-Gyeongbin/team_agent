@@ -56,6 +56,22 @@ public class MyDocumentsDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 내 문서 삭제 (docId, 로그인 사용자 기준)
+     */
+    public int deleteMyDoc(MyDocumentsVO searchVO) throws Exception {
+        return delete("myDocuments.deleteMyDoc", searchVO);
+    }
+
+    /**
+     * 공유 문서 비활성화 (삭제된 원본 DOC_ID 기준 TB_MY_DOC_SHARE USE_YN='N')
+     */
+    public int disableDocShareByDocId(String docId) throws Exception {
+        Map<String, Object> param = new HashMap<>();
+        param.put("docId", docId);
+        return update("myDocuments.disableDocShareByDocId", param);
+    }
+
+    /**
      * 내 문서 공유 정보 등록 (TB_MY_DOC_SHARE)
      * @param searchVO shareId, docId, fromUserId, toUserId, shareMsg 필수
      * @return

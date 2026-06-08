@@ -1,7 +1,9 @@
 package kr.teamagent.tmpl.service.impl;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -61,6 +63,71 @@ public class TmplHtmlRenderService extends EgovAbstractServiceImpl {
      * @param tmplFieldList 템플릿 필드 메타 목록(TB_TMPL_FIELD)
      * @return 치환 완료된 HTML
      */
+    /**
+     * createDoc AI JSON에서 [[CDOC_IMG:N]] 토큰 중복을 제거한다.
+     * tmplFieldList 순서 기준으로 각 토큰의 첫 등장만 유지하고 이후 필드·항목에서는 제거한다.
+     */
+    public void dedupeCreateDocImageTokens(JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList) {
+        if (json == null || tmplFieldList == null || tmplFieldList.isEmpty()) {
+            return;
+        }
+        Set<String> seenTokens = new HashSet<>();
+        for (LibraryVO.TmplFieldItem field : tmplFieldList) {
+            if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
+                continue;
+            }
+            String key = field.getJsonKey();
+            if (!json.containsKey(key)) {
+                continue;
+            }
+            json.put(key, dedupeImageTokensInFieldValue(json.get(key), seenTokens));
+        }
+    }
+
+    private Object dedupeImageTokensInFieldValue(Object value, Set<String> seenTokens) {
+        if (value == null) {
+            return null;
+        }
+        JSONArray arr = coerceToJsonArray(value);
+        if (arr != null) {
+            JSONArray out = new JSONArray();
+            for (Object item : arr) {
+                String stripped = stripDuplicateCreateDocImageTokens(stringValue(item), seenTokens);
+                if (!stripped.isEmpty()) {
+                    out.add(stripped);
+                }
+            }
+            return out;
+        }
+        return stripDuplicateCreateDocImageTokens(stringValue(value), seenTokens);
+    }
+
+    private JSONArray coerceToJsonArray(Object value) {
+        if (value instanceof JSONArray) {
+            return (JSONArray) value;
+        }
+        return tryParseJsonArray(stringValue(value));
+    }
+
+    private String stripDuplicateCreateDocImageTokens(String text, Set<String> seenTokens) {
+        if (text.isEmpty()) {
+            return "";
+        }
+        Matcher matcher = CREATE_DOC_IMG_TOKEN_PATTERN.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            String token = matcher.group();
+            if (seenTokens.contains(token)) {
+                matcher.appendReplacement(sb, "");
+            } else {
+                seenTokens.add(token);
+                matcher.appendReplacement(sb, Matcher.quoteReplacement(token));
+            }
+        }
+        matcher.appendTail(sb);
+        return sb.toString().trim();
+    }
+
     public String renderTemplateHtml(String tmplHtml, JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList) throws Exception {
         return renderTemplateHtml(tmplHtml, json, tmplFieldList, true);
     }

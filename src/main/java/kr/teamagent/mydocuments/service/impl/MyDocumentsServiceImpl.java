@@ -195,6 +195,45 @@ public class MyDocumentsServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 내 문서 삭제 (세션 사용자·docId 기준).
+     *
+     * @param searchVO docId
+     * @return successYn, returnMsg, data(docId)
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> deleteDoc(MyDocumentsVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청 본문이 없습니다.");
+            return resultMap;
+        }
+        if (CommonUtil.isEmpty(searchVO.getDocId())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "문서 ID가 없습니다.");
+            return resultMap;
+        }
+
+        searchVO.setUserId(SessionUtil.getUserId());
+        myDocumentsDAO.disableDocShareByDocId(searchVO.getDocId());
+        int deleted = myDocumentsDAO.deleteMyDoc(searchVO);
+        if (deleted == 0) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "삭제할 문서를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("docId", searchVO.getDocId());
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        resultMap.put("data", data);
+        return resultMap;
+    }
+
+    /**
      * 내 문서 공유 (TB_MY_DOC_SHARE + TB_NOTIFY userIds 수만큼 INSERT)
      * @param searchVO docId, userIds 필수 / shareMsg 선택
      * @throws Exception

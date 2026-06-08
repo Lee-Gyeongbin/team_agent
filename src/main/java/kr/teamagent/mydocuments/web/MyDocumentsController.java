@@ -85,6 +85,18 @@ public class MyDocumentsController extends BaseController {
     }
 
     /**
+     * 내 문서 삭제
+     * @param searchVO docId
+     * @return jsonView successYn, returnMsg, data: { docId }
+     */
+    @RequestMapping(value = "/deleteDoc.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteDoc(@RequestBody MyDocumentsVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(myDocumentsService.deleteDoc(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 내 문서 공유 (TB_MY_DOC_SHARE + TB_NOTIFY userIds 수만큼 INSERT)
      * @param searchVO docId, userIds 필수 / shareMsg 선택
      * @return
