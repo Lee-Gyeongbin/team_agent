@@ -487,7 +487,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                     .replace("{{USER_NM}}", userNm)
                     .replace("{{HTML_FIELD_INSTRUCTION}}", htmlFieldInstruction)
                     .replace("{{FIELD_LIST}}", fieldList.toString());
-            String base64ImageInstruction = buildBase64ImageInstruction(!extractedImgTags.isEmpty());
+            String base64ImageInstruction = buildBase64ImageInstruction(extractedImgTags.size());
             if (!CommonUtil.isEmpty(base64ImageInstruction)) {
                 prompt = prompt + "\n\n" + base64ImageInstruction;
             }
@@ -512,6 +512,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             String renderedHtml = CommonUtil.nullToBlank(tmpl.getTmplHtml());
             JSONObject aiJson = parseAiTemplateJson(res);
             if (aiJson != null) {
+                if (!extractedImgTags.isEmpty()) {
+                    tmplHtmlRenderService.dedupeCreateDocImageTokens(aiJson, tmplFieldList);
+                }
                 renderedHtml = tmplHtmlRenderService.renderTemplateHtml(renderedHtml, aiJson, tmplFieldList);
                 if (!extractedImgTags.isEmpty()) {
                     renderedHtml = restoreCreateDocImages(renderedHtml, extractedImgTags);
@@ -554,7 +557,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                     .replace("{{R_CONTENT}}", strippedRContent)
                     .replace("{{TODAY}}", today)
                     .replace("{{USER_NM}}", userNm);
-            String base64ImageInstruction = buildBase64ImageInstruction(!extractedImgTags.isEmpty());
+            String base64ImageInstruction = buildBase64ImageInstruction(extractedImgTags.size());
             if (!CommonUtil.isEmpty(base64ImageInstruction)) {
                 prompt = prompt + "\n\n" + base64ImageInstruction;
             }
@@ -891,21 +894,33 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * createDoc: 추출된 이미지가 있을 때 AI가 플레이스홀더만 출력하도록 지시한다.
+     * createDoc: 추출된 이미지가 있을 때 AI가 플레이스홀더 토큰을 반드시 포함하도록 지시한다.
      */
-    private String buildBase64ImageInstruction(boolean hasExtractedImages) {
-        if (!hasExtractedImages) {
+    private String buildBase64ImageInstruction(int imageCount) {
+        if (imageCount <= 0) {
             return "";
         }
         String token = TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN;
-        return "참고: 대화 내용에 인라인 이미지 토큰([[" + token + ":0]] 등)이 포함되어 있습니다. "
-                + "JSON 문자열 배열 필드(overview, content, conclusion 등)에 이미지를 넣을 때 "
-                + "HTML 태그 대신 [[" + token + ":0]], [[" + token + ":1]] 토큰만 단독 문자열 항목으로 넣을 것. "
-                + "예: [\"그래프 설명\", \"[[" + token + ":0]]\", \"분석 내용\"]. "
+        StringBuilder requiredTokens = new StringBuilder();
+        for (int i = 0; i < imageCount; i++) {
+            if (i > 0) {
+                requiredTokens.append(", ");
+            }
+            requiredTokens.append("[[").append(token).append(":").append(i).append("]]");
+        }
+        return "【필수·이미지 포함】 대화(Q_CONTENT/R_CONTENT)에 인라인 이미지 " + imageCount + "개가 있습니다. "
+                + "응답 JSON 전체(overview, content, conclusion 등 모든 필드 합산)에 아래 " + imageCount + "개 토큰을 반드시 모두 포함할 것. "
+                + "하나라도 누락·대체·생략·텍스트 설명으로 바꾸면 잘못된 응답이다. "
+                + "필수 토큰(이미지 1개당 응답 전체에서 정확히 1회만): " + requiredTokens + ". "
+                + "동일 토큰을 overview·content·conclusion 등 여러 배열 필드나 여러 배열 항목에 중복 삽입하면 잘못된 응답이다. "
+                + "이미지 토큰은 본문내용(content) 배열의 관련 항목 1곳에만 넣고, 개요(overview)·결론(conclusion) 등 다른 필드에는 같은 토큰을 넣지 말 것. "
+                + "각 토큰은 응답 JSON 어디에도 단 1곳(단일 문자열 배열 항목 1개)에만 넣을 것. "
+                + "JSON 문자열 배열 필드에 넣을 때 HTML 태그 대신 해당 토큰을 단독 문자열 배열 항목으로 넣을 것. "
+                + "예: [\"그래프 설명\", \"[[" + token + ":0]]\", \"분석 내용\"] — 이 예에서 \"[[" + token + ":0]]\"는 응답 전체에 이 한 번만 등장해야 함. "
                 + "data:image/...;base64,... 데이터를 응답에 직접 출력·복사·생성하지 말 것. "
-                + "이미지를 텍스트 설명·요약·[이미지] 표기 등으로 대체하거나 생략하지 말 것. "
-                + "각 [[" + token + ":N]] 토큰은 대화에서 해당 이미지가 등장한 맥락·주제와 의미상 가장 가까운 배열 항목 위치에 배치할 것. "
-                + "보고서 맨 아래·별도 부록·무관한 섹션에만 몰아 넣지 말 것.";
+                + "각 토큰은 대화에서 해당 이미지가 등장한 맥락·주제와 의미상 가장 가까운 단 하나의 배열 항목 위치에만 배치할 것. "
+                + "보고서 맨 아래·별도 부록·무관한 섹션에만 몰아 넣지 말 것. "
+                + "JSON 작성을 마치기 전, 필수 토큰 " + imageCount + "개가 응답 전체에 각각 정확히 1회만 포함되고 중복이 없는지 반드시 확인할 것.";
     }
 
     /**

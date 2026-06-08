@@ -29,9 +29,6 @@
         LEFT JOIN TB_COLOR C
             ON A.COLOR_ID = C.COLOR_ID
         WHERE M.USER_ID = #{userId}
-        <if test="docStatus != null and docStatus != ''">
-            AND M.DOC_STATUS = #{docStatus}
-        </if>
         <if test="svcTy != null and svcTy != ''">
             AND M.SVC_TY = #{svcTy}
         </if>
@@ -108,7 +105,6 @@
             , ORIGIN_HTML
             , SVC_TY
             , R_CONTENT
-            , DOC_STATUS
             , SORT_ORD
             , NEW_YN
             , CREATE_DT
@@ -123,7 +119,6 @@
             , #{originHtml, jdbcType=VARCHAR}
             , #{svcTy, jdbcType=VARCHAR}
             , #{rContent, jdbcType=VARCHAR}
-            , #{docStatus, jdbcType=VARCHAR}
             , #{sortOrd, jdbcType=INTEGER}
             , #{newYn, jdbcType=CHAR}
             , NOW()
@@ -137,7 +132,6 @@
             , ORIGIN_HTML  = VALUES(ORIGIN_HTML)
             , SVC_TY       = VALUES(SVC_TY)
             , R_CONTENT    = VALUES(R_CONTENT)
-            , DOC_STATUS   = VALUES(DOC_STATUS)
             , SORT_ORD     = COALESCE(#{sortOrd, jdbcType=INTEGER}, SORT_ORD)
             , MODIFY_DT    = NOW()
     </insert>
@@ -158,6 +152,22 @@
           , MODIFY_DT = NOW()
         WHERE DOC_ID = #{docId}
             AND USER_ID = #{userId}
+    </update>
+
+    <delete id="deleteMyDoc" parameterType="myDocumentsVO">
+        /* 내 문서 삭제 myDocuments.deleteMyDoc */
+        DELETE FROM TB_MY_DOC
+        WHERE DOC_ID = #{docId}
+            AND USER_ID = #{userId}
+    </delete>
+
+    <update id="disableDocShareByDocId">
+        /* 삭제된 문서 공유 비활성화 myDocuments.disableDocShareByDocId */
+        UPDATE TB_MY_DOC_SHARE
+        SET USE_YN = 'N'
+          , MODIFY_DT = NOW()
+        WHERE DOC_ID = #{docId}
+            AND USE_YN = 'Y'
     </update>
 
     <select id="selectDocIdByShareId" resultType="String">
@@ -219,7 +229,6 @@
             , ORIGIN_HTML
             , SVC_TY
             , R_CONTENT
-            , DOC_STATUS
             , SORT_ORD
             , NEW_YN
             , CREATE_DT
@@ -235,7 +244,6 @@
             , ORIGIN_HTML
             , SVC_TY
             , R_CONTENT
-            , DOC_STATUS
             , #{sortOrd}
             , 'Y'
             , NOW()
