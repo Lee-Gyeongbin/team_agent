@@ -154,6 +154,22 @@
             AND USER_ID = #{userId}
     </update>
 
+    <update id="updateSortOrd" parameterType="myDocumentsVO">
+        /* 내 문서 정렬순서 일괄 수정 myDocuments.updateSortOrd */
+        UPDATE TB_MY_DOC
+        SET SORT_ORD = CASE DOC_ID
+        <foreach collection="items" item="item">
+            WHEN #{item.docId} THEN #{item.sortOrd}
+        </foreach>
+        END
+          , MODIFY_DT = NOW()
+        WHERE USER_ID = #{userId}
+            AND DOC_ID IN
+        <foreach collection="items" item="item" open="(" separator="," close=")">
+            #{item.docId}
+        </foreach>
+    </update>
+
     <delete id="deleteMyDoc" parameterType="myDocumentsVO">
         /* 내 문서 삭제 myDocuments.deleteMyDoc */
         DELETE FROM TB_MY_DOC
