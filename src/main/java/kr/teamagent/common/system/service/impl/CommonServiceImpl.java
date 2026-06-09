@@ -11,6 +11,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.library.service.LibraryVO;
+import kr.teamagent.library.service.impl.LibraryDAO;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,6 +33,9 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 
 	@Autowired
 	private KeyGenerate keyGenerate;
+
+	@Autowired
+	private LibraryDAO libraryDAO;
 
 	public List<String> selectAdminPageAccessIpList() throws Exception {
 		return commonDAO.selectAdminPageAccessIpList(PropertyUtil.getProperty("Globals.Master.db"));
@@ -97,11 +105,13 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	 * 공유 받은 지식 카드 저장
 	 * 1. refId(SHARE_ID)로 원본 CARD_ID 조회
 	 * 2. 원본 카드를 세션 userId / payload categoryId로 복사 등록 (맨 앞 순서 1)
-	 * 3. TB_KNOW_CARD_SHARE의 SAVE_YN, SAVE_CARD_ID, SAVE_CATEGORY_ID 업데이트
+	 * 3. 원본 카드 svcTy='S'인 경우 TB_KNOW_CARD_CHART 차트 설정 복사
+	 * 4. TB_KNOW_CARD_SHARE의 SAVE_YN, SAVE_CARD_ID, SAVE_CATEGORY_ID 업데이트
 	 * @param notifyVO refId, categoryId 필수
 	 * @return successYn, returnMsg
 	 * @throws Exception
 	 */
+	@Transactional(rollbackFor = Exception.class)
 	public Map<String, Object> insertReceiveKnowledge(CommonVO.NotifyVO notifyVO) throws Exception {
 		Map<String, Object> resultMap = new HashMap<>();
 
@@ -125,7 +135,13 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 		cardParam.put("sortOrd",    1);
 		commonDAO.insertReceiveKnowledgeCard(cardParam);
 
-		// 3. TB_KNOW_CARD_SHARE 저장 정보 업데이트
+		// 3. 통계(svcTy='S') 카드만 차트 설정 복사 (TB_KNOW_CARD_CHART)
+		CommonVO.SharedCardVO srcCard = commonDAO.selectSharedCardInfo(srcCardId);
+		if (srcCard != null && "S".equals(srcCard.getSvcTy())) {
+			copyKnowChartsForCard(srcCardId, newCardId, userId);
+		}
+
+		// 4. TB_KNOW_CARD_SHARE 저장 정보 업데이트
 		Map<String, Object> shareParam = new HashMap<>();
 		shareParam.put("shareId",        shareId);
 		shareParam.put("saveCardId",     newCardId);
@@ -135,6 +151,61 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 		resultMap.put("successYn", true);
 		resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
 		return resultMap;
+	}
+
+	/**
+	 * 공유 수신 시 원본 카드의 차트 설정을 신규 카드로 복사한다.
+	 * @param srcCardId 원본 CARD_ID
+	 * @param newCardId 복사본 CARD_ID
+	 * @param userId 수신자(생성자) ID
+	 */
+	private void copyKnowChartsForCard(String srcCardId, String newCardId, String userId) throws Exception {
+		if (CommonUtil.isEmpty(srcCardId) || CommonUtil.isEmpty(newCardId) || CommonUtil.isEmpty(userId)) {
+			return;
+		}
+		LibraryVO chartParam = new LibraryVO();
+		chartParam.setCardId(srcCardId);
+		List<LibraryVO.KnowChartItem> charts = libraryDAO.selectKnowChartList(chartParam);
+		if (charts == null || charts.isEmpty()) {
+			return;
+		}
+		List<String> chartIds = assignKnowChartIdsForCopy(charts.size());
+		for (int i = 0; i < charts.size(); i++) {
+			LibraryVO.KnowChartItem chart = charts.get(i);
+			LibraryVO.KnowChartSavePayload insertVO = new LibraryVO.KnowChartSavePayload();
+			insertVO.setChartId(chartIds.get(i));
+			insertVO.setCardId(newCardId);
+			insertVO.setChartType(chart.getChartType());
+			insertVO.setChartTargetKey(chart.getChartTargetKey());
+			insertVO.setYAxisKeysJson(chart.getYAxisKeys());
+			insertVO.setSeriesKey(CommonUtil.nullToBlank(chart.getSeriesKey()));
+			insertVO.setStatIdFilter(CommonUtil.nullToBlank(chart.getStatIdFilter()));
+			insertVO.setStackYn("Y".equals(chart.getStackYn()) ? "Y" : "N");
+			insertVO.setDualAxisYn("Y".equals(chart.getDualAxisYn()) ? "Y" : "N");
+			insertVO.setYlChartType(chart.getYlChartType());
+			insertVO.setYrChartType(chart.getYrChartType());
+			insertVO.setSortOrd(chart.getSortOrd() != null ? chart.getSortOrd() : 0);
+			insertVO.setCreateUserId(userId);
+			libraryDAO.insertKnowChart(insertVO);
+		}
+	}
+
+	/**
+	 * 동일 트랜잭션 내 차트 복수 건 INSERT 시 CHART_ID 중복 방지용 로컬 시퀀스
+	 */
+	private List<String> assignKnowChartIdsForCopy(int count) throws Exception {
+		List<String> ids = new ArrayList<>();
+		if (count <= 0) {
+			return ids;
+		}
+		String seedKey = keyGenerate.generateTableKey("KH", "TB_KNOW_CARD_CHART", "CHART_ID");
+		ids.add(seedKey);
+		int nextSeq = Integer.parseInt(seedKey.substring(2));
+		for (int i = 1; i < count; i++) {
+			nextSeq++;
+			ids.add("KH" + String.format("%06d", nextSeq));
+		}
+		return ids;
 	}
 
 	/**

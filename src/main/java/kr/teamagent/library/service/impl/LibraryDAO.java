@@ -221,6 +221,46 @@ public class LibraryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 지식카드 차트 목록 조회
+     * @param searchVO cardId 필수
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.KnowChartItem> selectKnowChartList(LibraryVO searchVO) throws Exception {
+        return selectList("library.selectKnowChartList", searchVO);
+    }
+
+    /**
+     * 지식카드 차트 저장 (신규 insert)
+     * @param searchVO chartId, cardId, chartType 등 필수
+     * @return
+     * @throws Exception
+     */
+    public int insertKnowChart(LibraryVO.KnowChartSavePayload searchVO) throws Exception {
+        return insert("library.insertKnowChart", searchVO);
+    }
+
+    /**
+     * 지식카드 차트 삭제 (본인 카드 소유 차트만)
+     * @param searchVO chartId, userId(세션) 필수
+     * @return
+     * @throws Exception
+     */
+    public int deleteKnowChart(LibraryVO searchVO) throws Exception {
+        return delete("library.deleteKnowChart", searchVO);
+    }
+
+    /**
+     * 지식카드 차트 수정 (본인 카드 소유 차트만)
+     * @param searchVO chartId, userId(세션), chartType 등 필수
+     * @return
+     * @throws Exception
+     */
+    public int updateKnowChart(LibraryVO searchVO) throws Exception {
+        return update("library.updateKnowChart", searchVO);
+    }
+
+    /**
      * 템플릿 정보 조회 (TMPL_ID 기준)
      * @param searchVO tmplId 필수
      * @return
