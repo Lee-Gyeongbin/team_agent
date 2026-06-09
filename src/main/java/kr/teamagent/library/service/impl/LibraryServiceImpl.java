@@ -685,11 +685,14 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                 htmlFieldInstruction += " 단, 답변에 마크다운 파이프 표가 있으면 "
                         + "표 구간만 HTML <table><tbody><tr><th>또는<td>...</table> 로 변환해 넣을 것(마크다운 | 파이프 표 금지). "
                         + "<p>, <li> 등 그 외 HTML은 포함하지 말고 <table> 관련 태그만 예외로 허용. "
-                        + "표는 content(본문내용) 등 해당 필드 JSON 배열 항목 안에 넣어 보고서 본문 표 셀에 그려지게 할 것.";
+                        + "표는 " + buildMultilineFieldPlacementHint(multilineJsonKeys)
+                        + " JSON 배열 항목 안에 넣어 보고서 본문 표 셀에 그려지게 할 것. "
+                        + "content 등 예시 필드명이 FIELD_LIST에 없어도 표를 생략·요약하지 말 것.";
             }
             List<String> extractedImgTags = new ArrayList<>();
             String strippedQContent = stripCreateDocContentImages(qContent, extractedImgTags);
             String strippedRContent = stripCreateDocContentImages(rContent, extractedImgTags);
+            appendChartImagesToExtracted(searchVO.getChartImages(), extractedImgTags);
             String prompt = promptTemplate
                     .replace("{{Q_CONTENT}}", strippedQContent)
                     .replace("{{R_CONTENT}}", strippedRContent)
@@ -697,11 +700,11 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
                     .replace("{{USER_NM}}", userNm)
                     .replace("{{HTML_FIELD_INSTRUCTION}}", htmlFieldInstruction)
                     .replace("{{FIELD_LIST}}", fieldList.toString());
-            String base64ImageInstruction = buildBase64ImageInstruction(extractedImgTags.size());
+            String base64ImageInstruction = buildBase64ImageInstruction(extractedImgTags.size(), multilineJsonKeys);
             if (!CommonUtil.isEmpty(base64ImageInstruction)) {
                 prompt = prompt + "\n\n" + base64ImageInstruction;
             }
-            String markdownTableInstruction = buildMarkdownTableInstruction(qContent, rContent);
+            String markdownTableInstruction = buildMarkdownTableInstruction(qContent, rContent, multilineJsonKeys);
             if (!CommonUtil.isEmpty(markdownTableInstruction)) {
                 prompt = prompt + "\n\n" + markdownTableInstruction;
             }
@@ -762,12 +765,13 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             List<String> extractedImgTags = new ArrayList<>();
             String strippedQContent = stripCreateDocContentImages(qContent, extractedImgTags);
             String strippedRContent = stripCreateDocContentImages(rContent, extractedImgTags);
+            appendChartImagesToExtracted(searchVO.getChartImages(), extractedImgTags);
             String prompt = promptTemplate
                     .replace("{{Q_CONTENT}}", strippedQContent)
                     .replace("{{R_CONTENT}}", strippedRContent)
                     .replace("{{TODAY}}", today)
                     .replace("{{USER_NM}}", userNm);
-            String base64ImageInstruction = buildBase64ImageInstruction(extractedImgTags.size());
+            String base64ImageInstruction = buildBase64ImageInstruction(extractedImgTags.size(), null);
             if (!CommonUtil.isEmpty(base64ImageInstruction)) {
                 prompt = prompt + "\n\n" + base64ImageInstruction;
             }
@@ -1084,15 +1088,29 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * FIELD_LIST multiline 필드 안내 문구. 키가 없으면 FIELD_LIST 전체 필드 대상으로 안내한다.
+     */
+    private String buildMultilineFieldPlacementHint(List<String> multilineJsonKeys) {
+        if (multilineJsonKeys == null || multilineJsonKeys.isEmpty()) {
+            return "FIELD_LIST에 정의된 응답 JSON 필드 중 대화 맥락과 가장 관련 있는";
+        }
+        return "FIELD_LIST에 정의된 multiline(JSON 문자열 배열) 필드("
+                + String.join(", ", multilineJsonKeys) + ") 중 대화 맥락과 가장 관련 있는";
+    }
+
+    /**
      * R/Q에 마크다운 파이프 표가 있을 때 AI가 응답 JSON에 HTML table을 넣도록 지시한다.
      */
-    private String buildMarkdownTableInstruction(String qContent, String rContent) {
+    private String buildMarkdownTableInstruction(String qContent, String rContent, List<String> multilineJsonKeys) {
         if (!TmplHtmlRenderService.containsMarkdownPipeTable(qContent)
                 && !TmplHtmlRenderService.containsMarkdownPipeTable(rContent)) {
             return "";
         }
-        return "참고: 답변(R_CONTENT)에 마크다운 파이프 표(| 열1 | 열2 |, |---|---|, 데이터 행)가 있습니다. "
-                + "보고서 JSON의 content(본문내용) 등 multiline 배열 필드에 반영할 때 "
+        String fieldHint = buildMultilineFieldPlacementHint(multilineJsonKeys);
+        return "【필수·표 포함】 답변(R_CONTENT)에 마크다운 파이프 표(| 열1 | 열2 |, |---|---|, 데이터 행)가 있습니다. "
+                + "보고서 JSON의 " + fieldHint + " 필드에 반드시 반영할 것. "
+                + "content·overview 등 예시 필드명이 FIELD_LIST에 없어도 표를 생략·요약·불릿 목록으로 대체하면 잘못된 응답이다. "
+                + "multiline 필드가 FIELD_LIST에 없으면 FIELD_LIST에 정의된 다른 적절한 필드(문자열 또는 문자열 배열)에 넣을 것. "
                 + "표는 반드시 HTML <table> 형식으로 변환해 넣을 것. 마크다운 파이프 표(| ... |)는 응답에 넣지 말 것. "
                 + "예: \"<table><tbody><tr><th>기간</th><th>상품유형</th><th>개통 건수</th></tr>"
                 + "<tr><td>2025-6</td><td>8VSB</td><td>4,804</td></tr>...</tbody></table>\". "
@@ -1106,11 +1124,12 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
     /**
      * createDoc: 추출된 이미지가 있을 때 AI가 플레이스홀더 토큰을 반드시 포함하도록 지시한다.
      */
-    private String buildBase64ImageInstruction(int imageCount) {
+    private String buildBase64ImageInstruction(int imageCount, List<String> multilineJsonKeys) {
         if (imageCount <= 0) {
             return "";
         }
         String token = TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN;
+        String fieldHint = buildMultilineFieldPlacementHint(multilineJsonKeys);
         StringBuilder requiredTokens = new StringBuilder();
         for (int i = 0; i < imageCount; i++) {
             if (i > 0) {
@@ -1119,12 +1138,14 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             requiredTokens.append("[[").append(token).append(":").append(i).append("]]");
         }
         return "【필수·이미지 포함】 대화(Q_CONTENT/R_CONTENT)에 인라인 이미지 " + imageCount + "개가 있습니다. "
-                + "응답 JSON 전체(overview, content, conclusion 등 모든 필드 합산)에 아래 " + imageCount + "개 토큰을 반드시 모두 포함할 것. "
+                + "응답 JSON 전체(FIELD_LIST에 정의된 모든 필드 합산)에 아래 " + imageCount + "개 토큰을 반드시 모두 포함할 것. "
                 + "하나라도 누락·대체·생략·텍스트 설명으로 바꾸면 잘못된 응답이다. "
+                + "content·overview·conclusion 등 예시 필드명이 FIELD_LIST에 없어도 이미지 토큰을 생략하면 잘못된 응답이다. "
                 + "필수 토큰(이미지 1개당 응답 전체에서 정확히 1회만): " + requiredTokens + ". "
-                + "동일 토큰을 overview·content·conclusion 등 여러 배열 필드나 여러 배열 항목에 중복 삽입하면 잘못된 응답이다. "
-                + "이미지 토큰은 본문내용(content) 배열의 관련 항목 1곳에만 넣고, 개요(overview)·결론(conclusion) 등 다른 필드에는 같은 토큰을 넣지 말 것. "
-                + "각 토큰은 응답 JSON 어디에도 단 1곳(단일 문자열 배열 항목 1개)에만 넣을 것. "
+                + "동일 토큰을 여러 필드나 여러 배열 항목에 중복 삽입하면 잘못된 응답이다. "
+                + "이미지 토큰은 " + fieldHint + " 필드의 관련 배열 항목 1곳에 우선 배치할 것. "
+                + "multiline 필드가 FIELD_LIST에 없으면 FIELD_LIST에 정의된 다른 적절한 필드(문자열 또는 문자열 배열)에 반드시 넣을 것. "
+                + "각 토큰은 응답 JSON 어디에도 단 1곳(단일 문자열 배열 항목 1개, 또는 단일 문자열 필드 값)에만 넣을 것. "
                 + "JSON 문자열 배열 필드에 넣을 때 HTML 태그 대신 해당 토큰을 단독 문자열 배열 항목으로 넣을 것. "
                 + "예: [\"그래프 설명\", \"[[" + token + ":0]]\", \"분석 내용\"] — 이 예에서 \"[[" + token + ":0]]\"는 응답 전체에 이 한 번만 등장해야 함. "
                 + "data:image/...;base64,... 데이터를 응답에 직접 출력·복사·생성하지 말 것. "
@@ -1187,6 +1208,21 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             html = html.replace(placeholder, extractedImgTags.get(i));
         }
         return html;
+    }
+
+    /**
+     * svcTy='S' 차트 이미지(base64 data URL 목록)를 extractedImgTags에 추가한다.
+     * Q/R 콘텐츠 이미지 추출 후 호출하면 인덱스가 이어서 할당된다.
+     */
+    private void appendChartImagesToExtracted(List<String> chartImages, List<String> extractedImgTags) {
+        if (chartImages == null || chartImages.isEmpty()) {
+            return;
+        }
+        for (String dataUrl : chartImages) {
+            if (!CommonUtil.isEmpty(dataUrl)) {
+                extractedImgTags.add(buildImgTagFromDataUrl(dataUrl));
+            }
+        }
     }
 
     /**

@@ -214,6 +214,9 @@ public class LibraryVO {
     /** AI 문서 생성 API 요청 */
     private String tmplId;
 
+    /** createDoc API: svcTy='S'일 때 프론트엔드에서 캡처한 차트 이미지 base64 목록 */
+    private List<String> chartImages;
+
     /** 리포트 채팅방 ID */
     private String roomId;
 
