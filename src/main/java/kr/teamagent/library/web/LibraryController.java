@@ -339,4 +339,57 @@ public class LibraryController extends BaseController {
         return makeSuccessJsonData();
     }
 
+    /**
+     * 지식카드 차트 목록 조회
+     * @param searchVO body: { cardId }
+     * @return jsonView dataList: KnowChartItem[]
+     * @throws Exception
+     */
+    @RequestMapping(value = "/knowChartList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView knowChartList(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", libraryService.selectKnowChartList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 지식카드 차트 저장 (신규 insert)
+     * @param searchVO cardId, chartType, chartTargetKey, yAxisKeys, seriesKey, statIdFilter, stackYn, dualAxisYn, ylChartType, yrChartType, sortOrd
+     * @return jsonView successYn, returnMsg, data: { chartId }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/saveKnowChart.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView saveKnowChart(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(libraryService.saveKnowChart(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 지식카드 차트 삭제
+     * @param searchVO body: { chartId }
+     * @return jsonView successYn, returnMsg, data: { chartId }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/deleteKnowChart.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteKnowChart(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(libraryService.deleteKnowChart(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 지식카드 차트 수정
+     * @param searchVO chartId, chartType, chartTargetKey, yAxisKeys, seriesKey, statIdFilter, stackYn, dualAxisYn, ylChartType, yrChartType, sortOrd
+     * @return jsonView successYn, returnMsg, data: { chartId }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/updateKnowChart.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateKnowChart(@RequestBody LibraryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(libraryService.updateKnowChart(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

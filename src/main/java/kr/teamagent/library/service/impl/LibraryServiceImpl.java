@@ -28,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
 import kr.teamagent.common.CommonVO;
@@ -386,6 +387,215 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      */
     public List<LibraryVO.ChartDetailCdItem> selectChartDetailCdList(LibraryVO searchVO) throws Exception {
         return libraryDAO.selectChartDetailCdList(searchVO);
+    }
+
+    /**
+     * 지식카드 차트 목록 조회
+     * @param searchVO cardId 필수
+     * @return
+     * @throws Exception
+     */
+    public List<LibraryVO.KnowChartItem> selectKnowChartList(LibraryVO searchVO) throws Exception {
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getCardId())) {
+            return Collections.emptyList();
+        }
+        return libraryDAO.selectKnowChartList(searchVO);
+    }
+
+    /**
+     * 지식카드 차트 저장 (신규 insert)
+     * @param searchVO cardId, chartType, chartTargetKey, yAxisKeys 필수
+     * @return successYn, returnMsg, data(chartId)
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> saveKnowChart(LibraryVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청 본문이 없습니다.");
+            return resultMap;
+        }
+        String missingField = resolveKnowChartMissingField(searchVO);
+        if (missingField != null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", missingField + "가(이) 필요합니다.");
+            return resultMap;
+        }
+
+        String userId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(userId)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            return resultMap;
+        }
+
+        LibraryVO cardParam = new LibraryVO();
+        cardParam.setCardId(searchVO.getCardId());
+        LibraryVO card = libraryDAO.selectCardDetail(cardParam);
+        if (card == null || !userId.equals(card.getUserId())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "카드를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        LibraryVO.KnowChartSavePayload insertVO = new LibraryVO.KnowChartSavePayload();
+        insertVO.setChartId(keyGenerate.generateTableKey("KH", "TB_KNOW_CARD_CHART", "CHART_ID"));
+        insertVO.setCardId(searchVO.getCardId());
+        insertVO.setChartType(searchVO.getChartType());
+        insertVO.setChartTargetKey(searchVO.getChartTargetKey());
+        insertVO.setYAxisKeysJson(AGENT_SUB_CFG_GSON.toJson(searchVO.getYAxisKeys()));
+        insertVO.setSeriesKey(CommonUtil.nullToBlank(searchVO.getSeriesKey()));
+        insertVO.setStatIdFilter(CommonUtil.nullToBlank(searchVO.getStatIdFilter()));
+        insertVO.setStackYn("Y".equals(searchVO.getStackYn()) ? "Y" : "N");
+        insertVO.setDualAxisYn("Y".equals(searchVO.getDualAxisYn()) ? "Y" : "N");
+        insertVO.setYlChartType(searchVO.getYlChartType());
+        insertVO.setYrChartType(searchVO.getYrChartType());
+        insertVO.setSortOrd(searchVO.getSortOrd() != null ? searchVO.getSortOrd() : 0);
+        insertVO.setCreateUserId(userId);
+
+        libraryDAO.insertKnowChart(insertVO);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("chartId", insertVO.getChartId());
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        resultMap.put("data", data);
+        return resultMap;
+    }
+
+    private String resolveKnowChartMissingField(LibraryVO searchVO) {
+        if (CommonUtil.isEmpty(searchVO.getCardId())) {
+            return "cardId";
+        }
+        if (CommonUtil.isEmpty(searchVO.getChartType())) {
+            return "chartType";
+        }
+        if (CommonUtil.isEmpty(searchVO.getChartTargetKey())) {
+            return "chartTargetKey";
+        }
+        if (CommonUtil.isEmpty(searchVO.getYAxisKeys())) {
+            return "yAxisKeys";
+        }
+        return null;
+    }
+
+    /**
+     * 지식카드 차트 삭제
+     * @param searchVO chartId 필수
+     * @return successYn, returnMsg, data(chartId)
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> deleteKnowChart(LibraryVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청 본문이 없습니다.");
+            return resultMap;
+        }
+        if (CommonUtil.isEmpty(searchVO.getChartId())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "chartId가 필요합니다.");
+            return resultMap;
+        }
+
+        String userId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(userId)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            return resultMap;
+        }
+
+        searchVO.setUserId(userId);
+        int deleted = libraryDAO.deleteKnowChart(searchVO);
+        if (deleted == 0) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "삭제할 차트를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("chartId", searchVO.getChartId());
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        resultMap.put("data", data);
+        return resultMap;
+    }
+
+    /**
+     * 지식카드 차트 수정
+     * @param searchVO chartId, chartType, chartTargetKey, yAxisKeys 필수
+     * @return successYn, returnMsg, data(chartId)
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateKnowChart(LibraryVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청 본문이 없습니다.");
+            return resultMap;
+        }
+        String missingField = resolveKnowChartUpdateMissingField(searchVO);
+        if (missingField != null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", missingField + "가(이) 필요합니다.");
+            return resultMap;
+        }
+
+        String userId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(userId)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "로그인이 필요합니다.");
+            return resultMap;
+        }
+
+        searchVO.setUserId(userId);
+        searchVO.setYAxisKeysJson(AGENT_SUB_CFG_GSON.toJson(searchVO.getYAxisKeys()));
+        searchVO.setSeriesKey(CommonUtil.nullToBlank(searchVO.getSeriesKey()));
+        searchVO.setStatIdFilter(CommonUtil.nullToBlank(searchVO.getStatIdFilter()));
+        searchVO.setStackYn("Y".equals(searchVO.getStackYn()) ? "Y" : "N");
+        searchVO.setDualAxisYn("Y".equals(searchVO.getDualAxisYn()) ? "Y" : "N");
+        if (searchVO.getSortOrd() == null) {
+            searchVO.setSortOrd(0);
+        }
+
+        int updated = libraryDAO.updateKnowChart(searchVO);
+        if (updated == 0) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "변경할 차트를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("chartId", searchVO.getChartId());
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        resultMap.put("data", data);
+        return resultMap;
+    }
+
+    private String resolveKnowChartUpdateMissingField(LibraryVO searchVO) {
+        if (CommonUtil.isEmpty(searchVO.getChartId())) {
+            return "chartId";
+        }
+        if (CommonUtil.isEmpty(searchVO.getChartType())) {
+            return "chartType";
+        }
+        if (CommonUtil.isEmpty(searchVO.getChartTargetKey())) {
+            return "chartTargetKey";
+        }
+        if (CommonUtil.isEmpty(searchVO.getYAxisKeys())) {
+            return "yAxisKeys";
+        }
+        return null;
     }
 
     /**
