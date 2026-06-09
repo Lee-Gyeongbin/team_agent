@@ -55,6 +55,17 @@ public class MyDocumentsVO extends CommonVO {
     /** 목록 정렬 (latest | oldest | name, custom=수동 SORT_ORD) */
     private String searchSort;
 
+    /** 정렬순서 일괄 수정 요청 items */
+    private List<SortOrdItem> items;
+
+    /** 정렬순서 일괄 수정 항목 */
+    @Getter
+    @Setter
+    public static class SortOrdItem {
+        private String docId;
+        private Integer sortOrd;
+    }
+
     /** 내 문서 공유 요청 payload [TB_MY_DOC_SHARE, TB_NOTIFY] */
     @Getter
     @Setter

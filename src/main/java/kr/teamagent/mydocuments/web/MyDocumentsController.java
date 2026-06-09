@@ -85,6 +85,18 @@ public class MyDocumentsController extends BaseController {
     }
 
     /**
+     * 내 문서 정렬순서 일괄 변경
+     * @param searchVO items: [{ docId, sortOrd }]
+     * @return jsonView successYn, returnMsg, data
+     */
+    @RequestMapping(value = "/updateSortOrd.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateSortOrd(@RequestBody MyDocumentsVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>(myDocumentsService.updateSortOrd(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * 내 문서 삭제
      * @param searchVO docId
      * @return jsonView successYn, returnMsg, data: { docId }

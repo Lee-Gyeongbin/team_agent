@@ -195,6 +195,54 @@ public class MyDocumentsServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 내 문서 정렬순서(SORT_ORD) 일괄 변경.
+     *
+     * @param searchVO items: [{ docId, sortOrd }]
+     * @return successYn, returnMsg, data
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateSortOrd(MyDocumentsVO searchVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (searchVO == null) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청 본문이 없습니다.");
+            return resultMap;
+        }
+        if (searchVO.getItems() == null || searchVO.getItems().isEmpty()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "정렬 변경 목록이 없습니다.");
+            return resultMap;
+        }
+
+        for (MyDocumentsVO.SortOrdItem item : searchVO.getItems()) {
+            if (item == null || CommonUtil.isEmpty(item.getDocId())) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "문서 ID가 없습니다.");
+                return resultMap;
+            }
+            if (item.getSortOrd() == null) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "정렬 순서가 없습니다.");
+                return resultMap;
+            }
+        }
+
+        searchVO.setUserId(SessionUtil.getUserId());
+        int updated = myDocumentsDAO.updateSortOrd(searchVO);
+        if (updated != searchVO.getItems().size()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "변경할 문서를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        resultMap.put("data", new HashMap<>());
+        return resultMap;
+    }
+
+    /**
      * 내 문서 삭제 (세션 사용자·docId 기준).
      *
      * @param searchVO docId

@@ -56,6 +56,13 @@ public class MyDocumentsDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 내 문서 정렬순서(SORT_ORD) 일괄 변경
+     */
+    public int updateSortOrd(MyDocumentsVO searchVO) throws Exception {
+        return update("myDocuments.updateSortOrd", searchVO);
+    }
+
+    /**
      * 내 문서 삭제 (docId, 로그인 사용자 기준)
      */
     public int deleteMyDoc(MyDocumentsVO searchVO) throws Exception {
