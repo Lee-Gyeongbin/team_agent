@@ -56,10 +56,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final String LUNCH_MENU_AGENT_ID = "AG000009";
     private static final String MEME_AGENT_ID = "AG000011";
     private static final String RECOMMEND_SUB_TY = "RECOMMEND";
+    private static final String CURATION_SUB_TY = "CURATION";
 
     /** summary_query 동기 호출 시 프롬프트·응답이 커 지연이 길어질 수 있는 경우의 OkHttp 읽기 타임아웃(초). */
     private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
-    private static final String NEWS_CURATION_AGENT_ID = "AG000012";
     private static final Gson NEWS_CURATE_PROMPT_GSON = new Gson();
 
     /** WebSocket 세션별 진행 중인 AI API 스트리밍 호출 — 정지 버튼 클릭 시 cancel() 처리용 */
@@ -220,8 +220,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
-        if (NEWS_CURATION_AGENT_ID.equals(agentId)) {
-            deliverNewsRecommendationViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
+        ChatbotVO.AgtSubCfgVO curationSubCfg = getAgentSubCfg(agentId);
+        if (curationSubCfg != null && CURATION_SUB_TY.equals(curationSubCfg.getSubTy()) && "Y".equals(curationSubCfg.getUseYn())) {
+            deliverNewsRecommendationViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId,
+                    attachmentFileIds, curationSubCfg.getAdditionalConfigMap(), callback);
             return;
         }
 
@@ -559,22 +561,31 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * SUB_TY=RECOMMEND 에이전트 여부 판별 — 기존 selectAgentSubCfgListByAgentIds 재사용
-     * RECOMMEND 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
+     * 에이전트의 TB_AGT_SUB_CFG 조회 + ADDITIONAL_CONFIG 파싱 — SUB_TY 기반 분기 판별 공용 헬퍼
      */
-    private boolean isRecommendAgent(String agentId) {
-        if (CommonUtil.isEmpty(agentId)) return false;
+    private ChatbotVO.AgtSubCfgVO getAgentSubCfg(String agentId) {
+        if (CommonUtil.isEmpty(agentId)) return null;
         try {
             ChatbotVO searchVO = new ChatbotVO();
             searchVO.setAgentIdList(java.util.Collections.singletonList(agentId));
             List<ChatbotVO.AgtSubCfgVO> list = chatbotDAO.selectAgentSubCfgListByAgentIds(searchVO);
-            if (list == null || list.isEmpty()) return false;
+            if (list == null || list.isEmpty()) return null;
             ChatbotVO.AgtSubCfgVO subCfg = list.get(0);
-            return RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+            parseAgentSubAdditionalConfig(subCfg);
+            return subCfg;
         } catch (Exception e) {
-            logger.warn("isRecommendAgent 조회 중 오류 (agentId={}): {}", agentId, e.getMessage());
-            return false;
+            logger.warn("getAgentSubCfg 조회 중 오류 (agentId={}): {}", agentId, e.getMessage());
+            return null;
         }
+    }
+
+    /**
+     * SUB_TY=RECOMMEND 에이전트 여부 판별.
+     * RECOMMEND 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
+     */
+    private boolean isRecommendAgent(String agentId) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        return subCfg != null && RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
     }
 
     private String buildRequestQueryByAgent(String query, String agentId) {
@@ -2158,18 +2169,43 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 뉴스 큐레이션 에이전트 전용.
      * 관심 카테고리마다 RSS 수집 → AI 호출 → 서버에서 JSON 배열 병합.
      */
+    @SuppressWarnings("unchecked")
     private void deliverNewsRecommendationViaWebSocket(String query, String threadId, String userId, String svcTy,
             String modelId, String refId, String agentId, List<Long> attachmentFileIds,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+            Map<String, Object> additionalConfig, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
         String rawQuery = query != null ? query : "";
         List<String> interestCategories = selectNewsInterestCategoryCodeIds(userId);
         if (interestCategories.isEmpty()) {
             callback.onError("뉴스 관심 카테고리가 설정되지 않았습니다.");
             return;
         }
+
+        Map<String, Object> config = additionalConfig != null ? additionalConfig : Collections.emptyMap();
+        List<Map<String, Object>> candidateSources = (List<Map<String, Object>>) config.get("candidateSources");
+        Map<String, List<NewsRssUtil.FeedSpec>> feedMap = NewsRssUtil.buildFeedMap(candidateSources);
+
+        String pressLabel = "연합뉴스";
+        int snippetMaxLength = 400;
+        Object engineObj = config.get("engine");
+        if (engineObj instanceof Map) {
+            Object candidateFetchObj = ((Map<String, Object>) engineObj).get("candidateFetch");
+            if (candidateFetchObj instanceof Map) {
+                Map<String, Object> candidateFetch = (Map<String, Object>) candidateFetchObj;
+                Object pressLabelObj = candidateFetch.get("pressLabel");
+                if (pressLabelObj != null && CommonUtil.isNotEmpty(String.valueOf(pressLabelObj))) {
+                    pressLabel = String.valueOf(pressLabelObj);
+                }
+                Object snippetMaxLengthObj = candidateFetch.get("snippetMaxLength");
+                if (snippetMaxLengthObj instanceof Number) {
+                    snippetMaxLength = ((Number) snippetMaxLengthObj).intValue();
+                }
+            }
+        }
+
         List<String> categoryJsonList = new ArrayList<>();
         for (String codeId : interestCategories) {
-            List<RssArticleRow> categoryRows = NewsRssUtil.collectCandidatesForCodeId(restApiManager, logger, codeId);
+            List<RssArticleRow> categoryRows = NewsRssUtil.collectCandidatesForCodeId(restApiManager, logger, codeId,
+                    feedMap, pressLabel, snippetMaxLength);
             if (categoryRows.isEmpty()) {
                 continue;
             }

@@ -27,47 +27,60 @@ import kr.teamagent.chat.service.ChatbotVO;
  */
 public final class NewsRssUtil {
 
-    private static final String YONHAP_LABEL = "연합뉴스";
+    private static final String DEFAULT_PRESS_LABEL = "연합뉴스";
+    private static final int DEFAULT_SNIPPET_MAX_LENGTH = 400;
     private static final Pattern MEDIA_CONTENT_URL_THEN_JPEG = Pattern.compile(
             "(?i)<media:content\\s+url=[\"']([^\"']+)[\"']\\s+type=[\"']image/jpeg[\"']");
 
     private NewsRssUtil() {
     }
 
-    private static final class FeedSpec {
-        final String propKey;
+    /**
+     * NC000001 {@code CODE_ID}에 매핑되는 RSS 피드 1건 (feedUrl + 카테고리명).
+     */
+    public static final class FeedSpec {
+        final String feedUrl;
         final String rssCategory;
 
-        FeedSpec(String propKey, String rssCategory) {
-            this.propKey = propKey;
+        public FeedSpec(String feedUrl, String rssCategory) {
+            this.feedUrl = feedUrl;
             this.rssCategory = rssCategory;
         }
     }
 
     /**
-     * NC000001 {@code CODE_ID} → 연합뉴스 RSS
+     * ADDITIONAL_CONFIG의 {@code candidateSources}(codeId/rssCategory/feedUrl 목록)로부터
+     * NC000001 {@code CODE_ID} → RSS 피드 매핑을 생성한다.
      */
-    private static final Map<String, List<FeedSpec>> FEED_MAP = Map.ofEntries(
-            Map.entry("001", List.of(new FeedSpec("Globals.news.rss.yna.politics", "정치"))),
-            Map.entry("002", List.of(new FeedSpec("Globals.news.rss.yna.economy", "경제"))),
-            Map.entry("003", List.of(new FeedSpec("Globals.news.rss.yna.society", "사회"))),
-            Map.entry("004", List.of(new FeedSpec("Globals.news.rss.yna.industry", "산업"))),
-            Map.entry("005", List.of(new FeedSpec("Globals.news.rss.yna.culture", "문화"))),
-            Map.entry("006", List.of(new FeedSpec("Globals.news.rss.yna.international", "세계"))),
-            Map.entry("007", List.of(new FeedSpec("Globals.news.rss.yna.health", "건강"))),
-            Map.entry("008", List.of(new FeedSpec("Globals.news.rss.yna.entertainment", "연예"))),
-            Map.entry("009", List.of(new FeedSpec("Globals.news.rss.yna.sports", "스포츠"))),
-            Map.entry("010", List.of(new FeedSpec("Globals.news.rss.yna.market", "주식"))));
+    public static Map<String, List<FeedSpec>> buildFeedMap(List<Map<String, Object>> candidateSources) {
+        if (candidateSources == null || candidateSources.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, List<FeedSpec>> feedMap = new HashMap<>();
+        for (Map<String, Object> source : candidateSources) {
+            if (source == null) {
+                continue;
+            }
+            String codeId = String.valueOf(source.getOrDefault("codeId", "")).trim();
+            String feedUrl = String.valueOf(source.getOrDefault("feedUrl", "")).trim();
+            String rssCategory = String.valueOf(source.getOrDefault("rssCategory", "")).trim();
+            if (codeId.isEmpty() || feedUrl.isEmpty()) {
+                continue;
+            }
+            feedMap.computeIfAbsent(codeId, k -> new ArrayList<>()).add(new FeedSpec(feedUrl, rssCategory));
+        }
+        return feedMap;
+    }
 
-    private static List<FeedSpec> feedsForCodeId(String codeId) {
-        if (codeId == null) {
+    private static List<FeedSpec> feedsForCodeId(Map<String, List<FeedSpec>> feedMap, String codeId) {
+        if (feedMap == null || codeId == null) {
             return Collections.emptyList();
         }
         String key = codeId.trim();
         if (key.isEmpty()) {
             return Collections.emptyList();
         }
-        List<FeedSpec> specs = FEED_MAP.get(key);
+        List<FeedSpec> specs = feedMap.get(key);
         return specs != null ? specs : Collections.emptyList();
     }
 
@@ -75,37 +88,49 @@ public final class NewsRssUtil {
      * 관심 카테고리 1개에 대한 RSS 후보 기사 수집.
      *
      * @param codeId NC000001 {@code CODE_ID} (예: 001)
+     * @param feedMap {@link #buildFeedMap(List)}로 생성한 CODE_ID → RSS 피드 매핑
+     * @param pressLabel 기사 출처 라벨 (예: 연합뉴스)
+     * @param snippetMaxLength 기사 요약 최대 길이
      */
     public static List<ChatbotVO.RssArticleRow> collectCandidatesForCodeId(RestApiManager restApiManager, Logger log,
-            String codeId) {
+            String codeId, Map<String, List<FeedSpec>> feedMap, String pressLabel, int snippetMaxLength) {
         if (codeId == null || codeId.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        return collectCandidates(restApiManager, log, Collections.singletonList(codeId.trim()));
+        return collectCandidates(restApiManager, log, Collections.singletonList(codeId.trim()), feedMap, pressLabel,
+                snippetMaxLength);
     }
 
     /**
      * @param codeIds NC000001 {@code CODE_ID} 목록 (예: 001, 002)
+     * @param feedMap {@link #buildFeedMap(List)}로 생성한 CODE_ID → RSS 피드 매핑
+     * @param pressLabel 기사 출처 라벨 (예: 연합뉴스)
+     * @param snippetMaxLength 기사 요약 최대 길이
      */
     public static List<ChatbotVO.RssArticleRow> collectCandidates(RestApiManager restApiManager, Logger log,
-            List<String> codeIds) {
+            List<String> codeIds, Map<String, List<FeedSpec>> feedMap, String pressLabel, int snippetMaxLength) {
         List<ChatbotVO.RssArticleRow> out = new ArrayList<>();
         Set<String> seenLinks = new HashSet<>();
         Map<String, String> header = new HashMap<>();
         header.put("User-Agent", "Mozilla/5.0 (compatible; TeamAgent/1.0; +https://example.invalid/news-bot)");
+
+        String resolvedPressLabel = (pressLabel != null && !pressLabel.trim().isEmpty()) ? pressLabel
+                : DEFAULT_PRESS_LABEL;
+        int resolvedSnippetMaxLength = snippetMaxLength > 0 ? snippetMaxLength : DEFAULT_SNIPPET_MAX_LENGTH;
 
         List<String> ids = codeIds != null ? codeIds : Collections.emptyList();
         for (String codeId : ids) {
             if (codeId == null || codeId.trim().isEmpty()) {
                 continue;
             }
-            List<FeedSpec> specs = feedsForCodeId(codeId);
+            List<FeedSpec> specs = feedsForCodeId(feedMap, codeId);
             if (specs.isEmpty()) {
                 log.warn("뉴스 RSS: 알 수 없는 관심 카테고리 CODE_ID 무시: {}", codeId);
                 continue;
             }
             for (FeedSpec feedSpec : specs) {
-                addFeed(out, seenLinks, restApiManager, header, feedSpec.propKey, feedSpec.rssCategory, log);
+                addFeed(out, seenLinks, restApiManager, header, feedSpec.feedUrl, feedSpec.rssCategory,
+                        resolvedPressLabel, resolvedSnippetMaxLength, log);
             }
         }
 
@@ -117,10 +142,10 @@ public final class NewsRssUtil {
     }
 
     private static void addFeed(List<ChatbotVO.RssArticleRow> sink, Set<String> seenLinks,
-            RestApiManager restApiManager, Map<String, String> header, String propKey, String rssCategory, Logger log) {
-        String feedUrl = PropertyUtil.getProperty(propKey);
+            RestApiManager restApiManager, Map<String, String> header, String feedUrl, String rssCategory,
+            String pressLabel, int snippetMaxLength, Logger log) {
         if (feedUrl == null || feedUrl.isEmpty()) {
-            log.warn("RSS 수집 생략: properties에 URL 없음 propKey={}", propKey);
+            log.warn("RSS 수집 생략: feedUrl 없음 rssCategory={}", rssCategory);
             return;
         }
         try {
@@ -128,7 +153,7 @@ public final class NewsRssUtil {
             if (xml == null || xml.trim().isEmpty()) {
                 return;
             }
-            List<ChatbotVO.RssArticleRow> parsed = parseYonhapRssFeed(xml, rssCategory);
+            List<ChatbotVO.RssArticleRow> parsed = parseYonhapRssFeed(xml, rssCategory, pressLabel, snippetMaxLength);
             for (ChatbotVO.RssArticleRow row : parsed) {
                 String articleUrl = row.getLink() != null ? row.getLink().trim() : "";
                 if (!articleUrl.isEmpty() && !seenLinks.add(articleUrl)) {
@@ -137,11 +162,12 @@ public final class NewsRssUtil {
                 sink.add(row);
             }
         } catch (Exception e) {
-            log.warn("RSS 수집 실패 {} {}: {}", YONHAP_LABEL, feedUrl, e.getMessage());
+            log.warn("RSS 수집 실패 {} {}: {}", pressLabel, feedUrl, e.getMessage());
         }
     }
 
-    private static List<ChatbotVO.RssArticleRow> parseYonhapRssFeed(String xml, String rssCategory) throws Exception {
+    private static List<ChatbotVO.RssArticleRow> parseYonhapRssFeed(String xml, String rssCategory, String pressLabel,
+            int snippetMaxLength) throws Exception {
         SyndFeedInput input = new SyndFeedInput();
         input.setPreserveWireFeed(true);
         List<ChatbotVO.RssArticleRow> rows = new ArrayList<>();
@@ -151,14 +177,14 @@ public final class NewsRssUtil {
                 String title = entry.getTitle() != null ? entry.getTitle().trim() : "";
                 String link = resolveLink(entry);
                 String descriptionHtml = resolveDescriptionHtml(entry);
-                String snippet = shorten(stripHtml(descriptionHtml), 400);
+                String snippet = shorten(stripHtml(descriptionHtml), snippetMaxLength);
                 String imageUrl = yonhapMediaContentJpegInRawItemXml(xml, link);
 
                 if (title.isEmpty() && link.isEmpty()) {
                     continue;
                 }
                 ChatbotVO.RssArticleRow row = new ChatbotVO.RssArticleRow();
-                row.setPressLabel(YONHAP_LABEL);
+                row.setPressLabel(pressLabel);
                 row.setRssCategory(rssCategory != null ? rssCategory : "");
                 row.setTitle(title);
                 row.setLink(link);
