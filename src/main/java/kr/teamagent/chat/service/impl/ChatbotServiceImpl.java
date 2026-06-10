@@ -826,6 +826,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
+                    // AI 답변 청크크
                     if ("answer_delta".equals(currentEvent)) {
                         String text = (String) data.get("text");
                         if (text != null && text.length() > 0) {
@@ -837,6 +838,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
+                    // 런치 에이전트에서 사용. (카카오 URL 링크 답변)
                     if ("answer_linked".equals(currentEvent)) {
                         String linkedText = getString(data.get("text"));
                         if (CommonUtil.isNotEmpty(linkedText)) {
@@ -848,6 +850,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
+                    // 출처 답변 청크
                     if ("answer_source".equals(currentEvent)) {
                         if (isLunchAgent) {
                             continue;
@@ -872,6 +875,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
+                    // 이미지 청크(base64 이미지 데이터)
                     if ("answer_image".equals(currentEvent)) {
                         // 일반 채팅(svcTy=C)에서만 이미지 청크 전달
                         if (!"C".equals(svcTy)) {
