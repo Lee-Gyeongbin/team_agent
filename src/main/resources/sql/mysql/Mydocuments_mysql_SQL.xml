@@ -13,6 +13,7 @@
             , M.AGENT_ID
             , A.AGENT_NM
             , M.DOC_NM
+            , M.DOC_HTML
             , M.SVC_TY
             , M.DOC_STATUS
             , M.NEW_YN

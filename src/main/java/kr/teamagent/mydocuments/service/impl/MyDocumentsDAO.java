@@ -13,7 +13,7 @@ import kr.teamagent.mydocuments.service.MyDocumentsVO;
 public class MyDocumentsDAO extends EgovComAbstractDAO {
 
     /**
-     * 내 문서 목록 조회 (로그인 사용자, DOC_HTML 등 대용량 컬럼 제외)
+     * 내 문서 목록 조회 (로그인 사용자, 미리보기용 DOC_HTML 포함)
      */
     @SuppressWarnings("unchecked")
     public List<MyDocumentsVO> selectMyDocList(MyDocumentsVO searchVO) throws Exception {
