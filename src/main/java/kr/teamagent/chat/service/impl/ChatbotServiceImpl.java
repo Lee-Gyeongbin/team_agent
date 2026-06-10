@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.lang.reflect.Type;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -60,6 +61,20 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
     private static final String NEWS_CURATION_AGENT_ID = "AG000012";
     private static final Gson NEWS_CURATE_PROMPT_GSON = new Gson();
+
+    /** WebSocket 세션별 진행 중인 AI API 스트리밍 호출 — 정지 버튼 클릭 시 cancel() 처리용 */
+    private static final ConcurrentHashMap<String, okhttp3.Call> activeStreamCalls = new ConcurrentHashMap<>();
+
+    /**
+     * 세션의 진행 중인 AI API 스트리밍 호출을 취소
+     */
+    public void cancelStream(String sessionId) {
+        okhttp3.Call call = activeStreamCalls.get(sessionId);
+        if (call != null) {
+            call.cancel();
+            logger.info("스트리밍 응답 중단 요청 처리: sessionId={}", sessionId);
+        }
+    }
 
     @Autowired
     ChatbotDAO chatbotDAO;
@@ -477,7 +492,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
              * 이 구조를 통해 WebSocket 스레드 및 서버 내부 작업 스레드가
              * 네트워크 지연이나 장시간 스트리밍으로 인해 블로킹되지 않도록 한다.
              */
-            client.newCall(request).enqueue(new okhttp3.Callback() {
+            String sessionId = session.getId();
+            okhttp3.Call call = client.newCall(request);
+            activeStreamCalls.put(sessionId, call);
+            call.enqueue(new okhttp3.Callback() {
                 /**
                  * HTTP 요청 자체가 실패한 경우 호출됨
                  * - 네트워크 오류
@@ -487,6 +505,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                  */
                 @Override
                 public void onFailure(okhttp3.Call call, IOException e) {
+                    activeStreamCalls.remove(sessionId, call);
+                    if (call.isCanceled()) {
+                        logger.info("AI API 호출이 사용자 요청으로 중단되었습니다: threadId={}", threadId);
+                        callback.onComplete("사용자 요청에 의해 응답 생성이 중단되었습니다.", "", "", new ArrayList<>(), threadId, null, "", "", "");
+                        return;
+                    }
                     logger.error("AI API 호출 실패: {}", e.getMessage(), e);
                     callback.onError("API 호출 실패: " + e.getMessage());
                 }
@@ -520,7 +544,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                          * - 스트리밍 종료 시 callback.onComplete()
                          를 호출한다.
                          */
-                        processStreamingResponseWebSocket(responseBody, query, svcTy, modelId, refId, userId, agentId, threadId, attachmentFileIds, callback);
+                        processStreamingResponseWebSocket(responseBody, call, sessionId, query, svcTy, modelId, refId, userId, agentId, threadId, attachmentFileIds, callback);
                     } catch (Exception e) {
                         logger.error("스트리밍 응답 처리 중 오류: {}", e.getMessage(), e);
                         callback.onError("스트리밍 처리 오류: " + e.getMessage());
@@ -768,7 +792,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * WebSocket 방식으로 스트리밍 응답을 처리하여 클라이언트로 전달
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
-    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
+    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, okhttp3.Call call, String sessionId, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
@@ -784,6 +808,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String responseThreadId = threadId;
         boolean isCompleteCalled = false;
         boolean hasStreamError = false;
+        boolean isCancelled = false;
 
         int inputTokens = 0;
         int outputTokens = 0;
@@ -826,7 +851,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
-                    // AI 답변 청크크
+                    // AI 답변 청크
                     if ("answer_delta".equals(currentEvent)) {
                         String text = (String) data.get("text");
                         if (text != null && text.length() > 0) {
@@ -948,9 +973,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 }
             }
         } catch (Exception e) {
-            logger.error("스트림 읽기 중 오류 발생 (클라이언트 연결 끊김 등): {}", e.getMessage());
-            hasStreamError = true;
+            if (call.isCanceled()) {
+                isCancelled = true;
+                logger.info("스트리밍 응답이 사용자 요청으로 중단되었습니다: threadId={}", threadId);
+            } else {
+                logger.error("스트림 읽기 중 오류 발생 (클라이언트 연결 끊김 등): {}", e.getMessage());
+                hasStreamError = true;
+            }
         } finally {
+            activeStreamCalls.remove(sessionId, call);
             try {
                 String finalAnswerContent = accumulatedContent.toString();
                 if (CommonUtil.isNotEmpty(finalAnswerContent) && !"llmTest".equals(svcTy)) {
@@ -997,7 +1028,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     }
                 }
 
-                if (!hasStreamError && !isCompleteCalled && CommonUtil.isNotEmpty(finalAnswerContent)) {
+                if (!isCompleteCalled && (isCancelled || (!hasStreamError && CommonUtil.isNotEmpty(finalAnswerContent)))) {
                     ChatRefItem firstRef = !chatRefItems.isEmpty() ? chatRefItems.get(0) : null;
 
                     List<Integer> relatedPageNos = firstRef != null ? new ArrayList<>(firstRef.relatedPageNos) : new ArrayList<>();
@@ -1005,8 +1036,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             ? responseThreadId
                             : "thread-" + System.currentTimeMillis();
 
+                    String completeContent = (isCancelled && CommonUtil.isEmpty(finalAnswerContent))
+                            ? "사용자 요청에 의해 응답 생성이 중단되었습니다."
+                            : finalAnswerContent;
+
                     callback.onComplete(
-                            finalAnswerContent,
+                            completeContent,
                             mainDocFileId,
                             mainPage,
                             relatedPageNos,
