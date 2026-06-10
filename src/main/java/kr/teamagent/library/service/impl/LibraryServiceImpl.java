@@ -788,7 +788,8 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             }
 
             if (!extractedImgTags.isEmpty()) {
-                res = restoreCreateDocImages(res, extractedImgTags);
+                // res는 JSON 원문 문자열이므로 img 태그 속성을 single quote로 복원해 JSON 파싱이 깨지지 않게 한다.
+                res = restoreCreateDocImages(res, extractedImgTags, true);
             }
 
             resultMap.put("successYn", true);
@@ -1063,8 +1064,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      * 이미 &lt;img&gt; 태그로 저장된 경우는 stripImgTags가 전체 태그(style 등)를 그대로 보존한다.
      */
     private String buildImgTagFromDataUrl(String dataUrl) {
+        // 속성값은 single quote 사용: 자유형식 응답(JSON 원문 문자열)에 복원해도 JSON 파싱이 깨지지 않게 한다.
         if (CommonUtil.isEmpty(dataUrl)) {
-            return "<img src=\"\">";
+            return "<img src=''>";
         }
         try {
             String base64 = dataUrl;
@@ -1078,13 +1080,13 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             if (image != null && image.getWidth() > 0 && image.getHeight() > 0) {
                 int w = image.getWidth();
                 int h = image.getHeight();
-                return "<img src=\"" + dataUrl + "\" width=\"" + w + "\" height=\"" + h
-                        + "\" style=\"width:" + w + "px;height:" + h + "px;\">";
+                return "<img src='" + dataUrl + "' width='" + w + "' height='" + h
+                        + "' style='width:" + w + "px;height:" + h + "px;'>";
             }
         } catch (Exception e) {
             logger.debug("createDoc 이미지 크기 추출 실패: {}", e.getMessage());
         }
-        return "<img src=\"" + dataUrl + "\">";
+        return "<img src='" + dataUrl + "'>";
     }
 
     /**
@@ -1159,6 +1161,15 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
      * 템플릿에 포함된 일반 &lt;img src=\"...\"&gt; 또는 reAsk용 data-img-placeholder는 건드리지 않는다.
      */
     private String restoreCreateDocImages(String text, List<String> extractedImgTags) {
+        return restoreCreateDocImages(text, extractedImgTags, false);
+    }
+
+    /**
+     * jsonStringContext=true: 복원 대상이 JSON 원문 문자열(자유형식 응답)이므로,
+     * img 태그의 큰따옴표 속성(채팅 본문에서 원본 그대로 추출된 태그 등)을 single quote로 바꿔
+     * JSON.parse가 깨지지 않게 한다. base64 data URL에는 따옴표가 없어 안전하다.
+     */
+    private String restoreCreateDocImages(String text, List<String> extractedImgTags, boolean jsonStringContext) {
         if (CommonUtil.isEmpty(text) || extractedImgTags.isEmpty()) {
             return text;
         }
@@ -1167,6 +1178,9 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
         String restored = text;
         for (int i = 0; i < extractedImgTags.size(); i++) {
             String imgTag = extractedImgTags.get(i);
+            if (jsonStringContext) {
+                imgTag = imgTag.replace("\"", "'");
+            }
             restored = restored.replace("[[" + token + ":" + i + "]]", imgTag);
             restored = restored.replace("<img " + attr + "=\"" + i + "\">", imgTag);
             restored = restored.replace("&lt;img " + attr + "=&quot;" + i + "&quot;&gt;", imgTag);
