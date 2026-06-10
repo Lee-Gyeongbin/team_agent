@@ -138,6 +138,11 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             if ("question".equals(messageType)) {
                 // 질문 처리
                 handleQuestion(session, messageObj);
+            } else if ("stop".equals(messageType)) {
+                // 응답 중단 처리
+                if (chatbotService != null) {
+                    chatbotService.cancelStream(session.getId());
+                }
             } else {
                 logger.warn("알 수 없는 메시지 타입: {}", messageType);
             }
