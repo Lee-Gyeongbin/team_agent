@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mtlcare">
+
+    <resultMap id="tmplFieldItemResult" type="kr.teamagent.library.service.LibraryVO$TmplFieldItem" autoMapping="true"/>
+
+    <insert id="insertResult" parameterType="kr.teamagent.mtlcare.service.MtlcareVO$ResultVO">
+        /* 멘탈케어 진단 결과 저장 mtlcare.insertResult */
+        INSERT INTO TB_MTLCARE_RESULT (
+              RESULT_ID
+            , USER_ID
+            , SCORE_JSON
+            , RISK_LEVEL
+            , RISK_COLOR
+            , RISK_BG_COLOR
+            , RISK_SUMMARY
+            , CORE_AREAS_SUMMARY
+            , CREATE_DT
+        ) VALUES (
+              #{resultId}
+            , #{userId}
+            , #{scoreJson}
+            , #{riskLevel, jdbcType=VARCHAR}
+            , #{riskColor, jdbcType=VARCHAR}
+            , #{riskBgColor, jdbcType=VARCHAR}
+            , #{riskSummary, jdbcType=VARCHAR}
+            , #{coreAreasSummary, jdbcType=VARCHAR}
+            , NOW()
+        )
+    </insert>
+
+    <select id="selectResult" parameterType="kr.teamagent.mtlcare.service.MtlcareVO$ResultVO"
+            resultType="kr.teamagent.mtlcare.service.MtlcareVO$ResultVO">
+        /* 멘탈케어 진단 결과 조회 mtlcare.selectResult */
+        SELECT
+              RESULT_ID
+            , USER_ID
+            , SCORE_JSON
+            , RISK_LEVEL
+            , RISK_COLOR
+            , RISK_BG_COLOR
+            , RISK_SUMMARY
+            , CORE_AREAS_SUMMARY
+            , CREATE_DT
+        FROM TB_MTLCARE_RESULT
+        WHERE RESULT_ID = #{resultId}
+    </select>
+
+    <select id="selectTmplByType" parameterType="kr.teamagent.mtlcare.service.MtlcareVO$TmplVO"
+            resultType="kr.teamagent.mtlcare.service.MtlcareVO$TmplVO">
+        /* 멘탈케어 리포트 템플릿 정보 조회 mtlcare.selectTmplByType */
+        SELECT
+              TMPL_ID
+            , TMPL_TYPE
+            , LLM_PROMPT
+            , TMPL_HTML
+        FROM TB_TMPL
+        WHERE TMPL_ID = 'TM000006'
+            AND USE_YN = 'Y'
+        ORDER BY CREATE_DT
+        LIMIT 1
+    </select>
+
+    <select id="selectTmplFieldList" parameterType="kr.teamagent.mtlcare.service.MtlcareVO$TmplVO" resultMap="tmplFieldItemResult">
+        /* 멘탈케어 리포트 템플릿 필드 목록 조회 mtlcare.selectTmplFieldList */
+        SELECT
+              JSON_KEY
+            , FIELD_NM
+            , MULTILINE_YN
+            , LAYOUT_TYPE
+        FROM TB_TMPL_FIELD
+        WHERE TMPL_ID = #{tmplId}
+            AND USE_YN = 'Y'
+        ORDER BY SORT_ORD
+    </select>
+
+    <insert id="insertReport" parameterType="kr.teamagent.mtlcare.service.MtlcareVO$ReportVO">
+        /* 면담 리포트 저장 mtlcare.insertReport */
+        INSERT INTO TB_MTLCARE_REPORT (
+              REPORT_ID
+            , RESULT_ID
+            , REQ_USER_ID
+            , REQ_USER_NM
+            , MGR_USER_ID
+            , REQ_COMMENT
+            , TMPL_ID
+            , REPORT_HTML
+            , STATUS
+            , CREATE_DT
+        ) VALUES (
+              #{reportId}
+            , #{resultId}
+            , #{reqUserId}
+            , #{reqUserNm, jdbcType=VARCHAR}
+            , #{mgrUserId}
+            , #{reqComment, jdbcType=VARCHAR}
+            , #{tmplId, jdbcType=VARCHAR}
+            , #{reportHtml, jdbcType=VARCHAR}
+            , 'REQ'
+            , NOW()
+        )
+    </insert>
+
+    <select id="selectReport" parameterType="kr.teamagent.mtlcare.service.MtlcareVO$ReportVO"
+            resultType="kr.teamagent.mtlcare.service.MtlcareVO$ReportVO">
+        /* 면담 리포트 상세 조회 (진단 결과 포함) mtlcare.selectReport */
+        SELECT
+              R.REPORT_ID
+            , R.RESULT_ID
+            , R.REQ_USER_ID
+            , R.REQ_USER_NM
+            , R.MGR_USER_ID
+            , R.REQ_COMMENT
+            , R.TMPL_ID
+            , R.REPORT_HTML
+            , R.STATUS
+            , R.CREATE_DT
+            , R.CONFIRM_DT
+            , T.SCORE_JSON
+            , T.RISK_LEVEL
+            , T.RISK_COLOR
+            , T.RISK_BG_COLOR
+            , T.RISK_SUMMARY
+            , T.CORE_AREAS_SUMMARY
+        FROM TB_MTLCARE_REPORT R
+        LEFT JOIN TB_MTLCARE_RESULT T
+            ON R.RESULT_ID = T.RESULT_ID
+        WHERE R.REPORT_ID = #{reportId}
+    </select>
+
+    <update id="updateReportConfirm" parameterType="kr.teamagent.mtlcare.service.MtlcareVO$ReportVO">
+        /* 면담 리포트 확인 처리 mtlcare.updateReportConfirm */
+        UPDATE TB_MTLCARE_REPORT
+        SET STATUS = 'CONFIRMED'
+          , CONFIRM_DT = NOW()
+        WHERE REPORT_ID = #{reportId}
+    </update>
+
+</mapper>
