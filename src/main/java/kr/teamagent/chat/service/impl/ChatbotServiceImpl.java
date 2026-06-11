@@ -355,6 +355,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * Agent 필터 목록 조회 (USE_YN 무관 전체)
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectAgtFilterList() throws Exception {
+        return chatbotDAO.selectAgtFilterList();
+    }
+
+    /**
      * CHAT 대화방 로그 목록 조회
      * @param searchVO
      * @return

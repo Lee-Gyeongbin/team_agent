@@ -108,6 +108,7 @@ public class ChatbotController extends BaseController {
     public ModelAndView selectChatRoomList(ChatbotVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("list", chatbotService.selectChatRoomList(searchVO));
+        resultMap.put("agtFilterList", chatbotService.selectAgtFilterList());
         return new ModelAndView("jsonView", resultMap);
     }
 

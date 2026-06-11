@@ -40,6 +40,15 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return selectList("ai.chatbot.selectChatRoomList", searchVO);
     }
 
+    /**
+     * Agent 필터 목록 조회 (USE_YN 무관 전체)
+     * @return
+     * @throws Exception
+     */
+    public List<ChatbotVO> selectAgtFilterList() throws Exception {
+        return selectList("ai.chatbot.selectAgtFilterList");
+    }
+
     /** 대화방이 해당 사용자에게 속하는지 확인 */
     public int countChatRoomOwnedByUser(ChatbotVO searchVO) throws Exception {
         Integer cnt = selectOne("ai.chatbot.countChatRoomOwnedByUser", searchVO);
