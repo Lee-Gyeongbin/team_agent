@@ -1498,7 +1498,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return null;
         }
 
-        int readTimeoutSec = ("reAskReport".equals(purpose) || "insightReport".equals(purpose) || "createDoc".equals(purpose) || "news_curate".equals(purpose))
+        int readTimeoutSec = ("reAskReport".equals(purpose) || "insightReport".equals(purpose) || "createDoc".equals(purpose) || "news_curate".equals(purpose) || "mtlcareReport".equals(purpose))
                 ? SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC
                 : 60;
 
