@@ -156,6 +156,21 @@ public class RepositoryController extends BaseController {
     }
 
     /**
+     * 카테고리 순서·부모 일괄 변경 (드래그 정렬)
+     */
+    @RequestMapping("/updateCategoryOrder.do")
+    public @ResponseBody Map<String, Object> updateCategoryOrder(@RequestBody RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = repositoryService.updateCategoryOrder(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
      * 카테고리 저장
      * @param dataVO
      * @param bindingResult
