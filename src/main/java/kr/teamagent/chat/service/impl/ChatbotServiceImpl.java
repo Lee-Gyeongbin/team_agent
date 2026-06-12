@@ -53,7 +53,6 @@ import okhttp3.RequestBody;
 public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
-    private static final String LUNCH_MENU_AGENT_ID = "AG000009";
     private static final String MEME_AGENT_ID = "AG000011";
     private static final String RECOMMEND_SUB_TY = "RECOMMEND";
     private static final String CURATION_SUB_TY = "CURATION";
@@ -287,10 +286,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return getApiUrl(svcTy);
         }
 
-        if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
+        if (isKakaoAddressEnrichmentAgent(agentId)) {
             String lunchApiUrl = PropertyUtil.getProperty("Globals.chatbot.lunch.apiUrl");
             if (CommonUtil.isNotEmpty(lunchApiUrl)) {
-                logger.info("resolveStreamingApiUrl: lunch agent -> lunch_query URL");
+                logger.info("resolveStreamingApiUrl: kakao address-enrichment agent -> lunch_query URL");
                 return lunchApiUrl;
             }
         }
@@ -609,43 +608,24 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return subCfg != null && RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
     }
 
+    /**
+     * RECOMMEND 에이전트 중 ADDITIONAL_CONFIG.features.addressEnrichment == "kakao" 인지 판별.
+     * 식당명+위치 기반 카카오 장소 URL 보강 및 전용 스트리밍 처리(answer_linked) 대상 여부에 사용.
+     */
+    private boolean isKakaoAddressEnrichmentAgent(String agentId) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        if (subCfg == null || !RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) || !"Y".equals(subCfg.getUseYn())) {
+            return false;
+        }
+        Object featuresObj = subCfg.getAdditionalConfigMap() != null ? subCfg.getAdditionalConfigMap().get("features") : null;
+        if (!(featuresObj instanceof Map)) return false;
+        return "kakao".equals(((Map<?, ?>) featuresObj).get("addressEnrichment"));
+    }
+
     private String buildRequestQueryByAgent(String query, String agentId) {
         // RECOMMEND 에이전트: Frontend에서 완성형 프롬프트 전달 — 래핑 없이 그대로 반환
         if (isRecommendAgent(agentId)) {
             return query;
-        }
-
-        if (LUNCH_MENU_AGENT_ID.equals(agentId)) {
-            String userInput = CommonUtil.isNotEmpty(query) ? query : "";
-            String prompt =
-                    "너는 점심 식당 추천 AI이다.\n\n"
-                    + "조건:\n"
-                    + "- 사용자 요청: " + userInput + "\n\n"
-                    + "추천 기준:\n"
-                    + "1. 반드시 웹 검색으로 검색 가능한 식당 데이터만 사용\n"
-                    + "2. 절대 새로운 식당을 생성하지 말 것\n"
-                    + "3. 가게명은 그대로 사용\n"
-                    + "4. 폐업, 휴업, 임시휴무 등 이용 불가능한 식당은 절대 포함하지 말 것\n"
-                    + "5. 메뉴는 대표 메뉴 1개만 작성\n"
-                    + "6. 가격은 일반적인 평균 가격으로 작성\n"
-                    + "7. location은 도로명 주소\n"
-                    + "8. address는 빈 문자열로 출력 (URL 생성은 백엔드에서 처리)\n\n"
-                    + "출력 규칙:\n"
-                    + "- 반드시 JSON 배열\n"
-                    + "- 최대 3개\n"
-                    + "- 설명 금지\n"
-                    + "- 허위 생성 금지\n\n"
-                    + "출력:\n"
-                    + "[\n"
-                    + "  {\n"
-                    + "    \"restaurant\": \"\",\n"
-                    + "    \"location\": \"\",\n"
-                    + "    \"menu\": \"\",\n"
-                    + "    \"price\": \"\",\n"
-                    + "    \"address\": \"\",\n"
-                    + "  }\n"
-                    + "]";
-            return prompt;
         }
 
         return query;
@@ -828,8 +808,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
-        boolean isLunchAgent = LUNCH_MENU_AGENT_ID.equals(agentId);
-        if (!isLunchAgent && isRecommendAgent(agentId)) {
+        boolean isKakaoAddressEnrichmentAgent = isKakaoAddressEnrichmentAgent(agentId);
+        if (!isKakaoAddressEnrichmentAgent && isRecommendAgent(agentId)) {
             logger.info("processStreamingResponse: RECOMMEND agent (agentId={}) — 일반 스트리밍 처리", agentId);
         }
 
@@ -888,7 +868,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         String text = (String) data.get("text");
                         if (text != null && text.length() > 0) {
                             accumulatedContent.append(text);
-                            if (!isLunchAgent) {
+                            if (!isKakaoAddressEnrichmentAgent) {
                                 callback.onChunk(text, accumulatedContent.toString(), null);
                             }
                         }
@@ -897,7 +877,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                     // 출처 답변 청크
                     if ("answer_source".equals(currentEvent)) {
-                        if (isLunchAgent) {
+                        if (isKakaoAddressEnrichmentAgent) {
                             continue;
                         }
                         Object itemsObj = data.get("items");
@@ -953,7 +933,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     if ("done".equals(currentEvent) || "complete".equals(currentEvent)) {
                             String answer = getAnswerText(data);
                             if (CommonUtil.isNotEmpty(answer)) {
-                                if (isLunchAgent) {
+                                if (isKakaoAddressEnrichmentAgent) {
                                     answer = ensureLunchAddressUrlFormat(answer);
                                     callback.onChunk(answer, answer, null);
                                     accumulatedContent = new StringBuilder(answer);
@@ -1080,7 +1060,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         && !hasStreamError
                         && ("C".equals(svcTy) || "S".equals(svcTy) || "M".equals(svcTy))
                         && (!"C".equals(svcTy) || CommonUtil.isEmpty(agentId))
-                        && !isLunchAgent
                         && !MEME_AGENT_ID.equals(agentId)
                         && !isRecommendAgent(agentId)
                         && CommonUtil.isNotEmpty(savedLogId)
