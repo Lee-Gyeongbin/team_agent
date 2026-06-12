@@ -1086,9 +1086,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 }
 
                 // 다음 추천 질문 생성: 메인 응답 전송 후 별도 비동기 메시지로 전달
+                // 일반질의(svcTy=C)는 agentId가 없는 순수 일반질의에서만 추천 질문 노출
+                // (agentId가 있으면 일반질의를 활용한 에이전트 질의이므로 제외)
                 boolean shouldSuggestNextQuestions = !isCancelled
                         && !hasStreamError
                         && ("C".equals(svcTy) || "S".equals(svcTy) || "M".equals(svcTy))
+                        && (!"C".equals(svcTy) || CommonUtil.isEmpty(agentId))
                         && !isLunchAgent
                         && !MEME_AGENT_ID.equals(agentId)
                         && !isRecommendAgent(agentId)
