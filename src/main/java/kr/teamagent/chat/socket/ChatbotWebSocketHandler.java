@@ -322,6 +322,18 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
             }
             
             @Override
+            public void onRecommendQuestions(String logId, List<String> questions) {
+                // 다음 추천 질문 메시지: 메인 응답(complete)과 분리된 별도 비동기 메시지로 전송
+                JSONObject message = new JSONObject();
+                message.put("type", "recommend_questions");
+                message.put("logId", logId);
+                JSONArray questionsArr = new JSONArray();
+                questionsArr.addAll(questions);
+                message.put("questions", questionsArr);
+                sendMessage(session, message.toJSONString());
+            }
+
+            @Override
             public void onError(String error) {
                 sendMessage(session, createMessage("error", error, null));
             }
@@ -382,6 +394,7 @@ public class ChatbotWebSocketHandler extends TextWebSocketHandler {
         void onStatus(String statusCode, String statusMessage);
         void onChunk(String content, String accumulated, String chunkEvent);
         void onComplete(String content, String docFileId, String page, List<Integer> viewPage, String threadId, String logId, String tableData, String chartOption, String sql);
+        void onRecommendQuestions(String logId, List<String> questions);
         void onError(String error);
     }
 }

@@ -65,6 +65,18 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /** WebSocket 세션별 진행 중인 AI API 스트리밍 호출 — 정지 버튼 클릭 시 cancel() 처리용 */
     private static final ConcurrentHashMap<String, okhttp3.Call> activeStreamCalls = new ConcurrentHashMap<>();
 
+    /** 다음 추천 질문 생성을 위한 스레드 풀 — 메인 응답 전송과 분리된 별도 비동기 LLM 호출 처리 */
+    private static final java.util.concurrent.ExecutorService recommendQuestionExecutor =
+            java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
+                Thread thread = new Thread(r, "recommend-question-worker");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    private java.util.concurrent.ExecutorService getRecommendQuestionExecutor() {
+        return recommendQuestionExecutor;
+    }
+
     /**
      * 세션의 진행 중인 AI API 스트리밍 호출을 취소
      */
@@ -1072,6 +1084,32 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             sql);
                     isCompleteCalled = true;
                 }
+
+                // 다음 추천 질문 생성: 메인 응답 전송 후 별도 비동기 메시지로 전달
+                boolean shouldSuggestNextQuestions = !isCancelled
+                        && !hasStreamError
+                        && ("C".equals(svcTy) || "S".equals(svcTy) || "M".equals(svcTy))
+                        && !isLunchAgent
+                        && !MEME_AGENT_ID.equals(agentId)
+                        && !isRecommendAgent(agentId)
+                        && CommonUtil.isNotEmpty(savedLogId)
+                        && CommonUtil.isNotEmpty(finalAnswerContent);
+
+                if (shouldSuggestNextQuestions) {
+                    final String logIdForRecommend = savedLogId;
+                    final String queryForRecommend = query;
+                    final String answerForRecommend = finalAnswerContent;
+                    getRecommendQuestionExecutor().execute(() -> {
+                        try {
+                            List<String> nextQuestions = generateNextRecommendedQuestions(queryForRecommend, answerForRecommend);
+                            if (!nextQuestions.isEmpty()) {
+                                callback.onRecommendQuestions(logIdForRecommend, nextQuestions);
+                            }
+                        } catch (Exception e) {
+                            logger.warn("다음 추천 질문 생성 실패: {}", e.getMessage());
+                        }
+                    });
+                }
             } finally {
                 reader.close();
                 responseBody.close();
@@ -1491,6 +1529,36 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return truncateTitle(result.trim(), 200);
         }
         return "";
+    }
+
+    /**
+     * AI 서버를 통해 이전 질문/답변 맥락을 기반으로 다음 추천 질문을 생성한다.
+     * 줄바꿈으로 구분된 최대 3개의 질문을 반환한다. 실패 시 빈 리스트 반환.
+     */
+    private List<String> generateNextRecommendedQuestions(String qContent, String rContent) {
+        if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
+            return Collections.emptyList();
+        }
+
+        String prompt = "다음은 사용자와 AI의 대화 내용이다.\n"
+                + "질문: " + truncateTitle(qContent, 500) + "\n"
+                + "답변: " + truncateTitle(rContent, 1000) + "\n\n"
+                + "위 대화 맥락을 참고하여 사용자가 다음에 이어서 물어볼 만한 질문을 2~3개 한국어로 제안해줘. "
+                + "각 질문은 25자 이내로 간결하게 작성하고, 줄바꿈으로만 구분해서 질문 텍스트만 출력해. "
+                + "번호, 글머리 기호, 따옴표 등 부가 텍스트는 포함하지 마.";
+
+        String result = callAiSummary(prompt, "nextQuestions");
+        if (CommonUtil.isEmpty(result)) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(result.split("\n"))
+                .map(String::trim)
+                .map(line -> line.replaceFirst("^[\\d\\.\\-\\)\\s]+", ""))
+                .filter(CommonUtil::isNotEmpty)
+                .map(line -> truncateTitle(line, 50))
+                .limit(3)
+                .collect(Collectors.toList());
     }
 
     /**
