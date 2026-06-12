@@ -288,6 +288,23 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateCategoryOrder(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        List<RepositoryVO> items = dataVO.getDataList();
+        if (items == null || items.isEmpty()) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "변경사항이 없습니다.");
+            return resultMap;
+        }
+        for (RepositoryVO item : items) {
+            repositoryDAO.updateCategoryOrderItem(item);
+        }
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        return resultMap;
+    }
+
     public Map<String, Object> saveCategory(RepositoryVO searchVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
         if (searchVO.getCategoryId() == null || searchVO.getCategoryId().isEmpty()) {

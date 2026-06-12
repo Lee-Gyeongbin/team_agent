@@ -91,6 +91,13 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 카테고리 순서·부모 단건 변경
+     */
+    public int updateCategoryOrderItem(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateCategoryOrderItem", searchVO);
+    }
+
+    /**
      * 카테고리 삭제
      * @param searchVO
      * @return

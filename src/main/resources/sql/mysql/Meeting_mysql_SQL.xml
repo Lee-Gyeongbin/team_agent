@@ -24,7 +24,30 @@
         WHERE 1=1
             AND A.USE_YN = 'Y'
             AND A.CREATE_USER_ID = #{userId}
-        ORDER BY A.CREATE_DT DESC
+            <if test="statusCd != null and statusCd != ''">
+                AND A.STATUS = #{statusCd}
+            </if>
+            <if test="integrateYn != null and integrateYn != ''">
+                AND A.INTEGRATE_YN = #{integrateYn}
+            </if>
+            <if test="startDate != null and startDate != ''">
+                AND DATE(A.CREATE_DT) &gt;= #{startDate}
+            </if>
+            <if test="endDate != null and endDate != ''">
+                AND DATE(A.CREATE_DT) &lt;= #{endDate}
+            </if>
+            <if test="hasMeetingMinutes != null and hasMeetingMinutes == 'Y'">
+                AND EXISTS (SELECT 1 FROM TB_MEETING_MINUTES MM WHERE MM.MEETING_ID = A.MEETING_ID)
+            </if>
+        ORDER BY
+            <choose>
+                <when test="sortField != null and sortField == 'MEETING_TITLE'">A.MEETING_TITLE</when>
+                <otherwise>A.CREATE_DT</otherwise>
+            </choose>
+            <choose>
+                <when test="sortOrder != null and sortOrder == 'ASC'">ASC</when>
+                <otherwise>DESC</otherwise>
+            </choose>
     </select>
 
     <select id="selectMeeting" resultType="meetingVO">

@@ -88,4 +88,13 @@ public class MeetingVO extends CommonVO {
     private Long parentMeetingId;
     private List<Long> childMeetingIds;
     private Long childMeetingId;
+
+    // 목록 검색 필터 파라미터 (선택적, 기존 파라미터와 하위 호환)
+    private String statusCd;          // 상태 필터 (MT000001 코드: 001/002)
+    private String startDate;          // 검색 시작일 (yyyy-MM-dd)
+    private String endDate;            // 검색 종료일 (yyyy-MM-dd)
+    private String sortField;          // 정렬 기준 컬럼 (CREATE_DT | MEETING_TITLE)
+    private String sortOrder;          // 정렬 방향 (ASC | DESC)
+    private String hasMeetingMinutes;  // 회의록 존재 여부 필터 (Y: 있는 것만, 빈 문자열: 전체)
+    // integrateYn 은 기존 필드 재사용
 }
