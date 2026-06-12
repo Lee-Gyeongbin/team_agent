@@ -895,18 +895,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         continue;
                     }
 
-                    // 런치 에이전트에서 사용. (카카오 URL 링크 답변)
-                    if ("answer_linked".equals(currentEvent)) {
-                        String linkedText = getString(data.get("text"));
-                        if (CommonUtil.isNotEmpty(linkedText)) {
-                            accumulatedContent = new StringBuilder(linkedText);
-                            if (!isLunchAgent) {
-                                callback.onChunk(linkedText, accumulatedContent.toString(), "answer_linked");
-                            }
-                        }
-                        continue;
-                    }
-
                     // 출처 답변 청크
                     if ("answer_source".equals(currentEvent)) {
                         if (isLunchAgent) {
