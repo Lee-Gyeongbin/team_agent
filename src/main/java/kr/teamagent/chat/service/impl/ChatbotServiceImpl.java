@@ -2179,6 +2179,21 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * 즉시번역(드래그 선택 번역) — 동기 1회 호출, 채팅 로그를 남기지 않는다.
+     */
+    public String instantTranslate(String content, String targetLang, String tone) {
+        StringBuilder prompt = new StringBuilder(TRANSLATE_BASE_PROMPT);
+        prompt.append("\n\n## 번역 조건");
+        prompt.append("\n- 목표 언어: ").append(CommonUtil.isNotEmpty(targetLang) ? targetLang : "영어");
+        if (CommonUtil.isNotEmpty(tone)) {
+            prompt.append("\n- 톤: ").append(tone);
+        }
+        prompt.append("\n\n## 원문\n").append(content);
+
+        return callAiSummary(prompt.toString(), "instant_translate");
+    }
+
+    /**
      * 채팅 첨부 미리보기 (사용자 검증 없음 — 공유 페이지 전용)
      */
     public Map<String, Object> viewChatFileShare(ChatbotVO searchVO) throws Exception {

@@ -450,6 +450,31 @@ public class ChatbotController extends BaseController {
     }
 
     /**
+     * 즉시번역(드래그 선택 번역) — 채팅 로그를 남기지 않는 동기 번역 호출.
+     */
+    @RequestMapping("/ai/chatbot/instantTranslate.do")
+    public @ResponseBody Map<String, Object> instantTranslate(@RequestBody ChatbotVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (dataVO.getContent() == null || dataVO.getContent().trim().isEmpty()) {
+            resultMap.put("success", false);
+            resultMap.put("message", "번역할 내용이 없습니다.");
+            return resultMap;
+        }
+
+        String translatedText = chatbotService.instantTranslate(dataVO.getContent(), dataVO.getTargetLang(), dataVO.getTone());
+        if (translatedText == null) {
+            resultMap.put("success", false);
+            resultMap.put("message", "번역에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+            return resultMap;
+        }
+
+        resultMap.put("success", true);
+        resultMap.put("translatedText", translatedText);
+        return resultMap;
+    }
+
+    /**
      * 방사형 차트 데이터 조회 — prompt를 받아 AI가 생성한 차트용 JSON 문자열을 반환한다.
      */
     @RequestMapping("/ai/chatbot/getPsychologyChartData.do")
