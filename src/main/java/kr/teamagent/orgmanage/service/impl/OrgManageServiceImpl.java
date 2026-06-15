@@ -228,8 +228,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
     private void applyOrgExcelSheetOptions(XSSFSheet sheet) {
         ExcelUtil.adjustColumnWidths(sheet, ORG_EXCEL_HEADERS.length);
         sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
-        ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
-                USE_YN_COL_IDX, new String[] { "Y", "N" }, null, ExcelUtil.USE_YN_INVALID_MSG);
+        ExcelUtil.addUseYnListValidations(sheet, USE_YN_COL_IDX);
     }
 
     /**

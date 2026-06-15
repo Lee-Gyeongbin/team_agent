@@ -143,8 +143,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
                     ORG_NM_COL_IDX, null, ORG_LIST_NAME, "등록된 소속조직명만 선택할 수 있습니다.");
         }
-        ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
-                USE_YN_COL_IDX, new String[] { "Y", "N" }, null, ExcelUtil.USE_YN_INVALID_MSG);
+        ExcelUtil.addUseYnListValidations(sheet, USE_YN_COL_IDX);
     }
 
     /**

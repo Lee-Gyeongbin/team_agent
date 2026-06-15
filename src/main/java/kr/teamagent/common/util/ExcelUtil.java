@@ -264,6 +264,15 @@ public class ExcelUtil {
         sheet.addValidationData(validation);
     }
 
+    /** 데이터 영역에 Y/N 드롭다운을 적용한다. */
+    public static void addUseYnListValidations(XSSFSheet sheet, int... colIndices) {
+        int lastRow = DATA_VALIDATION_MAX_ROW + 1;
+        for (int colIdx : colIndices) {
+            addListValidation(sheet, DATA_START_ROW, lastRow, colIdx, new String[] { "Y", "N" }, null,
+                    USE_YN_INVALID_MSG);
+        }
+    }
+
     public static Map<String, Object> buildFailDetail(int row, String reason) {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("row", row);
