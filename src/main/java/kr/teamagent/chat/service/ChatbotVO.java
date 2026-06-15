@@ -40,6 +40,9 @@ public class ChatbotVO extends CommonVO {
     // 마지막 채팅 일시
     private String lastChatDt;
     private String content;
+    // 즉시번역(드래그 번역) 요청 시 목표 언어/톤 라벨
+    private String targetLang;
+    private String tone;
     // 참조 문서 존재 여부
     private String docExist;
     // 테이블 데이터 존재 여부

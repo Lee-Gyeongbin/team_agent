@@ -1,9 +1,13 @@
 package kr.teamagent.chat.web;
 
+import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import javax.servlet.http.HttpServletResponse;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -418,6 +422,55 @@ public class ChatbotController extends BaseController {
             resultMap.put("reason", "ERROR");
         }
 
+        return resultMap;
+    }
+
+    /**
+     * 번역 결과 텍스트를 .docx/.txt 파일로 변환하여 다운로드 응답한다.
+     */
+    @RequestMapping("/ai/chatbot/exportTranslationFile.do")
+    public void exportTranslationFile(@RequestBody ChatbotVO dataVO, HttpServletResponse response) throws Exception {
+        byte[] bytes = chatbotService.exportTranslationFile(dataVO.getContent(), dataVO.getFileType());
+
+        String fileType = "docx".equalsIgnoreCase(dataVO.getFileType()) ? "docx" : "txt";
+        String baseName = dataVO.getFileName() != null && !dataVO.getFileName().trim().isEmpty()
+                ? dataVO.getFileName().trim()
+                : "번역결과";
+        String fileName = baseName + "." + fileType;
+        String contentType = "docx".equals(fileType)
+                ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                : "text/plain; charset=UTF-8";
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%20");
+
+        response.setContentType(contentType);
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
+        response.setContentLength(bytes.length);
+        response.getOutputStream().write(bytes);
+        response.getOutputStream().flush();
+    }
+
+    /**
+     * 즉시번역(드래그 선택 번역) — 채팅 로그를 남기지 않는 동기 번역 호출.
+     */
+    @RequestMapping("/ai/chatbot/instantTranslate.do")
+    public @ResponseBody Map<String, Object> instantTranslate(@RequestBody ChatbotVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (dataVO.getContent() == null || dataVO.getContent().trim().isEmpty()) {
+            resultMap.put("success", false);
+            resultMap.put("message", "번역할 내용이 없습니다.");
+            return resultMap;
+        }
+
+        String translatedText = chatbotService.instantTranslate(dataVO.getContent(), dataVO.getTargetLang(), dataVO.getTone());
+        if (translatedText == null) {
+            resultMap.put("success", false);
+            resultMap.put("message", "번역에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+            return resultMap;
+        }
+
+        resultMap.put("success", true);
+        resultMap.put("translatedText", translatedText);
         return resultMap;
     }
 
