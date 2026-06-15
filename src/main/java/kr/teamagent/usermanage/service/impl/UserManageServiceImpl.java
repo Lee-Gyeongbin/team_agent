@@ -32,6 +32,7 @@ import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.orgmanage.service.OrgManageVO;
 import kr.teamagent.orgmanage.service.impl.OrgManageDAO;
+import kr.teamagent.orgmanage.service.impl.OrgManageServiceImpl;
 import kr.teamagent.usermanage.service.UserManageVO;
 
 @Service
@@ -80,6 +81,9 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private OrgManageDAO orgManageDAO;
+
+    @Autowired
+    private OrgManageServiceImpl orgManageService;
 
     @SuppressWarnings("deprecation")
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
@@ -224,7 +228,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
         for (UserExcelRow excelRow : excelRows) {
             try {
-                String orgId = ExcelUtil.resolveOrgIdByName(excelRow.orgNm, activeOrgs.orgIdByName);
+                String orgId = orgManageService.resolveOrgIdByName(excelRow.orgNm, activeOrgs.orgIdByName);
                 if (!excelRow.orgNm.isEmpty() && orgId == null) {
                     failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.userId, INVALID_ORG_NM_MSG + excelRow.orgNm,
                             FAIL_TYPE_FORMAT));
@@ -447,7 +451,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             if (orgNm.isEmpty()) {
                 continue;
             }
-            ExcelUtil.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
+            orgManageService.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
             if (seenNames.add(orgNm)) {
                 orgNames.add(orgNm);
             }

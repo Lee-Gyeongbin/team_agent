@@ -98,25 +98,6 @@ public class ExcelUtil {
         return "Y".equals(useYn) || "N".equals(useYn);
     }
 
-    /** trim된 조직명 → orgId (조직명은 trim·공백 없음 전제). */
-    public static void registerOrgName(Map<String, String> orgIdByName, String orgNm, String orgId) {
-        if (orgNm == null) {
-            return;
-        }
-        String key = orgNm.trim();
-        if (!key.isEmpty()) {
-            orgIdByName.putIfAbsent(key, orgId);
-        }
-    }
-
-    public static String resolveOrgIdByName(String orgNm, Map<String, String> orgIdByName) {
-        if (orgNm == null) {
-            return null;
-        }
-        String key = orgNm.trim();
-        return key.isEmpty() ? null : orgIdByName.get(key);
-    }
-
     public static void applyDataCell(Row row, int colIdx, String value, XSSFCellStyle style) {
         Cell cell = row.createCell(colIdx);
         cell.setCellValue(value);

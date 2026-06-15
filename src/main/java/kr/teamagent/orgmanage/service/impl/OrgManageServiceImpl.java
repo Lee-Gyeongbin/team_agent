@@ -65,6 +65,25 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
     @Autowired
     private FileServiceImpl fileService;
 
+    /** trim된 조직명 → orgId (조직명은 trim·공백 없음 전제). */
+    public void registerOrgName(Map<String, String> orgIdByName, String orgNm, String orgId) {
+        if (orgNm == null) {
+            return;
+        }
+        String key = orgNm.trim();
+        if (!key.isEmpty()) {
+            orgIdByName.putIfAbsent(key, orgId);
+        }
+    }
+
+    public String resolveOrgIdByName(String orgNm, Map<String, String> orgIdByName) {
+        if (orgNm == null) {
+            return null;
+        }
+        String key = orgNm.trim();
+        return key.isEmpty() ? null : orgIdByName.get(key);
+    }
+
     /**
      * 조직 목록 조회
      * @param searchVO
@@ -319,7 +338,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                     vo.setUseYn(excelRow.useYn);
                     saveOrgExcelRow(vo);
                     if (vo.getOrgNm() != null && !vo.getOrgNm().trim().isEmpty()) {
-                        ExcelUtil.registerOrgName(orgIdByName, vo.getOrgNm(), vo.getOrgId());
+                        registerOrgName(orgIdByName, vo.getOrgNm(), vo.getOrgId());
                     }
                     successCount++;
                     if (updateRow) {
@@ -560,7 +579,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
             if (orgNm.isEmpty()) {
                 continue;
             }
-            ExcelUtil.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
+            registerOrgName(orgIdByName, orgNm, vo.getOrgId());
         }
         return orgIdByName;
     }
@@ -582,11 +601,11 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
         if (parentById != null) {
             return parentById.getOrgId();
         }
-        return ExcelUtil.resolveOrgIdByName(trimmed, orgIdByName);
+        return resolveOrgIdByName(trimmed, orgIdByName);
     }
 
     private String resolveParentOrgIdByNameThenId(String trimmed, Map<String, String> orgIdByName) throws Exception {
-        String byName = ExcelUtil.resolveOrgIdByName(trimmed, orgIdByName);
+        String byName = resolveOrgIdByName(trimmed, orgIdByName);
         if (byName != null) {
             return byName;
         }
