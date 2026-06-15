@@ -110,6 +110,22 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 저장소 객체를 byte[]로 다운로드한다.
+     */
+    public byte[] downloadStorageObjectBytes(String key) throws Exception {
+        try (S3Object s3Object = s3Client.getObject(getBucketName(), key.trim());
+             InputStream in = new BufferedInputStream(s3Object.getObjectContent());
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    /**
      * 저장소 객체 키(S3 key = FILE_PATH) 단건 삭제.
      */
     public Map<String, Object> deleteStorageObjectByKey(String filePath) {
