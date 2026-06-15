@@ -1,9 +1,13 @@
 package kr.teamagent.chat.web;
 
+import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import javax.servlet.http.HttpServletResponse;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -419,6 +423,30 @@ public class ChatbotController extends BaseController {
         }
 
         return resultMap;
+    }
+
+    /**
+     * 번역 결과 텍스트를 .docx/.txt 파일로 변환하여 다운로드 응답한다.
+     */
+    @RequestMapping("/ai/chatbot/exportTranslationFile.do")
+    public void exportTranslationFile(@RequestBody ChatbotVO dataVO, HttpServletResponse response) throws Exception {
+        byte[] bytes = chatbotService.exportTranslationFile(dataVO.getContent(), dataVO.getFileType());
+
+        String fileType = "docx".equalsIgnoreCase(dataVO.getFileType()) ? "docx" : "txt";
+        String baseName = dataVO.getFileName() != null && !dataVO.getFileName().trim().isEmpty()
+                ? dataVO.getFileName().trim()
+                : "번역결과";
+        String fileName = baseName + "." + fileType;
+        String contentType = "docx".equals(fileType)
+                ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                : "text/plain; charset=UTF-8";
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%20");
+
+        response.setContentType(contentType);
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
+        response.setContentLength(bytes.length);
+        response.getOutputStream().write(bytes);
+        response.getOutputStream().flush();
     }
 
     /**

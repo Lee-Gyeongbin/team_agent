@@ -39,6 +39,7 @@ import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.RestApiManager;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.common.util.TranslationDocUtil;
 import kr.teamagent.prompt.service.impl.PromptServiceImpl;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -56,6 +57,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final String MEME_AGENT_ID = "AG000011";
     private static final String RECOMMEND_SUB_TY = "RECOMMEND";
     private static final String CURATION_SUB_TY = "CURATION";
+    private static final String TRANSLATE_SUB_TY = "TRANSLATE";
+
+    /** 번역 에이전트 공통 지시문 — 프론트엔드 translateAgentUtil.ts의 TRANSLATE_BASE_PROMPT와 동일하게 유지 */
+    private static final String TRANSLATE_BASE_PROMPT = String.join("\n",
+            "당신은 전문 비즈니스 번역가입니다.",
+            "- 입력 텍스트를 목표 언어로 번역하세요.",
+            "- 단순 직역이 아닌 비즈니스 문서/메일/채팅 맥락에 맞는 의미를 전달하세요.",
+            "- 지정된 톤을 유지하거나 목표 언어 관습에 맞게 자연스럽게 조정하세요.",
+            "- 숫자, 날짜, 고유명사, 회사명, 제품명, 약어는 원문 그대로 유지하세요.",
+            "- 원문의 줄바꿈, 목록, 강조 등 서식을 그대로 유지하세요.",
+            "- 번역 결과 외 다른 설명은 출력하지 마세요.");
 
     /** summary_query 동기 호출 시 프롬프트·응답이 커 지연이 길어질 수 있는 경우의 OkHttp 읽기 타임아웃(초). */
     private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
@@ -238,6 +250,18 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return;
         }
 
+        ChatbotVO.AgtSubCfgVO translateSubCfg = getAgentSubCfg(agentId);
+        if (translateSubCfg != null && TRANSLATE_SUB_TY.equals(translateSubCfg.getSubTy())
+                && "Y".equals(translateSubCfg.getUseYn())) {
+            // TB_CHAT_LOG.SVC_TY는 번역 에이전트(SVC_TY='W') 기준으로 저장한다.
+            svcTy = "W";
+            if (hasNonNullAttachmentId(attachmentFileIds)) {
+                deliverTranslationFileViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId,
+                        attachmentFileIds, callback);
+                return;
+            }
+        }
+
         String apiUrl = this.resolveStreamingApiUrl(svcTy, agentId, attachmentFileIds);
         logger.info("AI API URL resolved - svcTy: {}, apiUrl: {}", svcTy, apiUrl);
 
@@ -258,6 +282,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String apiUrl = "";
         switch (svcTy) {
             case "C":
+            case "W":
                 apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
                 break;
             case "llmTest":
@@ -283,6 +308,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 return recommendApiUrl;
             }
             logger.info("resolveStreamingApiUrl: recommend agent -> default chat URL");
+            return getApiUrl(svcTy);
+        }
+
+        // TRANSLATE 에이전트: AGENT_ID 기반 agentVO 조회(API_URL_CD 미설정 시 깨짐)를 우회하고 기본 chat API 사용
+        if (isTranslateAgent(agentId)) {
+            logger.info("resolveStreamingApiUrl: translate agent -> default chat URL");
             return getApiUrl(svcTy);
         }
 
@@ -620,6 +651,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         Object featuresObj = subCfg.getAdditionalConfigMap() != null ? subCfg.getAdditionalConfigMap().get("features") : null;
         if (!(featuresObj instanceof Map)) return false;
         return "kakao".equals(((Map<?, ?>) featuresObj).get("addressEnrichment"));
+    }
+
+    /**
+     * SUB_TY=TRANSLATE 에이전트 여부 판별.
+     * TRANSLATE 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
+     */
+    private boolean isTranslateAgent(String agentId) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        return subCfg != null && TRANSLATE_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
     }
 
     private String buildRequestQueryByAgent(String query, String agentId) {
@@ -1545,7 +1585,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return null;
         }
 
-        int readTimeoutSec = ("reAskReport".equals(purpose) || "insightReport".equals(purpose) || "createDoc".equals(purpose) || "news_curate".equals(purpose) || "mtlcareReport".equals(purpose))
+        int readTimeoutSec = ("reAskReport".equals(purpose) || "insightReport".equals(purpose) || "createDoc".equals(purpose) || "news_curate".equals(purpose) || "mtlcareReport".equals(purpose) || "translate_file".equals(purpose))
                 ? SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC
                 : 60;
 
@@ -2129,6 +2169,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * 번역 결과 텍스트를 .docx/.txt 파일 바이트로 변환한다.
+     */
+    public byte[] exportTranslationFile(String content, String fileType) throws Exception {
+        if ("docx".equalsIgnoreCase(fileType)) {
+            return TranslationDocUtil.textToDocxBytes(content);
+        }
+        return TranslationDocUtil.textToTxtBytes(content);
+    }
+
+    /**
      * 채팅 첨부 미리보기 (사용자 검증 없음 — 공유 페이지 전용)
      */
     public Map<String, Object> viewChatFileShare(ChatbotVO searchVO) throws Exception {
@@ -2210,6 +2260,109 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     public String getPsychologyChartData(String prompt) {
         return callAiSummary(prompt, "방사형 차트 데이터");
+    }
+
+    /**
+     * 번역 에이전트 파일 모드: 첨부된 .docx/.txt 파일에서 텍스트를 추출 → AI 1회 호출로 번역 →
+     * 일반 답변과 동일하게 번역된 텍스트를 채팅 응답으로 전달한다.
+     */
+    private void deliverTranslationFileViaWebSocket(String query, String threadId, String userId, String svcTy,
+            String modelId, String refId, String agentId, List<Long> attachmentFileIds,
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+
+        Long inputChatFileId = null;
+        for (Long id : attachmentFileIds) {
+            if (id != null) {
+                inputChatFileId = id;
+                break;
+            }
+        }
+        if (inputChatFileId == null) {
+            callback.onError("번역할 첨부파일을 찾을 수 없습니다.");
+            return;
+        }
+
+        ChatbotVO searchVO = new ChatbotVO();
+        searchVO.setChatFileId(inputChatFileId);
+        ChatbotVO fileRow = chatbotDAO.selectChatFileById(searchVO);
+        if (fileRow == null || CommonUtil.isEmpty(fileRow.getFilePath())) {
+            callback.onError("첨부파일 정보를 찾을 수 없습니다.");
+            return;
+        }
+
+        String ext = resolveTranslationFileExtension(fileRow.getFileName(), fileRow.getFileType());
+        if (!"docx".equalsIgnoreCase(ext) && !"txt".equalsIgnoreCase(ext)) {
+            callback.onError("지원하지 않는 파일 형식입니다. (.docx, .txt만 지원)");
+            return;
+        }
+
+        byte[] originalBytes = fileService.downloadStorageObjectBytes(fileRow.getFilePath());
+        List<TranslationDocUtil.Segment> segments = TranslationDocUtil.extractSegments(originalBytes, ext);
+        if (segments.isEmpty()) {
+            callback.onError("번역할 텍스트를 찾을 수 없습니다.");
+            return;
+        }
+
+        String extractedText = segments.stream()
+                .map(TranslationDocUtil.Segment::getText)
+                .collect(Collectors.joining("\n"));
+
+        String prompt = TRANSLATE_BASE_PROMPT
+                + "\n\n" + (query != null ? query : "")
+                + "\n\n## 원문\n" + extractedText;
+
+        String translatedText = callAiSummary(prompt, "translate_file");
+        if (CommonUtil.isEmpty(translatedText)) {
+            callback.onError("번역에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+            return;
+        }
+
+        callback.onChunk(translatedText, translatedText, null);
+
+        String savedLogId = "";
+        if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
+            try {
+                savedLogId = doInsertAiLog(threadId, agentId, query, translatedText, 0, 0, svcTy, modelId, refId, userId,
+                        "", "", "", "", "", "", new ArrayList<>(), "", "");
+                updateChatRoomLastChatDt(threadId);
+                if (CommonUtil.isNotEmpty(savedLogId)) {
+                    try {
+                        List<Long> linkFileIds = new ArrayList<>();
+                        for (Long id : attachmentFileIds) {
+                            if (id != null) {
+                                linkFileIds.add(id);
+                            }
+                        }
+                        ChatbotVO linkVO = new ChatbotVO();
+                        linkVO.setChatFileIdList(linkFileIds);
+                        linkVO.setLogId(Long.parseLong(savedLogId));
+                        chatbotDAO.linkChatFilesToLog(linkVO);
+                    } catch (Exception e) {
+                        logger.warn("첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
+            }
+        }
+
+        callback.onComplete(translatedText, "", "", new ArrayList<>(), CommonUtil.nullToBlank(threadId),
+                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null, null);
+    }
+
+    private String resolveTranslationFileExtension(String fileName, String fileType) {
+        if (CommonUtil.isNotEmpty(fileName)) {
+            int dotIdx = fileName.lastIndexOf('.');
+            if (dotIdx >= 0 && dotIdx < fileName.length() - 1) {
+                return fileName.substring(dotIdx + 1).toLowerCase();
+            }
+        }
+        if (CommonUtil.isNotEmpty(fileType)) {
+            String normalized = fileType.trim().toLowerCase();
+            int slashIdx = normalized.lastIndexOf('/');
+            return slashIdx >= 0 ? normalized.substring(slashIdx + 1) : normalized;
+        }
+        return "";
     }
 
     /**
