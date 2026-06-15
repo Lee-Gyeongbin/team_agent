@@ -98,6 +98,19 @@ public class ExcelUtil {
         return "Y".equals(useYn) || "N".equals(useYn);
     }
 
+    /** 엑셀 안내행(0행) 또는 데이터 행에 잘못 들어온 안내 텍스트 스킵 판별 */
+    public static boolean isGuideMarkerRow(String cellValue) {
+        return cellValue != null && cellValue.startsWith("※");
+    }
+
+    /** 값이 있을 때만 Y/N 형식을 검증한다. 실패 시 failDetail, 통과 시 null */
+    public static Map<String, Object> validateOptionalUseYn(int rowNum, String value, String label) {
+        if (value != null && !value.isEmpty() && !isValidUseYn(value)) {
+            return buildFailDetail(rowNum, label + "는 Y 또는 N만 입력 가능합니다.");
+        }
+        return null;
+    }
+
     public static void applyDataCell(Row row, int colIdx, String value, XSSFCellStyle style) {
         Cell cell = row.createCell(colIdx);
         cell.setCellValue(value);

@@ -291,7 +291,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                 String orgId = ExcelUtil.getCellString(row, orgIdCol, formatter);
                 String parentOrgNm = ExcelUtil.getCellString(row, parentOrgCol, formatter);
                 String useYn = ExcelUtil.getCellString(row, useYnCol, formatter);
-                if (orgNm.startsWith("※")) {
+                if (ExcelUtil.isGuideMarkerRow(orgNm)) {
                     continue;
                 }
                 if (isEmptyOrgExcelRow(orgId, orgNm, parentOrgNm, useYn)) {

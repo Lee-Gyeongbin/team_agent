@@ -467,7 +467,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
     private static boolean isSkippableUserExcelRow(String userId, String userNm, String email, String phone,
             String orgNm, String useYn) {
-        return userNm.startsWith("※") || isEmptyUserExcelRow(userId, userNm, email, phone, orgNm, useYn);
+        return ExcelUtil.isGuideMarkerRow(userNm) || isEmptyUserExcelRow(userId, userNm, email, phone, orgNm, useYn);
     }
 
     private static Map<String, Object> buildUserExcelRowFailDetail(int rowNum, String userId, String userNm,
