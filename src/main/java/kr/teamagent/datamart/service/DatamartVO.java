@@ -83,6 +83,28 @@ public class DatamartVO {
     }
 
     /**
+     * 컬럼 메타 엑셀 다운로드/업로드 행 (TB_DM_COL + TBL_ID)
+     */
+    @Getter
+    @Setter
+    public static class MetaColumnExcelRowVO {
+        private String tblId;
+        private String colId;
+        private String colPhyNm;
+        private String colKorNm;
+        private String colDesc;
+        private String dataType;
+        private String dataLen;
+        private String pkYn;
+        private String fkYn;
+        private String nullableYn;
+        private String hasCodeYn;
+        private String aiHint;
+        private Integer sortOrd;
+        private String useYn;
+    }
+
+    /**
      * TB_DM_COL 저장용 컬럼 행 (프론트 DatamartMetaColumnRow 대응)
      */
     @Getter

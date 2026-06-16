@@ -14,7 +14,6 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.ConditionalFormattingRule;
 import org.apache.poi.ss.usermodel.DataValidation;
 import org.apache.poi.ss.usermodel.DataValidationConstraint;
 import org.apache.poi.ss.usermodel.DataFormatter;
@@ -22,10 +21,8 @@ import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
 import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Name;
-import org.apache.poi.ss.usermodel.PatternFormatting;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.SheetConditionalFormatting;
 import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellRangeAddressList;
@@ -46,7 +43,7 @@ public class ExcelUtil {
     public static final int GUIDE_ROW_IDX = 0;
     public static final int COLUMN_MIN_WIDTH = 4000;
     public static final int COLUMN_WIDTH_PADDING = 2048;
-    public static final float GUIDE_ROW_HEIGHT = 36f;
+    public static final float GUIDE_ROW_HEIGHT = 54f;
     public static final float HEADER_ROW_HEIGHT = 22f;
     public static final int UPLOAD_FAIL_MSG_SHOW_MAX = 3;
     public static final String USE_YN_INVALID_MSG = "사용여부는 Y 또는 N만 입력 가능합니다.";
@@ -101,23 +98,17 @@ public class ExcelUtil {
         return "Y".equals(useYn) || "N".equals(useYn);
     }
 
-    /** trim된 조직명 → orgId (조직명은 trim·공백 없음 전제). */
-    public static void registerOrgName(Map<String, String> orgIdByName, String orgNm, String orgId) {
-        if (orgNm == null) {
-            return;
-        }
-        String key = orgNm.trim();
-        if (!key.isEmpty()) {
-            orgIdByName.putIfAbsent(key, orgId);
-        }
+    /** 엑셀 안내행(0행) 또는 데이터 행에 잘못 들어온 안내 텍스트 스킵 판별 */
+    public static boolean isGuideMarkerRow(String cellValue) {
+        return cellValue != null && cellValue.startsWith("※");
     }
 
-    public static String resolveOrgIdByName(String orgNm, Map<String, String> orgIdByName) {
-        if (orgNm == null) {
-            return null;
+    /** 값이 있을 때만 Y/N 형식을 검증한다. 실패 시 failDetail, 통과 시 null */
+    public static Map<String, Object> validateOptionalUseYn(int rowNum, String value, String label) {
+        if (value != null && !value.isEmpty() && !isValidUseYn(value)) {
+            return buildFailDetail(rowNum, label + "는 Y 또는 N만 입력 가능합니다.");
         }
-        String key = orgNm.trim();
-        return key.isEmpty() ? null : orgIdByName.get(key);
+        return null;
     }
 
     public static void applyDataCell(Row row, int colIdx, String value, XSSFCellStyle style) {
@@ -169,12 +160,6 @@ public class ExcelUtil {
         }
     }
 
-    public static void hideColumns(Sheet sheet, int... colIdxs) {
-        for (int colIdx : colIdxs) {
-            sheet.setColumnHidden(colIdx, true);
-        }
-    }
-
     public static XSSFCellStyle createHeaderStyle(XSSFWorkbook workbook, boolean autoGen) {
         return createHeaderStyle(workbook, autoGen, HEADER_BG_RGB, AUTO_GEN_HEADER_BG_RGB);
     }
@@ -221,16 +206,6 @@ public class ExcelUtil {
         style.setBorderBottom(BorderStyle.THIN);
         style.setBorderLeft(BorderStyle.THIN);
         style.setBorderRight(BorderStyle.THIN);
-    }
-
-    public static void addChangeHighlight(Sheet sheet, String formula, String rangeRef) {
-        SheetConditionalFormatting scf = sheet.getSheetConditionalFormatting();
-        ConditionalFormattingRule rule = scf.createConditionalFormattingRule(formula);
-        PatternFormatting fill = rule.createPatternFormatting();
-        fill.setFillBackgroundColor(IndexedColors.PALE_BLUE.getIndex());
-        fill.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
-        CellRangeAddress[] ranges = { CellRangeAddress.valueOf(rangeRef) };
-        scf.addConditionalFormatting(ranges, rule);
     }
 
     public static void prepareHiddenListColumn(XSSFWorkbook workbook, XSSFSheet sheet, int colIdx, List<String> values,
@@ -281,6 +256,15 @@ public class ExcelUtil {
         validation.createErrorBox("입력 오류", errorMessage);
         validation.setEmptyCellAllowed(true);
         sheet.addValidationData(validation);
+    }
+
+    /** 데이터 영역에 Y/N 드롭다운을 적용한다. */
+    public static void addUseYnListValidations(XSSFSheet sheet, int... colIndices) {
+        int lastRow = DATA_VALIDATION_MAX_ROW + 1;
+        for (int colIdx : colIndices) {
+            addListValidation(sheet, DATA_START_ROW, lastRow, colIdx, new String[] { "Y", "N" }, null,
+                    USE_YN_INVALID_MSG);
+        }
     }
 
     public static Map<String, Object> buildFailDetail(int row, String reason) {

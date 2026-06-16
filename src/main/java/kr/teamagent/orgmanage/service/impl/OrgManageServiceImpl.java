@@ -35,28 +35,26 @@ import kr.teamagent.orgmanage.service.OrgManageVO;
 @Service
 public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
 
-    private static final String[] ORG_EXCEL_HEADERS = { "조직ID", "조직명", "상위조직명", "조직레벨", "정렬순서", "사용여부" };
+    private static final String ORG_HDR_ORG_ID = "조직ID";
+    private static final String ORG_HDR_ORG_NM = "조직명 *";
+    private static final String ORG_HDR_PARENT_ORG_NM = "상위조직명";
+    private static final String ORG_HDR_ORG_LEVEL = "조직레벨";
+    private static final String ORG_HDR_SORT_ORD = "정렬순서";
+    private static final String ORG_HDR_USE_YN = "사용여부 *";
+    private static final String[] ORG_EXCEL_HEADERS = {
+            ORG_HDR_ORG_ID, ORG_HDR_ORG_NM, ORG_HDR_PARENT_ORG_NM, ORG_HDR_ORG_LEVEL, ORG_HDR_SORT_ORD, ORG_HDR_USE_YN
+    };
     /** ExcelUtil.applyHeaderRow 회색 헤더용 — 삭제·변경 시 다운로드 헤더 스타일이 깨짐 */
     private static final int[] AUTO_GEN_HEADER_COLS = { 0, 3, 4 };
     private static final int USE_YN_COL_IDX = 5;
-    private static final int ORIGIN_ORG_NM_COL_IDX = 7;
-    private static final int ORIGIN_PARENT_ORG_NM_COL_IDX = 8;
-    private static final int ORIGIN_USE_YN_COL_IDX = 9;
-    private static final int ORIGIN_ORG_ID_COL_IDX = 10;
-    private static final int ORIGIN_ORG_LEVEL_COL_IDX = 11;
-    private static final int ORIGIN_SORT_ORDER_COL_IDX = 12;
     private static final String ORG_NM_USE_YN_REQUIRED_MSG = "조직명과 사용여부는 필수값입니다.";
-    private static final String PARENT_ORG_NM_HEADER = "상위조직명";
+    private static final String PARENT_ORG_NM_HEADER = ORG_HDR_PARENT_ORG_NM;
     private static final String PARENT_ORG_ID_HEADER = "상위조직ID";
     private static final String PARENT_ORG_FLEX_HEADER = "상위조직명 or 상위조직ID";
-    /** 신규 행: 원본 조직명(H) 없음 + A~F 입력 있음. 수정 행: A~F 중 원본(K~M,H~J)과 하나라도 다름 */
-    private static final String ORG_CHANGE_HIGHLIGHT_FORMULA = "OR("
-            + "AND(LEN($H3)=0,COUNTA($A3:$F3)>0),"
-            + "AND(LEN($H3)>0,OR($A3<>$K3,$B3<>$H3,$C3<>$I3,$D3<>$L3,$E3<>$M3,$F3<>$J3))"
-            + ")";
     private static final String ORG_EXCEL_GUIDE_TEXT =
-            "※ 조직ID가 있으면 수정, 비어 있으면 신규 등록됩니다. 조직레벨·정렬순서는 업로드 시 무시됩니다.\n"
-                    + "  조직명(필수), 상위조직명(선택), 사용여부(Y/N) 만 입력하세요.";
+            "※ * 표시된 항목은 필수 입력값입니다.\n"
+                    + "※ 조직ID가 있으면 수정, 비어 있으면 신규 등록됩니다. 조직레벨·정렬순서는 업로드 시 무시됩니다.\n"
+                    + "  상위조직명(선택) 만 입력하세요.";
 
     @Autowired
     private OrgManageDAO orgManageDAO;
@@ -66,6 +64,25 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private FileServiceImpl fileService;
+
+    /** trim된 조직명 → orgId (조직명은 trim·공백 없음 전제). */
+    public void registerOrgName(Map<String, String> orgIdByName, String orgNm, String orgId) {
+        if (orgNm == null) {
+            return;
+        }
+        String key = orgNm.trim();
+        if (!key.isEmpty()) {
+            orgIdByName.putIfAbsent(key, orgId);
+        }
+    }
+
+    public String resolveOrgIdByName(String orgNm, Map<String, String> orgIdByName) {
+        if (orgNm == null) {
+            return null;
+        }
+        String key = orgNm.trim();
+        return key.isEmpty() ? null : orgIdByName.get(key);
+    }
 
     /**
      * 조직 목록 조회
@@ -224,25 +241,13 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
             ExcelUtil.applyDataCell(row, 3, CommonUtil.nullToBlank(vo.getOrgLevel()), rowStyle);
             ExcelUtil.applyDataCell(row, 4, CommonUtil.nullToBlank(vo.getSortOrder()), rowStyle);
             ExcelUtil.applyDataCell(row, 5, CommonUtil.nullToBlank(vo.getUseYn()), rowStyle);
-
-            row.createCell(ORIGIN_ORG_NM_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getOrgNm()));
-            row.createCell(ORIGIN_PARENT_ORG_NM_COL_IDX).setCellValue(parentOrgNm);
-            row.createCell(ORIGIN_USE_YN_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getUseYn()));
-            row.createCell(ORIGIN_ORG_ID_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getOrgId()));
-            row.createCell(ORIGIN_ORG_LEVEL_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getOrgLevel()));
-            row.createCell(ORIGIN_SORT_ORDER_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getSortOrder()));
         }
     }
 
     private void applyOrgExcelSheetOptions(XSSFSheet sheet) {
-        ExcelUtil.hideColumns(sheet, ORIGIN_ORG_NM_COL_IDX, ORIGIN_PARENT_ORG_NM_COL_IDX, ORIGIN_USE_YN_COL_IDX,
-                ORIGIN_ORG_ID_COL_IDX, ORIGIN_ORG_LEVEL_COL_IDX, ORIGIN_SORT_ORDER_COL_IDX);
-        ExcelUtil.addChangeHighlight(sheet, ORG_CHANGE_HIGHLIGHT_FORMULA,
-                "A3:F" + (ExcelUtil.DATA_VALIDATION_MAX_ROW + 2));
         ExcelUtil.adjustColumnWidths(sheet, ORG_EXCEL_HEADERS.length);
         sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
-        ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
-                USE_YN_COL_IDX, new String[] { "Y", "N" }, null, ExcelUtil.USE_YN_INVALID_MSG);
+        ExcelUtil.addUseYnListValidations(sheet, USE_YN_COL_IDX);
     }
 
     /**
@@ -262,19 +267,19 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, "조직명");
+            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, ORG_HDR_ORG_NM);
             if (headerRow == null) {
                 throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (헤더 행 없음)");
             }
 
             Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
-            ExcelUtil.validateRequiredHeaderColumns(colIdx, "조직", "조직명", "사용여부");
+            ExcelUtil.validateRequiredHeaderColumns(colIdx, "조직", ORG_HDR_ORG_NM, ORG_HDR_USE_YN);
 
-            Integer orgNmCol = colIdx.get("조직명");
-            Integer orgIdCol = colIdx.get("조직ID");
+            Integer orgNmCol = colIdx.get(ORG_HDR_ORG_NM);
+            Integer orgIdCol = colIdx.get(ORG_HDR_ORG_ID);
             Integer parentOrgCol = resolveParentOrgColumnIndex(colIdx);
             parentOrgIdFirst = isParentOrgIdColumn(colIdx);
-            Integer useYnCol = colIdx.get("사용여부");
+            Integer useYnCol = colIdx.get(ORG_HDR_USE_YN);
 
             for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
@@ -286,7 +291,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                 String orgId = ExcelUtil.getCellString(row, orgIdCol, formatter);
                 String parentOrgNm = ExcelUtil.getCellString(row, parentOrgCol, formatter);
                 String useYn = ExcelUtil.getCellString(row, useYnCol, formatter);
-                if (orgNm.startsWith("※")) {
+                if (ExcelUtil.isGuideMarkerRow(orgNm)) {
                     continue;
                 }
                 if (isEmptyOrgExcelRow(orgId, orgNm, parentOrgNm, useYn)) {
@@ -333,7 +338,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
                     vo.setUseYn(excelRow.useYn);
                     saveOrgExcelRow(vo);
                     if (vo.getOrgNm() != null && !vo.getOrgNm().trim().isEmpty()) {
-                        ExcelUtil.registerOrgName(orgIdByName, vo.getOrgNm(), vo.getOrgId());
+                        registerOrgName(orgIdByName, vo.getOrgNm(), vo.getOrgId());
                     }
                     successCount++;
                     if (updateRow) {
@@ -574,7 +579,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
             if (orgNm.isEmpty()) {
                 continue;
             }
-            ExcelUtil.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
+            registerOrgName(orgIdByName, orgNm, vo.getOrgId());
         }
         return orgIdByName;
     }
@@ -596,11 +601,11 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
         if (parentById != null) {
             return parentById.getOrgId();
         }
-        return ExcelUtil.resolveOrgIdByName(trimmed, orgIdByName);
+        return resolveOrgIdByName(trimmed, orgIdByName);
     }
 
     private String resolveParentOrgIdByNameThenId(String trimmed, Map<String, String> orgIdByName) throws Exception {
-        String byName = ExcelUtil.resolveOrgIdByName(trimmed, orgIdByName);
+        String byName = resolveOrgIdByName(trimmed, orgIdByName);
         if (byName != null) {
             return byName;
         }

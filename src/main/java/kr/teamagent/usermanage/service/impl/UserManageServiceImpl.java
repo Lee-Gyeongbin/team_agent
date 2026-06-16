@@ -32,33 +32,36 @@ import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.orgmanage.service.OrgManageVO;
 import kr.teamagent.orgmanage.service.impl.OrgManageDAO;
+import kr.teamagent.orgmanage.service.impl.OrgManageServiceImpl;
 import kr.teamagent.usermanage.service.UserManageVO;
 
 @Service
 public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
+    private static final String USER_HDR_USER_ID = "사용자ID *";
+    private static final String USER_HDR_USER_NM = "사용자명 *";
+    private static final String USER_HDR_EMAIL = "이메일 *";
+    private static final String USER_HDR_PHONE = "전화번호";
+    private static final String USER_HDR_ORG_NM = "소속조직명";
+    private static final String USER_HDR_USE_YN = "사용여부";
+    private static final String USER_HDR_ACCT_STATUS = "계정상태";
     private static final String[] USER_EXCEL_HEADERS = {
-            "사용자ID", "사용자명", "이메일", "전화번호", "소속조직명", "사용여부", "계정상태"
+            USER_HDR_USER_ID, USER_HDR_USER_NM, USER_HDR_EMAIL, USER_HDR_PHONE, USER_HDR_ORG_NM, USER_HDR_USE_YN,
+            USER_HDR_ACCT_STATUS
     };
     /** ExcelUtil.applyHeaderRow 회색 헤더용 — 삭제·변경 시 다운로드 헤더 스타일이 깨짐 */
     private static final int[] AUTO_GEN_HEADER_COLS = { 6 };
     private static final int ORG_NM_COL_IDX = 4;
     private static final int USE_YN_COL_IDX = 5;
-    private static final int ORG_LIST_COL_IDX = 10;
+    private static final int ORG_LIST_COL_IDX = 7;
     private static final String ORG_LIST_NAME = "UserOrgNmList";
-    private static final int ORIGIN_USER_NM_COL_IDX = 7;
-    private static final int ORIGIN_ORG_NM_COL_IDX = 8;
-    private static final int ORIGIN_USE_YN_COL_IDX = 9;
-    private static final int ORIGIN_EMAIL_COL_IDX = 11;
-    private static final int ORIGIN_PHONE_COL_IDX = 12;
-    private static final int ORIGIN_USER_ID_COL_IDX = 13;
     private static final String FAIL_TYPE_DUPLICATE_USER_ID = "DUPLICATE_USER_ID";
     private static final String FAIL_TYPE_DUPLICATE_EMAIL = "DUPLICATE_EMAIL";
     private static final String FAIL_TYPE_FORMAT = "FORMAT";
     private static final String USER_ID_REQUIRED_MSG = "사용자ID는 필수값입니다.";
     private static final String USER_NM_REQUIRED_MSG = "사용자명은 필수값입니다.";
     private static final String EMAIL_REQUIRED_MSG = "이메일은 필수값입니다.";
-    private static final String ORG_NM_HEADER = "소속조직명";
+    private static final String ORG_NM_HEADER = USER_HDR_ORG_NM;
     private static final String INVALID_ORG_NM_MSG = "존재하지 않는 소속조직명입니다.";
     private static final String INVALID_EMAIL_MSG = "이메일 형식이 올바르지 않습니다.";
     private static final String INVALID_PHONE_MSG = "전화번호는 숫자 9~11자리만 입력 가능합니다.";
@@ -68,20 +71,19 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     private static final Pattern EMAIL_PATTERN = Pattern.compile(
             "^([\\w-]+(?:\\.[\\w-]+)*)@((?:[\\w-]+\\.)*\\w[\\w-]{0,66})\\.([a-zA-Z]{2,6}(?:\\.[a-zA-Z]{2})?)$");
     private static final Pattern PHONE_PATTERN = Pattern.compile("^\\d{9,11}$");
-    /** 신규 행: 원본 사용자명(H) 없음 + A~F 입력 있음. 수정 행: A~F 중 원본(K~N,H~J)과 하나라도 다름 */
-    private static final String USER_CHANGE_HIGHLIGHT_FORMULA = "OR("
-            + "AND(LEN($H3)=0,COUNTA($A3:$F3)>0),"
-            + "AND(LEN($H3)>0,OR($A3<>$N3,$B3<>$H3,$C3<>$L3,$D3<>$M3,$E3<>$I3,$F3<>$J3))"
-            + ")";
     private static final String USER_EXCEL_GUIDE_TEXT =
-            "※ 사용자ID가 기존에 있으면 수정, 없으면 신규 등록됩니다. 신규 등록 시 임시 비밀번호가 자동 생성됩니다.\n"
-                    + "  사용자ID·사용자명·이메일(필수), 소속조직명(선택), 사용여부(Y/N) 만 입력하세요. 계정상태는 참고용입니다.";
+            "※ * 표시된 항목은 필수 입력값입니다.\n"
+                    + "※ 사용자ID가 기존에 있으면 수정, 없으면 신규 등록됩니다. 신규 등록 시 임시 비밀번호가 자동 생성됩니다.\n"
+                    + "  소속조직명(선택), 사용여부(Y/N) 만 입력하세요. 계정상태는 참고용입니다.";
 
     @Autowired
     private UserManageDAO userManageDAO;
 
     @Autowired
     private OrgManageDAO orgManageDAO;
+
+    @Autowired
+    private OrgManageServiceImpl orgManageService;
 
     @SuppressWarnings("deprecation")
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
@@ -134,21 +136,10 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             ExcelUtil.applyDataCell(row, 4, orgNm, rowStyle);
             ExcelUtil.applyDataCell(row, 5, CommonUtil.nullToBlank(vo.getUseYn()), rowStyle);
             ExcelUtil.applyDataCell(row, 6, CommonUtil.nullToBlank(vo.getAcctStatusDesc()), rowStyle);
-
-            row.createCell(ORIGIN_USER_NM_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getUserNm()));
-            row.createCell(ORIGIN_ORG_NM_COL_IDX).setCellValue(orgNm);
-            row.createCell(ORIGIN_USE_YN_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getUseYn()));
-            row.createCell(ORIGIN_EMAIL_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getEmail()));
-            row.createCell(ORIGIN_PHONE_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getPhone()));
-            row.createCell(ORIGIN_USER_ID_COL_IDX).setCellValue(CommonUtil.nullToBlank(vo.getUserId()));
         }
     }
 
     private void applyUserExcelSheetOptions(XSSFWorkbook workbook, XSSFSheet sheet, List<String> orgNames) {
-        ExcelUtil.hideColumns(sheet, ORIGIN_USER_NM_COL_IDX, ORIGIN_ORG_NM_COL_IDX, ORIGIN_USE_YN_COL_IDX,
-                ORIGIN_EMAIL_COL_IDX, ORIGIN_PHONE_COL_IDX, ORIGIN_USER_ID_COL_IDX);
-        ExcelUtil.addChangeHighlight(sheet, USER_CHANGE_HIGHLIGHT_FORMULA,
-                "A3:G" + (ExcelUtil.DATA_VALIDATION_MAX_ROW + 2));
         ExcelUtil.adjustColumnWidths(sheet, USER_EXCEL_HEADERS.length);
         sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
         ExcelUtil.prepareHiddenListColumn(workbook, sheet, ORG_LIST_COL_IDX, orgNames, ORG_LIST_NAME);
@@ -156,8 +147,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
                     ORG_NM_COL_IDX, null, ORG_LIST_NAME, "등록된 소속조직명만 선택할 수 있습니다.");
         }
-        ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
-                USE_YN_COL_IDX, new String[] { "Y", "N" }, null, ExcelUtil.USE_YN_INVALID_MSG);
+        ExcelUtil.addUseYnListValidations(sheet, USE_YN_COL_IDX);
     }
 
     /**
@@ -178,20 +168,20 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, "사용자명");
+            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, USER_HDR_USER_NM);
             if (headerRow == null) {
                 throw new IllegalArgumentException("올바른 사용자 엑셀 파일이 아닙니다. (헤더 행 없음)");
             }
 
             Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
-            ExcelUtil.validateRequiredHeaderColumns(colIdx, "사용자", "사용자명", "사용자ID", "이메일");
+            ExcelUtil.validateRequiredHeaderColumns(colIdx, "사용자", USER_HDR_USER_NM, USER_HDR_USER_ID, USER_HDR_EMAIL);
 
-            Integer userIdCol = colIdx.get("사용자ID");
-            Integer userNmCol = colIdx.get("사용자명");
-            Integer emailCol = colIdx.get("이메일");
-            Integer phoneCol = colIdx.get("전화번호");
+            Integer userIdCol = colIdx.get(USER_HDR_USER_ID);
+            Integer userNmCol = colIdx.get(USER_HDR_USER_NM);
+            Integer emailCol = colIdx.get(USER_HDR_EMAIL);
+            Integer phoneCol = colIdx.get(USER_HDR_PHONE);
             Integer orgCol = colIdx.get(ORG_NM_HEADER);
-            Integer useYnCol = colIdx.get("사용여부");
+            Integer useYnCol = colIdx.get(USER_HDR_USE_YN);
 
             for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
@@ -238,7 +228,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
         for (UserExcelRow excelRow : excelRows) {
             try {
-                String orgId = ExcelUtil.resolveOrgIdByName(excelRow.orgNm, activeOrgs.orgIdByName);
+                String orgId = orgManageService.resolveOrgIdByName(excelRow.orgNm, activeOrgs.orgIdByName);
                 if (!excelRow.orgNm.isEmpty() && orgId == null) {
                     failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.userId, INVALID_ORG_NM_MSG + excelRow.orgNm,
                             FAIL_TYPE_FORMAT));
@@ -461,7 +451,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             if (orgNm.isEmpty()) {
                 continue;
             }
-            ExcelUtil.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
+            orgManageService.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
             if (seenNames.add(orgNm)) {
                 orgNames.add(orgNm);
             }
@@ -477,7 +467,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
     private static boolean isSkippableUserExcelRow(String userId, String userNm, String email, String phone,
             String orgNm, String useYn) {
-        return userNm.startsWith("※") || isEmptyUserExcelRow(userId, userNm, email, phone, orgNm, useYn);
+        return ExcelUtil.isGuideMarkerRow(userNm) || isEmptyUserExcelRow(userId, userNm, email, phone, orgNm, useYn);
     }
 
     private static Map<String, Object> buildUserExcelRowFailDetail(int rowNum, String userId, String userNm,
