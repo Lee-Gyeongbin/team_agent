@@ -148,6 +148,28 @@
         ) AS USE_YN
     </select>
 
+    <select id="selectDmColListForExcel" parameterType="datamartVO" resultType="kr.teamagent.datamart.service.DatamartVO$MetaColumnExcelRowVO">
+        /* 메타 관리 > 컬럼 메타 엑셀 다운로드 datamart.selectDmColListForExcel */
+        SELECT
+            A.TBL_ID AS tblId
+            , A.COL_ID AS colId
+            , A.COL_PHY_NM AS colPhyNm
+            , A.COL_KOR_NM AS colKorNm
+            , A.COL_DESC AS colDesc
+            , A.DATA_TYPE AS dataType
+            , CAST(A.DATA_LEN AS CHAR) AS dataLen
+            , A.PK_YN AS pkYn
+            , A.FK_YN AS fkYn
+            , A.NULLABLE_YN AS nullableYn
+            , A.HAS_CODE_YN AS hasCodeYn
+            , A.AI_HINT AS aiHint
+            , A.SORT_ORD AS sortOrd
+            , A.USE_YN AS useYn
+        FROM TB_DM_COL A
+        WHERE A.DATAMART_ID = #{datamartId}
+        ORDER BY A.TBL_ID, A.SORT_ORD, A.COL_PHY_NM
+    </select>
+
     <select id="selectDmColListByDatamartAndTbl" parameterType="hashMap" resultType="kr.teamagent.datamart.service.DatamartVO$MetaColumnRowVO">
         /* 메타 테이블 목록 조회 시 저장된 컬럼 메타 로드 datamart.selectDmColListByDatamartAndTbl */
         SELECT

@@ -9,18 +9,31 @@ import java.sql.SQLTimeoutException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.servlet.http.HttpServletResponse;
+
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.datamart.service.DatamartVO;
 
@@ -30,6 +43,40 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     private static final Logger logger = LoggerFactory.getLogger(DatamartServiceImpl.class);
 
     private static final int DEFAULT_MYSQL_PORT = 3306;
+
+    private static final String META_HDR_TBL_ID = "테이블ID *";
+    private static final String META_HDR_COL_ID = "컬럼ID";
+    private static final String META_HDR_COL_PHY_NM = "물리컬럼명 *";
+    private static final String META_HDR_COL_KOR_NM = "한글컬럼명";
+    private static final String META_HDR_COL_DESC = "컬럼설명";
+    private static final String META_HDR_DATA_TYPE = "데이터타입 *";
+    private static final String META_HDR_DATA_LEN = "데이터길이";
+    private static final String META_HDR_PK_YN = "PK여부";
+    private static final String META_HDR_FK_YN = "FK여부";
+    private static final String META_HDR_NULLABLE_YN = "NULL허용";
+    private static final String META_HDR_HAS_CODE_YN = "코드값여부";
+    private static final String META_HDR_AI_HINT = "AI힌트";
+    private static final String META_HDR_SORT_ORD = "정렬순서";
+    private static final String META_HDR_USE_YN = "사용여부";
+    private static final String[] META_COLUMN_EXCEL_HEADERS = {
+            META_HDR_TBL_ID, META_HDR_COL_ID, META_HDR_COL_PHY_NM, META_HDR_COL_KOR_NM, META_HDR_COL_DESC,
+            META_HDR_DATA_TYPE, META_HDR_DATA_LEN, META_HDR_PK_YN, META_HDR_FK_YN, META_HDR_NULLABLE_YN,
+            META_HDR_HAS_CODE_YN, META_HDR_AI_HINT, META_HDR_SORT_ORD, META_HDR_USE_YN
+    };
+    private static final int[] META_COLUMN_AUTO_GEN_HEADER_COLS = { 12 };
+    private static final int META_COLUMN_COL_KOR_NM_COL_IDX = 3;
+    private static final int META_COLUMN_COL_DESC_COL_IDX = 4;
+    private static final int META_COLUMN_AI_HINT_COL_IDX = 11;
+    private static final int META_COLUMN_PK_YN_COL_IDX = 7;
+    private static final int META_COLUMN_FK_YN_COL_IDX = 8;
+    private static final int META_COLUMN_NULLABLE_YN_COL_IDX = 9;
+    private static final int META_COLUMN_HAS_CODE_YN_COL_IDX = 10;
+    private static final int META_COLUMN_USE_YN_COL_IDX = 13;
+    private static final String META_COLUMN_EXCEL_GUIDE_TEXT =
+            "※ * 표시된 항목은 필수 입력값입니다.\n"
+                    + "※ 업로드는 미리보기용이며, 저장 시 해당 데이터마트의 컬럼 메타가 전체 교체됩니다.\n"
+                    + "  테이블ID·물리컬럼명·데이터타입(필수), 컬럼ID, PK/FK/NULL허용/코드값여부/사용여부(Y/N)를 입력하세요. 컬럼ID 미입력 시 물리컬럼명이 사용됩니다.";
+
     @Autowired
     DatamartDAO datamartDAO;
 
@@ -403,6 +450,296 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         resultMap.put("result", "SUCCESS");
         resultMap.put("msg", "메타 컬럼 저장 성공");
         return resultMap;
+    }
+
+    /**
+     * 메타 관리 > 컬럼 메타 엑셀 다운로드 (datamartId 단위)
+     * @param response
+     * @param datamartId 데이터마트 ID
+     * @throws Exception
+     */
+    public void downloadMetaColumnExcel(HttpServletResponse response, String datamartId) throws Exception {
+        if (CommonUtil.isEmpty(datamartId)) {
+            throw new IllegalArgumentException("datamartId is required");
+        }
+        DatamartVO searchVO = new DatamartVO();
+        searchVO.setDatamartId(datamartId.trim());
+        if (datamartDAO.selectDatamart(searchVO) == null) {
+            throw new IllegalArgumentException("데이터마트 정보를 찾을 수 없습니다.");
+        }
+        List<DatamartVO.MetaColumnExcelRowVO> list = datamartDAO.selectDmColListForExcel(searchVO);
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            XSSFSheet sheet = ExcelUtil.createSheetWithHeader(workbook, "컬럼메타", META_COLUMN_EXCEL_HEADERS,
+                    META_COLUMN_AUTO_GEN_HEADER_COLS, META_COLUMN_EXCEL_GUIDE_TEXT);
+            writeMetaColumnExcelRows(workbook, sheet, list);
+            applyMetaColumnExcelSheetOptions(sheet);
+            ExcelUtil.writeXlsxResponse(response, workbook);
+        }
+    }
+
+    private void writeMetaColumnExcelRows(XSSFWorkbook workbook, XSSFSheet sheet, List<DatamartVO.MetaColumnExcelRowVO> list) {
+        XSSFCellStyle rowStyle = ExcelUtil.createDataStyle(workbook);
+        int rowNum = ExcelUtil.DATA_START_ROW;
+        if (list == null) {
+            return;
+        }
+        String prevTblId = null;
+        for (DatamartVO.MetaColumnExcelRowVO vo : list) {
+            if (vo == null) {
+                continue;
+            }
+            String tblId = CommonUtil.nullToBlank(vo.getTblId());
+            if (prevTblId != null && !prevTblId.equals(tblId)) {
+                rowNum++;
+            }
+            prevTblId = tblId;
+
+            Row row = sheet.createRow(rowNum++);
+            ExcelUtil.applyDataCell(row, 0, tblId, rowStyle);
+            ExcelUtil.applyDataCell(row, 1, CommonUtil.nullToBlank(vo.getColId()), rowStyle);
+            ExcelUtil.applyDataCell(row, 2, CommonUtil.nullToBlank(vo.getColPhyNm()), rowStyle);
+            ExcelUtil.applyDataCell(row, 3, CommonUtil.nullToBlank(vo.getColKorNm()), rowStyle);
+            ExcelUtil.applyDataCell(row, 4, CommonUtil.nullToBlank(vo.getColDesc()), rowStyle);
+            ExcelUtil.applyDataCell(row, 5, CommonUtil.nullToBlank(vo.getDataType()), rowStyle);
+            ExcelUtil.applyDataCell(row, 6, CommonUtil.nullToBlank(vo.getDataLen()), rowStyle);
+            ExcelUtil.applyDataCell(row, 7, CommonUtil.nullToBlank(vo.getPkYn()), rowStyle);
+            ExcelUtil.applyDataCell(row, 8, CommonUtil.nullToBlank(vo.getFkYn()), rowStyle);
+            ExcelUtil.applyDataCell(row, 9, CommonUtil.nullToBlank(vo.getNullableYn()), rowStyle);
+            ExcelUtil.applyDataCell(row, 10, CommonUtil.nullToBlank(vo.getHasCodeYn()), rowStyle);
+            ExcelUtil.applyDataCell(row, 11, CommonUtil.nullToBlank(vo.getAiHint()), rowStyle);
+            ExcelUtil.applyDataCell(row, 12, vo.getSortOrd() != null ? String.valueOf(vo.getSortOrd()) : "", rowStyle);
+            ExcelUtil.applyDataCell(row, 13, CommonUtil.nullToBlank(vo.getUseYn()), rowStyle);
+        }
+    }
+
+    private void applyMetaColumnExcelSheetOptions(XSSFSheet sheet) {
+        ExcelUtil.adjustColumnWidths(sheet, META_COLUMN_EXCEL_HEADERS.length);
+        int korNmWidth = sheet.getColumnWidth(META_COLUMN_COL_KOR_NM_COL_IDX);
+        sheet.setColumnWidth(META_COLUMN_COL_DESC_COL_IDX, korNmWidth);
+        sheet.setColumnWidth(META_COLUMN_AI_HINT_COL_IDX, korNmWidth);
+        sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
+        ExcelUtil.addUseYnListValidations(sheet, META_COLUMN_PK_YN_COL_IDX, META_COLUMN_FK_YN_COL_IDX,
+                META_COLUMN_NULLABLE_YN_COL_IDX, META_COLUMN_HAS_CODE_YN_COL_IDX, META_COLUMN_USE_YN_COL_IDX);
+    }
+
+    /**
+     * 메타 관리 > 컬럼 메타 엑셀 업로드 (파싱·검증 후 JSON 미리보기 반환, DB 저장 없음)
+     * @param datamartId 데이터마트 ID
+     * @param file 업로드 파일
+     * @return datamartId, tableList(성공 시), failDetails/returnMsg(실패 시)
+     * @throws Exception
+     */
+    public Map<String, Object> uploadMetaColumnExcel(String datamartId, MultipartFile file) throws Exception {
+        if (CommonUtil.isEmpty(datamartId)) {
+            throw new IllegalArgumentException("datamartId is required");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("uploadFile is required");
+        }
+
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(datamartId.trim());
+        if (datamartDAO.selectDatamart(dm) == null) {
+            throw new IllegalArgumentException("데이터마트 정보를 찾을 수 없습니다.");
+        }
+
+        List<Map<String, Object>> failDetails = new ArrayList<>();
+        Map<String, DatamartVO.MetaColumnSaveTableItemVO> tableMap = new LinkedHashMap<>();
+        Map<String, Integer> tblColSeqMap = new HashMap<>();
+        DataFormatter formatter = new DataFormatter();
+
+        try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, META_HDR_TBL_ID);
+            if (headerRow == null) {
+                throw new IllegalArgumentException("올바른 컬럼 메타 엑셀 파일이 아닙니다. (헤더 행 없음)");
+            }
+
+            Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
+            ExcelUtil.validateRequiredHeaderColumns(colIdx, "컬럼 메타", META_HDR_TBL_ID, META_HDR_COL_PHY_NM,
+                    META_HDR_DATA_TYPE);
+
+            Integer tblIdCol = colIdx.get(META_HDR_TBL_ID);
+            Integer colIdCol = colIdx.get(META_HDR_COL_ID);
+            Integer colPhyNmCol = colIdx.get(META_HDR_COL_PHY_NM);
+            Integer colKorNmCol = colIdx.get(META_HDR_COL_KOR_NM);
+            Integer colDescCol = colIdx.get(META_HDR_COL_DESC);
+            Integer dataTypeCol = colIdx.get(META_HDR_DATA_TYPE);
+            Integer dataLenCol = colIdx.get(META_HDR_DATA_LEN);
+            Integer pkYnCol = colIdx.get(META_HDR_PK_YN);
+            Integer fkYnCol = colIdx.get(META_HDR_FK_YN);
+            Integer nullableYnCol = colIdx.get(META_HDR_NULLABLE_YN);
+            Integer hasCodeYnCol = colIdx.get(META_HDR_HAS_CODE_YN);
+            Integer aiHintCol = colIdx.get(META_HDR_AI_HINT);
+            Integer sortOrdCol = colIdx.get(META_HDR_SORT_ORD);
+            Integer useYnCol = colIdx.get(META_HDR_USE_YN);
+
+            for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) {
+                    continue;
+                }
+
+                String tblId = ExcelUtil.getCellString(row, tblIdCol, formatter);
+                String colPhyNm = ExcelUtil.getCellString(row, colPhyNmCol, formatter);
+                String colId = ExcelUtil.getCellString(row, colIdCol, formatter);
+                String colKorNm = ExcelUtil.getCellString(row, colKorNmCol, formatter);
+                String colDesc = ExcelUtil.getCellString(row, colDescCol, formatter);
+                String dataType = ExcelUtil.getCellString(row, dataTypeCol, formatter);
+                String dataLen = ExcelUtil.getCellString(row, dataLenCol, formatter);
+                String pkYn = ExcelUtil.getCellString(row, pkYnCol, formatter);
+                String fkYn = ExcelUtil.getCellString(row, fkYnCol, formatter);
+                String nullableYn = ExcelUtil.getCellString(row, nullableYnCol, formatter);
+                String hasCodeYn = ExcelUtil.getCellString(row, hasCodeYnCol, formatter);
+                String aiHint = ExcelUtil.getCellString(row, aiHintCol, formatter);
+                String sortOrdStr = ExcelUtil.getCellString(row, sortOrdCol, formatter);
+                String useYn = ExcelUtil.getCellString(row, useYnCol, formatter);
+
+                if (isSkippableMetaColumnExcelRow(tblId, colPhyNm, colId, colKorNm, colDesc, dataType, dataLen,
+                        pkYn, fkYn, nullableYn, hasCodeYn, aiHint, sortOrdStr, useYn)) {
+                    continue;
+                }
+
+                Map<String, Object> rowFail = validateMetaColumnExcelRow(i + 1, tblId, colPhyNm, dataType, pkYn, fkYn,
+                        nullableYn, hasCodeYn, useYn);
+                if (rowFail != null) {
+                    failDetails.add(rowFail);
+                    continue;
+                }
+
+                if (colId.isEmpty()) {
+                    colId = colPhyNm;
+                }
+
+                pkYn = defaultYn(pkYn, "N");
+                fkYn = defaultYn(fkYn, "N");
+                nullableYn = defaultYn(nullableYn, "Y");
+                hasCodeYn = defaultYn(hasCodeYn, "N");
+                useYn = defaultYn(useYn, "Y");
+
+                int tblColSeq = tblColSeqMap.getOrDefault(tblId, 0) + 1;
+                tblColSeqMap.put(tblId, tblColSeq);
+                Integer sortOrd = parseSortOrd(sortOrdStr, tblColSeq);
+
+                DatamartVO.MetaColumnRowVO col = new DatamartVO.MetaColumnRowVO();
+                col.setColId(colId);
+                col.setColPhyNm(colPhyNm);
+                col.setColKorNm(colKorNm);
+                col.setColDesc(colDesc);
+                col.setDataType(dataType);
+                col.setDataLen(dataLen);
+                col.setPkYn(pkYn);
+                col.setFkYn(fkYn);
+                col.setNullableYn(nullableYn);
+                col.setHasCodeYn(hasCodeYn);
+                col.setAiHint(aiHint);
+                col.setSortOrd(sortOrd);
+                col.setUseYn(useYn);
+
+                DatamartVO.MetaColumnSaveTableItemVO tableItem = tableMap.get(tblId);
+                if (tableItem == null) {
+                    tableItem = new DatamartVO.MetaColumnSaveTableItemVO();
+                    tableItem.setId(tblId);
+                    tableItem.setColumns(new ArrayList<>());
+                    tableMap.put(tblId, tableItem);
+                }
+                tableItem.getColumns().add(col);
+            }
+        }
+
+        if (!failDetails.isEmpty()) {
+            String returnMsg = ExcelUtil.buildUploadFailReturnMsg(failDetails,
+                    DatamartServiceImpl::metaColumnFailDetailMessage);
+            return buildMetaColumnUploadPreviewResult(datamartId.trim(), null, failDetails, returnMsg);
+        }
+
+        return buildMetaColumnUploadPreviewResult(datamartId.trim(), new ArrayList<>(tableMap.values()),
+                failDetails, null);
+    }
+
+    private static Map<String, Object> buildMetaColumnUploadPreviewResult(String datamartId,
+            List<DatamartVO.MetaColumnSaveTableItemVO> tableList, List<Map<String, Object>> failDetails,
+            String returnMsg) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("datamartId", datamartId);
+        result.put("failDetails", failDetails != null ? failDetails : new ArrayList<>());
+        if (returnMsg != null) {
+            result.put("returnMsg", returnMsg);
+        }
+        if (tableList != null) {
+            result.put("tableList", tableList);
+        }
+        return result;
+    }
+
+    private static boolean isSkippableMetaColumnExcelRow(String tblId, String colPhyNm, String colId, String colKorNm,
+            String colDesc, String dataType, String dataLen, String pkYn, String fkYn, String nullableYn,
+            String hasCodeYn, String aiHint, String sortOrdStr, String useYn) {
+        if (ExcelUtil.isGuideMarkerRow(tblId)) {
+            return true;
+        }
+        return tblId.isEmpty() && colPhyNm.isEmpty() && colId.isEmpty() && colKorNm.isEmpty() && colDesc.isEmpty()
+                && dataType.isEmpty() && dataLen.isEmpty() && pkYn.isEmpty() && fkYn.isEmpty() && nullableYn.isEmpty()
+                && hasCodeYn.isEmpty() && aiHint.isEmpty() && sortOrdStr.isEmpty() && useYn.isEmpty();
+    }
+
+    private static Map<String, Object> validateMetaColumnExcelRow(int rowNum, String tblId, String colPhyNm,
+            String dataType, String pkYn, String fkYn, String nullableYn, String hasCodeYn, String useYn) {
+        if (tblId.isEmpty()) {
+            return ExcelUtil.buildFailDetail(rowNum, "테이블ID는 필수값입니다.");
+        }
+        if (colPhyNm.isEmpty()) {
+            return ExcelUtil.buildFailDetail(rowNum, "물리컬럼명은 필수값입니다.");
+        }
+        if (dataType.isEmpty()) {
+            return ExcelUtil.buildFailDetail(rowNum, "데이터타입은 필수값입니다.");
+        }
+        Map<String, Object> rowFail = ExcelUtil.validateOptionalUseYn(rowNum, pkYn, "PK여부");
+        if (rowFail != null) {
+            return rowFail;
+        }
+        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, fkYn, "FK여부");
+        if (rowFail != null) {
+            return rowFail;
+        }
+        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, nullableYn, "NULL허용");
+        if (rowFail != null) {
+            return rowFail;
+        }
+        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, hasCodeYn, "코드값여부");
+        if (rowFail != null) {
+            return rowFail;
+        }
+        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, useYn, "사용여부");
+        if (rowFail != null) {
+            return rowFail;
+        }
+        return null;
+    }
+
+    private static String metaColumnFailDetailMessage(Map<String, Object> detail) {
+        Object row = detail.get("row");
+        Object reason = detail.get("reason");
+        String message = reason != null ? String.valueOf(reason).trim() : "";
+        if (message.isEmpty()) {
+            return ExcelUtil.UPLOAD_FAIL_DEFAULT_MSG;
+        }
+        return row != null ? row + "행: " + message : message;
+    }
+
+    private static String defaultYn(String value, String defaultValue) {
+        return value.isEmpty() ? defaultValue : value;
+    }
+
+    private static Integer parseSortOrd(String sortOrdStr, int fallback) {
+        if (sortOrdStr.isEmpty()) {
+            return Integer.valueOf(fallback);
+        }
+        try {
+            return Integer.valueOf(sortOrdStr);
+        } catch (NumberFormatException e) {
+            return Integer.valueOf(fallback);
+        }
     }
 
     /**
