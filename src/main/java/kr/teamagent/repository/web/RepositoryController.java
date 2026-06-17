@@ -3,14 +3,19 @@ package kr.teamagent.repository.web;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 
+import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.repository.service.RepositoryVO;
@@ -73,6 +78,27 @@ public class RepositoryController extends BaseController {
     @ResponseBody
     public Map<String, Object> downloadDocumentFile(@RequestBody FileVO req) throws Exception {
         return repositoryService.downloadDocumentFile(req);
+    }
+
+    /**
+     * 문서 파일 뷰 리다이렉트 (GET) — 리서치 리포트 출처 링크 등에서 새 탭으로 직접 열기용.
+     * presigned URL을 생성한 뒤 302 리다이렉트한다(미리보기 URL 우선, 없으면 다운로드 URL).
+     */
+    @RequestMapping(value = "/viewDocRedirect.do", method = RequestMethod.GET)
+    public void viewDocRedirect(@RequestParam("docFileId") String docFileId, HttpServletResponse response) throws Exception {
+        FileVO req = new FileVO();
+        req.setDocFileId(docFileId);
+        Map<String, Object> result = repositoryService.viewDocumentFile(req);
+
+        String url = result != null ? (String) result.get("url") : null;
+        if (CommonUtil.isEmpty(url) && result != null) {
+            url = (String) result.get("downloadUrl");
+        }
+        if (CommonUtil.isEmpty(url)) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, "문서 파일 URL을 찾을 수 없습니다.");
+            return;
+        }
+        response.sendRedirect(url);
     }
 
     /**
