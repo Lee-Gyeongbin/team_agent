@@ -526,7 +526,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      * 메타 관리 > 컬럼 메타 엑셀 업로드 (파싱·검증 후 JSON 미리보기 반환, DB 저장 없음)
      * @param datamartId 데이터마트 ID
      * @param file 업로드 파일
-     * @return datamartId, tableList(성공 시), failDetails/returnMsg(실패 시)
+     * @return datamartId, tableList(성공 시), returnMsg(실패 시)
      * @throws Exception
      */
     public Map<String, Object> uploadMetaColumnExcel(String datamartId, MultipartFile file) throws Exception {
@@ -543,7 +543,8 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             throw new IllegalArgumentException("데이터마트 정보를 찾을 수 없습니다.");
         }
 
-        List<Map<String, Object>> failDetails = new ArrayList<>();
+        int requiredFailCount = 0;
+        int formatFailCount = 0;
         Map<String, DatamartVO.MetaColumnSaveTableItemVO> tableMap = new LinkedHashMap<>();
         Map<String, Integer> tblColSeqMap = new HashMap<>();
         DataFormatter formatter = new DataFormatter();
@@ -600,10 +601,12 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                Map<String, Object> rowFail = validateMetaColumnExcelRow(i + 1, tblId, colPhyNm, dataType, pkYn, fkYn,
-                        nullableYn, hasCodeYn, useYn);
-                if (rowFail != null) {
-                    failDetails.add(rowFail);
+                if (hasMetaColumnRequiredError(tblId, colPhyNm, dataType)) {
+                    requiredFailCount++;
+                    continue;
+                }
+                if (hasMetaColumnUseYnFormatError(pkYn, fkYn, nullableYn, hasCodeYn, useYn)) {
+                    formatFailCount++;
                     continue;
                 }
 
@@ -647,22 +650,18 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        if (!failDetails.isEmpty()) {
-            String returnMsg = ExcelUtil.buildUploadFailReturnMsg(failDetails,
-                    DatamartServiceImpl::metaColumnFailDetailMessage);
-            return buildMetaColumnUploadPreviewResult(datamartId.trim(), null, failDetails, returnMsg);
+        if (requiredFailCount > 0 || formatFailCount > 0) {
+            String returnMsg = buildMetaColumnUploadFailReturnMsg(requiredFailCount, formatFailCount);
+            return buildMetaColumnUploadPreviewResult(datamartId.trim(), null, returnMsg);
         }
 
-        return buildMetaColumnUploadPreviewResult(datamartId.trim(), new ArrayList<>(tableMap.values()),
-                failDetails, null);
+        return buildMetaColumnUploadPreviewResult(datamartId.trim(), new ArrayList<>(tableMap.values()), null);
     }
 
     private static Map<String, Object> buildMetaColumnUploadPreviewResult(String datamartId,
-            List<DatamartVO.MetaColumnSaveTableItemVO> tableList, List<Map<String, Object>> failDetails,
-            String returnMsg) {
+            List<DatamartVO.MetaColumnSaveTableItemVO> tableList, String returnMsg) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("datamartId", datamartId);
-        result.put("failDetails", failDetails != null ? failDetails : new ArrayList<>());
         if (returnMsg != null) {
             result.put("returnMsg", returnMsg);
         }
@@ -683,48 +682,33 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 && hasCodeYn.isEmpty() && aiHint.isEmpty() && sortOrdStr.isEmpty() && useYn.isEmpty();
     }
 
-    private static Map<String, Object> validateMetaColumnExcelRow(int rowNum, String tblId, String colPhyNm,
-            String dataType, String pkYn, String fkYn, String nullableYn, String hasCodeYn, String useYn) {
-        if (tblId.isEmpty()) {
-            return ExcelUtil.buildFailDetail(rowNum, "테이블ID는 필수값입니다.");
-        }
-        if (colPhyNm.isEmpty()) {
-            return ExcelUtil.buildFailDetail(rowNum, "물리컬럼명은 필수값입니다.");
-        }
-        if (dataType.isEmpty()) {
-            return ExcelUtil.buildFailDetail(rowNum, "데이터타입은 필수값입니다.");
-        }
-        Map<String, Object> rowFail = ExcelUtil.validateOptionalUseYn(rowNum, pkYn, "PK여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, fkYn, "FK여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, nullableYn, "NULL허용");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, hasCodeYn, "코드값여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, useYn, "사용여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        return null;
+    private static boolean hasMetaColumnRequiredError(String tblId, String colPhyNm, String dataType) {
+        return tblId.isEmpty() || colPhyNm.isEmpty() || dataType.isEmpty();
     }
 
-    private static String metaColumnFailDetailMessage(Map<String, Object> detail) {
-        Object row = detail.get("row");
-        Object reason = detail.get("reason");
-        String message = reason != null ? String.valueOf(reason).trim() : "";
-        if (message.isEmpty()) {
+    private static boolean hasMetaColumnUseYnFormatError(String pkYn, String fkYn, String nullableYn,
+            String hasCodeYn, String useYn) {
+        String[] useYnValues = { pkYn, fkYn, nullableYn, hasCodeYn, useYn };
+        for (String useYnValue : useYnValues) {
+            if (!useYnValue.isEmpty() && !ExcelUtil.isValidUseYn(useYnValue)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String buildMetaColumnUploadFailReturnMsg(int requiredFailCount, int formatFailCount) {
+        List<String> parts = new ArrayList<>();
+        if (requiredFailCount > 0) {
+            parts.add("필수값 누락 " + requiredFailCount + "건");
+        }
+        if (formatFailCount > 0) {
+            parts.add("형식 오류 " + formatFailCount + "건");
+        }
+        if (parts.isEmpty()) {
             return ExcelUtil.UPLOAD_FAIL_DEFAULT_MSG;
         }
-        return row != null ? row + "행: " + message : message;
+        return "업로드 실패 : " + String.join(", ", parts) + "이 있습니다.";
     }
 
     private static String defaultYn(String value, String defaultValue) {
