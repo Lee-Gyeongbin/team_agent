@@ -510,8 +510,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     private void applyMetaColumnExcelSheetOptions(XSSFSheet sheet) {
-        ExcelUtil.adjustColumnWidths(sheet, META_COLUMN_EXCEL_HEADERS.length);
-        sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
+        ExcelUtil.applyDataSheetLayout(sheet, META_COLUMN_EXCEL_HEADERS.length);
         ExcelUtil.addUseYnListValidations(sheet, META_COLUMN_PK_YN_COL_IDX, META_COLUMN_FK_YN_COL_IDX,
                 META_COLUMN_NULLABLE_YN_COL_IDX, META_COLUMN_HAS_CODE_YN_COL_IDX, META_COLUMN_USE_YN_COL_IDX);
     }
@@ -544,14 +543,8 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, META_HDR_TBL_ID);
-            if (headerRow == null) {
-                throw new IllegalArgumentException("올바른 컬럼 메타 엑셀 파일이 아닙니다. (헤더 행 없음)");
-            }
-
-            Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
-            ExcelUtil.validateRequiredHeaderColumns(colIdx, "컬럼 메타", META_HDR_TBL_ID, META_HDR_COL_PHY_NM,
-                    META_HDR_DATA_TYPE);
+            Map<String, Integer> colIdx = ExcelUtil.detectUploadHeader(sheet, formatter, "컬럼 메타",
+                    META_HDR_TBL_ID, META_HDR_TBL_ID, META_HDR_COL_PHY_NM, META_HDR_DATA_TYPE);
 
             Integer tblIdCol = colIdx.get(META_HDR_TBL_ID);
             Integer colIdCol = colIdx.get(META_HDR_COL_ID);
@@ -568,7 +561,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             Integer sortOrdCol = colIdx.get(META_HDR_SORT_ORD);
             Integer useYnCol = colIdx.get(META_HDR_USE_YN);
 
-            for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = ExcelUtil.DATA_START_ROW; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) {
                     continue;

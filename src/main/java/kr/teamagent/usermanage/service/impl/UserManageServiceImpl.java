@@ -140,11 +140,10 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     private void applyUserExcelSheetOptions(XSSFWorkbook workbook, XSSFSheet sheet, List<String> orgNames) {
-        ExcelUtil.adjustColumnWidths(sheet, USER_EXCEL_HEADERS.length);
-        sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
+        ExcelUtil.applyDataSheetLayout(sheet, USER_EXCEL_HEADERS.length);
         ExcelUtil.prepareHiddenListColumn(workbook, sheet, ORG_LIST_COL_IDX, orgNames, ORG_LIST_NAME);
         if (!orgNames.isEmpty()) {
-            ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_MAX_ROW + 1,
+            ExcelUtil.addListValidation(sheet, ExcelUtil.DATA_START_ROW, ExcelUtil.DATA_VALIDATION_LAST_ROW,
                     ORG_NM_COL_IDX, null, ORG_LIST_NAME, "등록된 소속조직명만 선택할 수 있습니다.");
         }
         ExcelUtil.addUseYnListValidations(sheet, USE_YN_COL_IDX);
@@ -168,13 +167,8 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, USER_HDR_USER_NM);
-            if (headerRow == null) {
-                throw new IllegalArgumentException("올바른 사용자 엑셀 파일이 아닙니다. (헤더 행 없음)");
-            }
-
-            Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
-            ExcelUtil.validateRequiredHeaderColumns(colIdx, "사용자", USER_HDR_USER_NM, USER_HDR_USER_ID, USER_HDR_EMAIL);
+            Map<String, Integer> colIdx = ExcelUtil.detectUploadHeader(sheet, formatter, "사용자",
+                    USER_HDR_USER_NM, USER_HDR_USER_NM, USER_HDR_USER_ID, USER_HDR_EMAIL);
 
             Integer userIdCol = colIdx.get(USER_HDR_USER_ID);
             Integer userNmCol = colIdx.get(USER_HDR_USER_NM);
@@ -183,7 +177,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             Integer orgCol = colIdx.get(ORG_NM_HEADER);
             Integer useYnCol = colIdx.get(USER_HDR_USE_YN);
 
-            for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = ExcelUtil.DATA_START_ROW; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) {
                     continue;
