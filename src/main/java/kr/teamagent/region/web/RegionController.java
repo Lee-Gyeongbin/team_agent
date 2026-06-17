@@ -14,6 +14,7 @@ import org.springframework.web.servlet.ModelAndView;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.region.service.impl.RegionServiceImpl;
 import kr.teamagent.region.service.impl.RegionTreeServiceImpl;
+import kr.teamagent.region.service.impl.RegionTreeServiceImpl.RegionTreeCacheFile;
 
 @Controller
 @RequestMapping(value = { "/region" })
@@ -38,7 +39,9 @@ public class RegionController extends BaseController {
         log.info("selectRegionTree params={}, resolvedLat={}, resolvedLng={}", requestParams, resolvedLat, resolvedLng);
 
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("data", regionTreeService.selectRegionTree());
+        RegionTreeCacheFile cache = regionTreeService.selectRegionTreeFromCache();
+        resultMap.put("data", cache.getData());
+        resultMap.put("updatedAt", cache.getUpdatedAt());
         resultMap.put("selected", buildSelectedRegion(resolvedLat, resolvedLng));
         return new ModelAndView("jsonView", resultMap);
     }

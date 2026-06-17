@@ -64,9 +64,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             META_HDR_HAS_CODE_YN, META_HDR_AI_HINT, META_HDR_SORT_ORD, META_HDR_USE_YN
     };
     private static final int[] META_COLUMN_AUTO_GEN_HEADER_COLS = { 12 };
-    private static final int META_COLUMN_COL_KOR_NM_COL_IDX = 3;
-    private static final int META_COLUMN_COL_DESC_COL_IDX = 4;
-    private static final int META_COLUMN_AI_HINT_COL_IDX = 11;
     private static final int META_COLUMN_PK_YN_COL_IDX = 7;
     private static final int META_COLUMN_FK_YN_COL_IDX = 8;
     private static final int META_COLUMN_NULLABLE_YN_COL_IDX = 9;
@@ -514,9 +511,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
     private void applyMetaColumnExcelSheetOptions(XSSFSheet sheet) {
         ExcelUtil.adjustColumnWidths(sheet, META_COLUMN_EXCEL_HEADERS.length);
-        int korNmWidth = sheet.getColumnWidth(META_COLUMN_COL_KOR_NM_COL_IDX);
-        sheet.setColumnWidth(META_COLUMN_COL_DESC_COL_IDX, korNmWidth);
-        sheet.setColumnWidth(META_COLUMN_AI_HINT_COL_IDX, korNmWidth);
         sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
         ExcelUtil.addUseYnListValidations(sheet, META_COLUMN_PK_YN_COL_IDX, META_COLUMN_FK_YN_COL_IDX,
                 META_COLUMN_NULLABLE_YN_COL_IDX, META_COLUMN_HAS_CODE_YN_COL_IDX, META_COLUMN_USE_YN_COL_IDX);
@@ -526,7 +520,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      * 메타 관리 > 컬럼 메타 엑셀 업로드 (파싱·검증 후 JSON 미리보기 반환, DB 저장 없음)
      * @param datamartId 데이터마트 ID
      * @param file 업로드 파일
-     * @return datamartId, tableList(성공 시), failDetails/returnMsg(실패 시)
+     * @return datamartId, tableList(성공 시), returnMsg(실패 시)
      * @throws Exception
      */
     public Map<String, Object> uploadMetaColumnExcel(String datamartId, MultipartFile file) throws Exception {
@@ -543,7 +537,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             throw new IllegalArgumentException("데이터마트 정보를 찾을 수 없습니다.");
         }
 
-        List<Map<String, Object>> failDetails = new ArrayList<>();
+        int requiredFailCount = 0;
         Map<String, DatamartVO.MetaColumnSaveTableItemVO> tableMap = new LinkedHashMap<>();
         Map<String, Integer> tblColSeqMap = new HashMap<>();
         DataFormatter formatter = new DataFormatter();
@@ -600,10 +594,8 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                Map<String, Object> rowFail = validateMetaColumnExcelRow(i + 1, tblId, colPhyNm, dataType, pkYn, fkYn,
-                        nullableYn, hasCodeYn, useYn);
-                if (rowFail != null) {
-                    failDetails.add(rowFail);
+                if (hasMetaColumnRequiredError(tblId, colPhyNm, dataType)) {
+                    requiredFailCount++;
                     continue;
                 }
 
@@ -611,11 +603,11 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                     colId = colPhyNm;
                 }
 
-                pkYn = defaultYn(pkYn, "N");
-                fkYn = defaultYn(fkYn, "N");
-                nullableYn = defaultYn(nullableYn, "Y");
-                hasCodeYn = defaultYn(hasCodeYn, "N");
-                useYn = defaultYn(useYn, "Y");
+                pkYn = pkYn.isEmpty() ? "N" : pkYn;
+                fkYn = fkYn.isEmpty() ? "N" : fkYn;
+                nullableYn = nullableYn.isEmpty() ? "Y" : nullableYn;
+                hasCodeYn = hasCodeYn.isEmpty() ? "N" : hasCodeYn;
+                useYn = useYn.isEmpty() ? "Y" : useYn;
 
                 int tblColSeq = tblColSeqMap.getOrDefault(tblId, 0) + 1;
                 tblColSeqMap.put(tblId, tblColSeq);
@@ -647,22 +639,18 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        if (!failDetails.isEmpty()) {
-            String returnMsg = ExcelUtil.buildUploadFailReturnMsg(failDetails,
-                    DatamartServiceImpl::metaColumnFailDetailMessage);
-            return buildMetaColumnUploadPreviewResult(datamartId.trim(), null, failDetails, returnMsg);
+        if (requiredFailCount > 0) {
+            String returnMsg = buildMetaColumnUploadFailReturnMsg(requiredFailCount);
+            return buildMetaColumnUploadPreviewResult(datamartId.trim(), null, returnMsg);
         }
 
-        return buildMetaColumnUploadPreviewResult(datamartId.trim(), new ArrayList<>(tableMap.values()),
-                failDetails, null);
+        return buildMetaColumnUploadPreviewResult(datamartId.trim(), new ArrayList<>(tableMap.values()), null);
     }
 
     private static Map<String, Object> buildMetaColumnUploadPreviewResult(String datamartId,
-            List<DatamartVO.MetaColumnSaveTableItemVO> tableList, List<Map<String, Object>> failDetails,
-            String returnMsg) {
+            List<DatamartVO.MetaColumnSaveTableItemVO> tableList, String returnMsg) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("datamartId", datamartId);
-        result.put("failDetails", failDetails != null ? failDetails : new ArrayList<>());
         if (returnMsg != null) {
             result.put("returnMsg", returnMsg);
         }
@@ -683,52 +671,12 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 && hasCodeYn.isEmpty() && aiHint.isEmpty() && sortOrdStr.isEmpty() && useYn.isEmpty();
     }
 
-    private static Map<String, Object> validateMetaColumnExcelRow(int rowNum, String tblId, String colPhyNm,
-            String dataType, String pkYn, String fkYn, String nullableYn, String hasCodeYn, String useYn) {
-        if (tblId.isEmpty()) {
-            return ExcelUtil.buildFailDetail(rowNum, "테이블ID는 필수값입니다.");
-        }
-        if (colPhyNm.isEmpty()) {
-            return ExcelUtil.buildFailDetail(rowNum, "물리컬럼명은 필수값입니다.");
-        }
-        if (dataType.isEmpty()) {
-            return ExcelUtil.buildFailDetail(rowNum, "데이터타입은 필수값입니다.");
-        }
-        Map<String, Object> rowFail = ExcelUtil.validateOptionalUseYn(rowNum, pkYn, "PK여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, fkYn, "FK여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, nullableYn, "NULL허용");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, hasCodeYn, "코드값여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        rowFail = ExcelUtil.validateOptionalUseYn(rowNum, useYn, "사용여부");
-        if (rowFail != null) {
-            return rowFail;
-        }
-        return null;
+    private static boolean hasMetaColumnRequiredError(String tblId, String colPhyNm, String dataType) {
+        return tblId.isEmpty() || colPhyNm.isEmpty() || dataType.isEmpty();
     }
 
-    private static String metaColumnFailDetailMessage(Map<String, Object> detail) {
-        Object row = detail.get("row");
-        Object reason = detail.get("reason");
-        String message = reason != null ? String.valueOf(reason).trim() : "";
-        if (message.isEmpty()) {
-            return ExcelUtil.UPLOAD_FAIL_DEFAULT_MSG;
-        }
-        return row != null ? row + "행: " + message : message;
-    }
-
-    private static String defaultYn(String value, String defaultValue) {
-        return value.isEmpty() ? defaultValue : value;
+    private static String buildMetaColumnUploadFailReturnMsg(int requiredFailCount) {
+        return "업로드 실패 : 필수값 누락 " + requiredFailCount + "건이 있습니다.";
     }
 
     private static Integer parseSortOrd(String sortOrdStr, int fallback) {

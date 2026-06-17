@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 
-import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.datamart.service.DatamartVO;
 import kr.teamagent.datamart.service.impl.DatamartServiceImpl;
@@ -138,7 +137,7 @@ public class DatamartController extends BaseController {
      * 메타 관리 > 컬럼 메타 엑셀 업로드 (파싱·검증 후 미리보기 JSON 반환, DB 저장 없음)
      * @param datamartId 데이터마트 ID
      * @param uploadFile 엑셀 파일
-     * @return jsonView (successYn, data: datamartId/tableList/failDetails 등)
+     * @return jsonView (successYn, returnMsg, data: datamartId/tableList 등)
      */
     @RequestMapping(value = "/metaColumnUploadExcel.do", method = RequestMethod.POST)
     @ResponseBody
@@ -147,11 +146,10 @@ public class DatamartController extends BaseController {
             @RequestParam("uploadFile") MultipartFile uploadFile) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         Map<String, Object> uploadResult = datamartService.uploadMetaColumnExcel(datamartId, uploadFile);
-        boolean hasUploadFail = ExcelUtil.hasUploadFailures(uploadResult);
-        resultMap.put("successYn", !hasUploadFail);
-        if (hasUploadFail) {
-            Object returnMsg = uploadResult.get("returnMsg");
-            resultMap.put("returnMsg", returnMsg != null ? returnMsg : "엑셀 업로드 검증에 실패했습니다.");
+        Object returnMsg = uploadResult.get("returnMsg");
+        resultMap.put("successYn", returnMsg == null);
+        if (returnMsg != null) {
+            resultMap.put("returnMsg", returnMsg);
         }
         resultMap.put("data", uploadResult);
         return new ModelAndView("jsonView", resultMap);

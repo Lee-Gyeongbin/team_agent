@@ -81,5 +81,5 @@
 		</property>
 		<property name="ignoreResourceNotFound" value="true"/>
 	</bean>
-	<import resource="classpath:/spring/com/scheduling/context-scheduling-category-trend.xml"/>
+	<import resource="classpath:/spring/com/scheduling/context-scheduling.xml"/>
 </beans>
