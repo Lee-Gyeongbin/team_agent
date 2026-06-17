@@ -64,9 +64,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             META_HDR_HAS_CODE_YN, META_HDR_AI_HINT, META_HDR_SORT_ORD, META_HDR_USE_YN
     };
     private static final int[] META_COLUMN_AUTO_GEN_HEADER_COLS = { 12 };
-    private static final int META_COLUMN_COL_KOR_NM_COL_IDX = 3;
-    private static final int META_COLUMN_COL_DESC_COL_IDX = 4;
-    private static final int META_COLUMN_AI_HINT_COL_IDX = 11;
     private static final int META_COLUMN_PK_YN_COL_IDX = 7;
     private static final int META_COLUMN_FK_YN_COL_IDX = 8;
     private static final int META_COLUMN_NULLABLE_YN_COL_IDX = 9;
@@ -514,9 +511,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
     private void applyMetaColumnExcelSheetOptions(XSSFSheet sheet) {
         ExcelUtil.adjustColumnWidths(sheet, META_COLUMN_EXCEL_HEADERS.length);
-        int korNmWidth = sheet.getColumnWidth(META_COLUMN_COL_KOR_NM_COL_IDX);
-        sheet.setColumnWidth(META_COLUMN_COL_DESC_COL_IDX, korNmWidth);
-        sheet.setColumnWidth(META_COLUMN_AI_HINT_COL_IDX, korNmWidth);
         sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
         ExcelUtil.addUseYnListValidations(sheet, META_COLUMN_PK_YN_COL_IDX, META_COLUMN_FK_YN_COL_IDX,
                 META_COLUMN_NULLABLE_YN_COL_IDX, META_COLUMN_HAS_CODE_YN_COL_IDX, META_COLUMN_USE_YN_COL_IDX);
@@ -609,11 +603,11 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                     colId = colPhyNm;
                 }
 
-                pkYn = defaultYn(pkYn, "N");
-                fkYn = defaultYn(fkYn, "N");
-                nullableYn = defaultYn(nullableYn, "Y");
-                hasCodeYn = defaultYn(hasCodeYn, "N");
-                useYn = defaultYn(useYn, "Y");
+                pkYn = pkYn.isEmpty() ? "N" : pkYn;
+                fkYn = fkYn.isEmpty() ? "N" : fkYn;
+                nullableYn = nullableYn.isEmpty() ? "Y" : nullableYn;
+                hasCodeYn = hasCodeYn.isEmpty() ? "N" : hasCodeYn;
+                useYn = useYn.isEmpty() ? "Y" : useYn;
 
                 int tblColSeq = tblColSeqMap.getOrDefault(tblId, 0) + 1;
                 tblColSeqMap.put(tblId, tblColSeq);
@@ -683,10 +677,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
     private static String buildMetaColumnUploadFailReturnMsg(int requiredFailCount) {
         return "업로드 실패 : 필수값 누락 " + requiredFailCount + "건이 있습니다.";
-    }
-
-    private static String defaultYn(String value, String defaultValue) {
-        return value.isEmpty() ? defaultValue : value;
     }
 
     private static Integer parseSortOrd(String sortOrdStr, int fallback) {
