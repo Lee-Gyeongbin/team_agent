@@ -1281,6 +1281,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
+        params.put("quality", "medium");
         params.put("room_id", "");
 
         try {

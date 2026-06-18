@@ -257,9 +257,9 @@ public class ChatbotVO extends CommonVO {
     private String storeFileName;
     private Long fileSize;
     private String fileType;
-    private String expireDt;
-    private String fileDelDt;
-
+    // 파일 삭제 주기
+    private int deleteFileTerm;
+    
     /** 공유 로그 복사 시 원본 첨부의 CREATE_USER_ID (TB_CHAT_FILE) — insert 매핑용 */
     private String chatFileUploaderUserId;
 

@@ -367,11 +367,6 @@ public class ChatbotController extends BaseController {
     }
 
     /**
-     * 채팅 파일 orphan 처리
-     * - NCP 업로드 + DB 저장은 성공했으나 ws 전송 실패로 LOG_ID가 연결되지 못한 파일을
-     *   EXPIRE_DT를 현재 시각으로 갱신해 배치 삭제 대상으로 표시한다.
-     */
-    /**
      * 채팅 첨부 미리보기 (TB_CHAT_FILE + 대화방 소유자 검증 후 Presigned URL 등 반환)
      */
     /** 공유 채팅방 첨부 미리보기 URL (소유자 사용자 검증 없음 — 공유 페이지 전용) */

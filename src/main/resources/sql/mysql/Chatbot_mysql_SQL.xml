@@ -277,7 +277,6 @@
             , F.FILE_PATH AS filePath
             , F.FILE_SIZE AS fileSize
             , F.FILE_TYPE AS fileType
-            , F.FILE_DEL_DT AS fileDelDt
             , F.CREATE_USER_ID AS chatFileUploaderUserId
         FROM TB_CHAT_FILE F
         WHERE F.ROOM_ID = #{roomId}
@@ -620,10 +619,9 @@
     </select>
 
     <update id="updateChatFileLogId" parameterType="chatbotVO">
-        /* 첨부파일 LOG_ID 연결 + EXPIRE_DT 한달 후 삭제 ai.chatbot.updateChatFileLogId */
+        /* 첨부파일 LOG_ID 연결 ai.chatbot.updateChatFileLogId */
         UPDATE TB_CHAT_FILE
-        SET LOG_ID    = #{logId},
-            EXPIRE_DT = NOW() + INTERVAL 1 MONTH
+        SET LOG_ID = #{logId}
         WHERE CHAT_FILE_ID IN
         <foreach collection="chatFileIdList" item="id" open="(" separator="," close=")">
             #{id}
@@ -634,7 +632,7 @@
     <update id="updateChatFileOrphan" parameterType="chatbotVO">
         /* 채팅 파일 orphan 처리 ai.chatbot.updateChatFileOrphan */
         UPDATE TB_CHAT_FILE
-        SET EXPIRE_DT = NOW()
+        SET FILE_EXIST_YN = 'N'
         WHERE CHAT_FILE_ID IN
         <foreach collection="chatFileIdList" item="id" open="(" separator="," close=")">
             #{id}
@@ -655,8 +653,6 @@
             FILE_SIZE,
             FILE_TYPE,
             FILE_EXIST_YN,
-            EXPIRE_DT,
-            FILE_DEL_DT,
             CREATE_USER_ID
         )
         VALUES
@@ -669,8 +665,6 @@
             #{fileSize},
             #{fileType},
             'Y',
-            NOW() + INTERVAL 1 DAY,
-            #{fileDelDt},
             #{userId}
         )
     </insert>
@@ -688,8 +682,6 @@
             FILE_SIZE,
             FILE_TYPE,
             FILE_EXIST_YN,
-            EXPIRE_DT,
-            FILE_DEL_DT,
             CREATE_USER_ID
         )
         VALUES
@@ -702,8 +694,6 @@
             #{fileSize},
             #{fileType},
             'Y',
-            NOW() + INTERVAL 1 MONTH,
-            #{fileDelDt},
             #{chatFileUploaderUserId}
         )
     </insert>
@@ -767,4 +757,36 @@
             NEWS_CATEGORY_CD = VALUES(NEWS_CATEGORY_CD)
             , MODIFY_DT = NOW()
     </insert>
+
+    <select id="selectChatFileDelete" parameterType="chatbotVO" resultType="chatbotVO">
+        /* 챗봇 첨부파일 삭제 대상 조회 ai.chatbot.selectChatFileDelete */
+        SELECT
+            CHAT_FILE_ID   AS chatFileId
+             , LOG_ID          AS logId
+             , FILE_NAME       AS fileName
+             , STORE_FILE_NAME AS storeFileName
+             , FILE_PATH       AS filePath
+             , FILE_SIZE       AS fileSize
+             , FILE_TYPE       AS fileType
+             , FILE_EXIST_YN   AS fileExistYn
+             , CREATE_USER_ID  AS createUserId
+             , CREATE_DT       AS createDt
+        FROM tb_chat_file
+        WHERE (
+            CREATE_DT <![CDATA[<]]> DATE_SUB(CURDATE(), INTERVAL #{deleteFileTerm} DAY)
+            AND IFNULL(FILE_EXIST_YN, 'Y') = 'Y'
+            AND (LOG_ID IS NULL OR LOG_ID NOT IN (SELECT LOG_ID FROM TB_KNOW_CARD WHERE LOG_ID IS NOT NULL))
+        )
+        OR (
+            LOG_ID IS NULL
+            AND IFNULL(FILE_EXIST_YN, 'Y') = 'N'
+        )
+    </select>
+
+    <delete id="deleteChatFile" parameterType="chatbotVO">
+        /* 챗봇 첨부파일 DB 삭제 ai.chatbot.deleteChatFile */
+        DELETE
+        FROM TB_CHAT_FILE
+        WHERE CHAT_FILE_ID = #{chatFileId}
+    </delete>
 </mapper>
