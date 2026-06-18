@@ -1900,6 +1900,56 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * 템플릿 필드(TB_TMPL_FIELD)로부터 LLM JSON 응답 지시문을 동적으로 생성한다.
+     * 어떤 템플릿이든 그 템플릿의 jsonKey 목록에 맞춰 LLM이 응답하도록 강제한다.
+     * - layoutType=table → 객체 배열, multilineYn=Y → 문자열 배열, 그 외 → 문자열
+     */
+    private String buildTemplateJsonInstruction(List<LibraryVO.TmplFieldItem> tmplFieldList) {
+        if (tmplFieldList == null || tmplFieldList.isEmpty()) {
+            return "\n\n반드시 순수 JSON 형식으로만 응답하세요(코드블록/설명 없이).";
+        }
+
+        StringBuilder desc = new StringBuilder();
+        StringBuilder skeleton = new StringBuilder("{\n");
+        for (int i = 0; i < tmplFieldList.size(); i++) {
+            LibraryVO.TmplFieldItem field = tmplFieldList.get(i);
+            if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
+                continue;
+            }
+            String key = field.getJsonKey();
+            String nm = CommonUtil.nullToBlank(field.getFieldNm());
+            boolean isTable = "table".equalsIgnoreCase(CommonUtil.nullToBlank(field.getLayoutType()));
+            boolean multiline = "Y".equals(field.getMultilineYn());
+
+            desc.append("- ").append(key);
+            if (CommonUtil.isNotEmpty(nm)) {
+                desc.append(" (").append(nm).append(")");
+            }
+            if (isTable) {
+                desc.append(": 항목들을 객체 배열로 작성 (예: [{\"항목명\":\"값\", ...}, ...])");
+                skeleton.append("  \"").append(key).append("\": [{ ... }]");
+            } else if (multiline) {
+                desc.append(": 여러 항목을 문자열 배열로 작성 (예: [\"...\", \"...\"])");
+                skeleton.append("  \"").append(key).append("\": [\"...\"]");
+            } else {
+                desc.append(": 문자열로 작성");
+                skeleton.append("  \"").append(key).append("\": \"...\"");
+            }
+            desc.append("\n");
+            skeleton.append(i < tmplFieldList.size() - 1 ? ",\n" : "\n");
+        }
+        skeleton.append("}");
+
+        return "\n\n## 응답 형식 (중요)\n"
+                + "문서 종류와 관계없이, 아래에 명시된 JSON 키에만 정확히 맞춰 응답하세요.\n"
+                + "키 이름을 변경/추가/삭제하지 말고, 위 다른 안내에 다른 키가 있더라도 무시하고 아래 키만 사용하세요.\n"
+                + "내용이 부족한 항목은 합리적으로 채우되 빈 값으로 두지 마세요.\n\n"
+                + desc.toString()
+                + "\n반드시 아래 구조의 순수 JSON으로만 응답하세요(마크다운 코드블록·설명 문장 없이):\n"
+                + skeleton.toString();
+    }
+
+    /**
      * 리서치 리포트 출처 섹션 HTML을 구성한다.
      * - 사내 문서(RAG): 파일 뷰 링크 (프론트가 클릭 가로채 파일 열기)
      * - 웹 출처: 실제 URL 링크 (새 탭)
@@ -2107,12 +2157,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 }
             }
 
+            // 템플릿 필드(TB_TMPL_FIELD)에서 JSON 키 지시문을 동적으로 생성한다.
+            // → 어떤 템플릿/문서든 해당 템플릿의 정확한 키로 응답하게 강제하여 항상 템플릿 HTML대로 렌더링.
+            String jsonKeyInstruction = buildTemplateJsonInstruction(tmplFieldList);
+
             // 출처는 LLM이 생성하지 않고 백엔드에서 직접 링크 HTML로 구성하므로
             // 프롬프트에서는 본문 인용 참고용으로만 문서/웹 목록을 전달한다.
             String enrichedQuery = llmPrompt.replace("{{web_search_results}}", webSearchAnswer)
                     + "\n\n## 참조 가능한 사내 문서 목록\n" + (ragDocNames.length() > 0 ? ragDocNames.toString() : "(없음)")
                     + "\n\n## 참조 가능한 웹 출처\n" + (CommonUtil.isNotEmpty(webSearchSource) ? webSearchSource : "(없음)")
-                    + "\n## 참고: sources 필드는 비워두거나 간단히 작성해도 됩니다. 출처 링크는 시스템이 자동 생성합니다."
+                    + jsonKeyInstruction
                     + "\n\n## 사용자 질문\n" + query;
 
             // ④ RAG 매뉴얼 질의(9111/query) 동기 호출 — dataset_id 벡터 검색 + LLM 생성
@@ -2283,7 +2337,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 reportHtml = reportHtml.replace(SOURCES_TOKEN, sourcesHtml);
             } catch (Exception e) {
                 logger.warn("리서처 리포트 JSON 파싱/렌더링 오류: {}", e.getMessage());
-                reportHtml = "<div><pre>" + aiResponse.replace("<", "&lt;").replace(">", "&gt;") + "</pre></div>";
+                // fallback: 코드블록(<pre>) 대신 일반 문단으로 렌더 — 에디터 코드블록 다크 배경 방지
+                String safe = aiResponse.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        .replace("\n", "<br/>");
+                reportHtml = "<div><p>" + safe + "</p></div>";
                 executiveSummary = aiResponse.length() > 200 ? aiResponse.substring(0, 200) + "..." : aiResponse;
             }
 
