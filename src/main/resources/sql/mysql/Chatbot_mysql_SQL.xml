@@ -308,6 +308,8 @@
             REPORT_HTML,
             MAIN_DOC_FILE_ID,
             MAIN_PAGE,
+            RETRIEVER_QUERY,
+            CHUNK,
             REASK_CNT,
             CREATE_USER_ID,
             CREATE_DT
@@ -333,6 +335,8 @@
             #{reportHtml},
             #{mainDocFileId},
             #{mainPage},
+            #{retrieverQuery},
+            #{chunk},
             #{reaskCnt},
             #{userId},
             NOW()

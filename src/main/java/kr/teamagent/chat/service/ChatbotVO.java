@@ -121,6 +121,10 @@ public class ChatbotVO extends CommonVO {
     private String ttsqParam;
     // TEXT2SQL 기간 파라미터 JSON
     private String ttsqPeriodParam;
+    // vectorDB 검색에 사용되는 쿼리
+    private String retrieverQuery;
+    // LLM으로 전달되기 전 확정된 청크
+    private String chunk;
 
     /* AI 서비스 사용자별 일일 사용량 */
     // 사용 일자 (YYYYMMDD)
