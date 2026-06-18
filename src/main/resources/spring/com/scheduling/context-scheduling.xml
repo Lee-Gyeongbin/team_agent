@@ -38,7 +38,7 @@
 
 	<bean id="chatFileDeleteBatchTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
 		<property name="jobDetail" ref="chatFileBatchJob"/>
-		<property name="cronExpression" value="0 05 15 * * ?"/>
+		<property name="cronExpression" value="0 30 0 * * ?"/>
 	</bean>
 
 	<bean id="dashBoardScheduler" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
