@@ -932,6 +932,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String sql = "";
         String ttsqParam = "";
         String ttsqPeriodParam = "";
+        String retrieverQuery = "";
+        String chunk = "";
         List<ChatRefItem> chatRefItems = new ArrayList<>();
         /** answer_source 스트림에서 누적 — done.data.items 가 있으면 그쪽이 최종 우선 */
         String webGroundingJson = "";
@@ -1057,6 +1059,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             }
                             ttsqPeriodParam = toJsonIfExists(ttsqPeriodParamObj);
 
+                            Object retrieverQueryObj = data.get("retriever_query");
+                            retrieverQuery = (retrieverQueryObj instanceof JSONArray || retrieverQueryObj instanceof JSONObject)
+                                    ? toJsonIfExists(retrieverQueryObj)
+                                    : getString(retrieverQueryObj);
+                            Object chunkObj = data.get("chunk");
+                            chunk = (chunkObj instanceof JSONArray || chunkObj instanceof JSONObject)
+                                    ? toJsonIfExists(chunkObj)
+                                    : getString(chunkObj);
+
                             chatRefItems = extractChatRefItems(data);
 
                             Object doneItems = data.get("items");
@@ -1105,7 +1116,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 mainPage,
                                 chatRefItems,
                                 webGroundingJson,
-                                chartOption
+                                chartOption,
+                                retrieverQuery,
+                                chunk
                             );
 
                         this.updateChatRoomLastChatDt(responseThreadId);
@@ -1383,7 +1396,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             String mainPage,
             List<ChatRefItem> chatRefItems,
             String webGroundingJson,
-            String chartOption) throws Exception {
+            String chartOption,
+            String retrieverQuery,
+            String chunk) throws Exception {
 
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setRoomId(Long.parseLong(responseThreadId));
@@ -1404,6 +1419,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setWebGroundingJson(CommonUtil.isNotEmpty(webGroundingJson) ? webGroundingJson : null);
         chatbotVO.setMainDocFileId(CommonUtil.isNotEmpty(mainDocFileId) ? mainDocFileId : null);
         chatbotVO.setMainPage(CommonUtil.isNotEmpty(mainPage) ? mainPage : null);
+        chatbotVO.setRetrieverQuery(CommonUtil.isNotEmpty(retrieverQuery) ? retrieverQuery : null);
+        chatbotVO.setChunk(CommonUtil.isNotEmpty(chunk) ? chunk : null);
 
         chatbotDAO.insertChatLog(chatbotVO);
 
@@ -2794,7 +2811,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "text/event-stream")
                 .build();
-        logger.info("리스크 RAG 섹션 호출 시작 - url:{}, requestBody:{}", ragApiUrl, ragJsonBody);
         try (okhttp3.Response response = client.newCall(ragRequest).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 String errBody = "";
@@ -3625,7 +3641,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
             try {
                 savedLogId = doInsertAiLog(threadId, agentId, query, translatedText, 0, 0, svcTy, modelId, refId, userId,
-                        "", "", "", "", "", "", new ArrayList<>(), "", "");
+                        "", "", "", "", "", "", new ArrayList<>(), "", "", "", "");
                 updateChatRoomLastChatDt(threadId);
                 if (CommonUtil.isNotEmpty(savedLogId)) {
                     try {
@@ -3748,6 +3764,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         "",
                         "",
                         new ArrayList<>(),
+                        "",
+                        "",
                         "",
                         "");
                 updateChatRoomLastChatDt(threadId);
