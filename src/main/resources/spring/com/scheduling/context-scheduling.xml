@@ -29,11 +29,24 @@
 		<property name="cronExpression" value="0 20 0 1 * ?"/>
 	</bean>
 
+	<!-- 채팅 첨부파일 삭제 배치 (Quartz) -->
+	<bean id="chatFileBatchJob" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
+		<property name="targetObject" ref="chatFileDeleteBatchService"/>
+		<property name="targetMethod" value="deleteBatchAuto"/>
+		<property name="concurrent" value="false"/>
+	</bean>
+
+	<bean id="chatFileDeleteBatchTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
+		<property name="jobDetail" ref="chatFileBatchJob"/>
+		<property name="cronExpression" value="0 05 15 * * ?"/>
+	</bean>
+
 	<bean id="dashBoardScheduler" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
 		<property name="triggers">
 			<list>
 				<ref bean="dashBoardCategoryTrendTrigger"/>
 				<ref bean="regionTreeRefreshTrigger"/>
+				<ref bean="chatFileDeleteBatchTrigger"/>
 			</list>
 		</property>
 	</bean>
