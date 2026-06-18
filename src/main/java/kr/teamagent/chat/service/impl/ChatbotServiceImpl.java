@@ -41,6 +41,10 @@ import kr.teamagent.common.util.RestApiManager;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.TranslationDocUtil;
 import kr.teamagent.prompt.service.impl.PromptServiceImpl;
+import kr.teamagent.tmpl.service.impl.TmplHtmlRenderService;
+import kr.teamagent.tmpl.service.impl.TmplServiceImpl;
+import kr.teamagent.tmpl.service.TmplVO;
+import kr.teamagent.library.service.LibraryVO;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -58,6 +62,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final String RECOMMEND_SUB_TY = "RECOMMEND";
     private static final String CURATION_SUB_TY = "CURATION";
     private static final String TRANSLATE_SUB_TY = "TRANSLATE";
+    private static final String RESEARCHER_SUB_TY = "RESEARCHER";
+    /** 리서처 리포트 출처 섹션 — 템플릿 HTML escape 우회용 치환 토큰 */
+    private static final String SOURCES_TOKEN = "@@RSRC_SOURCES@@";
+    /** RAG 문서 출처 링크 — 백엔드 GET 리다이렉트 엔드포인트.
+     *  native target=_blank로 새 탭이 열리면 presigned 파일 URL로 302 리다이렉트된다.
+     *  (/api는 프론트 프록시 prefix — 브라우저가 프론트 도메인에서 요청 → 백엔드로 포워딩) */
+    private static final String RAG_DOC_LINK_PREFIX = "/api/repository/viewDocRedirect.do?docFileId=";
 
     /** 번역 에이전트 공통 지시문 — 프론트엔드 translateAgentUtil.ts의 TRANSLATE_BASE_PROMPT와 동일하게 유지 */
     private static final String TRANSLATE_BASE_PROMPT = String.join("\n",
@@ -116,6 +127,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     RestApiManager restApiManager;
+
+    @Autowired
+    TmplServiceImpl tmplService;
+
+    @Autowired
+    TmplHtmlRenderService tmplHtmlRenderService;
 
     /**
      * 채팅 에이전트 목록 조회
@@ -260,6 +277,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         attachmentFileIds, callback);
                 return;
             }
+        }
+
+        // RESEARCHER 에이전트: 웹검색 + RAG 통합 리서치 리포트
+        if (isResearcherAgent(agentId)) {
+            deliverResearchReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
+            return;
         }
 
         String apiUrl = this.resolveStreamingApiUrl(svcTy, agentId, attachmentFileIds);
@@ -660,6 +683,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private boolean isTranslateAgent(String agentId) {
         ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
         return subCfg != null && TRANSLATE_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+    }
+
+    /**
+     * SUB_TY=RESEARCHER 에이전트 여부 판별.
+     */
+    private boolean isResearcherAgent(String agentId) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        return subCfg != null && RESEARCHER_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
     }
 
     private String buildRequestQueryByAgent(String query, String agentId) {
@@ -1375,6 +1406,58 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
+     * TB_CHAT_LOG 저장 (reportHtml 포함 오버로드).
+     * RESEARCHER 에이전트 등 리포트 HTML을 함께 저장해야 하는 경우 사용한다.
+     */
+    private String doInsertAiLog(
+            String responseThreadId, String agentId, String query, String answer,
+            int inputTokens, int outputTokens, String svcTy, String modelId, String refId,
+            String userId, String tableData, String sql, String ttsqParam, String ttsqPeriodParam,
+            String mainDocFileId, String mainPage, List<ChatRefItem> chatRefItems,
+            String webGroundingJson, String chartOption,
+            String reportHtml) throws Exception {
+
+        ChatbotVO chatbotVO = new ChatbotVO();
+        chatbotVO.setRoomId(Long.parseLong(responseThreadId));
+        chatbotVO.setAgentId(agentId);
+        chatbotVO.setSvcTy(svcTy);
+        chatbotVO.setRefId(refId);
+        chatbotVO.setQContent(query);
+        chatbotVO.setModelId(modelId);
+        chatbotVO.setInTokens(inputTokens);
+        chatbotVO.setOutTokens(outputTokens);
+        chatbotVO.setRContent(answer);
+        chatbotVO.setUserId(userId);
+        chatbotVO.setTableData(CommonUtil.isNotEmpty(tableData) ? tableData : null);
+        chatbotVO.setChartOption(CommonUtil.isNotEmpty(chartOption) ? chartOption : null);
+        chatbotVO.setSql(CommonUtil.isNotEmpty(sql) ? sql : null);
+        chatbotVO.setTtsqParam(CommonUtil.isNotEmpty(ttsqParam) ? ttsqParam : null);
+        chatbotVO.setTtsqPeriodParam(CommonUtil.isNotEmpty(ttsqPeriodParam) ? ttsqPeriodParam : null);
+        chatbotVO.setWebGroundingJson(CommonUtil.isNotEmpty(webGroundingJson) ? webGroundingJson : null);
+        chatbotVO.setMainDocFileId(CommonUtil.isNotEmpty(mainDocFileId) ? mainDocFileId : null);
+        chatbotVO.setMainPage(CommonUtil.isNotEmpty(mainPage) ? mainPage : null);
+        chatbotVO.setReportHtml(CommonUtil.isNotEmpty(reportHtml) ? reportHtml : null);
+
+        chatbotDAO.insertChatLog(chatbotVO);
+
+        if ("M".equals(svcTy) && chatRefItems != null && !chatRefItems.isEmpty()) {
+            for (ChatRefItem refItem : chatRefItems) {
+                if (!CommonUtil.isNotEmpty(refItem.docFileId)) {
+                    continue;
+                }
+                ChatbotVO chatbotRefVO = new ChatbotVO();
+                chatbotRefVO.setLogId(chatbotVO.getLogId());
+                chatbotRefVO.setDocFileId(refItem.docFileId);
+                chatbotRefVO.setMainPageNo(refItem.mainPageNo);
+                chatbotRefVO.setRelatedPages(refItem.relatedPageNos.isEmpty() ? "" : refItem.relatedPageNos.toString());
+                chatbotDAO.insertChatRef(chatbotRefVO);
+            }
+        }
+
+        return String.valueOf(chatbotVO.getLogId());
+    }
+
+    /**
      * 챗봇 대화방 마지막 채팅 일시 업데이트
      * @param responseThreadId
      * @throws Exception
@@ -1663,6 +1746,647 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         return null;
+    }
+
+    /**
+     * 웹 검색 엔드포인트(query_search_only)에 동기 호출하여 검색 결과 텍스트와 출처를 반환한다.
+     * SSE 이벤트:
+     * - event: answer_delta / data: {"text": "..."}
+     * - event: answer_source / data: {"items":[{url,title},..]}
+     * - event: done / data: {"answer": "...", ...}
+     * @return [0]=answer text, [1]=출처 문자열(제목: URL 줄바꿈 목록). 실패 시 null.
+     */
+    private String[] callWebSearchSync(String query, String modelId) {
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIpSearchOnly");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            logger.warn("웹 검색 실패 - query_search_only URL 미설정");
+            return null;
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", query);
+        params.put("model_id", modelId != null ? modelId : "");
+        params.put("room_id", "");
+
+        try {
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build();
+
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            String jsonBody = gson.toJson(params);
+            RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .build();
+
+            logger.info("웹 검색 호출 시작 - url: {}", apiUrl);
+
+            try (okhttp3.Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("웹 검색 응답 오류: {}", response.code());
+                    return null;
+                }
+
+                try (okhttp3.ResponseBody responseBody = response.body()) {
+                    // /query SSE 응답 파싱
+                    // - event: answer_delta / data: {"text": "..."}            → 텍스트 누적
+                    // - event: answer_source / data: {"items":[{url,title},..]} → 웹 그라운딩 출처
+                    // - event: done / data: {"answer": "...", ...}             → 최종 답변
+                    // (단일 JSON 응답 {"answer":...}도 처리 — data: 접두 없이 본문 전체가 JSON일 때)
+                    BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(responseBody.byteStream(), "UTF-8"));
+                    StringBuilder answerBuilder = new StringBuilder();
+                    StringBuilder sourceBuilder = new StringBuilder();
+                    String doneAnswer = "";
+                    String line;
+                    JSONParser jsonParser = new JSONParser();
+                    java.util.Set<String> seenUrls = new java.util.LinkedHashSet<>();
+
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith("event: ")) {
+                            continue;
+                        }
+                        String jsonStr;
+                        if (line.startsWith("data: ")) {
+                            jsonStr = line.substring(6).trim();
+                        } else if (line.trim().startsWith("{")) {
+                            // SSE가 아닌 단일 JSON 응답 라인
+                            jsonStr = line.trim();
+                        } else {
+                            continue;
+                        }
+                        if (jsonStr.isEmpty()) {
+                            continue;
+                        }
+                        try {
+                            JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
+                            Object textObj = data.get("text");
+                            if (textObj != null) {
+                                answerBuilder.append(String.valueOf(textObj));
+                            }
+                            Object answerObj = data.get("answer");
+                            if (answerObj != null) {
+                                doneAnswer = String.valueOf(answerObj);
+                            }
+                            // answer_source: items 배열(url/title)
+                            Object itemsObj = data.get("items");
+                            if (itemsObj instanceof JSONArray) {
+                                for (Object it : (JSONArray) itemsObj) {
+                                    if (!(it instanceof JSONObject)) continue;
+                                    JSONObject item = (JSONObject) it;
+                                    String url = getString(item.get("url")).trim();
+                                    String title = getString(item.get("title")).trim();
+                                    if (!url.isEmpty() && seenUrls.add(url)) {
+                                        sourceBuilder.append("- ");
+                                        if (!title.isEmpty()) sourceBuilder.append(title).append(": ");
+                                        sourceBuilder.append(url).append("\n");
+                                    }
+                                }
+                            }
+                            // answer_source: 문자열 형태(혹시 모를 호환)
+                            Object sourceObj = data.get("answer_source");
+                            if (sourceObj != null && CommonUtil.isNotEmpty(String.valueOf(sourceObj))
+                                    && !"None".equalsIgnoreCase(String.valueOf(sourceObj).trim())) {
+                                sourceBuilder.append(String.valueOf(sourceObj)).append("\n");
+                            }
+                        } catch (Exception ignore) {
+                            // 개별 라인 파싱 실패는 무시하고 계속
+                        }
+                    }
+
+                    // done.answer가 있으면 우선 사용, 없으면 델타 누적분 사용
+                    String answer = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                    String answerSource = sourceBuilder.toString();
+                    return new String[]{ answer, answerSource };
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("웹 검색 중 오류 발생: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 웹 검색 출처 문자열(answer_source)에서 URL을 추출하여 출처 items 배열로 변환한다.
+     * 각 item은 {url, title} 형태. URL이 없으면 빈 배열 반환.
+     */
+    @SuppressWarnings("unchecked")
+    private JSONArray extractWebSourceItems(String source) {
+        JSONArray items = new JSONArray();
+        if (CommonUtil.isEmpty(source)) {
+            return items;
+        }
+        // http(s) URL 추출 (공백·따옴표·괄호·꺾쇠 등 경계 제외)
+        java.util.regex.Pattern urlPattern = java.util.regex.Pattern.compile("https?://[^\\s\"'<>\\)\\]]+");
+        java.util.regex.Matcher matcher = urlPattern.matcher(source);
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        while (matcher.find()) {
+            String url = matcher.group();
+            // 끝의 문장부호 제거
+            url = url.replaceAll("[.,;]+$", "");
+            if (seen.add(url)) {
+                JSONObject item = new JSONObject();
+                item.put("url", url);
+                items.add(item);
+            }
+        }
+        return items;
+    }
+
+    /**
+     * 템플릿 필드(TB_TMPL_FIELD)로부터 LLM JSON 응답 지시문을 동적으로 생성한다.
+     * 어떤 템플릿이든 그 템플릿의 jsonKey 목록에 맞춰 LLM이 응답하도록 강제한다.
+     * - layoutType=table → 객체 배열, multilineYn=Y → 문자열 배열, 그 외 → 문자열
+     */
+    private String buildTemplateJsonInstruction(List<LibraryVO.TmplFieldItem> tmplFieldList) {
+        if (tmplFieldList == null || tmplFieldList.isEmpty()) {
+            return "\n\n반드시 순수 JSON 형식으로만 응답하세요(코드블록/설명 없이).";
+        }
+
+        StringBuilder desc = new StringBuilder();
+        StringBuilder skeleton = new StringBuilder("{\n");
+        for (int i = 0; i < tmplFieldList.size(); i++) {
+            LibraryVO.TmplFieldItem field = tmplFieldList.get(i);
+            if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
+                continue;
+            }
+            String key = field.getJsonKey();
+            String nm = CommonUtil.nullToBlank(field.getFieldNm());
+            boolean isTable = "table".equalsIgnoreCase(CommonUtil.nullToBlank(field.getLayoutType()));
+            boolean multiline = "Y".equals(field.getMultilineYn());
+
+            desc.append("- ").append(key);
+            if (CommonUtil.isNotEmpty(nm)) {
+                desc.append(" (").append(nm).append(")");
+            }
+            if (isTable) {
+                desc.append(": 항목들을 객체 배열로 작성 (예: [{\"항목명\":\"값\", ...}, ...])");
+                skeleton.append("  \"").append(key).append("\": [{ ... }]");
+            } else if (multiline) {
+                desc.append(": 여러 항목을 문자열 배열로 작성 (예: [\"...\", \"...\"])");
+                skeleton.append("  \"").append(key).append("\": [\"...\"]");
+            } else {
+                desc.append(": 문자열로 작성");
+                skeleton.append("  \"").append(key).append("\": \"...\"");
+            }
+            desc.append("\n");
+            skeleton.append(i < tmplFieldList.size() - 1 ? ",\n" : "\n");
+        }
+        skeleton.append("}");
+
+        return "\n\n## 응답 형식 (중요)\n"
+                + "문서 종류와 관계없이, 아래에 명시된 JSON 키에만 정확히 맞춰 응답하세요.\n"
+                + "키 이름을 변경/추가/삭제하지 말고, 위 다른 안내에 다른 키가 있더라도 무시하고 아래 키만 사용하세요.\n"
+                + "내용이 부족한 항목은 합리적으로 채우되 빈 값으로 두지 마세요.\n\n"
+                + desc.toString()
+                + "\n반드시 아래 구조의 순수 JSON으로만 응답하세요(마크다운 코드블록·설명 문장 없이):\n"
+                + skeleton.toString();
+    }
+
+    /**
+     * 리서치 리포트 출처 섹션 HTML을 구성한다.
+     * - 사내 문서(RAG): 파일 뷰 링크 (프론트가 클릭 가로채 파일 열기)
+     * - 웹 출처: 실제 URL 링크 (새 탭)
+     */
+    private String buildResearcherSourcesHtml(List<ChatbotVO> ragDocs, String webSearchSource) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<ul>");
+
+        // 사내 문서 출처
+        if (ragDocs != null) {
+            for (ChatbotVO doc : ragDocs) {
+                if (doc == null || CommonUtil.isEmpty(doc.getFileName())) {
+                    continue;
+                }
+                String fileName = htmlEscape(doc.getFileName());
+                String docFileId = CommonUtil.nullToBlank(doc.getDocFileId());
+                String href = RAG_DOC_LINK_PREFIX + docFileId;
+                sb.append("<li>사내 문서: <a href=\"").append(href).append("\">")
+                        .append(fileName).append("</a></li>");
+            }
+        }
+
+        // 웹 출처 (answer_source 문자열에서 URL 추출)
+        JSONArray webItems = extractWebSourceItems(webSearchSource);
+        for (Object itemObj : webItems) {
+            if (!(itemObj instanceof JSONObject)) {
+                continue;
+            }
+            String url = String.valueOf(((JSONObject) itemObj).get("url"));
+            if (CommonUtil.isEmpty(url)) {
+                continue;
+            }
+            String urlEsc = htmlEscape(url);
+            sb.append("<li>웹페이지: <a href=\"").append(urlEsc)
+                    .append("\" target=\"_blank\" rel=\"noopener noreferrer\">")
+                    .append(urlEsc).append("</a></li>");
+        }
+
+        sb.append("</ul>");
+        return sb.toString();
+    }
+
+    /** HTML 특수문자 escape */
+    private String htmlEscape(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    /**
+     * AI 응답 JSON의 한글/변형 키를 템플릿 필드의 영문 키로 매핑한다.
+     * 매핑되지 않는 키는 그대로 유지한다.
+     */
+    @SuppressWarnings("unchecked")
+    private JSONObject mapResearcherJsonKeys(JSONObject src) {
+        // 한글 키 → 영문 템플릿 키 매핑 테이블
+        Map<String, String> keyMap = new java.util.LinkedHashMap<>();
+        keyMap.put("제목", "title");
+        keyMap.put("주제", "title");
+        keyMap.put("요약", "executive_summary");
+        keyMap.put("핵심요약", "executive_summary");
+        keyMap.put("핵심_요약", "executive_summary");
+        keyMap.put("summary", "executive_summary");
+        keyMap.put("시장개요", "market_overview");
+        keyMap.put("시장_개요", "market_overview");
+        keyMap.put("시장현황", "market_overview");
+        keyMap.put("시장_현황", "market_overview");
+        keyMap.put("주요발견사항", "key_findings");
+        keyMap.put("주요_발견사항", "key_findings");
+        keyMap.put("경쟁사분석", "competitor_analysis");
+        keyMap.put("경쟁사_분석", "competitor_analysis");
+        keyMap.put("경쟁사비교", "competitor_analysis");
+        keyMap.put("경쟁사_비교", "competitor_analysis");
+        keyMap.put("SWOT분석", "swot");
+        keyMap.put("SWOT_분석", "swot");
+        keyMap.put("결론", "conclusion");
+        keyMap.put("결론및제언", "conclusion");
+        keyMap.put("결론_및_제언", "conclusion");
+        keyMap.put("참고출처", "sources");
+        keyMap.put("참고_출처", "sources");
+        keyMap.put("출처", "sources");
+
+        JSONObject mapped = new JSONObject();
+        for (Object keyObj : src.keySet()) {
+            String key = String.valueOf(keyObj);
+            // 숫자 접두사 제거: "1. AI 반도체 시장 현황" → "AI 반도체 시장 현황"
+            String normalizedKey = key.replaceAll("^\\d+\\.\\s*", "").trim();
+            // 공백/특수문자 제거 후 매핑 시도
+            String compactKey = normalizedKey.replaceAll("[\\s_·.\\-]", "");
+
+            String mappedKey = null;
+            for (Map.Entry<String, String> entry : keyMap.entrySet()) {
+                String candidate = entry.getKey().replaceAll("[\\s_·.\\-]", "");
+                if (candidate.equalsIgnoreCase(compactKey)) {
+                    mappedKey = entry.getValue();
+                    break;
+                }
+            }
+
+            // 매핑 성공 시 영문 키 사용, 실패 시 원본 키 유지
+            String targetKey = mappedKey != null ? mappedKey : key;
+            Object val = src.get(keyObj);
+
+            // 중첩 객체도 재귀 매핑 (1단계만)
+            if (val instanceof JSONObject) {
+                mapped.put(targetKey, mapResearcherJsonKeys((JSONObject) val));
+            } else {
+                mapped.put(targetKey, val);
+            }
+        }
+        return mapped;
+    }
+
+    /**
+     * RESEARCHER 에이전트: 웹 검색 + 사내 문서 RAG를 통합하여 리서치 리포트를 생성한다.
+     * 1) query_search_only(9000) 동기 호출 → 웹 검색 답변 + 웹 출처(URL)
+     * 2) 템플릿 조회 + 웹 결과를 주입한 enriched query 구성
+     * 3) ragQuery(9111/query) 동기 호출 → dataset_id 벡터 검색 + JSON 리포트 생성 + file_info(참조 문서)
+     * 4) TmplHtmlRenderService → 리포트 HTML 렌더링 (출처: 사내 문서 링크 + 웹 URL)
+     * 5) TB_CHAT_LOG/TB_CHAT_REF 저장 + 결과 스트리밍 전송
+     */
+    private void deliverResearchReportViaWebSocket(
+            String query, String threadId, String userId, String svcTy, String modelId,
+            String refId, String agentId, List<Long> attachmentFileIds,
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
+        try {
+            // ① 웹 검색
+            callback.onStatus("searching_web", "웹 검색 중");
+            String[] webSearchResult = callWebSearchSync(query, modelId);
+            String webSearchAnswer = (webSearchResult != null) ? webSearchResult[0] : "";
+            String webSearchSource = (webSearchResult != null) ? webSearchResult[1] : "";
+
+            // ② 템플릿 조회
+            callback.onStatus("loading_template", "리포트 템플릿 준비 중");
+            ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+            String tmplId = "TM000007";
+            if (subCfg != null && subCfg.getAdditionalConfigMap() != null) {
+                Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
+                if (featuresObj instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> features = (Map<String, Object>) featuresObj;
+                    String cfgTmplId = (String) features.get("tmplId");
+                    if (CommonUtil.isNotEmpty(cfgTmplId)) {
+                        tmplId = cfgTmplId;
+                    }
+                }
+            }
+
+            TmplVO tmplSearchVO = new TmplVO();
+            tmplSearchVO.setTmplId(tmplId);
+            TmplVO tmpl = tmplService.selectTmplDetail(tmplSearchVO);
+            List<LibraryVO.TmplFieldItem> tmplFieldList = new ArrayList<>();
+            if (tmpl != null) {
+                TmplVO fieldSearchVO = new TmplVO();
+                fieldSearchVO.setTmplId(tmplId);
+                List<TmplVO.TmplFieldVO> fieldVoList = tmplService.selectTmplFieldList(fieldSearchVO);
+                if (fieldVoList != null) {
+                    for (TmplVO.TmplFieldVO fv : fieldVoList) {
+                        LibraryVO.TmplFieldItem item = new LibraryVO.TmplFieldItem();
+                        item.setJsonKey(fv.getJsonKey());
+                        item.setFieldNm(fv.getFieldNm());
+                        item.setMultilineYn(fv.getMultilineYn());
+                        item.setLayoutType(fv.getLayoutType());
+                        tmplFieldList.add(item);
+                    }
+                }
+            }
+
+            // ③ enriched query 구성
+            callback.onStatus("generating_report", "리포트 생성 중");
+            String llmPrompt = (tmpl != null && CommonUtil.isNotEmpty(tmpl.getLlmPrompt()))
+                    ? tmpl.getLlmPrompt()
+                    : "다음 주제에 대해 JSON 형식으로 리서치 리포트를 작성하세요.";
+
+            // dataset_id 배열 구성 (M 모드)
+            List<String> datasetIds = new ArrayList<>();
+            if (refId != null && !refId.trim().isEmpty()) {
+                for (String part : refId.split(",")) {
+                    String trimmed = part.trim();
+                    if (!trimmed.isEmpty()) {
+                        datasetIds.add(trimmed);
+                    }
+                }
+            }
+
+            // RAG 데이터셋의 실제 문서 (docFileId + fileName) 조회
+            List<ChatbotVO> ragDocs = new ArrayList<>();
+            StringBuilder ragDocNames = new StringBuilder();
+            if (!datasetIds.isEmpty()) {
+                try {
+                    for (String dsId : datasetIds) {
+                        ChatbotVO docSearchVO = new ChatbotVO();
+                        docSearchVO.setRefId(dsId);
+                        List<ChatbotVO> docFiles = chatbotDAO.selectDatasetDocFileNames(docSearchVO);
+                        if (docFiles != null) {
+                            for (ChatbotVO doc : docFiles) {
+                                if (CommonUtil.isNotEmpty(doc.getFileName())) {
+                                    ragDocs.add(doc);
+                                    ragDocNames.append("- ").append(doc.getFileName()).append("\n");
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("RAG 문서 파일명 조회 실패: {}", e.getMessage());
+                }
+            }
+
+            // 템플릿 필드(TB_TMPL_FIELD)에서 JSON 키 지시문을 동적으로 생성한다.
+            // → 어떤 템플릿/문서든 해당 템플릿의 정확한 키로 응답하게 강제하여 항상 템플릿 HTML대로 렌더링.
+            String jsonKeyInstruction = buildTemplateJsonInstruction(tmplFieldList);
+
+            // 출처는 LLM이 생성하지 않고 백엔드에서 직접 링크 HTML로 구성하므로
+            // 프롬프트에서는 본문 인용 참고용으로만 문서/웹 목록을 전달한다.
+            String enrichedQuery = llmPrompt.replace("{{web_search_results}}", webSearchAnswer)
+                    + "\n\n## 참조 가능한 사내 문서 목록\n" + (ragDocNames.length() > 0 ? ragDocNames.toString() : "(없음)")
+                    + "\n\n## 참조 가능한 웹 출처\n" + (CommonUtil.isNotEmpty(webSearchSource) ? webSearchSource : "(없음)")
+                    + jsonKeyInstruction
+                    + "\n\n## 사용자 질문\n" + query;
+
+            // ④ RAG 매뉴얼 질의(9111/query) 동기 호출 — dataset_id 벡터 검색 + LLM 생성
+            //    9111/query 명세 입력: query, dataset_id, model_id, room_id, agent_id, attachment_file_ids
+            Map<String, Object> ragParams = new HashMap<>();
+            ragParams.put("query", enrichedQuery);
+            ragParams.put("dataset_id", datasetIds);
+            ragParams.put("model_id", modelId != null ? modelId : "");
+            ragParams.put("room_id", threadId != null ? threadId : "string");
+            ragParams.put("agent_id", agentId != null ? agentId : "");
+            ragParams.put("attachment_file_ids", new ArrayList<String>());
+
+            String ragApiUrl = PropertyUtil.getProperty("Globals.chatbot.ragQuery.apiUrl");
+            if (CommonUtil.isEmpty(ragApiUrl)) {
+                callback.onError("RAG 질의 API URL이 설정되지 않았습니다.");
+                return;
+            }
+
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build();
+
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            String ragJsonBody = gson.toJson(ragParams);
+            RequestBody ragBody = RequestBody.create(ragJsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+
+            Request ragRequest = new Request.Builder()
+                    .url(ragApiUrl)
+                    .post(ragBody)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "text/event-stream")
+                    .build();
+
+            logger.info("리서처 RAG 질의 호출 시작 - url: {}, dataset_id: {}", ragApiUrl, datasetIds);
+
+            String aiResponse = null;
+            List<ChatRefItem> chatRefItems = new ArrayList<>();
+            try (okhttp3.Response response = client.newCall(ragRequest).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("리서처 RAG 질의 응답 오류: {}", response.code());
+                    callback.onError("RAG 질의 API 응답 오류: " + response.code());
+                    return;
+                }
+                try (okhttp3.ResponseBody responseBody = response.body()) {
+                    // 9111/query SSE 응답: event: answer_delta(text) ... event: done(answer/답변, file_info)
+                    BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(responseBody.byteStream(), "UTF-8"));
+                    StringBuilder answerBuilder = new StringBuilder();
+                    String doneAnswer = "";
+                    String line;
+                    JSONParser jsonParser = new JSONParser();
+
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith("event: ")) {
+                            continue;
+                        }
+                        String jsonStr;
+                        if (line.startsWith("data: ")) {
+                            jsonStr = line.substring(6).trim();
+                        } else if (line.trim().startsWith("{")) {
+                            jsonStr = line.trim();
+                        } else {
+                            continue;
+                        }
+                        if (jsonStr.isEmpty()) {
+                            continue;
+                        }
+                        try {
+                            JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
+                            Object textObj = data.get("text");
+                            if (textObj != null) {
+                                answerBuilder.append(String.valueOf(textObj));
+                            }
+                            // done 이벤트 답변 키: "answer" 또는 한글 "답변"
+                            Object answerObj = data.get("answer");
+                            if (answerObj == null) {
+                                answerObj = data.get("답변");
+                            }
+                            if (answerObj != null) {
+                                doneAnswer = String.valueOf(answerObj);
+                            }
+                            // done 이벤트의 file_info → 실제 참조 문서(TB_CHAT_REF)
+                            List<ChatRefItem> refs = extractChatRefItems(data);
+                            if (!refs.isEmpty()) {
+                                chatRefItems = refs;
+                            }
+                        } catch (Exception ignore) {
+                            // 개별 라인 파싱 실패는 무시
+                        }
+                    }
+                    aiResponse = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                }
+            }
+
+            // RAG 응답이 참조 문서를 주지 않으면, 데이터셋에 연결된 문서를 참조로 저장(폴백)
+            if (chatRefItems.isEmpty() && !ragDocs.isEmpty()) {
+                for (ChatbotVO doc : ragDocs) {
+                    if (doc == null || CommonUtil.isEmpty(doc.getDocFileId())) {
+                        continue;
+                    }
+                    ChatRefItem item = new ChatRefItem();
+                    item.docFileId = doc.getDocFileId();
+                    item.mainPageNo = "";
+                    item.relatedPageNos = new ArrayList<>();
+                    chatRefItems.add(item);
+                }
+            }
+
+            if (CommonUtil.isEmpty(aiResponse)) {
+                callback.onError("리포트 생성에 실패했습니다. AI 응답이 비어 있습니다.");
+                return;
+            }
+
+            // ⑤ JSON 파싱 → 템플릿 HTML 렌더링
+            String reportHtml = "";
+            String executiveSummary = "";
+            try {
+                // AI 응답에서 JSON 부분 추출 (마크다운 코드블록 처리)
+                String jsonContent = aiResponse.trim();
+                if (jsonContent.startsWith("```json")) {
+                    jsonContent = jsonContent.substring(7);
+                }
+                if (jsonContent.startsWith("```")) {
+                    jsonContent = jsonContent.substring(3);
+                }
+                if (jsonContent.endsWith("```")) {
+                    jsonContent = jsonContent.substring(0, jsonContent.length() - 3);
+                }
+                jsonContent = jsonContent.trim();
+
+                JSONParser parser = new JSONParser();
+                JSONObject aiJson = (JSONObject) parser.parse(jsonContent);
+
+                // 래퍼 키 벗기기: { "리서치리포트": { ... } } → 내부 객체 사용
+                if (aiJson.size() == 1) {
+                    Object onlyVal = aiJson.values().iterator().next();
+                    if (onlyVal instanceof JSONObject) {
+                        aiJson = (JSONObject) onlyVal;
+                    }
+                }
+
+                // AI 한글 키 → 템플릿 영문 키 매핑
+                JSONObject mappedJson = mapResearcherJsonKeys(aiJson);
+
+                // 요약 텍스트 추출 (여러 후보 키 시도)
+                for (String summaryKey : new String[]{"executive_summary", "요약", "summary", "핵심요약"}) {
+                    Object summaryObj = mappedJson.get(summaryKey);
+                    if (summaryObj != null && CommonUtil.isNotEmpty(String.valueOf(summaryObj))) {
+                        executiveSummary = String.valueOf(summaryObj);
+                        break;
+                    }
+                }
+
+                // 출처는 LLM 출력을 버리고 백엔드에서 직접 링크 HTML로 구성한다.
+                // 템플릿 렌더링 시 HTML escape를 우회하기 위해 토큰으로 치환 후 후처리에서 교체.
+                mappedJson.put("sources", SOURCES_TOKEN);
+
+                // 템플릿 HTML 렌더링
+                if (tmpl != null && CommonUtil.isNotEmpty(tmpl.getTmplHtml()) && !tmplFieldList.isEmpty()) {
+                    reportHtml = tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), mappedJson, tmplFieldList);
+                } else {
+                    reportHtml = "<div>" + aiResponse + "</div>";
+                }
+
+                // 출처 토큰 → 실제 링크 HTML 교체
+                String sourcesHtml = buildResearcherSourcesHtml(ragDocs, webSearchSource);
+                reportHtml = reportHtml.replace(SOURCES_TOKEN, sourcesHtml);
+            } catch (Exception e) {
+                logger.warn("리서처 리포트 JSON 파싱/렌더링 오류: {}", e.getMessage());
+                // fallback: 코드블록(<pre>) 대신 일반 문단으로 렌더 — 에디터 코드블록 다크 배경 방지
+                String safe = aiResponse.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        .replace("\n", "<br/>");
+                reportHtml = "<div><p>" + safe + "</p></div>";
+                executiveSummary = aiResponse.length() > 200 ? aiResponse.substring(0, 200) + "..." : aiResponse;
+            }
+
+            // ⑥ 클라이언트에 결과 전송
+            // 요약 텍스트 (채팅 버블)
+            String summaryText = CommonUtil.isNotEmpty(executiveSummary) ? executiveSummary : "리서치 리포트가 생성되었습니다.";
+            callback.onChunk(summaryText, summaryText, null);
+
+            // 리포트 HTML (사이드 패널)
+            if (CommonUtil.isNotEmpty(reportHtml)) {
+                callback.onChunk(reportHtml, reportHtml, "report_html");
+            }
+
+            // 웹 검색 출처 (answer_source 문자열에서 URL 추출 → items 구성)
+            JSONArray webSourceItems = extractWebSourceItems(webSearchSource);
+            String webGroundingJson = "";
+            if (!webSourceItems.isEmpty()) {
+                JSONObject wgJson = new JSONObject();
+                wgJson.put("items", webSourceItems);
+                webGroundingJson = wgJson.toJSONString();
+
+                // 클라이언트에 출처 청크 전송
+                JSONObject sourcePayload = new JSONObject();
+                sourcePayload.put("items", webSourceItems);
+                callback.onChunk(webGroundingJson, sourcePayload.toJSONString(), "answer_source");
+            }
+
+            String savedLogId = this.doInsertAiLog(
+                    threadId, agentId, query, summaryText,
+                    0, 0, svcTy, modelId, refId, userId,
+                    null, null, null, null,
+                    null, null, chatRefItems,
+                    webGroundingJson, null,
+                    reportHtml);
+
+            this.updateChatRoomLastChatDt(threadId);
+
+            // ⑧ 완료 전송
+            callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
+                    CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
+                    "", "", "");
+
+        } catch (Exception e) {
+            logger.error("리서처 리포트 생성 중 오류: {}", e.getMessage(), e);
+            callback.onError("리서치 리포트 생성 중 오류가 발생했습니다: " + e.getMessage());
+        }
     }
 
     /**

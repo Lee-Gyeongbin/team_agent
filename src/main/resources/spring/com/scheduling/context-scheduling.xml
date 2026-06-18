@@ -5,7 +5,7 @@
           http://www.springframework.org/schema/beans
           http://www.springframework.org/schema/beans/spring-beans-4.0.xsd">
 
-    <!-- Dashboard category trend batch (Quartz) -->
+    <!-- 대시보드 카테고리 통계 배치 (Quartz) -->
 	<bean id="dashBoardCategoryTrendJobDetail" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
 		<property name="targetObject" ref="dashBoardServiceImpl"/>
 		<property name="targetMethod" value="buildYesterdayCategoryTrend"/>
@@ -17,10 +17,23 @@
 		<property name="cronExpression" value="0 10 0 * * ?"/>
 	</bean>
 
+    <!-- 표준지역코드 캐시 갱신 배치 (Quartz) -->
+	<bean id="regionTreeRefreshJobDetail" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
+		<property name="targetObject" ref="regionTreeServiceImpl"/>
+		<property name="targetMethod" value="refreshRegionTreeCache"/>
+		<property name="concurrent" value="false"/>
+	</bean>
+
+	<bean id="regionTreeRefreshTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
+		<property name="jobDetail" ref="regionTreeRefreshJobDetail"/>
+		<property name="cronExpression" value="0 20 0 1 * ?"/>
+	</bean>
+
 	<bean id="dashBoardScheduler" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
 		<property name="triggers">
 			<list>
 				<ref bean="dashBoardCategoryTrendTrigger"/>
+				<ref bean="regionTreeRefreshTrigger"/>
 			</list>
 		</property>
 	</bean>

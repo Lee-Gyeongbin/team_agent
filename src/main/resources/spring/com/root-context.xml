@@ -83,4 +83,5 @@
 	</bean>
 	<import resource="classpath:/spring/com/scheduling/context-scheduling-category-trend.xml"/>
 	<import resource="classpath:/spring/com/scheduling/context-scheduling-chat-file-delete.xml"/>
+	<import resource="classpath:/spring/com/scheduling/context-scheduling.xml"/>
 </beans>

@@ -323,4 +323,10 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     public int deleteChatFile(ChatbotVO param) throws Exception {
         return delete("ai.chatbot.deleteChatFile", param);
     }
+    /**
+     * 데이터셋에 속한 문서 파일명 목록 조회 (TB_DS_DOC → TB_DOC_FILE)
+     */
+    public List<ChatbotVO> selectDatasetDocFileNames(ChatbotVO searchVO) throws Exception {
+        return selectList("ai.chatbot.selectDatasetDocFileNames", searchVO);
+    }
 }

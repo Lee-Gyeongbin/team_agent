@@ -305,6 +305,7 @@
             TABLE_DATA,
             CHART_OPTION,
             WEB_GROUNDING_JSON,
+            REPORT_HTML,
             MAIN_DOC_FILE_ID,
             MAIN_PAGE,
             REASK_CNT,
@@ -329,6 +330,7 @@
             #{tableData},
             #{chartOption},
             #{webGroundingJson},
+            #{reportHtml},
             #{mainDocFileId},
             #{mainPage},
             #{reaskCnt},
@@ -383,6 +385,7 @@
             , A.TABLE_DATA 
             , A.CHART_OPTION
             , A.WEB_GROUNDING_JSON
+            , A.REPORT_HTML
             , A.TTSQ
             , A.REASK_CNT
             , A.CREATE_USER_ID
@@ -757,7 +760,19 @@
             NEWS_CATEGORY_CD = VALUES(NEWS_CATEGORY_CD)
             , MODIFY_DT = NOW()
     </insert>
+    
+    <select id="selectDatasetDocFileNames" resultType="chatbotVO">
+        /* 데이터셋 문서 파일명 목록 조회 ai.chatbot.selectDatasetDocFileNames */
+        SELECT
+            F.DOC_FILE_ID
+            , F.FILE_NAME
+        FROM TB_DS_DOC D
+        INNER JOIN TB_DOC_FILE F ON F.DOC_FILE_ID = D.DOC_FILE_ID
+        WHERE D.DATASET_ID = #{refId}
+          AND F.USE_YN = 'Y'
+    </select>
 
+    
     <select id="selectChatFileDelete" parameterType="chatbotVO" resultType="chatbotVO">
         /* 챗봇 첨부파일 삭제 대상 조회 ai.chatbot.selectChatFileDelete */
         SELECT
