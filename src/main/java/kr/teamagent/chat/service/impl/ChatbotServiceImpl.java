@@ -1081,7 +1081,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                         this.updateChatRoomLastChatDt(responseThreadId);
 
-                        // 첨부파일 LOG_ID 연결 + EXPIRE_DT 해제
+                        // 첨부파일 LOG_ID 연결
                         if (CommonUtil.isNotEmpty(savedLogId)
                                 && attachmentFileIds != null
                                 && !attachmentFileIds.isEmpty()) {
@@ -2831,7 +2831,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         fIns.setFilePath(fSrc.getFilePath());
                         fIns.setFileSize(fSrc.getFileSize());
                         fIns.setFileType(fSrc.getFileType());
-                        fIns.setFileDelDt(fSrc.getFileDelDt());
                         String uploaderUserId = "Y".equals(searchVO.getFileShareYn())
                                 ? userId
                                 : fSrc.getChatFileUploaderUserId();
@@ -2865,20 +2864,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         try {
             chatbotVO.setUserId(SessionUtil.getUserId());
-            /**
-             * 업로드 직후 insert
-                LOG_ID = NULL
-                FILE_EXIST_YN = 'Y'
-                EXPIRE_DT = NOW() + INTERVAL 1 DAY (또는 3시간/24시간 정책)
-
-                CASE 1. ws 전송 성공 + onComplete에서 로그 저장 완료 시
-                해당 파일들 LOG_ID = savedLogId로 업데이트
-                EXPIRE_DT = NULL로 해제
-
-                CASE 2. ws 전송 실패(또는 일정 시간 내 LOG_ID 미연결) 시
-                그대로 LOG_ID IS NULL + EXPIRE_DT <= NOW() 대상이 배치 삭제 후보
-                배치 작업
-             */
             int result = chatbotDAO.saveChatFile(chatbotVO);
             if (result > 0) {
                 resultMap.put("successYn", true);
@@ -2960,8 +2945,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /**
      * 채팅 파일 orphan 처리
-     * ws 전송 실패 등으로 LOG_ID가 연결되지 못한 파일의 EXPIRE_DT를 현재 시각으로 갱신해
-     * 배치 삭제 대상으로 표시한다.
+     * ws 전송 실패 등으로 LOG_ID가 연결되지 못한 파일을 삭제 대상으로 표시한다.
      */
     public Map<String, Object> markChatFileOrphan(ChatbotVO chatbotVO) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
@@ -3316,4 +3300,48 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
     }
 
+
+    public void deleteBatchAuto() throws Exception {
+        logger.info("=== 채팅 첨부파일 삭제 배치 시작 ===");
+
+        try {
+            ChatbotVO fileVo = new ChatbotVO();
+            int deleteTerm = Integer.parseInt(PropertyUtil.getProperty("Globals.chatbot.file.deleteTerm"));
+            fileVo.setDeleteFileTerm(deleteTerm);
+            // 1. 삭제 대상 파일 조회
+            List<ChatbotVO> targetList = chatbotDAO.selectChatFileDelete(fileVo);
+
+            // 3. 각 통계별로 API 연동 실행 (10일 마감 대상 제외)
+            for (ChatbotVO target : targetList) {
+
+                try {
+                    // ncp 삭제
+                    Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(target.getFilePath());
+                    if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
+                        logger.warn("자동 배치 NCP 삭제 실패 - chatFileId: {}, filePath: {}, returnMsg: {}",
+                                target.getChatFileId(), target.getFilePath(), ncpResult.get("returnMsg"));
+                        continue;
+                    }
+
+                    // 물리 파일 삭제 모두 성공 시 db 삭제
+                    int deleted = chatbotDAO.deleteChatFile(target);
+                    if (deleted <= 0) {
+                        logger.warn("자동 배치 DB 삭제 대상 없음 - chatFileId: {}, filePath: {}",
+                                target.getChatFileId(), target.getFilePath());
+                        continue;
+                    }
+                    logger.info("자동 배치 삭제 완료 - chatFileId: {}, filePath: {}",
+                            target.getChatFileId(), target.getFilePath());
+                } catch (Exception e) {
+                    logger.error("자동 배치 실행 중 오류 - e: {}", e);
+                    // 개별 실패는 로그만 남기고 계속 진행
+                }
+            }
+
+            logger.info("=== 자동 배치 완료 (월말 마감) ===");
+        } catch (Exception e) {
+            logger.error("=== 자동 배치 오류 발생 (월말 마감) ===", e);
+            throw e;
+        }
+    }
 }

@@ -99,13 +99,23 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 데이터마트 메타 테이블 저장
-     * @param paramMap datamartId, tblId ...
-     * @return
+     * 데이터마트 메타 테이블 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
      * @throws Exception
      */
-    public int saveMetaTable(DatamartVO.MetaTableSavePayloadVO payload) throws Exception {
-        return insert("datamart.saveMetaTable", payload);
+    public int deleteDmTblByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmTblByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 메타 테이블 일괄 등록
+     * @param payload datamartId, tableList
+     * @return 등록 건수
+     * @throws Exception
+     */
+    public int insertMetaTableBatch(DatamartVO.MetaTableSavePayloadVO payload) throws Exception {
+        return insert("datamart.insertMetaTableBatch", payload);
     }
 
     /**
@@ -149,13 +159,23 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 데이터마트 코드값 매핑 일괄 등록/수정
-     * @param payload datamartId, codeColumnMappingList
-     * @return 등록/수정 건수
+     * 데이터마트 코드그룹 매핑 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
      * @throws Exception
      */
-    public int upsertDmColCodeBatch(DatamartVO.MetaCodeMappingSavePayloadVO payload) throws Exception {
-        return insert("datamart.upsertDmColCodeBatch", payload);
+    public int deleteDmColCodeByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmColCodeByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 코드그룹 매핑 일괄 등록
+     * @param payload datamartId, codeColumnMappingList
+     * @return 등록 건수
+     * @throws Exception
+     */
+    public int insertDmColCodeBatch(DatamartVO.MetaCodeMappingSavePayloadVO payload) throws Exception {
+        return insert("datamart.insertDmColCodeBatch", payload);
     }
 
     /**
@@ -179,6 +199,26 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 데이터마트 동의어 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
+     * @throws Exception
+     */
+    public int deleteDmSynonymByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmSynonymByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 퓨샷 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
+     * @throws Exception
+     */
+    public int deleteDmFewshotByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmFewshotByDatamartId", searchVO);
+    }
+
+    /**
      * 데이터마트 동의어 목록 조회
      * @param searchVO datamartId
      * @return 동의어 행 목록
@@ -199,13 +239,13 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 데이터마트 동의어 수정
-     * @param datamartVO datamartId, synonymId, synonymWord
-     * @return 수정 건수
+     * 데이터마트 동의어 등록
+     * @param datamartVO datamartId, synonymId, synonymWord, useYn ...
+     * @return 등록 건수
      * @throws Exception
      */
-    public int updateMetaSynonym(DatamartVO.MetaSynonymRowVO datamartVO) throws Exception {
-        return update("datamart.updateDatamartSynonym", datamartVO);
+    public int insertMetaSynonym(DatamartVO.MetaSynonymRowVO datamartVO) throws Exception {
+        return insert("datamart.insertMetaSynonym", datamartVO);
     }
 
     /**
@@ -219,33 +259,12 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 데이터마트 퓨샷 단건 조회 (DATAMART_ID + USER_QUESTION)
-     * @param fewshotVO datamartId, userQuestion
-     * @return 퓨샷 행
+     * 데이터마트 퓨샷 일괄 등록
+     * @param payload datamartId, fewshotList
+     * @return 등록 건수
      * @throws Exception
      */
-    public DatamartVO.MetaFewshotRowVO selectMetaFewshotByQuestion(DatamartVO.MetaFewshotRowVO fewshotVO) throws Exception {
-        return selectOne("datamart.selectMetaFewshotByQuestion", fewshotVO);
-    }
-
-    /**
-     * 데이터마트 퓨샷 SORT_ORD 최대값 (datamartId 단위)
-     * @param searchVO datamartId
-     * @return MAX(SORT_ORD), 없으면 0
-     * @throws Exception
-     */
-    public int selectMetaFewshotMaxSortOrd(DatamartVO searchVO) throws Exception {
-        Integer maxSortOrd = (Integer) selectOne("datamart.selectMetaFewshotMaxSortOrd", searchVO);
-        return maxSortOrd != null ? maxSortOrd : 0;
-    }
-
-    /**
-     * 데이터마트 퓨샷 등록/수정(upsert)
-     * @param fewshotVO datamartId, fewshotId, userQuestion, aiUnderstand, aiRefExam, sqlExam, sortOrd, useYn
-     * @return 등록/수정 건수
-     * @throws Exception
-     */
-    public int saveMetaFewshot(DatamartVO.MetaFewshotRowVO fewshotVO) throws Exception {
-        return insert("datamart.saveMetaFewshot", fewshotVO);
+    public int insertMetaFewshotBatch(DatamartVO.MetaFewshotSavePayloadVO payload) throws Exception {
+        return insert("datamart.insertMetaFewshotBatch", payload);
     }
 }

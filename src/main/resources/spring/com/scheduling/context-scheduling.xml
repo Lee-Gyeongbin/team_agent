@@ -14,7 +14,7 @@
 
 	<bean id="dashBoardCategoryTrendTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
 		<property name="jobDetail" ref="dashBoardCategoryTrendJobDetail"/>
-		<property name="cronExpression" value="0 09 14 * * ?"/>
+		<property name="cronExpression" value="0 10 0 * * ?"/>
 	</bean>
 
     <!-- 표준지역코드 캐시 갱신 배치 (Quartz) -->
@@ -29,11 +29,24 @@
 		<property name="cronExpression" value="0 20 0 1 * ?"/>
 	</bean>
 
+	<!-- 채팅 첨부파일 삭제 배치 (Quartz) -->
+	<bean id="chatFileBatchJob" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
+		<property name="targetObject" ref="chatFileDeleteBatchService"/>
+		<property name="targetMethod" value="deleteBatchAuto"/>
+		<property name="concurrent" value="false"/>
+	</bean>
+
+	<bean id="chatFileDeleteBatchTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
+		<property name="jobDetail" ref="chatFileBatchJob"/>
+		<property name="cronExpression" value="0 30 0 * * ?"/>
+	</bean>
+
 	<bean id="dashBoardScheduler" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
 		<property name="triggers">
 			<list>
 				<ref bean="dashBoardCategoryTrendTrigger"/>
 				<ref bean="regionTreeRefreshTrigger"/>
+				<ref bean="chatFileDeleteBatchTrigger"/>
 			</list>
 		</property>
 	</bean>

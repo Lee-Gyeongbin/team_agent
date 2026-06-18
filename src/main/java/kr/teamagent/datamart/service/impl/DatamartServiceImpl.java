@@ -57,22 +57,20 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     private static final String META_HDR_HAS_CODE_YN = "코드값여부";
     private static final String META_HDR_AI_HINT = "AI힌트";
     private static final String META_HDR_SORT_ORD = "정렬순서";
-    private static final String META_HDR_USE_YN = "사용여부";
     private static final String[] META_COLUMN_EXCEL_HEADERS = {
             META_HDR_TBL_ID, META_HDR_COL_ID, META_HDR_COL_PHY_NM, META_HDR_COL_KOR_NM, META_HDR_COL_DESC,
             META_HDR_DATA_TYPE, META_HDR_DATA_LEN, META_HDR_PK_YN, META_HDR_FK_YN, META_HDR_NULLABLE_YN,
-            META_HDR_HAS_CODE_YN, META_HDR_AI_HINT, META_HDR_SORT_ORD, META_HDR_USE_YN
+            META_HDR_HAS_CODE_YN, META_HDR_AI_HINT, META_HDR_SORT_ORD
     };
     private static final int[] META_COLUMN_AUTO_GEN_HEADER_COLS = { 12 };
     private static final int META_COLUMN_PK_YN_COL_IDX = 7;
     private static final int META_COLUMN_FK_YN_COL_IDX = 8;
     private static final int META_COLUMN_NULLABLE_YN_COL_IDX = 9;
     private static final int META_COLUMN_HAS_CODE_YN_COL_IDX = 10;
-    private static final int META_COLUMN_USE_YN_COL_IDX = 13;
     private static final String META_COLUMN_EXCEL_GUIDE_TEXT =
             "※ * 표시된 항목은 필수 입력값입니다.\n"
                     + "※ 업로드는 미리보기용이며, 저장 시 해당 데이터마트의 컬럼 메타가 전체 교체됩니다.\n"
-                    + "  테이블ID·물리컬럼명·데이터타입(필수), 컬럼ID, PK/FK/NULL허용/코드값여부/사용여부(Y/N)를 입력하세요. 컬럼ID 미입력 시 물리컬럼명이 사용됩니다.";
+                    + "  테이블ID·물리컬럼명·데이터타입(필수), 컬럼ID, PK/FK/NULL허용/코드값여부(Y/N)를 입력하세요. 컬럼ID 미입력 시 물리컬럼명이 사용됩니다.";
 
     @Autowired
     DatamartDAO datamartDAO;
@@ -266,7 +264,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             while (tableRs.next()) {
                 String tableName = tableRs.getString("TABLE_NAME");
                 String tableRemarks = tableRs.getString("REMARKS");
-                String tableType = tableRs.getString("TABLE_TYPE").trim();
 
                 Map<String, Object> colParamMap = new HashMap<>();
                 colParamMap.put("datamartId", dm.getDatamartId());
@@ -318,7 +315,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                         col.setHasCodeYn("N");
                         col.setAiHint("");
                         col.setSortOrd(Integer.valueOf(colRs.getInt("ORDINAL_POSITION")));
-                        col.setUseYn("Y");
                         columns.add(col);
                     }
                     colRs.close();
@@ -365,11 +361,12 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 메타 관리 > 테이블 저장
+     * 메타 관리 > 테이블 저장 (TB_DM_TBL 해당 DATAMART_ID 전체 삭제 후 INSERT)
      * @param payload datamartId, tableList
      * @return result, msg
      * @throws Exception
      */
+    @Transactional(rollbackFor = Exception.class)
     public HashMap<String, Object> saveMetaTableList(DatamartVO.MetaTableSavePayloadVO payload) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
 
@@ -387,14 +384,24 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
+        datamartDAO.deleteDmTblByDatamartId(dm);
+
+        List<DatamartVO.MetaTableItemVO> toSave = new ArrayList<>();
         List<DatamartVO.MetaTableItemVO> tableList = payload.getTableList();
-        if (tableList == null || tableList.isEmpty()) {
-            resultMap.put("result", "SUCCESS");
-            resultMap.put("msg", "저장할 테이블이 없습니다.");
-            return resultMap;
+        if (tableList != null) {
+            for (DatamartVO.MetaTableItemVO table : tableList) {
+                if (table != null) {
+                    toSave.add(table);
+                }
+            }
         }
 
-        datamartDAO.saveMetaTable(payload);
+        if (!toSave.isEmpty()) {
+            DatamartVO.MetaTableSavePayloadVO insertPayload = new DatamartVO.MetaTableSavePayloadVO();
+            insertPayload.setDatamartId(payload.getDatamartId());
+            insertPayload.setTableList(toSave);
+            datamartDAO.insertMetaTableBatch(insertPayload);
+        }
 
         resultMap.put("result", "SUCCESS");
         resultMap.put("msg", "메타 테이블 저장 성공");
@@ -505,15 +512,13 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             ExcelUtil.applyDataCell(row, 10, CommonUtil.nullToBlank(vo.getHasCodeYn()), rowStyle);
             ExcelUtil.applyDataCell(row, 11, CommonUtil.nullToBlank(vo.getAiHint()), rowStyle);
             ExcelUtil.applyDataCell(row, 12, vo.getSortOrd() != null ? String.valueOf(vo.getSortOrd()) : "", rowStyle);
-            ExcelUtil.applyDataCell(row, 13, CommonUtil.nullToBlank(vo.getUseYn()), rowStyle);
         }
     }
 
     private void applyMetaColumnExcelSheetOptions(XSSFSheet sheet) {
-        ExcelUtil.adjustColumnWidths(sheet, META_COLUMN_EXCEL_HEADERS.length);
-        sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
+        ExcelUtil.applyDataSheetLayout(sheet, META_COLUMN_EXCEL_HEADERS.length);
         ExcelUtil.addUseYnListValidations(sheet, META_COLUMN_PK_YN_COL_IDX, META_COLUMN_FK_YN_COL_IDX,
-                META_COLUMN_NULLABLE_YN_COL_IDX, META_COLUMN_HAS_CODE_YN_COL_IDX, META_COLUMN_USE_YN_COL_IDX);
+                META_COLUMN_NULLABLE_YN_COL_IDX, META_COLUMN_HAS_CODE_YN_COL_IDX);
     }
 
     /**
@@ -544,14 +549,8 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, META_HDR_TBL_ID);
-            if (headerRow == null) {
-                throw new IllegalArgumentException("올바른 컬럼 메타 엑셀 파일이 아닙니다. (헤더 행 없음)");
-            }
-
-            Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
-            ExcelUtil.validateRequiredHeaderColumns(colIdx, "컬럼 메타", META_HDR_TBL_ID, META_HDR_COL_PHY_NM,
-                    META_HDR_DATA_TYPE);
+            Map<String, Integer> colIdx = ExcelUtil.detectUploadHeader(sheet, formatter, "컬럼 메타",
+                    META_HDR_TBL_ID, META_HDR_TBL_ID, META_HDR_COL_PHY_NM, META_HDR_DATA_TYPE);
 
             Integer tblIdCol = colIdx.get(META_HDR_TBL_ID);
             Integer colIdCol = colIdx.get(META_HDR_COL_ID);
@@ -566,9 +565,8 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             Integer hasCodeYnCol = colIdx.get(META_HDR_HAS_CODE_YN);
             Integer aiHintCol = colIdx.get(META_HDR_AI_HINT);
             Integer sortOrdCol = colIdx.get(META_HDR_SORT_ORD);
-            Integer useYnCol = colIdx.get(META_HDR_USE_YN);
 
-            for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = ExcelUtil.DATA_START_ROW; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) {
                     continue;
@@ -587,10 +585,9 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 String hasCodeYn = ExcelUtil.getCellString(row, hasCodeYnCol, formatter);
                 String aiHint = ExcelUtil.getCellString(row, aiHintCol, formatter);
                 String sortOrdStr = ExcelUtil.getCellString(row, sortOrdCol, formatter);
-                String useYn = ExcelUtil.getCellString(row, useYnCol, formatter);
 
                 if (isSkippableMetaColumnExcelRow(tblId, colPhyNm, colId, colKorNm, colDesc, dataType, dataLen,
-                        pkYn, fkYn, nullableYn, hasCodeYn, aiHint, sortOrdStr, useYn)) {
+                        pkYn, fkYn, nullableYn, hasCodeYn, aiHint, sortOrdStr)) {
                     continue;
                 }
 
@@ -607,7 +604,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 fkYn = fkYn.isEmpty() ? "N" : fkYn;
                 nullableYn = nullableYn.isEmpty() ? "Y" : nullableYn;
                 hasCodeYn = hasCodeYn.isEmpty() ? "N" : hasCodeYn;
-                useYn = useYn.isEmpty() ? "Y" : useYn;
 
                 int tblColSeq = tblColSeqMap.getOrDefault(tblId, 0) + 1;
                 tblColSeqMap.put(tblId, tblColSeq);
@@ -626,7 +622,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 col.setHasCodeYn(hasCodeYn);
                 col.setAiHint(aiHint);
                 col.setSortOrd(sortOrd);
-                col.setUseYn(useYn);
 
                 DatamartVO.MetaColumnSaveTableItemVO tableItem = tableMap.get(tblId);
                 if (tableItem == null) {
@@ -662,13 +657,13 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
     private static boolean isSkippableMetaColumnExcelRow(String tblId, String colPhyNm, String colId, String colKorNm,
             String colDesc, String dataType, String dataLen, String pkYn, String fkYn, String nullableYn,
-            String hasCodeYn, String aiHint, String sortOrdStr, String useYn) {
+            String hasCodeYn, String aiHint, String sortOrdStr) {
         if (ExcelUtil.isGuideMarkerRow(tblId)) {
             return true;
         }
         return tblId.isEmpty() && colPhyNm.isEmpty() && colId.isEmpty() && colKorNm.isEmpty() && colDesc.isEmpty()
                 && dataType.isEmpty() && dataLen.isEmpty() && pkYn.isEmpty() && fkYn.isEmpty() && nullableYn.isEmpty()
-                && hasCodeYn.isEmpty() && aiHint.isEmpty() && sortOrdStr.isEmpty() && useYn.isEmpty();
+                && hasCodeYn.isEmpty() && aiHint.isEmpty() && sortOrdStr.isEmpty();
     }
 
     private static boolean hasMetaColumnRequiredError(String tblId, String colPhyNm, String dataType) {
@@ -740,7 +735,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 메타 관리 > 코드그룹 매핑 저장 (TB_DM_COL_CODE UK merge upsert, useYn N = soft delete)
+     * 메타 관리 > 코드그룹 매핑 저장 (TB_DM_COL_CODE 해당 DATAMART_ID 전체 삭제 후 INSERT)
      */
     @Transactional(rollbackFor = Exception.class)
     public HashMap<String, Object> saveMetaCodeMappingList(DatamartVO.MetaCodeMappingSavePayloadVO payload) throws Exception {
@@ -760,10 +755,14 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
+        datamartDAO.deleteDmColCodeByDatamartId(dm);
+
         List<DatamartVO.MetaCodeColumnMappingVO> toSave = filterCodeMappingSaveList(payload.getCodeColumnMappingList());
         if (!toSave.isEmpty()) {
-            payload.setCodeColumnMappingList(toSave);
-            datamartDAO.upsertDmColCodeBatch(payload);
+            DatamartVO.MetaCodeMappingSavePayloadVO insertPayload = new DatamartVO.MetaCodeMappingSavePayloadVO();
+            insertPayload.setDatamartId(payload.getDatamartId());
+            insertPayload.setCodeColumnMappingList(toSave);
+            datamartDAO.insertDmColCodeBatch(insertPayload);
         }
 
         List<DatamartVO.MetaCodeColumnMappingVO> dataList = datamartDAO.selectMetaCodeMappingRows(dm);
@@ -789,8 +788,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                     || CommonUtil.isEmpty(mapping.getCodeGrpId())) {
                 continue;
             }
-            String useYn = CommonUtil.nullToBlank(mapping.getUseYn()).trim();
-            mapping.setUseYn(CommonUtil.isEmpty(useYn) ? "Y" : useYn.toUpperCase());
             if (mapping.getSortOrd() == null) {
                 mapping.setSortOrd(sortOrd++);
             }
@@ -896,50 +893,50 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 데이터마트 동의어 저장(목록)
+     * 데이터마트 동의어 저장 (TB_DM_SYNONYM 해당 DATAMART_ID 전체 삭제 후 INSERT)
      * @param payload datamartId, synonymList
      * @return { result, msg }
      * @throws Exception
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public HashMap<String, Object> saveMetaSynonymList(DatamartVO.MetaSynonymSavePayloadVO payload) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        List<DatamartVO.MetaSynonymRowVO> synonymList = payload != null ? payload.getSynonymList() : null;
-        if (synonymList == null || synonymList.isEmpty()) {
+        if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
             resultMap.put("result", "FAIL");
-            resultMap.put("msg", "동의어 목록이 비어 있습니다.");
+            resultMap.put("msg", "datamartId is required");
             return resultMap;
         }
 
-        String payloadDatamartId = payload.getDatamartId();
+        String datamartId = payload.getDatamartId().trim();
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(datamartId);
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        datamartDAO.deleteDmSynonymByDatamartId(dm);
+
         List<DatamartVO.MetaSynonymRowVO> validRows = new ArrayList<>();
-        for (DatamartVO.MetaSynonymRowVO row : synonymList) {
-            if (row == null || CommonUtil.isEmpty(row.getSynonymWord())) {
-                continue;
+        List<DatamartVO.MetaSynonymRowVO> synonymList = payload.getSynonymList();
+        if (synonymList != null) {
+            for (DatamartVO.MetaSynonymRowVO row : synonymList) {
+                if (row == null || CommonUtil.isEmpty(row.getSynonymWord())) {
+                    continue;
+                }
+                row.setDatamartId(datamartId);
+                validRows.add(row);
             }
-            if (CommonUtil.isEmpty(row.getDatamartId())) {
-                row.setDatamartId(payloadDatamartId);
-            }
-            validRows.add(row);
-        }
-        if (validRows.isEmpty()) {
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", "동의어 목록이 비어 있습니다.");
-            return resultMap;
         }
 
-        String synonymDuplicateMsg = validateMetaSynonymUniqueness(payloadDatamartId, validRows);
-        if (synonymDuplicateMsg != null) {
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", synonymDuplicateMsg);
-            return resultMap;
-        }
-
-        assignSynonymIdsForSave(validRows);
-        applyMetaSynonymSortOrd(validRows);
-        for (DatamartVO.MetaSynonymRowVO row : validRows) {
-            applyMetaSynonymRowDefaults(row);
-            datamartDAO.updateMetaSynonym(row);
+        if (!validRows.isEmpty()) {
+            assignSynonymIdsForSave(validRows);
+            applyMetaSynonymSortOrd(validRows);
+            for (DatamartVO.MetaSynonymRowVO row : validRows) {
+                applyMetaSynonymRowDefaults(row);
+                datamartDAO.insertMetaSynonym(row);
+            }
         }
 
         resultMap.put("result", "SUCCESS");
@@ -1069,9 +1066,6 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         if (CommonUtil.isEmpty(datamartVO.getRepresentYn())) {
             datamartVO.setRepresentYn("N");
         }
-        if (CommonUtil.isEmpty(datamartVO.getUseYn())) {
-            datamartVO.setUseYn("Y");
-        }
     }
 
     /**
@@ -1089,12 +1083,12 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 데이터마트 퓨샷 저장(목록)
-     * @param payload datamartId, fewshotList (useYn: Y=저장, N=삭제(프론트 전달))
+     * 데이터마트 퓨샷 저장 (TB_DM_FEWSHOT 해당 DATAMART_ID 전체 삭제 후 INSERT)
+     * @param payload datamartId, fewshotList
      * @return { result, msg }
      * @throws Exception
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public HashMap<String, Object> saveMetaFewshotList(DatamartVO.MetaFewshotSavePayloadVO payload) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
@@ -1103,52 +1097,25 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
-        List<DatamartVO.MetaFewshotRowVO> fewshotList = payload.getFewshotList();
-        if (fewshotList == null || fewshotList.isEmpty()) {
+        String datamartId = payload.getDatamartId().trim();
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(datamartId);
+        if (datamartDAO.selectDatamart(dm) == null) {
             resultMap.put("result", "FAIL");
-            resultMap.put("msg", "퓨샷 목록이 비어 있습니다.");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
             return resultMap;
         }
 
-        String payloadDatamartId = payload.getDatamartId();
-        List<DatamartVO.MetaFewshotRowVO> validRows = new ArrayList<>();
-        for (DatamartVO.MetaFewshotRowVO row : fewshotList) {
-            if (row == null) {
-                continue;
-            }
-            if (CommonUtil.isEmpty(row.getDatamartId())) {
-                row.setDatamartId(payloadDatamartId);
-            }
-            normalizeMetaFewshotUseYn(row);
+        datamartDAO.deleteDmFewshotByDatamartId(dm);
 
-            if (isMetaFewshotDeleteRow(row)) {
-                if (CommonUtil.isEmpty(row.getFewshotId())) {
-                    continue;
-                }
-                validRows.add(row);
-                continue;
-            }
-            if (CommonUtil.isEmpty(row.getUserQuestion())) {
-                continue;
-            }
-            validRows.add(row);
-        }
-        if (validRows.isEmpty()) {
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", "퓨샷 목록이 비어 있습니다.");
-            return resultMap;
-        }
+        List<DatamartVO.MetaFewshotRowVO> validRows = filterFewshotSaveList(payload.getFewshotList(), datamartId);
 
-        String fewshotDuplicateMsg = validateMetaFewshotUniqueness(payloadDatamartId, validRows);
-        if (fewshotDuplicateMsg != null) {
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", fewshotDuplicateMsg);
-            return resultMap;
-        }
-
-        assignFewshotIdsForSave(payloadDatamartId, validRows);
-        for (DatamartVO.MetaFewshotRowVO row : validRows) {
-            datamartDAO.saveMetaFewshot(row);
+        if (!validRows.isEmpty()) {
+            assignFewshotIdsForSave(validRows);
+            DatamartVO.MetaFewshotSavePayloadVO insertPayload = new DatamartVO.MetaFewshotSavePayloadVO();
+            insertPayload.setDatamartId(datamartId);
+            insertPayload.setFewshotList(validRows);
+            datamartDAO.insertMetaFewshotBatch(insertPayload);
         }
 
         resultMap.put("result", "SUCCESS");
@@ -1156,134 +1123,28 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         return resultMap;
     }
 
-    private boolean isMetaFewshotDeleteRow(DatamartVO.MetaFewshotRowVO row) {
-        return row != null && "N".equalsIgnoreCase(CommonUtil.nullToBlank(row.getUseYn()));
-    }
-
-    private void normalizeMetaFewshotUseYn(DatamartVO.MetaFewshotRowVO row) {
-        if (row == null) {
-            return;
+    private List<DatamartVO.MetaFewshotRowVO> filterFewshotSaveList(
+            List<DatamartVO.MetaFewshotRowVO> fewshotList, String datamartId) {
+        List<DatamartVO.MetaFewshotRowVO> validRows = new ArrayList<>();
+        if (fewshotList == null) {
+            return validRows;
         }
-        String useYn = CommonUtil.nullToBlank(row.getUseYn()).trim();
-        if (CommonUtil.isEmpty(useYn)) {
-            row.setUseYn("Y");
-            return;
-        }
-        row.setUseYn(useYn.toUpperCase());
-    }
-
-    /**
-     * 동의어 (DATAMART_ID, SYNONYM_WORD) UNIQUE 검증
-     * @return 중복 시 FAIL 메시지, 없으면 null
-     */
-    private String validateMetaSynonymUniqueness(String datamartId, List<DatamartVO.MetaSynonymRowVO> rows)
-            throws Exception {
-        Set<String> seenWords = new HashSet<>();
-        for (DatamartVO.MetaSynonymRowVO row : rows) {
-            if (row == null || CommonUtil.isEmpty(row.getSynonymWord())) {
+        for (DatamartVO.MetaFewshotRowVO row : fewshotList) {
+            if (row == null || CommonUtil.isEmpty(row.getUserQuestion())) {
                 continue;
             }
-            String synonymWord = row.getSynonymWord().trim();
-            if (!seenWords.add(synonymWord)) {
-                return "동일한 동의어가 중복되었습니다: " + synonymWord;
-            }
+            row.setDatamartId(datamartId);
+            validRows.add(row);
         }
-
-        for (DatamartVO.MetaSynonymRowVO row : rows) {
-            if (row == null || CommonUtil.isEmpty(row.getSynonymWord())) {
-                continue;
-            }
-            if (CommonUtil.isEmpty(row.getDatamartId())) {
-                row.setDatamartId(datamartId);
-            }
-            DatamartVO.MetaSynonymRowVO existsRow = datamartDAO.selectMetaSynonymByWord(row);
-            if (existsRow == null || CommonUtil.isEmpty(existsRow.getSynonymWord())) {
-                continue;
-            }
-            String existingWord = existsRow.getSynonymWord().trim();
-            String rowWord = row.getSynonymWord().trim();
-            if (!existingWord.equals(rowWord)) {
-                continue;
-            }
-            String existingSynonymId = CommonUtil.nullToBlank(existsRow.getSynonymId()).trim();
-            String rowSynonymId = CommonUtil.nullToBlank(row.getSynonymId()).trim();
-            if (CommonUtil.isNotEmpty(rowSynonymId) && !existingSynonymId.equals(rowSynonymId)) {
-                return "이미 등록된 동의어입니다: " + rowWord;
-            }
-        }
-        return null;
+        return validRows;
     }
 
     /**
-     * 퓨샷 (DATAMART_ID, USER_QUESTION) UNIQUE 검증
-     * @return 중복 시 FAIL 메시지, 없으면 null
+     * 저장 payload 기준으로 FEWSHOT_ID·SORT_ORD를 채운다.
+     * - ID 없는 행: allocateFewshotIdInBatch로 신규 발급
+     * - SORT_ORD: payload 순서대로 1..N (delete-then-insert 전체 교체)
      */
-    private String validateMetaFewshotUniqueness(String datamartId, List<DatamartVO.MetaFewshotRowVO> rows)
-            throws Exception {
-        Set<String> seenQuestions = new HashSet<>();
-        Set<String> seenFewshotIds = new HashSet<>();
-        for (DatamartVO.MetaFewshotRowVO row : rows) {
-            if (row == null) {
-                continue;
-            }
-            if (isMetaFewshotDeleteRow(row)) {
-                if (CommonUtil.isNotEmpty(row.getFewshotId())) {
-                    String fewshotId = row.getFewshotId().trim();
-                    if (!seenFewshotIds.add(fewshotId)) {
-                        return "동일한 퓨샷 ID가 중복되었습니다: " + fewshotId;
-                    }
-                }
-                continue;
-            }
-            String userQuestion = CommonUtil.nullToBlank(row.getUserQuestion()).trim();
-            if (CommonUtil.isEmpty(userQuestion)) {
-                continue;
-            }
-            if (!seenQuestions.add(userQuestion)) {
-                return "동일한 사용자 질문이 중복되었습니다: " + userQuestion;
-            }
-            if (CommonUtil.isNotEmpty(row.getFewshotId())) {
-                String fewshotId = row.getFewshotId().trim();
-                if (!seenFewshotIds.add(fewshotId)) {
-                    return "동일한 퓨샷 ID가 중복되었습니다: " + fewshotId;
-                }
-            }
-        }
-
-        for (DatamartVO.MetaFewshotRowVO row : rows) {
-            if (row == null || isMetaFewshotDeleteRow(row)) {
-                continue;
-            }
-            String userQuestion = CommonUtil.nullToBlank(row.getUserQuestion()).trim();
-            if (CommonUtil.isEmpty(userQuestion)) {
-                continue;
-            }
-            if (CommonUtil.isEmpty(row.getDatamartId())) {
-                row.setDatamartId(datamartId);
-            }
-            DatamartVO.MetaFewshotRowVO existsRow = datamartDAO.selectMetaFewshotByQuestion(row);
-            if (existsRow == null || CommonUtil.isEmpty(existsRow.getUserQuestion())) {
-                continue;
-            }
-            String existingQuestion = existsRow.getUserQuestion().trim();
-            if (!existingQuestion.equals(userQuestion)) {
-                continue;
-            }
-            String existingFewshotId = CommonUtil.nullToBlank(existsRow.getFewshotId()).trim();
-            String rowFewshotId = CommonUtil.nullToBlank(row.getFewshotId()).trim();
-            if (CommonUtil.isEmpty(rowFewshotId) || !existingFewshotId.equals(rowFewshotId)) {
-                return "이미 등록된 사용자 질문입니다: " + userQuestion;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * 저장 payload 기준으로 신규 행에 FEWSHOT_ID·SORT_ORD를 채운다.
-     * - ID: allocateSynonymIdInBatch / allocateFewshotIdInBatch와 동일(로컬 시퀀스)
-     * - SORT_ORD: AgentServiceImpl.saveAgent 신규 등록과 동일(MAX+1, datamartId 단위)
-     */
-    private void assignFewshotIdsForSave(String datamartId, List<DatamartVO.MetaFewshotRowVO> rows) throws Exception {
+    private void assignFewshotIdsForSave(List<DatamartVO.MetaFewshotRowVO> rows) throws Exception {
         Set<String> reservedIds = new HashSet<>();
         for (DatamartVO.MetaFewshotRowVO row : rows) {
             if (row != null && CommonUtil.isNotEmpty(row.getFewshotId())) {
@@ -1292,28 +1153,22 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         }
 
         int[] batchNextSeq = new int[] { -1 };
-        int[] batchNextSortOrd = new int[] { -1 };
+        int sortOrd = 1;
         for (DatamartVO.MetaFewshotRowVO row : rows) {
-            if (row == null || CommonUtil.isNotEmpty(row.getFewshotId())) {
-                continue;
-            }
-            if (isMetaFewshotDeleteRow(row)) {
+            if (row == null) {
                 continue;
             }
 
-            String newId;
-            do {
-                newId = allocateFewshotIdInBatch(batchNextSeq);
-            } while (reservedIds.contains(newId));
-            reservedIds.add(newId);
-            row.setFewshotId(newId);
-
-            if (batchNextSortOrd[0] < 0) {
-                DatamartVO searchVO = new DatamartVO();
-                searchVO.setDatamartId(datamartId);
-                batchNextSortOrd[0] = datamartDAO.selectMetaFewshotMaxSortOrd(searchVO) + 1;
+            if (CommonUtil.isEmpty(row.getFewshotId())) {
+                String newId;
+                do {
+                    newId = allocateFewshotIdInBatch(batchNextSeq);
+                } while (reservedIds.contains(newId));
+                reservedIds.add(newId);
+                row.setFewshotId(newId);
             }
-            row.setSortOrd(batchNextSortOrd[0]++);
+
+            row.setSortOrd(sortOrd++);
         }
     }
 

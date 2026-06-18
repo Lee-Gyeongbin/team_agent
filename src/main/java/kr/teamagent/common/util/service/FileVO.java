@@ -44,8 +44,5 @@ public class FileVO extends CommonVO {
     private Long expiration;
     // 스토리지 파일 존재 여부
     private String fileExistYn;
-    // 삭제 예정일시
-    private String expireDt;
-    // 스토리지 파일 삭제일시
-    private String fileDelDt;
+
 }

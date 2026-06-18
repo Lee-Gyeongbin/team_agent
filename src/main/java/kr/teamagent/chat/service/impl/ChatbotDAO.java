@@ -269,7 +269,7 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 채팅 파일 orphan 처리 (EXPIRE_DT = NOW()로 갱신 → 배치 삭제 대상)
+     * 채팅 파일 orphan 처리
      * @param chatbotVO chatFileIdList 필수
      * @return 처리된 행 수
      * @throws Exception
@@ -279,7 +279,7 @@ public class ChatbotDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 첨부파일에 LOG_ID 연결 + EXPIRE_DT 해제 (로그 저장 성공 시 호출)
+     * 첨부파일에 LOG_ID 연결 (로그 저장 성공 시 호출)
      * @param chatbotVO chatFileIdList + logId 필수
      * @return 처리된 행 수
      * @throws Exception
@@ -316,6 +316,13 @@ public class ChatbotDAO extends EgovComAbstractDAO {
         return insert("ai.chatbot.upsertUserNewsInterestCategories", searchVO);
     }
 
+    public List<ChatbotVO> selectChatFileDelete(ChatbotVO param) throws Exception {
+        return selectList("ai.chatbot.selectChatFileDelete", param);
+    }
+
+    public int deleteChatFile(ChatbotVO param) throws Exception {
+        return delete("ai.chatbot.deleteChatFile", param);
+    }
     /**
      * 데이터셋에 속한 문서 파일명 목록 조회 (TB_DS_DOC → TB_DOC_FILE)
      */

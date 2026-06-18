@@ -245,8 +245,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     private void applyOrgExcelSheetOptions(XSSFSheet sheet) {
-        ExcelUtil.adjustColumnWidths(sheet, ORG_EXCEL_HEADERS.length);
-        sheet.createFreezePane(0, ExcelUtil.DATA_START_ROW);
+        ExcelUtil.applyDataSheetLayout(sheet, ORG_EXCEL_HEADERS.length);
         ExcelUtil.addUseYnListValidations(sheet, USE_YN_COL_IDX);
     }
 
@@ -267,13 +266,8 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = ExcelUtil.findHeaderRow(sheet, formatter, ORG_HDR_ORG_NM);
-            if (headerRow == null) {
-                throw new IllegalArgumentException("올바른 조직 엑셀 파일이 아닙니다. (헤더 행 없음)");
-            }
-
-            Map<String, Integer> colIdx = ExcelUtil.parseHeaderColumns(headerRow, formatter);
-            ExcelUtil.validateRequiredHeaderColumns(colIdx, "조직", ORG_HDR_ORG_NM, ORG_HDR_USE_YN);
+            Map<String, Integer> colIdx = ExcelUtil.detectUploadHeader(sheet, formatter, "조직",
+                    ORG_HDR_ORG_NM, ORG_HDR_ORG_NM, ORG_HDR_USE_YN);
 
             Integer orgNmCol = colIdx.get(ORG_HDR_ORG_NM);
             Integer orgIdCol = colIdx.get(ORG_HDR_ORG_ID);
@@ -281,7 +275,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
             parentOrgIdFirst = isParentOrgIdColumn(colIdx);
             Integer useYnCol = colIdx.get(ORG_HDR_USE_YN);
 
-            for (int i = headerRow.getRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = ExcelUtil.DATA_START_ROW; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) {
                     continue;
