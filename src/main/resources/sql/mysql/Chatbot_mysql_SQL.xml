@@ -136,7 +136,7 @@
         WHERE 1 = 1
             AND A.USE_YN = 'Y'
             AND C.USE_YN = 'Y'
-            AND A.SVC_TY = 'M'
+            AND A.SVC_TY IN ('M', 'D')
             AND A.AGENT_ID = #{agentId}
         GROUP BY B.DATASET_ID, C.DS_NM
     </select>

@@ -63,6 +63,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final String CURATION_SUB_TY = "CURATION";
     private static final String TRANSLATE_SUB_TY = "TRANSLATE";
     private static final String RESEARCHER_SUB_TY = "RESEARCHER";
+    private static final String RISK_SUB_TY = "RISK";
+    /** 리스크진단 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
+    private static final String RISK_DEFAULT_TMPL_ID = "TM000008";
+    /** 리스크진단 섹션별 LLM 호출에 주입하는 RFP 추출 텍스트 최대 길이(문자) — 토큰 폭주 방지 */
+    private static final int RISK_RFP_TEXT_MAX_CHARS = 12000;
     /** 리서처 리포트 출처 섹션 — 템플릿 HTML escape 우회용 치환 토큰 */
     private static final String SOURCES_TOKEN = "@@RSRC_SOURCES@@";
     /** RAG 문서 출처 링크 — 백엔드 GET 리다이렉트 엔드포인트.
@@ -98,6 +103,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private java.util.concurrent.ExecutorService getRecommendQuestionExecutor() {
         return recommendQuestionExecutor;
     }
+
+    /** 리스크진단 섹션별 병렬 LLM 호출용 스레드 풀 — 섹션(템플릿 필드) 단위로 동시 진단 */
+    private static final java.util.concurrent.ExecutorService riskAnalysisExecutor =
+            java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
+                Thread thread = new Thread(r, "risk-analysis-worker");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     /**
      * 세션의 진행 중인 AI API 스트리밍 호출을 취소
@@ -282,6 +295,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         // RESEARCHER 에이전트: 웹검색 + RAG 통합 리서치 리포트
         if (isResearcherAgent(agentId)) {
             deliverResearchReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
+            return;
+        }
+
+        // RISK 에이전트: RFP(PDF) 업로드 → 섹션 분리 → 섹션별 병렬 LLM 진단 → 리포트
+        if (isRiskDiagnosisAgent(agentId)) {
+            // TB_CHAT_LOG.SVC_TY는 리스크진단 에이전트(SVC_TY='D') 기준으로 저장한다.
+            svcTy = "D";
+            deliverRiskReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
             return;
         }
 
@@ -691,6 +712,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private boolean isResearcherAgent(String agentId) {
         ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
         return subCfg != null && RESEARCHER_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+    }
+
+    /**
+     * SUB_TY=RISK 에이전트(프로젝트 리스크진단) 여부 판별.
+     */
+    private boolean isRiskDiagnosisAgent(String agentId) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        return subCfg != null && RISK_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
     }
 
     private String buildRequestQueryByAgent(String query, String agentId) {
@@ -1992,6 +2021,21 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return sb.toString();
     }
 
+    /** HTML 태그를 제거해 평문으로 변환 (채팅 버블 요약용) */
+    private String stripHtmlTags(String s) {
+        if (CommonUtil.isEmpty(s)) {
+            return "";
+        }
+        String text = s.replaceAll("(?is)<[^>]+>", " ")
+                .replace("&nbsp;", " ")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return text.length() > 300 ? text.substring(0, 300) + "..." : text;
+    }
+
     /** HTML 특수문자 escape */
     private String htmlEscape(String s) {
         if (s == null) return "";
@@ -2387,6 +2431,541 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.error("리서처 리포트 생성 중 오류: {}", e.getMessage(), e);
             callback.onError("리서치 리포트 생성 중 오류가 발생했습니다: " + e.getMessage());
         }
+    }
+
+    /**
+     * RISK 에이전트(프로젝트 리스크진단): RFP(PDF) 업로드 → 텍스트 추출 → 템플릿 섹션 분리
+     * → 섹션별 병렬 LLM 진단(자사 역량 RAG 결합) → 결과 통합 → 리포트 HTML 조립.
+     */
+    private void deliverRiskReportViaWebSocket(
+            String query, String threadId, String userId, String svcTy, String modelId,
+            String refId, String agentId, List<Long> attachmentFileIds,
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
+        try {
+            // ① 첨부 RFP 필수 검증 + 텍스트 추출
+            if (!hasNonNullAttachmentId(attachmentFileIds)) {
+                callback.onError("진단할 RFP 파일을 업로드하세요.");
+                return;
+            }
+            callback.onStatus("extracting_file", "RFP 문서 분석 중");
+            StringBuilder rfpTextBuilder = new StringBuilder();
+            List<String> uploadedFileNames = new ArrayList<>();
+            for (Long fileId : attachmentFileIds) {
+                if (fileId == null) {
+                    continue;
+                }
+                try {
+                    ChatbotVO fileSearchVO = new ChatbotVO();
+                    fileSearchVO.setChatFileId(fileId);
+                    ChatbotVO fileVO = chatbotDAO.selectChatFileById(fileSearchVO);
+                    if (fileVO == null || CommonUtil.isEmpty(fileVO.getFilePath())) {
+                        continue;
+                    }
+                    String fileName = CommonUtil.nullToBlank(fileVO.getFileName());
+                    byte[] bytes = fileService.downloadStorageObjectBytes(fileVO.getFilePath());
+                    String text = extractPdfText(bytes, fileName);
+                    if (CommonUtil.isNotEmpty(text)) {
+                        if (CommonUtil.isNotEmpty(fileName)) {
+                            uploadedFileNames.add(fileName);
+                            rfpTextBuilder.append("\n\n===== 파일: ").append(fileName).append(" =====\n");
+                        }
+                        rfpTextBuilder.append(text);
+                    }
+                } catch (Exception e) {
+                    logger.warn("RFP 파일 추출 실패 (chatFileId={}): {}", fileId, e.getMessage());
+                }
+            }
+            String rfpText = rfpTextBuilder.toString().trim();
+            if (CommonUtil.isEmpty(rfpText)) {
+                callback.onError("업로드한 파일에서 텍스트를 추출하지 못했습니다. 텍스트가 포함된 PDF인지 확인하세요.");
+                return;
+            }
+            String rfpTextForPrompt = rfpText.length() > RISK_RFP_TEXT_MAX_CHARS
+                    ? rfpText.substring(0, RISK_RFP_TEXT_MAX_CHARS) + "\n...(이하 생략)"
+                    : rfpText;
+
+            // ② 템플릿 + 섹션(필드) 로딩
+            callback.onStatus("loading_template", "리포트 템플릿 준비 중");
+            ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+            String tmplId = RISK_DEFAULT_TMPL_ID;
+            if (subCfg != null && subCfg.getAdditionalConfigMap() != null) {
+                Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
+                if (featuresObj instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> features = (Map<String, Object>) featuresObj;
+                    String cfgTmplId = (String) features.get("tmplId");
+                    if (CommonUtil.isNotEmpty(cfgTmplId)) {
+                        tmplId = cfgTmplId;
+                    }
+                }
+            }
+            TmplVO tmplSearchVO = new TmplVO();
+            tmplSearchVO.setTmplId(tmplId);
+            TmplVO tmpl = tmplService.selectTmplDetail(tmplSearchVO);
+            List<LibraryVO.TmplFieldItem> tmplFieldList = new ArrayList<>();
+            if (tmpl != null) {
+                TmplVO fieldSearchVO = new TmplVO();
+                fieldSearchVO.setTmplId(tmplId);
+                List<TmplVO.TmplFieldVO> fieldVoList = tmplService.selectTmplFieldList(fieldSearchVO);
+                if (fieldVoList != null) {
+                    for (TmplVO.TmplFieldVO fv : fieldVoList) {
+                        LibraryVO.TmplFieldItem item = new LibraryVO.TmplFieldItem();
+                        item.setJsonKey(fv.getJsonKey());
+                        item.setFieldNm(fv.getFieldNm());
+                        item.setMultilineYn(fv.getMultilineYn());
+                        item.setLayoutType(fv.getLayoutType());
+                        tmplFieldList.add(item);
+                    }
+                }
+            }
+            if (tmpl == null || tmplFieldList.isEmpty()) {
+                callback.onError("리스크진단 리포트 템플릿이 설정되지 않았습니다. (tmplId=" + tmplId + ")");
+                return;
+            }
+            String llmPrompt = CommonUtil.isNotEmpty(tmpl.getLlmPrompt())
+                    ? tmpl.getLlmPrompt()
+                    : "당신은 RFP(제안요청서) 리스크 진단 전문가입니다. 업로드된 RFP와 자사 역량 자료를 근거로 진단하세요.";
+
+            // ③ 자사 역량 RAG 데이터셋 문서 조회
+            List<String> datasetIds = new ArrayList<>();
+            if (refId != null && !refId.trim().isEmpty()) {
+                for (String part : refId.split(",")) {
+                    String trimmed = part.trim();
+                    if (!trimmed.isEmpty() && !"all".equalsIgnoreCase(trimmed)) {
+                        datasetIds.add(trimmed);
+                    }
+                }
+            }
+            List<ChatbotVO> ragDocs = new ArrayList<>();
+            StringBuilder ragDocNames = new StringBuilder();
+            if (!datasetIds.isEmpty()) {
+                try {
+                    for (String dsId : datasetIds) {
+                        ChatbotVO docSearchVO = new ChatbotVO();
+                        docSearchVO.setRefId(dsId);
+                        List<ChatbotVO> docFiles = chatbotDAO.selectDatasetDocFileNames(docSearchVO);
+                        if (docFiles != null) {
+                            for (ChatbotVO doc : docFiles) {
+                                if (CommonUtil.isNotEmpty(doc.getFileName())) {
+                                    ragDocs.add(doc);
+                                    ragDocNames.append("- ").append(doc.getFileName()).append("\n");
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("리스크진단 RAG 문서 조회 실패: {}", e.getMessage());
+                }
+            }
+
+            // ④ 섹션별 병렬 LLM 진단 (sources 필드는 백엔드가 직접 구성하므로 제외)
+            callback.onStatus("analyzing_sections", "섹션별 리스크 진단 중");
+            final String fLlmPrompt = llmPrompt;
+            final String fRfpText = rfpTextForPrompt;
+            final String fRagDocNames = ragDocNames.length() > 0 ? ragDocNames.toString() : "(없음)";
+            final List<String> fDatasetIds = datasetIds;
+            final String fModelId = modelId;
+            final String fThreadId = threadId;
+            final String fAgentId = agentId;
+            final String fUserQuery = CommonUtil.isNotEmpty(query) ? query : "(추가 요청 없음)";
+
+            Map<String, java.util.concurrent.Future<Object>> futureMap = new java.util.LinkedHashMap<>();
+            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
+                if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
+                    continue;
+                }
+                if ("sources".equalsIgnoreCase(field.getJsonKey())) {
+                    continue;
+                }
+                final LibraryVO.TmplFieldItem fField = field;
+                java.util.concurrent.Future<Object> future = riskAnalysisExecutor.submit(() -> {
+                    String sectionPrompt = buildRiskSectionPrompt(fLlmPrompt, fField, fRfpText, fRagDocNames, fUserQuery);
+                    // 자사 역량 데이터셋이 연결돼 있으면 RAG(9111) 벡터검색, 없으면 RFP 본문 기반 일반 LLM(9000)
+                    String sectionAnswer = (fDatasetIds != null && !fDatasetIds.isEmpty())
+                            ? callRagQuerySync(sectionPrompt, fDatasetIds, fModelId, fThreadId, fAgentId)
+                            : callLlmQuerySync(sectionPrompt, fModelId, fThreadId);
+                    return cleanSectionHtml(sectionAnswer);
+                });
+                futureMap.put(field.getJsonKey(), future);
+            }
+
+            logger.info("리스크진단 섹션 병렬 호출 시작 - 섹션수:{}, datasetIds:{} (비어있으면 일반 LLM 사용)",
+                    futureMap.size(), datasetIds);
+
+            // ⑤ 결과 통합
+            Map<String, String> sectionHtmlMap = new java.util.LinkedHashMap<>();
+            int filledSections = 0;
+            for (Map.Entry<String, java.util.concurrent.Future<Object>> entry : futureMap.entrySet()) {
+                try {
+                    Object val = entry.getValue().get(
+                            SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC + 20, java.util.concurrent.TimeUnit.SECONDS);
+                    String html = val != null ? String.valueOf(val) : "";
+                    sectionHtmlMap.put(entry.getKey(), html);
+                    if (CommonUtil.isNotEmpty(html)) {
+                        filledSections++;
+                    }
+                } catch (Exception e) {
+                    logger.warn("리스크진단 섹션 '{}' 진단 실패: {}", entry.getKey(), e.getMessage());
+                    sectionHtmlMap.put(entry.getKey(), "");
+                }
+            }
+            logger.info("리스크진단 섹션 진단 완료 - 내용 채워진 섹션:{}/{}", filledSections, futureMap.size());
+
+            // 요약 텍스트 (채팅 버블용) — HTML 태그 제거한 평문
+            String executiveSummary = "";
+            for (String summaryKey : new String[]{"executive_summary", "요약", "summary", "핵심요약"}) {
+                String summaryVal = sectionHtmlMap.get(summaryKey);
+                if (CommonUtil.isNotEmpty(summaryVal)) {
+                    executiveSummary = stripHtmlTags(summaryVal);
+                    break;
+                }
+            }
+
+            // ⑥ 리포트 HTML 조립 — LLM이 생성한 HTML 조각을 escape 없이 {{key}}에 직접 주입
+            //    (공용 TmplHtmlRenderService는 값을 escape하므로 리스크 리포트는 직접 치환한다)
+            String reportHtml = CommonUtil.isNotEmpty(tmpl.getTmplHtml())
+                    ? tmpl.getTmplHtml() : "<div class=\"risk-report\"></div>";
+            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
+                if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
+                    continue;
+                }
+                String key = field.getJsonKey();
+                if ("sources".equalsIgnoreCase(key)) {
+                    continue;
+                }
+                String v = sectionHtmlMap.get(key);
+                String htmlVal = CommonUtil.isNotEmpty(v)
+                        ? v
+                        : "<p class=\"risk-empty\">※ 해당 항목 분석 결과가 비어 있습니다.</p>";
+                reportHtml = reportHtml.replace("{{" + key + "}}", htmlVal);
+            }
+            String sourcesHtml = buildRiskSourcesHtml(uploadedFileNames, ragDocs);
+            reportHtml = reportHtml.replace("{{sources}}", sourcesHtml);
+
+            // ⑦ 전송 + 저장
+            String summaryText = CommonUtil.isNotEmpty(executiveSummary)
+                    ? executiveSummary : "프로젝트 리스크진단 리포트가 생성되었습니다.";
+            callback.onChunk(summaryText, summaryText, null);
+            if (CommonUtil.isNotEmpty(reportHtml)) {
+                callback.onChunk(reportHtml, reportHtml, "report_html");
+            }
+
+            String savedLogId = this.doInsertAiLog(
+                    threadId, agentId, query, summaryText,
+                    0, 0, svcTy, modelId, refId, userId,
+                    null, null, null, null,
+                    null, null, new ArrayList<>(),
+                    null, null,
+                    reportHtml);
+
+            this.updateChatRoomLastChatDt(threadId);
+
+            callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
+                    CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
+                    "", "", "");
+
+        } catch (Exception e) {
+            logger.error("리스크진단 리포트 생성 중 오류: {}", e.getMessage(), e);
+            callback.onError("리스크진단 리포트 생성 중 오류가 발생했습니다: " + e.getMessage());
+        }
+    }
+
+    /** PDFBox로 PDF byte[]에서 텍스트를 추출한다. PDF가 아니거나 실패 시 빈 문자열. */
+    private String extractPdfText(byte[] bytes, String fileName) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+        try (org.apache.pdfbox.pdmodel.PDDocument document =
+                     org.apache.pdfbox.pdmodel.PDDocument.load(bytes)) {
+            org.apache.pdfbox.text.PDFTextStripper stripper = new org.apache.pdfbox.text.PDFTextStripper();
+            String text = stripper.getText(document);
+            return text != null ? text.trim() : "";
+        } catch (Exception e) {
+            logger.warn("PDF 텍스트 추출 실패 (file={}): {}", fileName, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 리스크진단 섹션(템플릿 필드) 1개에 대한 LLM 프롬프트를 구성한다.
+     * 리포트는 LLM이 생성한 HTML 조각을 escape 없이 그대로 주입하므로, 응답은 'HTML 조각'으로 받는다.
+     */
+    private String buildRiskSectionPrompt(String basePrompt, LibraryVO.TmplFieldItem field,
+            String rfpText, String ragDocNames, String userQuery) {
+        String jsonKey = field.getJsonKey();
+        String fieldNm = CommonUtil.nullToBlank(field.getFieldNm());
+        boolean isTable = "table".equalsIgnoreCase(CommonUtil.nullToBlank(field.getLayoutType()));
+        boolean multiline = "Y".equals(field.getMultilineYn());
+        boolean titleLike = "title".equalsIgnoreCase(jsonKey) || fieldNm.contains("제목");
+
+        String formatGuide;
+        if (titleLike) {
+            // 템플릿이 {{title}}을 <h1> 등으로 감싸므로, 여기서는 태그 없는 한 줄 제목 텍스트만 출력해야 중첩이 없다.
+            formatGuide = "한 줄 제목 텍스트만 출력하세요. **HTML 태그를 절대 쓰지 말 것** "
+                    + "(리포트 템플릿이 제목 서식을 적용합니다). 요약 문단을 넣지 말고 핵심을 담은 한 문장 제목만.";
+        } else if (isTable) {
+            formatGuide = "비교·정리에 적합하므로 표로 작성하세요. 형식: "
+                    + "<table><thead><tr><th>구분</th><th>내용</th><th>영향/대응</th></tr></thead>"
+                    + "<tbody><tr><td>...</td><td>...</td><td>...</td></tr> ... (최소 3행)</tbody></table>";
+        } else if (multiline) {
+            formatGuide = "여러 항목을 목록으로 작성하세요. 형식: "
+                    + "<ul><li><strong>핵심 라벨</strong> — 구체 설명(근거·영향·대응 포함)</li> ... (3~6개)</ul>. "
+                    + "비교가 더 명확하면 <ul> 대신 <table>(thead/tbody)로 작성해도 됩니다.";
+        } else {
+            // 단락형(executive_summary 등)은 템플릿이 <p> 등으로 감쌀 수 있으므로 블록 태그로 감싸지 않는다.
+            formatGuide = "2~4문장의 단락 텍스트로 작성하세요. **<p>·<div> 같은 블록 태그로 감싸지 말 것** "
+                    + "(템플릿이 문단 영역을 제공). 강조는 <strong>, 줄바꿈은 <br>만 인라인으로 사용 가능.";
+        }
+
+        return basePrompt
+                + "\n\n## 이번에 작성할 진단 항목 (이 항목 하나만)\n"
+                + "- 항목: " + (CommonUtil.isNotEmpty(fieldNm) ? fieldNm : jsonKey) + "\n"
+                + "\n## 작성 규칙 (반드시 준수)\n"
+                + "1) 절대 비우지 마세요. RFP에 근거가 없더라도 일반적 기준에 따른 합리적 추정·권고를 "
+                + "'※ RFP 미명시 — 추정/권고: ...' 로 반드시 채워 넣으세요. 어떤 경우에도 내용이 비면 안 됩니다.\n"
+                + "2) 추측이라도 구체적으로 — 근거(RFP 문구 또는 일반 기준)·영향·대응을 함께 제시하세요.\n"
+                + "3) 핵심을 항목별로 끊어 구조화하고, 모호한 한 줄로 끝내지 마세요.\n"
+                + "\n## 출력 형식 (매우 중요)\n"
+                + "- 응답은 **HTML 조각만** 출력하세요. JSON·코드블록(```)·설명 문장·인사말을 절대 붙이지 마세요.\n"
+                + "- 허용 태그: <h3> <h4> <p> <ul> <ol> <li> <strong> <em> <br> <table> <thead> <tbody> <tr> <th> <td>\n"
+                + "- 금지: <script> <style> <iframe>, on...= 이벤트 속성, 인라인 style, <html>/<body> 등 문서 루트 태그\n"
+                + "- 이 항목의 형식: " + formatGuide + "\n"
+                + "\n## 분석 대상 RFP 본문\n" + rfpText
+                + "\n\n## 참조 가능한 자사 역량 문서 목록\n" + ragDocNames
+                + "\n\n## 사용자 추가 요청\n" + userQuery
+                + "\n\n## 다시 강조\nHTML 조각만 출력. 다른 텍스트 금지.";
+    }
+
+    /**
+     * 섹션 LLM 응답을 리포트에 주입할 안전한 HTML 조각으로 정리한다.
+     * 코드펜스 제거 + 위험 태그/속성 제거(간이 새니타이즈).
+     */
+    private String cleanSectionHtml(String answer) {
+        if (CommonUtil.isEmpty(answer)) {
+            return "";
+        }
+        String s = answer.trim();
+        // 코드펜스 제거 (```html / ``` )
+        if (s.startsWith("```html")) {
+            s = s.substring(7);
+        } else if (s.startsWith("```")) {
+            s = s.substring(3);
+        }
+        if (s.endsWith("```")) {
+            s = s.substring(0, s.length() - 3);
+        }
+        s = s.trim();
+        // 간이 새니타이즈 — script/style/iframe, 이벤트 핸들러, javascript: 제거
+        s = s.replaceAll("(?is)<\\s*script[^>]*>.*?<\\s*/\\s*script\\s*>", "");
+        s = s.replaceAll("(?is)<\\s*style[^>]*>.*?<\\s*/\\s*style\\s*>", "");
+        s = s.replaceAll("(?is)<\\s*iframe[^>]*>.*?<\\s*/\\s*iframe\\s*>", "");
+        s = s.replaceAll("(?is)\\son\\w+\\s*=\\s*\"[^\"]*\"", "");
+        s = s.replaceAll("(?is)\\son\\w+\\s*=\\s*'[^']*'", "");
+        s = s.replaceAll("(?is)javascript:", "");
+        return s.trim();
+    }
+
+    /** 9111/query(RAG)를 동기 호출하고 done 이벤트의 답변 문자열을 반환한다. dataset_id 벡터 검색 포함. */
+    private String callRagQuerySync(String prompt, List<String> datasetIds, String modelId,
+            String threadId, String agentId) {
+        String ragApiUrl = PropertyUtil.getProperty("Globals.chatbot.ragQuery.apiUrl");
+        if (CommonUtil.isEmpty(ragApiUrl)) {
+            logger.warn("RAG 질의 API URL 미설정");
+            return "";
+        }
+        Map<String, Object> ragParams = new HashMap<>();
+        ragParams.put("query", prompt);
+        ragParams.put("dataset_id", datasetIds != null ? datasetIds : new ArrayList<String>());
+        ragParams.put("model_id", modelId != null ? modelId : "");
+        ragParams.put("room_id", threadId != null ? threadId : "string");
+        ragParams.put("agent_id", agentId != null ? agentId : "");
+        ragParams.put("attachment_file_ids", new ArrayList<String>());
+
+        OkHttpClient client = new OkHttpClient.Builder()
+                .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        String ragJsonBody = gson.toJson(ragParams);
+        RequestBody ragBody = RequestBody.create(ragJsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+        Request ragRequest = new Request.Builder()
+                .url(ragApiUrl)
+                .post(ragBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "text/event-stream")
+                .build();
+        logger.info("리스크 RAG 섹션 호출 시작 - url:{}, requestBody:{}", ragApiUrl, ragJsonBody);
+        try (okhttp3.Response response = client.newCall(ragRequest).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                String errBody = "";
+                try {
+                    if (response.body() != null) {
+                        errBody = response.body().string();
+                    }
+                } catch (Exception ignore) {
+                    // 본문 읽기 실패 무시
+                }
+                logger.warn("RAG 질의 응답 오류: {} - body: {}", response.code(), errBody);
+                return "";
+            }
+            try (okhttp3.ResponseBody responseBody = response.body()) {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(responseBody.byteStream(), "UTF-8"));
+                StringBuilder answerBuilder = new StringBuilder();
+                String doneAnswer = "";
+                String line;
+                JSONParser jsonParser = new JSONParser();
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("event: ")) {
+                        continue;
+                    }
+                    String jsonStr;
+                    if (line.startsWith("data: ")) {
+                        jsonStr = line.substring(6).trim();
+                    } else if (line.trim().startsWith("{")) {
+                        jsonStr = line.trim();
+                    } else {
+                        continue;
+                    }
+                    if (jsonStr.isEmpty()) {
+                        continue;
+                    }
+                    try {
+                        JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
+                        Object textObj = data.get("text");
+                        if (textObj != null) {
+                            answerBuilder.append(String.valueOf(textObj));
+                        }
+                        Object answerObj = data.get("answer");
+                        if (answerObj == null) {
+                            answerObj = data.get("답변");
+                        }
+                        if (answerObj != null) {
+                            doneAnswer = String.valueOf(answerObj);
+                        }
+                    } catch (Exception ignore) {
+                        // 개별 라인 파싱 실패는 무시
+                    }
+                }
+                String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                logger.info("리스크 RAG 섹션 응답 수신 - 길이:{}", result != null ? result.length() : 0);
+                return result;
+            }
+        } catch (Exception e) {
+            logger.warn("RAG 질의 호출 실패: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 일반 LLM 엔드포인트(9000/query)를 동기 호출하고 답변 문자열을 반환한다.
+     * 데이터셋(RAG) 없이 RFP 본문만으로 진단할 때 사용 — dataset_id 불필요.
+     */
+    private String callLlmQuerySync(String prompt, String modelId, String threadId) {
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            logger.warn("리스크 LLM 질의 실패 - gpt.apiUrl 미설정");
+            return "";
+        }
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", prompt);
+        params.put("model_id", modelId != null ? modelId : "");
+        params.put("room_id", threadId != null ? threadId : "");
+
+        OkHttpClient client = new OkHttpClient.Builder()
+                .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        String jsonBody = gson.toJson(params);
+        RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+        Request request = new Request.Builder()
+                .url(apiUrl)
+                .post(body)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "text/event-stream")
+                .build();
+        logger.info("리스크 LLM 섹션 호출 시작 - url:{}", apiUrl);
+        try (okhttp3.Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                logger.warn("리스크 LLM 질의 응답 오류: {}", response.code());
+                return "";
+            }
+            try (okhttp3.ResponseBody responseBody = response.body()) {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(responseBody.byteStream(), "UTF-8"));
+                StringBuilder answerBuilder = new StringBuilder();
+                String doneAnswer = "";
+                String line;
+                JSONParser jsonParser = new JSONParser();
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("event: ")) {
+                        continue;
+                    }
+                    String jsonStr;
+                    if (line.startsWith("data: ")) {
+                        jsonStr = line.substring(6).trim();
+                    } else if (line.trim().startsWith("{")) {
+                        jsonStr = line.trim();
+                    } else {
+                        continue;
+                    }
+                    if (jsonStr.isEmpty()) {
+                        continue;
+                    }
+                    try {
+                        JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
+                        Object textObj = data.get("text");
+                        if (textObj != null) {
+                            answerBuilder.append(String.valueOf(textObj));
+                        }
+                        Object answerObj = data.get("answer");
+                        if (answerObj == null) {
+                            answerObj = data.get("답변");
+                        }
+                        if (answerObj != null) {
+                            doneAnswer = String.valueOf(answerObj);
+                        }
+                    } catch (Exception ignore) {
+                        // 개별 라인 파싱 실패는 무시
+                    }
+                }
+                String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                logger.info("리스크 LLM 섹션 응답 수신 - 길이:{}", result != null ? result.length() : 0);
+                return result;
+            }
+        } catch (Exception e) {
+            logger.warn("리스크 LLM 질의 호출 실패: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** 리스크진단 출처 HTML — 업로드한 RFP 파일명 + 자사 역량 RAG 문서 링크. */
+    private String buildRiskSourcesHtml(List<String> uploadedFileNames, List<ChatbotVO> ragDocs) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<ul>");
+        if (uploadedFileNames != null) {
+            for (String name : uploadedFileNames) {
+                if (CommonUtil.isEmpty(name)) {
+                    continue;
+                }
+                sb.append("<li>업로드 RFP: ").append(htmlEscape(name)).append("</li>");
+            }
+        }
+        if (ragDocs != null) {
+            for (ChatbotVO doc : ragDocs) {
+                if (doc == null || CommonUtil.isEmpty(doc.getFileName())) {
+                    continue;
+                }
+                String fileName = htmlEscape(doc.getFileName());
+                String docFileId = CommonUtil.nullToBlank(doc.getDocFileId());
+                String href = RAG_DOC_LINK_PREFIX + docFileId;
+                sb.append("<li>자사 역량 문서: <a href=\"").append(href).append("\">")
+                        .append(fileName).append("</a></li>");
+            }
+        }
+        sb.append("</ul>");
+        return sb.toString();
     }
 
     /**

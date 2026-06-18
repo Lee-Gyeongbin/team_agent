@@ -93,7 +93,8 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     public List<?> selectAgentDetailDataList(AgentVO searchVO) throws Exception {
-        if ("M".equals(searchVO.getSvcTy())) {
+        // D(RISK)는 자사 역량 RAG 데이터셋을 M과 동일하게 연결한다.
+        if ("M".equals(searchVO.getSvcTy()) || "D".equals(searchVO.getSvcTy())) {
             return agentDAO.selectAgentDsList(searchVO);
         } else if ("S".equals(searchVO.getSvcTy())) {
             return agentDAO.selectAgentDmList(searchVO);
@@ -142,6 +143,27 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
                     agentDAO.insertAgentDm(formVO);
                 }
             }
+        } else if ("D".equals(formVO.getSvcTy())) {
+            // RISK 등 D 타입: 자사 역량 RAG 데이터셋 연결 저장.
+            // AI 서버 9111/query(get_prompt_config)가 TB_AGT_RAG_CFG 행을 요구하므로 M과 동일하게 RAG 설정도 저장한다.
+            if (CommonUtil.isEmpty(formVO.getSimThresh())) {
+                formVO.setSimThresh("0.7");
+            }
+            if (CommonUtil.isEmpty(formVO.getMaxSrchRslt())) {
+                formVO.setMaxSrchRslt("10");
+            }
+            agentDAO.saveAgentRagCfg(formVO);
+
+            agentDAO.deleteAgentDs(formVO);
+            if (formVO.getDatasetList() != null) {
+                List<AgentVO.DsVO> connList = formVO.getDatasetList().stream()
+                        .filter(ds -> "Y".equals(ds.getConnYn()))
+                        .collect(Collectors.toList());
+                if (!connList.isEmpty()) {
+                    formVO.setDatasetList(connList);
+                    agentDAO.insertAgentDs(formVO);
+                }
+            }
         }
 
         if (formVO.getSubCfg() != null) {
@@ -169,6 +191,10 @@ public class AgentServiceImpl extends EgovAbstractServiceImpl {
         } else if ("S".equals(searchVO.getSvcTy())) {
             agentDAO.deleteAgentDm(searchVO);
             agentDAO.deleteAgentSqlCfg(searchVO);
+        } else if ("D".equals(searchVO.getSvcTy())) {
+            // RISK 등 D 타입: 연결된 자사 역량 데이터셋 + RAG 설정 정리
+            agentDAO.deleteAgentDs(searchVO);
+            agentDAO.deleteAgentRagCfg(searchVO);
         }
         agentDAO.deleteAgent(searchVO);
     }
