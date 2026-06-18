@@ -2811,7 +2811,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "text/event-stream")
                 .build();
-        logger.info("리스크 RAG 섹션 호출 시작 - url:{}, requestBody:{}", ragApiUrl, ragJsonBody);
         try (okhttp3.Response response = client.newCall(ragRequest).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 String errBody = "";
