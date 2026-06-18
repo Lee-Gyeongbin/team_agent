@@ -97,7 +97,7 @@ public class DatamartController extends BaseController {
     }
 
     /**
-     * 메타 관리 > 테이블 저장 API
+     * 메타 관리 > 테이블 저장 API (TB_DM_TBL DATAMART_ID 단위 전체 삭제 후 INSERT)
      * @param payload datamartId, tableList
      * @return { result, msg }
      * @throws Exception
@@ -169,7 +169,7 @@ public class DatamartController extends BaseController {
     }
 
     /**
-     * 메타 관리 > 코드그룹 매핑 저장 API (TB_DM_COL_CODE UK merge upsert, soft delete USE_YN=N)
+     * 메타 관리 > 코드그룹 매핑 저장 API (TB_DM_COL_CODE DATAMART_ID 단위 전체 삭제 후 INSERT)
      * @param payload datamartId, codeColumnMappingList
      * @return { result, msg, dataList }
      * @throws Exception
@@ -237,7 +237,7 @@ public class DatamartController extends BaseController {
     }
 
     /**
-     * 메타 관리 > 동의어 저장 API (등록/수정)
+     * 메타 관리 > 동의어 저장 API (TB_DM_SYNONYM DATAMART_ID 단위 전체 삭제 후 INSERT)
      * @param payload datamartId, synonymList
      * @return { result, msg }
      * @throws Exception
@@ -263,7 +263,7 @@ public class DatamartController extends BaseController {
     }
 
     /**
-     * 메타 관리 > 퓨샷 저장 API
+     * 메타 관리 > 퓨샷 저장 API (TB_DM_FEWSHOT DATAMART_ID 단위 전체 삭제 후 INSERT)
      * @param payload datamartId, fewshotList
      * @return { result, msg }
      * @throws Exception
