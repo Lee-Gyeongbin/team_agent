@@ -33,6 +33,26 @@ public class MailController extends BaseController<Object> {
     @Autowired
     private MailServiceImpl mailService;
 
+    // ─── 0. 인증 상태 확인 ───────────────────────────────────
+
+    /**
+     * GET /mail/auth-check.do
+     * 서버 세션에 메일 자격증명이 저장되어 있으면 SUCCESS, 없으면 FAIL 반환.
+     * 로그인 모달 표시 여부 판단용 — IMAP 재연결 없이 세션만 확인.
+     */
+    @RequestMapping(value = "/auth-check.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView authCheck(HttpServletRequest request) {
+        String email    = getMailSession(request, SESSION_KEY_EMAIL);
+        String password = getMailSession(request, SESSION_KEY_PASSWORD);
+        if (email != null && password != null) {
+            return makeSuccessJsonData();
+        }
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("message", "인증 정보가 없습니다.");
+        return makeFailJsonData(resultMap);
+    }
+
     // ─── 1. IMAP 로그인 인증 ─────────────────────────────────
 
     /**
