@@ -219,6 +219,16 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 데이터마트 퓨샷 최대 정렬순서 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return MAX(SORT_ORD), 없으면 0
+     * @throws Exception
+     */
+    public int selectMaxFewshotSortOrdByDatamartId(DatamartVO searchVO) throws Exception {
+        return selectOne("datamart.selectMaxFewshotSortOrdByDatamartId", searchVO);
+    }
+
+    /**
      * 데이터마트 동의어 목록 조회
      * @param searchVO datamartId
      * @return 동의어 행 목록
@@ -226,16 +236,6 @@ public class DatamartDAO extends EgovComAbstractDAO {
      */
     public List<DatamartVO.MetaSynonymRowVO> selectMetaSynonymList(DatamartVO searchVO) throws Exception {
         return selectList("datamart.selectDatamartSynonymList", searchVO);
-    }
-
-    /**
-     * 데이터마트 동의어 단건 조회 (DATAMART_ID + SYNONYM_WORD)
-     * @param datamartVO datamartId, synonymWord
-     * @return 동의어 행
-     * @throws Exception
-     */
-    public DatamartVO.MetaSynonymRowVO selectMetaSynonymByWord(DatamartVO.MetaSynonymRowVO datamartVO) throws Exception {
-        return selectOne("datamart.selectDatamartSynonymByWord", datamartVO);
     }
 
     /**

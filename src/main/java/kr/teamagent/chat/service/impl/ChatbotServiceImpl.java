@@ -66,8 +66,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final String RISK_SUB_TY = "RISK";
     /** 리스크진단 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
     private static final String RISK_DEFAULT_TMPL_ID = "TM000008";
-    /** 리스크진단 섹션별 LLM 호출에 주입하는 RFP 추출 텍스트 최대 길이(문자) — 토큰 폭주 방지 */
-    private static final int RISK_RFP_TEXT_MAX_CHARS = 12000;
+    /** 리스크진단 생성(9000) 프롬프트에 주입하는 RFP 추출 텍스트 최대 길이(문자).
+     *  2단계 생성은 대용량 컨텍스트(임베딩 아님)라 RFP 전체를 충분히 담아 분석 충실도를 높인다. */
+    private static final int RISK_RFP_TEXT_MAX_CHARS = 24000;
+    /** 리스크진단 단일 호출은 전체 리포트를 한 번에 생성하므로 읽기 타임아웃을 길게 둔다(초). */
+    private static final int RISK_QUERY_READ_TIMEOUT_SEC = 300;
     /** 리서처 리포트 출처 섹션 — 템플릿 HTML escape 우회용 치환 토큰 */
     private static final String SOURCES_TOKEN = "@@RSRC_SOURCES@@";
     /** RAG 문서 출처 링크 — 백엔드 GET 리다이렉트 엔드포인트.
@@ -103,14 +106,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private java.util.concurrent.ExecutorService getRecommendQuestionExecutor() {
         return recommendQuestionExecutor;
     }
-
-    /** 리스크진단 섹션별 병렬 LLM 호출용 스레드 풀 — 섹션(템플릿 필드) 단위로 동시 진단 */
-    private static final java.util.concurrent.ExecutorService riskAnalysisExecutor =
-            java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
-                Thread thread = new Thread(r, "risk-analysis-worker");
-                thread.setDaemon(true);
-                return thread;
-            });
 
     /**
      * 세션의 진행 중인 AI API 스트리밍 호출을 취소
@@ -2575,58 +2570,45 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 }
             }
 
-            // ④ 섹션별 병렬 LLM 진단 (sources 필드는 백엔드가 직접 구성하므로 제외)
-            callback.onStatus("analyzing_sections", "섹션별 리스크 진단 중");
-            final String fLlmPrompt = llmPrompt;
-            final String fRfpText = rfpTextForPrompt;
-            final String fRagDocNames = ragDocNames.length() > 0 ? ragDocNames.toString() : "(없음)";
-            final List<String> fDatasetIds = datasetIds;
-            final String fModelId = modelId;
-            final String fThreadId = threadId;
-            final String fAgentId = agentId;
-            final String fUserQuery = CommonUtil.isNotEmpty(query) ? query : "(추가 요청 없음)";
-
-            Map<String, java.util.concurrent.Future<Object>> futureMap = new java.util.LinkedHashMap<>();
-            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
-                if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
-                    continue;
-                }
-                if ("sources".equalsIgnoreCase(field.getJsonKey())) {
-                    continue;
-                }
-                final LibraryVO.TmplFieldItem fField = field;
-                java.util.concurrent.Future<Object> future = riskAnalysisExecutor.submit(() -> {
-                    String sectionPrompt = buildRiskSectionPrompt(fLlmPrompt, fField, fRfpText, fRagDocNames, fUserQuery);
-                    // 자사 역량 데이터셋이 연결돼 있으면 RAG(9111) 벡터검색, 없으면 RFP 본문 기반 일반 LLM(9000)
-                    String sectionAnswer = (fDatasetIds != null && !fDatasetIds.isEmpty())
-                            ? callRagQuerySync(sectionPrompt, fDatasetIds, fModelId, fThreadId, fAgentId)
-                            : callLlmQuerySync(sectionPrompt, fModelId, fThreadId);
-                    return cleanSectionHtml(sectionAnswer);
-                });
-                futureMap.put(field.getJsonKey(), future);
+            // ④-1 자사 역량 RAG 검색 — 짧은 검색 쿼리만 임베딩(RFP 본문 제외)해 9111의 8192 임베딩 한도를 회피.
+            //     사내 문서(dataset_id) 벡터검색이 실제로 수행되어 자사 역량 요지를 받아온다.
+            String companyContext = "";
+            if (!datasetIds.isEmpty()) {
+                callback.onStatus("searching_rag", "자사 역량 자료 검색 중");
+                String retrievalQuery = buildRiskRetrievalQuery(rfpTextForPrompt);
+                companyContext = callRagQuerySync(retrievalQuery, datasetIds, modelId, threadId, agentId);
+                logger.info("리스크진단 자사역량 RAG 컨텍스트 수신 - 길이:{}",
+                        companyContext != null ? companyContext.length() : 0);
+            }
+            if (CommonUtil.isEmpty(companyContext)) {
+                // RAG 미연결/검색 실패 시 — 문서명 목록만 참고로 제공
+                companyContext = ragDocNames.length() > 0
+                        ? "(검색 결과 없음 — 참고 문서 목록)\n" + ragDocNames
+                        : "(자사 역량 자료 없음)";
             }
 
-            logger.info("리스크진단 섹션 병렬 호출 시작 - 섹션수:{}, datasetIds:{} (비어있으면 일반 LLM 사용)",
-                    futureMap.size(), datasetIds);
+            // ④-2 전체 리포트 생성 — 9000/query(대용량 컨텍스트)로 RFP 임베딩 없이 단일 생성(섹션 간 일관성 유지).
+            //     모든 섹션을 [[SEC:키]]…[[/SEC]] 구분자로 한 번에 받는다.
+            callback.onStatus("analyzing_sections", "리스크 진단 리포트 생성 중");
+            String reportPrompt = buildRiskReportPrompt(llmPrompt, tmplFieldList, rfpTextForPrompt,
+                    companyContext, CommonUtil.isNotEmpty(query) ? query : "(추가 요청 없음)");
+            String aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId);
+            // 응답이 비면 1회 재시도
+            if (CommonUtil.isEmpty(aiResponse)) {
+                logger.warn("리스크진단 리포트 1차 응답 없음 — 재시도");
+                aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId);
+            }
 
-            // ⑤ 결과 통합
-            Map<String, String> sectionHtmlMap = new java.util.LinkedHashMap<>();
+            // ⑤ 섹션 구분자([[SEC:키]]…[[/SEC]]) 파싱 → key별 HTML
+            Map<String, String> sectionHtmlMap = parseRiskSections(aiResponse, tmplFieldList);
             int filledSections = 0;
-            for (Map.Entry<String, java.util.concurrent.Future<Object>> entry : futureMap.entrySet()) {
-                try {
-                    Object val = entry.getValue().get(
-                            SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC + 20, java.util.concurrent.TimeUnit.SECONDS);
-                    String html = val != null ? String.valueOf(val) : "";
-                    sectionHtmlMap.put(entry.getKey(), html);
-                    if (CommonUtil.isNotEmpty(html)) {
-                        filledSections++;
-                    }
-                } catch (Exception e) {
-                    logger.warn("리스크진단 섹션 '{}' 진단 실패: {}", entry.getKey(), e.getMessage());
-                    sectionHtmlMap.put(entry.getKey(), "");
+            for (String v : sectionHtmlMap.values()) {
+                if (CommonUtil.isNotEmpty(v)) {
+                    filledSections++;
                 }
             }
-            logger.info("리스크진단 섹션 진단 완료 - 내용 채워진 섹션:{}/{}", filledSections, futureMap.size());
+            logger.info("리스크진단 리포트 생성 완료 - 파싱된 섹션:{}/{}, 응답 길이:{}",
+                    filledSections, sectionHtmlMap.size(), aiResponse != null ? aiResponse.length() : 0);
 
             // 요약 텍스트 (채팅 버블용) — HTML 태그 제거한 평문
             String executiveSummary = "";
@@ -2704,53 +2686,116 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 리스크진단 섹션(템플릿 필드) 1개에 대한 LLM 프롬프트를 구성한다.
-     * 리포트는 LLM이 생성한 HTML 조각을 escape 없이 그대로 주입하므로, 응답은 'HTML 조각'으로 받는다.
+     * 리스크진단 전체 리포트를 한 번의 LLM(9000) 호출로 생성하기 위한 프롬프트를 구성한다.
+     * 모든 섹션을 [[SEC:키]]…[[/SEC]] 구분자로 받고, 각 내용은 escape 없이 그대로 주입할 HTML 조각이다.
+     * @param companyContext 1단계 RAG 검색으로 받아온 자사 역량 자료 요지(또는 폴백 문서 목록)
      */
-    private String buildRiskSectionPrompt(String basePrompt, LibraryVO.TmplFieldItem field,
-            String rfpText, String ragDocNames, String userQuery) {
+    private String buildRiskReportPrompt(String basePrompt, List<LibraryVO.TmplFieldItem> fields,
+            String rfpText, String companyContext, String userQuery) {
+        StringBuilder secSpec = new StringBuilder();
+        for (LibraryVO.TmplFieldItem field : fields) {
+            if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
+                continue;
+            }
+            String key = field.getJsonKey();
+            if ("sources".equalsIgnoreCase(key)) {
+                continue;
+            }
+            String fieldNm = CommonUtil.nullToBlank(field.getFieldNm());
+            secSpec.append("- [[SEC:").append(key).append("]] ")
+                    .append(CommonUtil.isNotEmpty(fieldNm) ? fieldNm : key)
+                    .append(" — ").append(riskFieldFormatRule(field)).append("\n");
+        }
+
+        return basePrompt
+                + "\n\n## 작성할 진단 항목 (아래 모든 항목을 빠짐없이 작성)\n" + secSpec
+                + "\n## 작성 규칙 (반드시 준수)\n"
+                + "1) 어떤 항목도 비우지 마세요. RFP에 근거가 없으면 '※ RFP 미명시 — 추정/권고: ...' 로 합리적 추정·권고를 채우세요.\n"
+                + "2) **충실하고 구체적으로**: 일반론이 아니라 이 RFP 고유의 리스크·조건을 도출하고, RFP의 구체 수치·일정·"
+                + "자격요건·계약조항(예: 추정금액, 보증금율, 평가배점, 마감일, 참가자격 등)을 직접 인용하세요. "
+                + "각 항목은 근거·영향·대응을 빠짐없이 담아 실무에서 바로 활용 가능한 수준으로 작성하세요.\n"
+                + "3) 리스크 → 대응책 → 자사 역량 적정성이 서로 일관되게 연결되도록 작성하세요.\n"
+                + "4) '자사 역량 자료' 검색 결과를 적정성 진단·대응책의 근거로 적극 활용하세요(보유/미보유를 구체적으로 대비).\n"
+                + "\n## 출력 형식 (매우 중요)\n"
+                + "- 각 항목을 정확히 '[[SEC:키]]내용[[/SEC]]' 구분자로 감싸 위 목록 순서대로 출력하세요.\n"
+                + "- 구분자 밖에는 어떤 텍스트(설명·JSON·코드블록 ```·인사말)도 출력하지 마세요.\n"
+                + "- 각 항목의 '내용'은 HTML 조각입니다. 허용 태그: "
+                + "<h3> <h4> <p> <ul> <ol> <li> <strong> <em> <br> <table> <thead> <tbody> <tr> <th> <td>\n"
+                + "- 금지: <script> <style> <iframe>, on...= 이벤트 속성, 인라인 style, <html>/<body> 등 문서 루트 태그.\n"
+                + "- 제목류는 태그 없는 한 줄 평문, 단락류는 <p>·<div>로 감싸지 말 것(템플릿이 감쌈), 목록은 <ul>, 비교는 <table>.\n"
+                + "\n## 분석 대상 RFP 본문\n" + rfpText
+                + "\n\n## 자사 역량 자료 (사내 문서 검색 결과 — 적정성 진단·대응책의 근거로 활용)\n" + companyContext
+                + "\n\n## 사용자 추가 요청\n" + userQuery
+                + "\n\n## 다시 강조\n각 항목을 [[SEC:키]]…[[/SEC]] 구분자로만 출력하세요. 구분자 밖 텍스트 금지.";
+    }
+
+    /**
+     * 1단계 RAG 검색용 짧은 쿼리를 만든다. RFP 본문 전체 대신 핵심 발췌만 포함해
+     * 9111 임베딩 입력 한도(8192 토큰)를 넘지 않도록 한다.
+     */
+    private String buildRiskRetrievalQuery(String rfpText) {
+        String gist = "";
+        if (CommonUtil.isNotEmpty(rfpText)) {
+            gist = rfpText.length() > 600 ? rfpText.substring(0, 600) : rfpText;
+        }
+        return "다음 사업 제안 검토를 위해, 자사(우리 회사) 역량 자료에서 관련 정보를 정리해 주세요.\n"
+                + "## 사업 개요 발췌\n" + gist
+                + "\n\n## 정리할 항목\n자사의 기술/솔루션/서비스, 투입 가능 인력, 유사 사업 수행 실적, 보유 인증, "
+                + "유지보수·운영(SLA) 역량, 보안·개인정보 대응 역량을 항목별로 간결히 정리하세요. "
+                + "자료에 없는 항목은 '해당 자료 없음'으로 표기하세요.";
+    }
+
+    /** 템플릿 필드 1개의 출력 형식 지시문(단일 호출 프롬프트의 항목별 가이드). */
+    private String riskFieldFormatRule(LibraryVO.TmplFieldItem field) {
         String jsonKey = field.getJsonKey();
         String fieldNm = CommonUtil.nullToBlank(field.getFieldNm());
         boolean isTable = "table".equalsIgnoreCase(CommonUtil.nullToBlank(field.getLayoutType()));
         boolean multiline = "Y".equals(field.getMultilineYn());
         boolean titleLike = "title".equalsIgnoreCase(jsonKey) || fieldNm.contains("제목");
-
-        String formatGuide;
         if (titleLike) {
-            // 템플릿이 {{title}}을 <h1> 등으로 감싸므로, 여기서는 태그 없는 한 줄 제목 텍스트만 출력해야 중첩이 없다.
-            formatGuide = "한 줄 제목 텍스트만 출력하세요. **HTML 태그를 절대 쓰지 말 것** "
-                    + "(리포트 템플릿이 제목 서식을 적용합니다). 요약 문단을 넣지 말고 핵심을 담은 한 문장 제목만.";
+            return "한 줄 제목 평문(HTML 태그 금지, 요약 문단 금지).";
         } else if (isTable) {
-            formatGuide = "비교·정리에 적합하므로 표로 작성하세요. 형식: "
-                    + "<table><thead><tr><th>구분</th><th>내용</th><th>영향/대응</th></tr></thead>"
-                    + "<tbody><tr><td>...</td><td>...</td><td>...</td></tr> ... (최소 3행)</tbody></table>";
+            return "<table><thead><tr><th>구분</th><th>내용</th><th>영향/대응</th></tr></thead><tbody>"
+                    + "…5~6행, 각 셀은 RFP의 구체 수치·조항을 인용해 구체적으로…</tbody></table>";
         } else if (multiline) {
-            formatGuide = "여러 항목을 목록으로 작성하세요. 형식: "
-                    + "<ul><li><strong>핵심 라벨</strong> — 구체 설명(근거·영향·대응 포함)</li> ... (3~6개)</ul>. "
-                    + "비교가 더 명확하면 <ul> 대신 <table>(thead/tbody)로 작성해도 됩니다.";
+            return "<ul><li><strong>라벨</strong> — 2~3문장(근거: RFP의 구체 문구·수치·일정·자격요건 인용, 그에 따른 영향, "
+                    + "그리고 실행 가능한 대응책을 모두 포함)</li> …5~7개, 충실하게…</ul> (비교가 효과적이면 <table> 사용).";
         } else {
-            // 단락형(executive_summary 등)은 템플릿이 <p> 등으로 감쌀 수 있으므로 블록 태그로 감싸지 않는다.
-            formatGuide = "2~4문장의 단락 텍스트로 작성하세요. **<p>·<div> 같은 블록 태그로 감싸지 말 것** "
-                    + "(템플릿이 문단 영역을 제공). 강조는 <strong>, 줄바꿈은 <br>만 인라인으로 사용 가능.";
+            return "4~6문장의 충실한 단락 평문(RFP 핵심 근거를 담아 구체적으로. 블록 태그 금지, 강조 <strong>·줄바꿈 <br>만).";
         }
+    }
 
-        return basePrompt
-                + "\n\n## 이번에 작성할 진단 항목 (이 항목 하나만)\n"
-                + "- 항목: " + (CommonUtil.isNotEmpty(fieldNm) ? fieldNm : jsonKey) + "\n"
-                + "\n## 작성 규칙 (반드시 준수)\n"
-                + "1) 절대 비우지 마세요. RFP에 근거가 없더라도 일반적 기준에 따른 합리적 추정·권고를 "
-                + "'※ RFP 미명시 — 추정/권고: ...' 로 반드시 채워 넣으세요. 어떤 경우에도 내용이 비면 안 됩니다.\n"
-                + "2) 추측이라도 구체적으로 — 근거(RFP 문구 또는 일반 기준)·영향·대응을 함께 제시하세요.\n"
-                + "3) 핵심을 항목별로 끊어 구조화하고, 모호한 한 줄로 끝내지 마세요.\n"
-                + "\n## 출력 형식 (매우 중요)\n"
-                + "- 응답은 **HTML 조각만** 출력하세요. JSON·코드블록(```)·설명 문장·인사말을 절대 붙이지 마세요.\n"
-                + "- 허용 태그: <h3> <h4> <p> <ul> <ol> <li> <strong> <em> <br> <table> <thead> <tbody> <tr> <th> <td>\n"
-                + "- 금지: <script> <style> <iframe>, on...= 이벤트 속성, 인라인 style, <html>/<body> 등 문서 루트 태그\n"
-                + "- 이 항목의 형식: " + formatGuide + "\n"
-                + "\n## 분석 대상 RFP 본문\n" + rfpText
-                + "\n\n## 참조 가능한 자사 역량 문서 목록\n" + ragDocNames
-                + "\n\n## 사용자 추가 요청\n" + userQuery
-                + "\n\n## 다시 강조\nHTML 조각만 출력. 다른 텍스트 금지.";
+    /**
+     * 단일 호출 응답에서 [[SEC:키]]…[[/SEC]] 구분자를 파싱해 템플릿 필드별 HTML 조각 맵을 만든다.
+     * 각 조각은 cleanSectionHtml로 코드펜스 제거 + 새니타이즈한다. sources 필드는 백엔드가 구성하므로 제외.
+     */
+    private Map<String, String> parseRiskSections(String response, List<LibraryVO.TmplFieldItem> fields) {
+        Map<String, String> map = new java.util.LinkedHashMap<>();
+        String resp = response != null ? response : "";
+        for (LibraryVO.TmplFieldItem field : fields) {
+            if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
+                continue;
+            }
+            String key = field.getJsonKey();
+            if ("sources".equalsIgnoreCase(key)) {
+                continue;
+            }
+            String html = "";
+            try {
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                        "\\[\\[\\s*SEC\\s*:\\s*" + java.util.regex.Pattern.quote(key)
+                                + "\\s*\\]\\](.*?)\\[\\[\\s*/\\s*SEC\\s*\\]\\]",
+                        java.util.regex.Pattern.DOTALL | java.util.regex.Pattern.CASE_INSENSITIVE);
+                java.util.regex.Matcher m = p.matcher(resp);
+                if (m.find()) {
+                    html = cleanSectionHtml(m.group(1));
+                }
+            } catch (Exception e) {
+                logger.warn("리스크진단 섹션 '{}' 파싱 실패: {}", key, e.getMessage());
+            }
+            map.put(key, html);
+        }
+        return map;
     }
 
     /**
@@ -2799,7 +2844,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         ragParams.put("attachment_file_ids", new ArrayList<String>());
 
         OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(RISK_QUERY_READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
                 .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
         com.google.gson.Gson gson = new com.google.gson.Gson();
@@ -2811,6 +2856,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "text/event-stream")
                 .build();
+        logger.info("리스크 RAG 단일 호출 시작 - url:{}, readTimeout:{}s, 요청바디길이:{}",
+                ragApiUrl, RISK_QUERY_READ_TIMEOUT_SEC, ragJsonBody.length());
+        // AI 담당자 문의용 — 9111/query 요청 본문 전체 출력
+        logger.info("리스크 RAG 요청 본문 전체:\n{}", ragJsonBody);
+        long startMs = System.currentTimeMillis();
         try (okhttp3.Response response = client.newCall(ragRequest).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 String errBody = "";
@@ -2864,11 +2914,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     }
                 }
                 String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
-                logger.info("리스크 RAG 섹션 응답 수신 - 길이:{}", result != null ? result.length() : 0);
+                logger.info("리스크 RAG 응답 수신 완료 - 길이:{}, 소요:{}ms",
+                        result != null ? result.length() : 0, System.currentTimeMillis() - startMs);
                 return result;
             }
+        } catch (java.net.SocketTimeoutException te) {
+            logger.warn("리스크 RAG 호출 타임아웃 - {}s 초과({}ms 경과). 응답이 너무 길거나 AI 서버 지연일 수 있음: {}",
+                    RISK_QUERY_READ_TIMEOUT_SEC, System.currentTimeMillis() - startMs, te.getMessage());
+            return "";
         } catch (Exception e) {
-            logger.warn("RAG 질의 호출 실패: {}", e.getMessage());
+            logger.warn("리스크 RAG 호출 실패 - {}({}ms 경과): {}",
+                    e.getClass().getSimpleName(), System.currentTimeMillis() - startMs, e.getMessage());
             return "";
         }
     }
@@ -2889,7 +2945,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("room_id", threadId != null ? threadId : "");
 
         OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(RISK_QUERY_READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
                 .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
         com.google.gson.Gson gson = new com.google.gson.Gson();
@@ -2901,7 +2957,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "text/event-stream")
                 .build();
-        logger.info("리스크 LLM 섹션 호출 시작 - url:{}", apiUrl);
+        logger.info("리스크 LLM 단일 호출 시작 - url:{}, readTimeout:{}s, 요청바디길이:{}",
+                apiUrl, RISK_QUERY_READ_TIMEOUT_SEC, jsonBody.length());
+        long startMs = System.currentTimeMillis();
         try (okhttp3.Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 logger.warn("리스크 LLM 질의 응답 오류: {}", response.code());
@@ -2947,11 +3005,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     }
                 }
                 String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
-                logger.info("리스크 LLM 섹션 응답 수신 - 길이:{}", result != null ? result.length() : 0);
+                logger.info("리스크 LLM 응답 수신 완료 - 길이:{}, 소요:{}ms",
+                        result != null ? result.length() : 0, System.currentTimeMillis() - startMs);
                 return result;
             }
+        } catch (java.net.SocketTimeoutException te) {
+            logger.warn("리스크 LLM 호출 타임아웃 - {}s 초과({}ms 경과). 응답이 너무 길거나 AI 서버 지연일 수 있음: {}",
+                    RISK_QUERY_READ_TIMEOUT_SEC, System.currentTimeMillis() - startMs, te.getMessage());
+            return "";
         } catch (Exception e) {
-            logger.warn("리스크 LLM 질의 호출 실패: {}", e.getMessage());
+            logger.warn("리스크 LLM 호출 실패 - {}({}ms 경과): {}",
+                    e.getClass().getSimpleName(), System.currentTimeMillis() - startMs, e.getMessage());
             return "";
         }
     }

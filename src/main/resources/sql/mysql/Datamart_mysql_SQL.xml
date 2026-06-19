@@ -439,29 +439,10 @@
                 WHERE R.DATAMART_ID = A.DATAMART_ID
                 AND R.SYNONYM_ID = A.SYNONYM_ID
                 AND R.REPRESENT_YN = 'Y'
-            ), A.SORT_ORD) DESC
+            ), A.SORT_ORD) ASC
             , CASE WHEN A.REPRESENT_YN = 'Y' THEN 0 ELSE 1 END
             , A.SORT_ORD
             , A.SYNONYM_WORD
-    </select>
-
-    <select id="selectDatamartSynonymByWord" parameterType="kr.teamagent.datamart.service.DatamartVO$MetaSynonymRowVO"
-            resultType="kr.teamagent.datamart.service.DatamartVO$MetaSynonymRowVO">
-        /* 데이터마트 동의어 단건 조회 datamart.selectDatamartSynonymByWord */
-        SELECT
-            A.DATAMART_ID AS datamartId
-            , A.SYNONYM_ID AS synonymId
-            , A.SYNONYM_WORD AS synonymWord
-            , A.REPRESENT_YN AS representYn
-            , A.SORT_ORD AS sortOrd
-            , A.USE_YN AS useYn
-            , A.CREATE_DT AS createDt
-            , A.MODIFY_DT AS modifyDt
-        FROM TB_DM_SYNONYM A
-        WHERE A.DATAMART_ID = #{datamartId}
-        AND A.SYNONYM_WORD = #{synonymWord}
-        ORDER BY COALESCE(A.MODIFY_DT, A.CREATE_DT) DESC
-        LIMIT 1
     </select>
 
     <delete id="deleteDmSynonymByDatamartId" parameterType="datamartVO">
@@ -509,6 +490,13 @@
         FROM TB_DM_FEWSHOT
         WHERE DATAMART_ID = #{datamartId}
         ORDER BY SORT_ORD DESC
+    </select>
+
+    <select id="selectMaxFewshotSortOrdByDatamartId" parameterType="datamartVO" resultType="int">
+        /* 메타 관리 > 퓨샷 최대 정렬순서 조회 datamart.selectMaxFewshotSortOrdByDatamartId */
+        SELECT IFNULL(MAX(SORT_ORD), 0)
+        FROM TB_DM_FEWSHOT
+        WHERE DATAMART_ID = #{datamartId}
     </select>
 
     <delete id="deleteDmFewshotByDatamartId" parameterType="datamartVO">

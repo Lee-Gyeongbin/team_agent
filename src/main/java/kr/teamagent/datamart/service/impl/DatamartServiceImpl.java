@@ -948,12 +948,24 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      * 저장 payload 기준으로 SYNONYM_ID를 채운다.
      * - synonymId가 있으면 유지
      * - ID가 없는 일반 동의어(REPRESENT_YN!=Y)는 직전 그룹 ID 상속
-     * - ID가 없는 대표(REPRESENT_YN=Y)는 동일 단어의 기존 대표 행 ID 재사용, 없으면 신규 그룹 ID
-     * - 신규 ID는 한 요청 내에서 로컬 시퀀스로 발급 (generateTableKey 반복 호출 시 동일 ID 중복 방지)
+     * - ID가 없는 대표(REPRESENT_YN=Y)는 신규 그룹 ID 발급
+     * - 신규 ID는 payload·DB 최대 ID + 1부터 로컬 시퀀스로 발급 (delete 후 DB MAX만 보면 빈 번호가 재사용됨)
      */
     private void assignSynonymIdsForSave(List<DatamartVO.MetaSynonymRowVO> rows) throws Exception {
         String currentSynonymId = null;
-        int[] batchNextSeq = new int[] { -1 };
+        int maxSeq = 0;
+        for (DatamartVO.MetaSynonymRowVO row : rows) {
+            if (row != null && CommonUtil.isNotEmpty(row.getSynonymId())) {
+                try {
+                    maxSeq = Math.max(maxSeq, Integer.parseInt(row.getSynonymId().trim().substring(2)));
+                } catch (NumberFormatException ignored) {
+                    // skip invalid id
+                }
+            }
+        }
+        maxSeq = Math.max(maxSeq,
+                Integer.parseInt(keyGenerate.generateTableKey("DS", "TB_DM_SYNONYM", "SYNONYM_ID").substring(2)) - 1);
+        int[] batchNextSeq = new int[] { maxSeq + 1 };
 
         for (DatamartVO.MetaSynonymRowVO row : rows) {
             if (row == null) {
@@ -971,16 +983,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                 continue;
             }
 
-            DatamartVO.MetaSynonymRowVO existsRow = datamartDAO.selectMetaSynonymByWord(row);
-            boolean reuseExistingGroupId = existsRow != null
-                    && CommonUtil.isNotEmpty(existsRow.getSynonymId())
-                    && (!isRepresent || "Y".equalsIgnoreCase(CommonUtil.nullToBlank(existsRow.getRepresentYn())));
-
-            if (reuseExistingGroupId) {
-                currentSynonymId = existsRow.getSynonymId().trim();
-            } else {
-                currentSynonymId = allocateSynonymIdInBatch(batchNextSeq);
-            }
+            currentSynonymId = allocateSynonymIdInBatch(batchNextSeq);
             row.setSynonymId(currentSynonymId);
         }
     }
@@ -988,78 +991,42 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     /**
      * 동일 저장 요청에서 신규 SYNONYM_ID를 중복 없이 발급한다.
      */
-    private String allocateSynonymIdInBatch(int[] batchNextSeq) throws Exception {
-        if (batchNextSeq[0] < 0) {
-            String seedKey = keyGenerate.generateTableKey("DS", "TB_DM_SYNONYM", "SYNONYM_ID");
-            batchNextSeq[0] = Integer.parseInt(seedKey.substring(2)) + 1;
-            return seedKey;
-        }
+    private String allocateSynonymIdInBatch(int[] batchNextSeq) {
         String key = "DS" + String.format("%06d", batchNextSeq[0]);
         batchNextSeq[0]++;
         return key;
     }
 
     /**
-     * SORT_ORD 순서 지정 (저장 시에만 사용)
-     * - 대표(REPRESENT_YN=Y): 전역 순번 1..N
-     * - 일반 동의어(REPRESENT_YN!=Y): SYNONYM_ID 그룹별 순번 1..N
+     * SORT_ORD 순서 지정 (저장 시에만 사용, payload 순서 기준)
+     * - 대표(REPRESENT_YN=Y): 대표값끼리 순번 1..N
+     * - 일반 동의어: 동일 REPRESENT_YN·SYNONYM_ID·DATAMART_ID 그룹별 순번 1..N
      */
     private void applyMetaSynonymSortOrd(List<DatamartVO.MetaSynonymRowVO> rows) {
-        List<DatamartVO.MetaSynonymRowVO> sortedList = new ArrayList<>();
-        for (DatamartVO.MetaSynonymRowVO row : rows) {
-            if (row != null) {
-                sortedList.add(row);
-            }
-        }
-
-        sortedList.sort((a, b) -> {
-            String aRepresentYn = CommonUtil.nullToBlank(a.getRepresentYn());
-            String bRepresentYn = CommonUtil.nullToBlank(b.getRepresentYn());
-            boolean aIsRepresent = "Y".equalsIgnoreCase(aRepresentYn);
-            boolean bIsRepresent = "Y".equalsIgnoreCase(bRepresentYn);
-
-            // 1) 대표값 먼저
-            if (aIsRepresent != bIsRepresent) {
-                return aIsRepresent ? -1 : 1;
-            }
-
-            int aSortOrd = a.getSortOrd() != null ? a.getSortOrd() : Integer.MAX_VALUE;
-            int bSortOrd = b.getSortOrd() != null ? b.getSortOrd() : Integer.MAX_VALUE;
-
-            // 2) 대표값끼리는 기존 sortOrd 기준
-            if (aIsRepresent && bIsRepresent) {
-                return Integer.compare(aSortOrd, bSortOrd);
-            }
-
-            // 3) 같은 동의어 ID끼리 묶기
-            String aSynonymId = CommonUtil.nullToBlank(a.getSynonymId());
-            String bSynonymId = CommonUtil.nullToBlank(b.getSynonymId());
-            int idCompare = aSynonymId.compareTo(bSynonymId);
-            if (idCompare != 0) {
-                return idCompare;
-            }
-
-            // 4) 같은 동의어 ID 내 일반 동의어 정렬
-            return Integer.compare(aSortOrd, bSortOrd);
-        });
-
         int representOrd = 1;
-        Map<String, Integer> normalOrdMap = new HashMap<>();
-        for (DatamartVO.MetaSynonymRowVO row : sortedList) {
+        Map<String, Integer> groupOrdMap = new HashMap<>();
+        for (DatamartVO.MetaSynonymRowVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+
             boolean isRepresent = "Y".equalsIgnoreCase(CommonUtil.nullToBlank(row.getRepresentYn()));
             if (isRepresent) {
                 row.setSortOrd(representOrd++);
                 continue;
             }
 
-            String key = CommonUtil.nullToBlank(row.getSynonymId());
-            int normalOrd = normalOrdMap.getOrDefault(key, 1);
-            row.setSortOrd(normalOrd);
-            normalOrdMap.put(key, normalOrd + 1);
+            String groupKey = buildSynonymSortGroupKey(row);
+            int groupOrd = groupOrdMap.getOrDefault(groupKey, 1);
+            row.setSortOrd(groupOrd);
+            groupOrdMap.put(groupKey, groupOrd + 1);
         }
+    }
 
-        rows.clear();
-        rows.addAll(sortedList);
+    private String buildSynonymSortGroupKey(DatamartVO.MetaSynonymRowVO row) {
+        return CommonUtil.nullToBlank(row.getRepresentYn()) + "|"
+                + CommonUtil.nullToBlank(row.getSynonymId()) + "|"
+                + CommonUtil.nullToBlank(row.getDatamartId());
     }
 
     private void applyMetaSynonymRowDefaults(DatamartVO.MetaSynonymRowVO datamartVO) {
@@ -1106,12 +1073,13 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
+        int dbMaxSortOrd = datamartDAO.selectMaxFewshotSortOrdByDatamartId(dm);
         datamartDAO.deleteDmFewshotByDatamartId(dm);
 
         List<DatamartVO.MetaFewshotRowVO> validRows = filterFewshotSaveList(payload.getFewshotList(), datamartId);
 
         if (!validRows.isEmpty()) {
-            assignFewshotIdsForSave(validRows);
+            assignFewshotIdsForSave(validRows, dbMaxSortOrd);
             DatamartVO.MetaFewshotSavePayloadVO insertPayload = new DatamartVO.MetaFewshotSavePayloadVO();
             insertPayload.setDatamartId(datamartId);
             insertPayload.setFewshotList(validRows);
@@ -1141,46 +1109,49 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 저장 payload 기준으로 FEWSHOT_ID·SORT_ORD를 채운다.
-     * - ID 없는 행: allocateFewshotIdInBatch로 신규 발급
-     * - SORT_ORD: payload 순서대로 1..N (delete-then-insert 전체 교체)
+     * - ID 없는 행: payload·DB 최대 ID + 1부터 순차 발급 (빈 번호 재사용 방지)
+     * - SORT_ORD: 있으면 유지, 없으면 DB·payload 최대값 + 1부터 순차 부여
      */
-    private void assignFewshotIdsForSave(List<DatamartVO.MetaFewshotRowVO> rows) throws Exception {
-        Set<String> reservedIds = new HashSet<>();
+    private void assignFewshotIdsForSave(List<DatamartVO.MetaFewshotRowVO> rows, int dbMaxSortOrd) throws Exception {
+        int maxSeq = 0;
         for (DatamartVO.MetaFewshotRowVO row : rows) {
             if (row != null && CommonUtil.isNotEmpty(row.getFewshotId())) {
-                reservedIds.add(row.getFewshotId().trim());
+                try {
+                    maxSeq = Math.max(maxSeq, Integer.parseInt(row.getFewshotId().trim().substring(2)));
+                } catch (NumberFormatException ignored) {
+                    // skip invalid id
+                }
             }
         }
-
-        int[] batchNextSeq = new int[] { -1 };
-        int sortOrd = 1;
+        maxSeq = Math.max(maxSeq,
+                Integer.parseInt(keyGenerate.generateTableKey("FW", "TB_DM_FEWSHOT", "FEWSHOT_ID").substring(2)) - 1);
+        int[] batchNextSeq = new int[] { maxSeq + 1 };
+        int maxSortOrd = dbMaxSortOrd;
+        for (DatamartVO.MetaFewshotRowVO row : rows) {
+            if (row != null && row.getSortOrd() != null) {
+                maxSortOrd = Math.max(maxSortOrd, row.getSortOrd());
+            }
+        }
+        int nextSortOrd = maxSortOrd + 1;
         for (DatamartVO.MetaFewshotRowVO row : rows) {
             if (row == null) {
                 continue;
             }
 
             if (CommonUtil.isEmpty(row.getFewshotId())) {
-                String newId;
-                do {
-                    newId = allocateFewshotIdInBatch(batchNextSeq);
-                } while (reservedIds.contains(newId));
-                reservedIds.add(newId);
-                row.setFewshotId(newId);
+                row.setFewshotId(allocateFewshotIdInBatch(batchNextSeq));
             }
 
-            row.setSortOrd(sortOrd++);
+            if (row.getSortOrd() == null) {
+                row.setSortOrd(nextSortOrd++);
+            }
         }
     }
 
     /**
      * 동일 저장 요청에서 신규 FEWSHOT_ID를 중복 없이 발급한다.
      */
-    private String allocateFewshotIdInBatch(int[] batchNextSeq) throws Exception {
-        if (batchNextSeq[0] < 0) {
-            String seedKey = keyGenerate.generateTableKey("FW", "TB_DM_FEWSHOT", "FEWSHOT_ID");
-            batchNextSeq[0] = Integer.parseInt(seedKey.substring(2)) + 1;
-            return seedKey;
-        }
+    private String allocateFewshotIdInBatch(int[] batchNextSeq) {
         String key = "FW" + String.format("%06d", batchNextSeq[0]);
         batchNextSeq[0]++;
         return key;
