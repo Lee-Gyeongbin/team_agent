@@ -3585,9 +3585,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             ins.setOutTokens(src.getOutTokens());
             ins.setSatisYn(CommonUtil.isNotEmpty(src.getSatisYn()) ? src.getSatisYn() : null);
             ins.setSql(CommonUtil.isNotEmpty(src.getTtsq()) ? src.getTtsq() : null);
+            ins.setTtsqParam(CommonUtil.isNotEmpty(src.getTtsqParam()) ? src.getTtsqParam() : null);
+            ins.setTtsqPeriodParam(CommonUtil.isNotEmpty(src.getTtsqPeriodParam()) ? src.getTtsqPeriodParam() : null);
             ins.setTableData(CommonUtil.isNotEmpty(src.getTableData()) ? src.getTableData() : null);
             ins.setChartOption(CommonUtil.isNotEmpty(src.getChartOption()) ? src.getChartOption() : null);
             ins.setWebGroundingJson(CommonUtil.isNotEmpty(src.getWebGroundingJson()) ? src.getWebGroundingJson() : null);
+            ins.setReportHtml(CommonUtil.isNotEmpty(src.getReportHtml()) ? src.getReportHtml() : null);
+            ins.setRetrieverQuery(CommonUtil.isNotEmpty(src.getRetrieverQuery()) ? src.getRetrieverQuery() : null);
+            ins.setChunk(CommonUtil.isNotEmpty(src.getChunk()) ? src.getChunk() : null);
             ins.setMainDocFileId(CommonUtil.isNotEmpty(src.getMainDocFileId()) ? src.getMainDocFileId() : null);
             ins.setMainPage(CommonUtil.isNotEmpty(src.getMainPage()) ? src.getMainPage() : null);
             ins.setReaskCnt(src.getReaskCnt());

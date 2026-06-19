@@ -245,11 +245,16 @@
             , IFNULL(A.OUT_TOKENS, 0) AS OUT_TOKENS
             , A.SATIS_YN
             , A.TTSQ
+            , A.TTSQ_PARAM
+            , A.TTSQ_PERIOD_PARAM
             , A.TABLE_DATA
             , A.CHART_OPTION
             , A.WEB_GROUNDING_JSON
+            , A.REPORT_HTML
             , A.MAIN_DOC_FILE_ID
             , A.MAIN_PAGE
+            , A.RETRIEVER_QUERY
+            , A.CHUNK
             , IFNULL(A.REASK_CNT, 0) AS REASK_CNT
         FROM TB_CHAT_LOG A
         WHERE A.ROOM_ID = #{roomId}
