@@ -69,6 +69,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /** 리스크진단 생성(9000) 프롬프트에 주입하는 RFP 추출 텍스트 최대 길이(문자).
      *  2단계 생성은 대용량 컨텍스트(임베딩 아님)라 RFP 전체를 충분히 담아 분석 충실도를 높인다. */
     private static final int RISK_RFP_TEXT_MAX_CHARS = 24000;
+    /** 대용량 RFP 요약 시 청크 최대 개수(문서가 커져도 요약 호출 수를 이 값으로 제한). */
+    private static final int RISK_SUMMARY_MAX_CHUNKS = 16;
+    /** 대용량 RFP 요약 시 청크 최소 길이(문자). 너무 잘게 쪼개지지 않도록 하한. */
+    private static final int RISK_SUMMARY_MIN_CHUNK_CHARS = 15000;
+    /** 청크 요약을 합친 '압축 RFP'의 최대 길이(문자). 후반부(붙임·평가기준) 요약이 잘리지 않도록 넉넉히 둔다.
+     *  (이미 압축된 텍스트라 2단계 9000 대용량 컨텍스트에 충분히 들어간다) */
+    private static final int RISK_CONDENSED_MAX_CHARS = 80000;
+    /** 청크 경계에 걸친 표·항목이 잘리지 않도록 인접 청크 간 겹치는 길이(문자). */
+    private static final int RISK_SUMMARY_CHUNK_OVERLAP = 800;
     /** 리스크진단 단일 호출은 전체 리포트를 한 번에 생성하므로 읽기 타임아웃을 길게 둔다(초). */
     private static final int RISK_QUERY_READ_TIMEOUT_SEC = 300;
     /** 리서처 리포트 출처 섹션 — 템플릿 HTML escape 우회용 치환 토큰 */
@@ -106,6 +115,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private java.util.concurrent.ExecutorService getRecommendQuestionExecutor() {
         return recommendQuestionExecutor;
     }
+
+    /** 대용량 RFP 청크 병렬 요약용 스레드 풀 (요약은 청크당 작은 입력이라 빠르게 동시 처리) */
+    private static final java.util.concurrent.ExecutorService riskSummarizeExecutor =
+            java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
+                Thread thread = new Thread(r, "risk-summarize-worker");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     /**
      * 세션의 진행 중인 AI API 스트리밍 호출을 취소
@@ -2492,9 +2509,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 callback.onError("업로드한 파일에서 텍스트를 추출하지 못했습니다. 텍스트가 포함된 PDF인지 확인하세요.");
                 return;
             }
-            String rfpTextForPrompt = rfpText.length() > RISK_RFP_TEXT_MAX_CHARS
-                    ? rfpText.substring(0, RISK_RFP_TEXT_MAX_CHARS) + "\n...(이하 생략)"
-                    : rfpText;
+            // 캡 이하면 원문 그대로(빠른 경로), 초과(대용량 RFP)면 청크 병렬 요약으로 압축
+            String rfpTextForPrompt = condenseRfpTextIfLarge(rfpText, modelId, callback);
 
             // ② 템플릿 + 섹션(필드) 로딩
             callback.onStatus("loading_template", "리포트 템플릿 준비 중");
@@ -2570,13 +2586,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 }
             }
 
-            // ④-1 자사 역량 RAG 검색 — 짧은 검색 쿼리만 임베딩(RFP 본문 제외)해 9111의 8192 임베딩 한도를 회피.
-            //     사내 문서(dataset_id) 벡터검색이 실제로 수행되어 자사 역량 요지를 받아온다.
+            // ④-1 자사 역량 RAG 검색 — 항목별 '좁은' 쿼리 여러 개를 병렬로 던져 각 표/섹션을 정확히 끌어온다.
+            //     (한 방 broad 쿼리는 임베딩이 여러 주제의 평균이 되어 인력표·인증표 등 특정 청크를 놓침)
             String companyContext = "";
             if (!datasetIds.isEmpty()) {
                 callback.onStatus("searching_rag", "자사 역량 자료 검색 중");
-                String retrievalQuery = buildRiskRetrievalQuery(rfpTextForPrompt);
-                companyContext = callRagQuerySync(retrievalQuery, datasetIds, modelId, threadId, agentId);
+                companyContext = retrieveCompanyContext(datasetIds, modelId, threadId, agentId);
                 logger.info("리스크진단 자사역량 RAG 컨텍스트 수신 - 길이:{}",
                         companyContext != null ? companyContext.length() : 0);
             }
@@ -2677,12 +2692,107 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         try (org.apache.pdfbox.pdmodel.PDDocument document =
                      org.apache.pdfbox.pdmodel.PDDocument.load(bytes)) {
             org.apache.pdfbox.text.PDFTextStripper stripper = new org.apache.pdfbox.text.PDFTextStripper();
+            // 좌표 순서로 추출 — 표/다단 레이아웃에서 같은 행의 셀이 흩어지지 않고 읽기 순서를 유지하도록 한다.
+            stripper.setSortByPosition(true);
             String text = stripper.getText(document);
             return text != null ? text.trim() : "";
         } catch (Exception e) {
             logger.warn("PDF 텍스트 추출 실패 (file={}): {}", fileName, e.getMessage());
             return "";
         }
+    }
+
+    /**
+     * RFP 추출 텍스트가 캡(RISK_RFP_TEXT_MAX_CHARS) 이하면 그대로 반환(빠른 경로),
+     * 초과(대용량 RFP)면 청크로 나눠 9000으로 병렬 요약 후 압축본을 반환한다.
+     * 요약은 리스크 진단에 필요한 핵심(개요·과업·조건·평가·자격·일정·금액·보증/패널티·보안 등)만 추출한다.
+     */
+    private String condenseRfpTextIfLarge(String rfpText, String modelId,
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
+        if (CommonUtil.isEmpty(rfpText)) {
+            return "";
+        }
+        if (rfpText.length() <= RISK_RFP_TEXT_MAX_CHARS) {
+            return rfpText;
+        }
+        callback.onStatus("condensing_rfp", "대용량 RFP 요약 중");
+
+        int total = rfpText.length();
+        int chunkSize = Math.max(RISK_SUMMARY_MIN_CHUNK_CHARS,
+                (int) Math.ceil((double) total / RISK_SUMMARY_MAX_CHUNKS));
+        // 인접 청크를 overlap만큼 겹쳐 잘라, 청크 경계에 걸친 표·항목(인력표·평가표·일정표 등)이 잘리지 않게 한다.
+        int overlap = Math.min(RISK_SUMMARY_CHUNK_OVERLAP, chunkSize / 4);
+        List<String> chunks = new ArrayList<>();
+        int pos = 0;
+        while (pos < total) {
+            int end = Math.min(total, pos + chunkSize);
+            chunks.add(rfpText.substring(pos, end));
+            if (end >= total) {
+                break;
+            }
+            pos = end - overlap;
+        }
+        logger.info("RFP 요약 시작 - 원본:{}자, 청크:{}개(청크당 ~{}자, overlap:{}자)",
+                total, chunks.size(), chunkSize, overlap);
+
+        // 청크별 병렬 요약 — 순서 보존(원문 순서대로 합쳐야 흐름 유지). 청크 진행 상황을 로그로 남긴다.
+        final int chunkCount = chunks.size();
+        List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
+        for (int ci = 0; ci < chunkCount; ci++) {
+            final int chunkNo = ci + 1;
+            final String fChunk = chunks.get(ci);
+            futures.add(riskSummarizeExecutor.submit(() -> {
+                long chunkStart = System.currentTimeMillis();
+                logger.info("RFP 청크 요약 시작 - {}/{} (입력:{}자)", chunkNo, chunkCount, fChunk.length());
+                String out = callLlmQuerySync(buildRfpSummaryPrompt(fChunk), modelId, "");
+                logger.info("RFP 청크 요약 완료 - {}/{} (입력:{}자 → 요약:{}자, {}ms)",
+                        chunkNo, chunkCount, fChunk.length(), out != null ? out.length() : 0,
+                        System.currentTimeMillis() - chunkStart);
+                return out;
+            }));
+        }
+        StringBuilder condensed = new StringBuilder();
+        int idx = 0;
+        for (java.util.concurrent.Future<String> f : futures) {
+            idx++;
+            try {
+                String s = f.get(RISK_QUERY_READ_TIMEOUT_SEC + 20, java.util.concurrent.TimeUnit.SECONDS);
+                if (CommonUtil.isNotEmpty(s)) {
+                    condensed.append("===== 요약 ").append(idx).append(" =====\n")
+                            .append(s.trim()).append("\n\n");
+                }
+            } catch (Exception e) {
+                logger.warn("RFP 청크 {} 요약 실패: {}", idx, e.getMessage());
+            }
+        }
+
+        String result = condensed.toString().trim();
+        if (CommonUtil.isEmpty(result)) {
+            // 요약이 전부 실패하면 앞부분만이라도 사용(폴백)
+            logger.warn("RFP 요약 결과 없음 — 원문 앞부분으로 폴백");
+            result = rfpText.substring(0, RISK_RFP_TEXT_MAX_CHARS) + "\n...(이하 생략)";
+        } else if (result.length() > RISK_CONDENSED_MAX_CHARS) {
+            // 압축본이 압축 상한(넉넉)을 넘는 극단적 경우에만 안전 절단 — 후반부 요약이 잘리지 않도록 캡을 크게 둔다
+            logger.warn("RFP 압축본이 상한({}자) 초과 — 안전 절단", RISK_CONDENSED_MAX_CHARS);
+            result = result.substring(0, RISK_CONDENSED_MAX_CHARS) + "\n...(요약 일부 생략)";
+        }
+        logger.info("RFP 요약 완료 - 원본:{}자 → 압축:{}자, 청크:{}개", total, result.length(), chunks.size());
+        return result;
+    }
+
+    /** 대용량 RFP 청크 1개를 리스크 진단 관점에서 요약하는 프롬프트. */
+    private String buildRfpSummaryPrompt(String chunk) {
+        return "다음은 RFP(제안요청서)의 일부입니다. 리스크 진단에 필요한 핵심 정보만 항목형으로 요약하세요.\n"
+                + "포함 대상: 사업 개요/목적, 과업 범위·요구사항, 입찰·계약 조건, 평가 기준·배점, 자격 요건, "
+                + "일정·기간, 금액·예산, 보증금·패널티, 보안·개인정보 요건, "
+                + "**붙임·별지·서식·평가표 등 후반부 첨부 내용**, 기타 제약/유의사항.\n"
+                + "규칙:\n"
+                + "- 해당 내용이 없는 항목은 생략.\n"
+                + "- **표 형태 데이터(평가 배점표, 인력 구성표, 일정표, 자격·인증 목록과 만료일, 금액 내역 등)는 "
+                + "요약·생략하지 말고 항목과 수치를 원문 그대로 보존**하세요(마크다운 표 또는 '항목: 값' 나열).\n"
+                + "- 수치·일정·조항·금액·날짜·배점은 절대 생략·반올림하지 말 것.\n"
+                + "- 이 조각이 붙임/별지/평가기준 등 후반부라도 빠짐없이 핵심을 추출할 것.\n"
+                + "- 인사말·설명 없이 요약 본문만 출력.\n\n## RFP 일부\n" + chunk;
     }
 
     /**
@@ -2730,19 +2840,46 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 1단계 RAG 검색용 짧은 쿼리를 만든다. RFP 본문 전체 대신 핵심 발췌만 포함해
-     * 9111 임베딩 입력 한도(8192 토큰)를 넘지 않도록 한다.
+     * 자사 역량 RAG 검색 — 항목별 좁은 쿼리를 병렬로 던져 각 표/섹션 청크를 정확히 끌어와 합친다.
+     * 한 방 broad 쿼리는 임베딩이 여러 주제의 평균이 되어 인력표·인증표 같은 특정 청크를 top-K에서 놓치므로,
+     * 항목별 focused 쿼리로 분리한다(각 쿼리는 짧아 8192 무관, 병렬이라 빠름).
      */
-    private String buildRiskRetrievalQuery(String rfpText) {
-        String gist = "";
-        if (CommonUtil.isNotEmpty(rfpText)) {
-            gist = rfpText.length() > 600 ? rfpText.substring(0, 600) : rfpText;
+    private String retrieveCompanyContext(List<String> datasetIds, String modelId, String threadId, String agentId) {
+        // {제목, 검색 쿼리} 쌍 — 항목별 좁은 질의
+        String[][] aspects = {
+            {"인력 현황", "자사의 핵심 투입 예정 인력과 전사 인력 구성을 알려줘: 역할·성명·경력연수·보유 자격증·담당 업무, "
+                    + "그리고 직군별 인원수와 비율. 인력표의 모든 행과 수치를 그대로."},
+            {"인증·자격·특허", "자사가 보유한 인증·자격·특허·저작권을 알려줘: 인증/특허 명칭, 번호, 취득일, 유효기간(만료일), "
+                    + "발급기관을 표의 항목과 날짜 그대로."},
+            {"수행 실적", "자사의 주요 납품·구축 실적을 알려줘: 연도·발주기관·사업명·수행역할·계약금액을 표 그대로."},
+            {"기술·솔루션·서비스", "자사의 핵심 기술 역량, 주요 솔루션, 서비스 포트폴리오와 수행 방식을 알려줘: "
+                    + "기술 분야·세부 기술·수준, 솔루션명과 핵심 기능."},
+            {"보안·운영(SLA) 역량", "자사의 보안·개인정보보호 대응 역량과 유지보수·운영(SLA) 역량을 알려줘."}
+        };
+
+        // 병렬 검색
+        List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
+        for (String[] aspect : aspects) {
+            final String q = aspect[1] + " 자료에 있는 표·수치·날짜는 요약하지 말고 그대로 포함하고, "
+                    + "없는 항목은 '해당 자료 없음'으로 표기.";
+            futures.add(riskSummarizeExecutor.submit(
+                    () -> callRagQuerySync(q, datasetIds, modelId, threadId, agentId)));
         }
-        return "다음 사업 제안 검토를 위해, 자사(우리 회사) 역량 자료에서 관련 정보를 정리해 주세요.\n"
-                + "## 사업 개요 발췌\n" + gist
-                + "\n\n## 정리할 항목\n자사의 기술/솔루션/서비스, 투입 가능 인력, 유사 사업 수행 실적, 보유 인증, "
-                + "유지보수·운영(SLA) 역량, 보안·개인정보 대응 역량을 항목별로 간결히 정리하세요. "
-                + "자료에 없는 항목은 '해당 자료 없음'으로 표기하세요.";
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < futures.size(); i++) {
+            String title = aspects[i][0];
+            try {
+                String ans = futures.get(i).get(RISK_QUERY_READ_TIMEOUT_SEC + 20, java.util.concurrent.TimeUnit.SECONDS);
+                logger.info("자사역량 RAG 검색 - [{}] 응답 길이:{}", title, ans != null ? ans.length() : 0);
+                if (CommonUtil.isNotEmpty(ans)) {
+                    sb.append("[").append(title).append("]\n").append(ans.trim()).append("\n\n");
+                }
+            } catch (Exception e) {
+                logger.warn("자사역량 RAG 검색 실패 - [{}]: {}", title, e.getMessage());
+            }
+        }
+        return sb.toString().trim();
     }
 
     /** 템플릿 필드 1개의 출력 형식 지시문(단일 호출 프롬프트의 항목별 가이드). */
