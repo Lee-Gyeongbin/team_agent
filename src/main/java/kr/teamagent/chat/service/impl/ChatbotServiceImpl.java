@@ -1386,7 +1386,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * TB_CHAT_LOG 저장 및 svcTy == M 이면 TB_CHAT_REF(chatRefItems) 반복 저장.
+     * TB_CHAT_LOG 저장 및 svcTy == M(리서처) 또는 D(리스크진단) 이면 TB_CHAT_REF(chatRefItems) 반복 저장.
      * webGroundingJson: answer_source 스트림 또는 done.data.items — JSON {@code {"items":[{url,title},...]}}.
      */
     private String doInsertAiLog(
@@ -1436,7 +1436,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         chatbotDAO.insertChatLog(chatbotVO);
 
-        if ("M".equals(svcTy) && chatRefItems != null && !chatRefItems.isEmpty()) {
+        if (("M".equals(svcTy) || "D".equals(svcTy)) && chatRefItems != null && !chatRefItems.isEmpty()) {
             for (ChatRefItem refItem : chatRefItems) {
                 if (!CommonUtil.isNotEmpty(refItem.docFileId)) {
                     continue;
@@ -1498,7 +1498,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         chatbotDAO.insertChatLog(chatbotVO);
 
-        if ("M".equals(svcTy) && chatRefItems != null && !chatRefItems.isEmpty()) {
+        if (("M".equals(svcTy) || "D".equals(svcTy)) && chatRefItems != null && !chatRefItems.isEmpty()) {
             for (ChatRefItem refItem : chatRefItems) {
                 if (!CommonUtil.isNotEmpty(refItem.docFileId)) {
                     continue;
@@ -2343,8 +2343,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     }
                     ChatRefItem item = new ChatRefItem();
                     item.docFileId = doc.getDocFileId();
-                    item.mainPageNo = "";
-                    item.relatedPageNos = new ArrayList<>();
+                    item.mainPageNo = "1";
+                    item.relatedPageNos = new ArrayList<>(Collections.singletonList(1));
                     chatRefItems.add(item);
                 }
             }
@@ -2664,15 +2664,46 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 callback.onChunk(reportHtml, reportHtml, "report_html");
             }
 
+            // ⑧ RAG 참조 문서를 TB_CHAT_REF에 저장하기 위해 chatRefItems 구성
+            List<ChatRefItem> chatRefItems = new ArrayList<>();
+            for (ChatbotVO doc : ragDocs) {
+                if (doc == null || CommonUtil.isEmpty(doc.getDocFileId())) {
+                    continue;
+                }
+                ChatRefItem item = new ChatRefItem();
+                item.docFileId = doc.getDocFileId();
+                item.mainPageNo = "1";
+                item.relatedPageNos = new ArrayList<>(Collections.singletonList(1));
+                chatRefItems.add(item);
+            }
+
             String savedLogId = this.doInsertAiLog(
                     threadId, agentId, query, summaryText,
                     0, 0, svcTy, modelId, refId, userId,
                     null, null, null, null,
-                    null, null, new ArrayList<>(),
+                    null, null, chatRefItems,
                     null, null,
                     reportHtml);
 
             this.updateChatRoomLastChatDt(threadId);
+
+            // 첨부파일(RFP) LOG_ID 연결
+            if (CommonUtil.isNotEmpty(savedLogId) && hasNonNullAttachmentId(attachmentFileIds)) {
+                try {
+                    List<Long> linkFileIds = new ArrayList<>();
+                    for (Long id : attachmentFileIds) {
+                        if (id != null) {
+                            linkFileIds.add(id);
+                        }
+                    }
+                    ChatbotVO linkVO = new ChatbotVO();
+                    linkVO.setChatFileIdList(linkFileIds);
+                    linkVO.setLogId(Long.parseLong(savedLogId));
+                    chatbotDAO.linkChatFilesToLog(linkVO);
+                } catch (Exception e) {
+                    logger.warn("리스크진단 첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
+                }
+            }
 
             callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
                     CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
@@ -3600,7 +3631,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             chatbotDAO.insertChatLog(ins);
             copied++;
 
-            if ("M".equals(src.getSvcTy()) && oldLogId != null && ins.getLogId() != null) {
+            if (("M".equals(src.getSvcTy()) || "D".equals(src.getSvcTy())) && oldLogId != null && ins.getLogId() != null) {
                 List<ChatbotVO> refs = refsBySourceLogId.get(oldLogId);
                 if (refs != null) {
                     for (ChatbotVO refSrc : refs) {
