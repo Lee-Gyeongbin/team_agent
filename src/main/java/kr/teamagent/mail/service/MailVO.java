@@ -9,7 +9,7 @@ import lombok.Setter;
 
 @Getter
 @Setter
-public class MailDto {
+public class MailVO {
 
     /** 메일 제목 */
     private String subject;
@@ -23,8 +23,20 @@ public class MailDto {
     /** 수신 일시 */
     private Date receivedDate;
 
+    /** 발송 일시 (보낸 메일함 전용) */
+    private Date sentDate;
+
+    /** 수신자 전체 문자열 (보낸 메일함 전용) */
+    private String to;
+
+    /** 수신자 이름만 (보낸 메일함 전용, 이름이 없으면 이메일 주소) */
+    private String toName;
+
     /** 본문 (text/plain 우선, 없으면 text/html에서 태그 제거) */
     private String body;
+
+    /** MIME Message-ID 헤더 값 */
+    private String messageId;
 
     /**
      * 읽음 여부.
