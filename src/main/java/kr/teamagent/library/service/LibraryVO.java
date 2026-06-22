@@ -62,6 +62,7 @@ public class LibraryVO {
     private String qContent;
     private String rContent;
     private String ttsq;
+    private String reportHtml;
     private String agentId;
     private String agentNm;
     private String iconClassNm;
