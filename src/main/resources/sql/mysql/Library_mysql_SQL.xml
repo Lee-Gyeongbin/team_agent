@@ -190,6 +190,7 @@
             , B.Q_CONTENT
             , B.R_CONTENT
             , B.TTSQ
+            , B.REPORT_HTML
             , D.AGENT_ID 
             , D.AGENT_NM 
             , E.ICON_CLASS_NM 
