@@ -23,6 +23,7 @@ import org.springframework.web.servlet.ModelAndView;
 
 import kr.teamagent.common.CommonVO;
 
+import kr.teamagent.chatguide.service.impl.ChatGuideServiceImpl;
 import kr.teamagent.library.service.LibraryVO;
 import kr.teamagent.library.service.impl.LibraryServiceImpl;
 
@@ -36,6 +37,9 @@ public class CommonController extends BaseController {
 
 	@Autowired
 	private kr.teamagent.common.system.service.impl.CommonServiceImpl commonService;
+
+	@Autowired
+	private ChatGuideServiceImpl chatGuideService;
 
 	@Autowired
 	private LibraryServiceImpl libraryService;
@@ -145,6 +149,23 @@ public class CommonController extends BaseController {
 		HashMap<String, Object> resultMap = new LinkedHashMap<>();
 		resultMap.put("list", commonService.selectNotifyList());
 		return new ModelAndView("jsonView", resultMap);
+	}
+
+	/**
+	 * 챗봇 가이드 전체 목록 조회
+	 * @return { list: ChatGuideVO[] }
+	 */
+	@RequestMapping("/chatGuideList.do")
+	public @ResponseBody Map<String, Object> chatGuideList() throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		try {
+			resultMap.put("list", chatGuideService.selectChatGuideList());
+		} catch (Exception e) {
+			log.error("chatGuideList failed", e);
+			resultMap.put("successYn", false);
+			resultMap.put("returnMsg", "챗봇 가이드 목록 조회 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
+		}
+		return resultMap;
 	}
 
 	/**

@@ -10,6 +10,10 @@ import kr.teamagent.chatguide.service.ChatGuideVO;
 @Repository
 public class ChatGuideDAO extends EgovComAbstractDAO {
 
+    public List<ChatGuideVO> selectChatGuideList() throws Exception {
+        return selectList("chatGuide.selectChatGuideList", null);
+    }
+
     public List<ChatGuideVO> selectChatGuideGreetingList(ChatGuideVO searchVO) throws Exception {
         return selectList("chatGuide.selectChatGuideGreetingList", searchVO);
     }
