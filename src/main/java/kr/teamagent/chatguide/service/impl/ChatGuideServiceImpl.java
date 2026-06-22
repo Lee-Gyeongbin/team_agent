@@ -23,6 +23,15 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
     private KeyGenerate keyGenerate;
 
     /**
+     * 챗봇가이드 전체 목록 조회 (공통 API용)
+     * @return 전체 가이드 목록
+     * @throws Exception
+     */
+    public List<ChatGuideVO> selectChatGuideList() throws Exception {
+        return chatGuideDAO.selectChatGuideList();
+    }
+
+    /**
      * 챗봇가이드 인사멘트 목록 조회
      * @param searchVO 검색 조건
      * @return 인사멘트 목록

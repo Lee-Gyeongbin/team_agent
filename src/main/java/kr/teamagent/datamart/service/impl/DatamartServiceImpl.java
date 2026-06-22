@@ -1073,13 +1073,12 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
-        int dbMaxSortOrd = datamartDAO.selectMaxFewshotSortOrdByDatamartId(dm);
         datamartDAO.deleteDmFewshotByDatamartId(dm);
 
         List<DatamartVO.MetaFewshotRowVO> validRows = filterFewshotSaveList(payload.getFewshotList(), datamartId);
 
         if (!validRows.isEmpty()) {
-            assignFewshotIdsForSave(validRows, dbMaxSortOrd);
+            assignFewshotIdsForSave(validRows);
             DatamartVO.MetaFewshotSavePayloadVO insertPayload = new DatamartVO.MetaFewshotSavePayloadVO();
             insertPayload.setDatamartId(datamartId);
             insertPayload.setFewshotList(validRows);
@@ -1109,10 +1108,10 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 저장 payload 기준으로 FEWSHOT_ID·SORT_ORD를 채운다.
-     * - ID 없는 행: payload·DB 최대 ID + 1부터 순차 발급 (빈 번호 재사용 방지)
-     * - SORT_ORD: 있으면 유지, 없으면 DB·payload 최대값 + 1부터 순차 부여
+     * - ID 없는 행만 신규 발급 (동일 요청 내 중복 방지)
+     * - SORT_ORD: payload 순서대로 1..N (입력값 무시)
      */
-    private void assignFewshotIdsForSave(List<DatamartVO.MetaFewshotRowVO> rows, int dbMaxSortOrd) throws Exception {
+    private void assignFewshotIdsForSave(List<DatamartVO.MetaFewshotRowVO> rows) throws Exception {
         int maxSeq = 0;
         for (DatamartVO.MetaFewshotRowVO row : rows) {
             if (row != null && CommonUtil.isNotEmpty(row.getFewshotId())) {
@@ -1126,25 +1125,15 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         maxSeq = Math.max(maxSeq,
                 Integer.parseInt(keyGenerate.generateTableKey("FW", "TB_DM_FEWSHOT", "FEWSHOT_ID").substring(2)) - 1);
         int[] batchNextSeq = new int[] { maxSeq + 1 };
-        int maxSortOrd = dbMaxSortOrd;
-        for (DatamartVO.MetaFewshotRowVO row : rows) {
-            if (row != null && row.getSortOrd() != null) {
-                maxSortOrd = Math.max(maxSortOrd, row.getSortOrd());
-            }
-        }
-        int nextSortOrd = maxSortOrd + 1;
+        int sortOrd = 1;
         for (DatamartVO.MetaFewshotRowVO row : rows) {
             if (row == null) {
                 continue;
             }
-
             if (CommonUtil.isEmpty(row.getFewshotId())) {
                 row.setFewshotId(allocateFewshotIdInBatch(batchNextSeq));
             }
-
-            if (row.getSortOrd() == null) {
-                row.setSortOrd(nextSortOrd++);
-            }
+            row.setSortOrd(sortOrd++);
         }
     }
 
@@ -1153,6 +1142,117 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
      */
     private String allocateFewshotIdInBatch(int[] batchNextSeq) {
         String key = "FW" + String.format("%06d", batchNextSeq[0]);
+        batchNextSeq[0]++;
+        return key;
+    }
+
+    /**
+     * 데이터마트 약어사전 목록 조회
+     * @param searchVO datamartId 필수
+     * @return { datamartId, abbrDictList: MetaAbbrDictRowVO[] }
+     * @throws Exception
+     */
+    public HashMap<String, Object> selectMetaAbbrDictList(DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        List<DatamartVO.MetaAbbrDictRowVO> abbrDictList = datamartDAO.selectMetaAbbrDictList(searchVO);
+        resultMap.put("datamartId", searchVO != null ? searchVO.getDatamartId() : "");
+        resultMap.put("abbrDictList", abbrDictList != null ? abbrDictList : new ArrayList<DatamartVO.MetaAbbrDictRowVO>());
+        return resultMap;
+    }
+
+    /**
+     * 데이터마트 약어사전 저장 (TB_DM_ABBR_DICT 해당 DATAMART_ID 전체 삭제 후 INSERT)
+     * @param payload datamartId, abbrDictList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public HashMap<String, Object> saveMetaAbbrDictList(DatamartVO.MetaAbbrDictSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        String datamartId = payload.getDatamartId().trim();
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(datamartId);
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        datamartDAO.deleteDmAbbrDictByDatamartId(dm);
+
+        List<DatamartVO.MetaAbbrDictRowVO> validRows = filterAbbrDictSaveList(payload.getAbbrDictList(), datamartId);
+
+        if (!validRows.isEmpty()) {
+            assignAbbrDictIdsForSave(validRows);
+            DatamartVO.MetaAbbrDictSavePayloadVO insertPayload = new DatamartVO.MetaAbbrDictSavePayloadVO();
+            insertPayload.setDatamartId(datamartId);
+            insertPayload.setAbbrDictList(validRows);
+            datamartDAO.insertMetaAbbrDictBatch(insertPayload);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "데이터마트 약어사전 저장 성공");
+        return resultMap;
+    }
+
+    private List<DatamartVO.MetaAbbrDictRowVO> filterAbbrDictSaveList(
+            List<DatamartVO.MetaAbbrDictRowVO> abbrDictList, String datamartId) {
+        List<DatamartVO.MetaAbbrDictRowVO> validRows = new ArrayList<>();
+        if (abbrDictList == null) {
+            return validRows;
+        }
+        for (DatamartVO.MetaAbbrDictRowVO row : abbrDictList) {
+            if (row == null || CommonUtil.isEmpty(row.getAbbrNm())) {
+                continue;
+            }
+            row.setDatamartId(datamartId);
+            validRows.add(row);
+        }
+        return validRows;
+    }
+
+    /**
+     * 저장 payload 기준으로 ABBR_ID·SORT_ORD를 채운다.
+     * - ID 없는 행만 신규 발급 (동일 요청 내 중복 방지)
+     * - SORT_ORD: payload 순서대로 1..N (입력값 무시)
+     */
+    private void assignAbbrDictIdsForSave(List<DatamartVO.MetaAbbrDictRowVO> rows) throws Exception {
+        int maxSeq = 0;
+        for (DatamartVO.MetaAbbrDictRowVO row : rows) {
+            if (row != null && CommonUtil.isNotEmpty(row.getAbbrId())) {
+                try {
+                    maxSeq = Math.max(maxSeq, Integer.parseInt(row.getAbbrId().trim().substring(2)));
+                } catch (NumberFormatException ignored) {
+                    // skip invalid id
+                }
+            }
+        }
+        maxSeq = Math.max(maxSeq,
+                Integer.parseInt(keyGenerate.generateTableKey("DA", "TB_DM_ABBR_DICT", "ABBR_ID").substring(2)) - 1);
+        int[] batchNextSeq = new int[] { maxSeq + 1 };
+        int sortOrd = 1;
+        for (DatamartVO.MetaAbbrDictRowVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+            if (CommonUtil.isEmpty(row.getAbbrId())) {
+                row.setAbbrId(allocateAbbrDictIdInBatch(batchNextSeq));
+            }
+            row.setSortOrd(sortOrd++);
+        }
+    }
+
+    /**ㄴㄴ
+     * 동일 저장 요청에서 신규 ABBR_ID를 중복 없이 발급한다.
+     */
+    private String allocateAbbrDictIdInBatch(int[] batchNextSeq) {
+        String key = "DA" + String.format("%06d", batchNextSeq[0]);
         batchNextSeq[0]++;
         return key;
     }
