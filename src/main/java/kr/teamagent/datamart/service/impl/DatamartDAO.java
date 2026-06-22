@@ -219,16 +219,6 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 데이터마트 퓨샷 최대 정렬순서 (DATAMART_ID 기준)
-     * @param searchVO datamartId
-     * @return MAX(SORT_ORD), 없으면 0
-     * @throws Exception
-     */
-    public int selectMaxFewshotSortOrdByDatamartId(DatamartVO searchVO) throws Exception {
-        return selectOne("datamart.selectMaxFewshotSortOrdByDatamartId", searchVO);
-    }
-
-    /**
      * 데이터마트 동의어 목록 조회
      * @param searchVO datamartId
      * @return 동의어 행 목록
@@ -266,5 +256,35 @@ public class DatamartDAO extends EgovComAbstractDAO {
      */
     public int insertMetaFewshotBatch(DatamartVO.MetaFewshotSavePayloadVO payload) throws Exception {
         return insert("datamart.insertMetaFewshotBatch", payload);
+    }
+
+    /**
+     * 데이터마트 약어사전 전체 삭제 (DATAMART_ID 기준)
+     * @param searchVO datamartId
+     * @return 삭제 건수
+     * @throws Exception
+     */
+    public int deleteDmAbbrDictByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmAbbrDictByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 약어사전 목록 조회
+     * @param searchVO datamartId
+     * @return 약어사전 행 목록
+     * @throws Exception
+     */
+    public List<DatamartVO.MetaAbbrDictRowVO> selectMetaAbbrDictList(DatamartVO searchVO) throws Exception {
+        return selectList("datamart.selectDatamartAbbrDictList", searchVO);
+    }
+
+    /**
+     * 데이터마트 약어사전 일괄 등록
+     * @param payload datamartId, abbrDictList
+     * @return 등록 건수
+     * @throws Exception
+     */
+    public int insertMetaAbbrDictBatch(DatamartVO.MetaAbbrDictSavePayloadVO payload) throws Exception {
+        return insert("datamart.insertMetaAbbrDictBatch", payload);
     }
 }

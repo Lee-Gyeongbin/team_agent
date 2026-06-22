@@ -274,4 +274,30 @@ public class DatamartController extends BaseController {
         HashMap<String, Object> resultMap = datamartService.saveMetaFewshotList(payload);
         return new ModelAndView("jsonView", resultMap);
     }
+
+    /**
+     * 메타 관리 > 약어사전 목록 조회 API
+     * @param searchVO datamartId 필수
+     * @return { datamartId, abbrDictList: MetaAbbrDictRowVO[] }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaAbbrDictList.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaAbbrDictList(@RequestBody DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.selectMetaAbbrDictList(searchVO);
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 메타 관리 > 약어사전 저장 API (TB_DM_ABBR_DICT DATAMART_ID 단위 전체 삭제 후 INSERT)
+     * @param payload datamartId, abbrDictList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @RequestMapping(value = "/metaAbbrDictSave.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView metaAbbrDictSave(@RequestBody DatamartVO.MetaAbbrDictSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = datamartService.saveMetaAbbrDictList(payload);
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

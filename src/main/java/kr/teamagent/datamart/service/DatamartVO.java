@@ -225,4 +225,25 @@ public class DatamartVO {
         private String datamartId;
         private List<MetaFewshotRowVO> fewshotList;
     }
+
+    @Getter
+    @Setter
+    public static class MetaAbbrDictRowVO {
+        private String datamartId;
+        private String abbrId;
+        private String abbrNm;
+        private String fullNmEng;
+        private String fullNmKor;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
+    @Getter
+    @Setter
+    public static class MetaAbbrDictSavePayloadVO {
+        private String datamartId;
+        private List<MetaAbbrDictRowVO> abbrDictList;
+    }
 }
