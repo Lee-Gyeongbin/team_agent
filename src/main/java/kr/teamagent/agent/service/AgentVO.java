@@ -17,6 +17,7 @@ public class AgentVO {
     private String agentId;
     private String agentNm;
     private String svcTy;
+    private String cncptTy;
     private String svcTyNm;
     private String temperature;
     private String tempDefaultYn;
