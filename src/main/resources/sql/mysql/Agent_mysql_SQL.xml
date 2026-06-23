@@ -49,6 +49,7 @@
             A.AGENT_ID
             , A.AGENT_NM
             , A.SVC_TY
+            , A.CNCPT_TY
             , A.TEMPERATURE
             , A.TEMP_DEFAULT_YN
             , A.TOP_P
@@ -171,6 +172,7 @@
             AGENT_ID
             , AGENT_NM
             , SVC_TY
+            , CNCPT_TY
             , TEMPERATURE
             , TEMP_DEFAULT_YN
             , TOP_P
@@ -188,6 +190,7 @@
             #{agentId}
             , #{agentNm, jdbcType=VARCHAR}
             , #{svcTy, jdbcType=VARCHAR}
+            , #{cncptTy, jdbcType=VARCHAR}
             , #{temperature, jdbcType=VARCHAR}
             , #{tempDefaultYn, jdbcType=VARCHAR}
             , #{topP, jdbcType=VARCHAR}
@@ -204,6 +207,7 @@
         )
         ON DUPLICATE KEY UPDATE
             AGENT_NM = VALUES(AGENT_NM)
+            , CNCPT_TY = VALUES(CNCPT_TY)
             , TEMPERATURE = VALUES(TEMPERATURE)
             , TEMP_DEFAULT_YN = VALUES(TEMP_DEFAULT_YN)
             , TOP_P = VALUES(TOP_P)

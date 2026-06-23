@@ -8,6 +8,7 @@
             A.AGENT_ID			AS AGENT_ID
             , A.AGENT_NM		AS AGENT_NM
             , A.SVC_TY			AS SVC_TY
+            , A.CNCPT_TY		AS CNCPT_TY
             , B.CODE_NM         AS SVC_TY_NM
             , A.DESCRIPTION 	AS DESCRIPTION
             , C.ETC1		    AS API_PORT

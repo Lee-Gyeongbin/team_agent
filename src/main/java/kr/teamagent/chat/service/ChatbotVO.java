@@ -78,6 +78,7 @@ public class ChatbotVO extends CommonVO {
     private String agentId;
     // AI 서비스 타입
     private String svcTy;
+    private String cncptTy;
     private String svcTyNm;
     // 참조 타겟 ID (RAG DATASET_ID, SQL DATAMART_ID 등)
     private String refId;
