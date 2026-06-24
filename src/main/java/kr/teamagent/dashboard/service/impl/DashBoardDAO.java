@@ -79,4 +79,19 @@ public class DashBoardDAO extends EgovComAbstractDAO {
     public int deleteYesterdayCategoryTrend() throws Exception {
         return delete("dashboard.deleteYesterdayCategoryTrend");
     }
+
+    /* 카테고리 -> 키워드 교체 예정 */
+    /**
+     * 배치용 어제 키워드 통계 삭제
+     */
+    public int deleteYesterdayKeywordDailyStat() throws Exception {
+        return delete("dashboard.deleteYesterdayKeywordDailyStat");
+    }
+
+    /**
+     * 배치용 어제 키워드 일별 통계 등록
+     */
+    public int insertKeywordDailyStat(DashBoardVO.KeywordDailyStat saveVO) throws Exception {
+        return insert("dashboard.insertKeywordDailyStat", saveVO);
+    }
 }

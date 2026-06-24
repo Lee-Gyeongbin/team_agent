@@ -241,4 +241,29 @@
             , NULL
         )
     </insert>
+
+    <!-- 카테고리 -> 키워드 교체 예정 -->
+    <delete id="deleteYesterdayKeywordDailyStat">
+        /* 배치용 어제 키워드 통계 삭제 dashboard.deleteYesterdayKeywordDailyStat */
+        DELETE
+        FROM TB_CHAT_KEYWORD_DAILY_STAT
+        WHERE STAT_DATE = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+    </delete>
+
+    <insert id="insertKeywordDailyStat">
+        /* 배치용 어제 키워드 일별 통계 등록 dashboard.insertKeywordDailyStat */
+        INSERT INTO TB_CHAT_KEYWORD_DAILY_STAT (
+            STAT_DATE
+            , LLM_KEYWORD
+            , KEYWORD_CNT
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+            , #{llmKeyword}
+            , #{keywordCnt}
+            , NOW()
+            , NULL
+        )
+    </insert>
 </mapper>

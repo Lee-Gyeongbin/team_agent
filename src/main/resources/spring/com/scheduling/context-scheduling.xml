@@ -41,10 +41,24 @@
 		<property name="cronExpression" value="0 30 0 * * ?"/>
 	</bean>
 
+	<!-- 카테고리 -> 키워드 교체 예정 -->
+	<!-- 대시보드 전날 채팅 키워드 통계 배치 (Quartz) -->
+	<bean id="dashBoardKeywordDailyStatJobDetail" class="org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean">
+		<property name="targetObject" ref="dashBoardServiceImpl"/>
+		<property name="targetMethod" value="buildYesterdayKeywordDailyStat"/>
+		<property name="concurrent" value="false"/>
+	</bean>
+
+	<bean id="dashBoardKeywordDailyStatTrigger" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
+		<property name="jobDetail" ref="dashBoardKeywordDailyStatJobDetail"/>
+		<property name="cronExpression" value="0 50 0 * * ?"/>
+	</bean>
+
 	<bean id="dashBoardScheduler" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
 		<property name="triggers">
 			<list>
 				<ref bean="dashBoardCategoryTrendTrigger"/>
+				<ref bean="dashBoardKeywordDailyStatTrigger"/>
 				<ref bean="regionTreeRefreshTrigger"/>
 				<ref bean="chatFileDeleteBatchTrigger"/>
 			</list>

@@ -65,4 +65,13 @@ public class DashBoardVO {
         private String categoryCd;
         private Integer categoryCnt;
     }
+
+    /* 카테고리 -> 키워드 교체 예정 */
+    /** 채팅 키워드 일별 통계 */
+    @Getter
+    @Setter
+    public static class KeywordDailyStat {
+        private String llmKeyword;
+        private Integer keywordCnt;
+    }
 }
