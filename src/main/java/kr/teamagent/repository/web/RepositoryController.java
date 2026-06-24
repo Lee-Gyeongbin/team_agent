@@ -246,6 +246,95 @@ public class RepositoryController extends BaseController {
         return resultMap;
     }
 
+    // ===== URL =====
+
+    /**
+     * URL 목록 조회
+     */
+    @RequestMapping("/selectUrlList.do")
+    @ResponseBody
+    public ModelAndView selectUrlList(@RequestBody RepositoryVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("dataList", repositoryService.selectUrlList(searchVO));
+        resultMap.put("totalCnt", repositoryService.selectUrlListCnt(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * URL 저장 (등록)
+     */
+    @RequestMapping("/saveUrl.do")
+    public @ResponseBody Map<String, Object> saveUrl(@RequestBody RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = repositoryService.saveUrl(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * URL 수정
+     */
+    @RequestMapping("/updateUrl.do")
+    public @ResponseBody Map<String, Object> updateUrl(@RequestBody RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = repositoryService.updateUrl(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * URL 사용여부 변경 (활성/비활성 토글)
+     */
+    @RequestMapping("/updateUrlUseYn.do")
+    public @ResponseBody Map<String, Object> updateUrlUseYn(@RequestBody RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = repositoryService.updateUrlUseYn(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * URL 배치 삭제
+     */
+    @RequestMapping("/deleteUrl.do")
+    public @ResponseBody Map<String, Object> deleteUrl(@RequestBody RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = repositoryService.deleteUrl(dataVO);
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 배치 스크래핑 — 활성 URL 전체 AI 수집 요청
+     */
+    @RequestMapping("/batchScraping.do")
+    public @ResponseBody Map<String, Object> batchScraping() throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = repositoryService.batchScraping();
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
     @RequestMapping("/deleteCategory.do")
     public @ResponseBody Map<String, Object> deleteCategory(@RequestBody RepositoryVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();

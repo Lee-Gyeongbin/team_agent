@@ -743,10 +743,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return query;
     }
 
-    private String ensureLunchAddressUrlFormat(String answerJson) {
+    private String ensureLunchAddressUrlFormat(String answerJson, String agentId) {
         if (CommonUtil.isEmpty(answerJson)) {
             return answerJson;
         }
+
+        // ADDITIONAL_CONFIG.features.imageEnrichment 모드
+        //  - "kakaoImage" : 장소·행사명 키워드로 카카오 이미지 검색 → 실제 사진 썸네일 주입
+        //  - 그 외(aiGenerate 등) : 기존 동작 유지 — 프론트가 placeholder 보고 AI 이미지 생성
+        String imageMode = getRecommendImageEnrichmentMode(agentId);
+        boolean useKakaoImage = "kakaoImage".equals(imageMode);
 
         try {
             JSONParser parser = new JSONParser();
@@ -772,17 +778,42 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 normalizedRow.put("location", location);
                 normalizedRow.put("menu", menu);
                 normalizedRow.put("price", price);
-                normalizedRow.put("imageUrl", "[음식이미지]");
 
                 String kakaoPlaceUrl = resolveKakaoPlaceUrlByKeyword(restaurant, location);
+
+                if (useKakaoImage) {
+                    // 카카오맵 place 페이지의 대표사진(og:image) 사용 — 없으면 빈 값(이미지 미표시)
+                    String ogImage = CommonUtil.isNotEmpty(kakaoPlaceUrl) ? resolveKakaoPlaceOgImage(kakaoPlaceUrl) : "";
+                    normalizedRow.put("imageUrl", ogImage);
+                } else {
+                    normalizedRow.put("imageUrl", "[음식이미지]");
+                }
+
                 normalizedRow.put("address", CommonUtil.isNotEmpty(kakaoPlaceUrl) ? kakaoPlaceUrl : "");
                 normalizedRows.add(normalizedRow);
             }
             return normalizedRows.toJSONString();
         } catch (Exception e) {
-            logger.warn("점심 추천 address URL 후처리 실패: {}", e.getMessage());
+            logger.warn("추천 결과 address/image URL 후처리 실패: {}", e.getMessage());
             return answerJson;
         }
+    }
+
+    /**
+     * RECOMMEND 에이전트의 ADDITIONAL_CONFIG.features.imageEnrichment 값을 반환한다.
+     * (예: "aiGenerate", "kakaoImage") — 미설정 시 빈 문자열.
+     */
+    private String getRecommendImageEnrichmentMode(String agentId) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        if (subCfg == null || subCfg.getAdditionalConfigMap() == null) {
+            return "";
+        }
+        Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
+        if (!(featuresObj instanceof Map)) {
+            return "";
+        }
+        Object mode = ((Map<?, ?>) featuresObj).get("imageEnrichment");
+        return mode != null ? String.valueOf(mode) : "";
     }
 
     /**
@@ -908,6 +939,73 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return "";
         } catch (Exception e) {
             logger.warn("카카오 장소 URL 생성 실패 - restaurant: {}, location: {}, error: {}", restaurant, location, e.getMessage());
+            return "";
+        }
+    }
+
+    // 카카오맵 place 페이지 og:image 추출용 (속성·content 순서 양방향 대응)
+    private static final java.util.regex.Pattern OG_IMAGE_PATTERN = java.util.regex.Pattern.compile(
+            "property=[\"']og:image[\"'][^>]*content=[\"']([^\"']+)[\"']", java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.regex.Pattern OG_IMAGE_PATTERN_ALT = java.util.regex.Pattern.compile(
+            "content=[\"']([^\"']+)[\"'][^>]*property=[\"']og:image[\"']", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /**
+     * 카카오맵 place 페이지(place_url)의 OpenGraph 대표 이미지(og:image)를 추출한다.
+     * (imageEnrichment == "kakaoImage" — 장소 대표사진)
+     * 대표 사진이 없어 지도 캡처(staticmap) 등이 노출되면 빈 문자열을 반환한다.
+     */
+    private String resolveKakaoPlaceOgImage(String placeUrl) {
+        if (CommonUtil.isEmpty(placeUrl)) {
+            return "";
+        }
+
+        try {
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .build();
+
+            Request request = new Request.Builder()
+                    .url(placeUrl)
+                    .get()
+                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .addHeader("Accept", "text/html")
+                    .build();
+
+            try (okhttp3.Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("카카오 place 페이지 응답 오류: {} / url={}", response.code(), placeUrl);
+                    return "";
+                }
+
+                String html = response.body().string();
+                if (CommonUtil.isEmpty(html)) {
+                    return "";
+                }
+
+                java.util.regex.Matcher matcher = OG_IMAGE_PATTERN.matcher(html);
+                String img = matcher.find() ? matcher.group(1).trim() : "";
+                if (CommonUtil.isEmpty(img)) {
+                    java.util.regex.Matcher altMatcher = OG_IMAGE_PATTERN_ALT.matcher(html);
+                    img = altMatcher.find() ? altMatcher.group(1).trim() : "";
+                }
+
+                // 대표 사진 없음 → 지도 캡처(staticmap)만 노출되는 경우 제외
+                if (CommonUtil.isEmpty(img) || img.contains("staticmap")) {
+                    return "";
+                }
+
+                // 프로토콜 상대 URL(//...) / http 보정 → https
+                if (img.startsWith("//")) {
+                    return "https:" + img;
+                }
+                if (img.startsWith("http://")) {
+                    return "https://" + img.substring("http://".length());
+                }
+                return img;
+            }
+        } catch (Exception e) {
+            logger.warn("카카오 place og:image 추출 실패 - url: {}, error: {}", placeUrl, e.getMessage());
             return "";
         }
     }
@@ -1048,7 +1146,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                             String answer = getAnswerText(data);
                             if (CommonUtil.isNotEmpty(answer)) {
                                 if (isKakaoAddressEnrichmentAgent) {
-                                    answer = ensureLunchAddressUrlFormat(answer);
+                                    answer = ensureLunchAddressUrlFormat(answer, agentId);
                                     callback.onChunk(answer, answer, null);
                                     accumulatedContent = new StringBuilder(answer);
                                 } else if (accumulatedContent.length() == 0) {

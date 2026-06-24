@@ -106,4 +106,37 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     public int deleteCategory(RepositoryVO searchVO) throws Exception {
         return delete("repository.deleteCategory", searchVO);
     }
+
+    // ===== URL =====
+
+    /**
+     * 활성 URL 전체 조회 (배치 스크래핑용)
+     */
+    public List<RepositoryVO> selectActiveUrlList() throws Exception {
+        return selectList("repository.selectActiveUrlList", new RepositoryVO());
+    }
+
+    public Integer selectUrlListCnt(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectUrlListCnt", searchVO);
+    }
+
+    public List<RepositoryVO> selectUrlList(RepositoryVO searchVO) throws Exception {
+        return selectList("repository.selectUrlList", searchVO);
+    }
+
+    public int insertUrl(RepositoryVO searchVO) throws Exception {
+        return insert("repository.insertUrl", searchVO);
+    }
+
+    public int updateUrl(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateUrl", searchVO);
+    }
+
+    public int updateUrlUseYn(RepositoryVO searchVO) throws Exception {
+        return update("repository.updateUrlUseYn", searchVO);
+    }
+
+    public int deleteUrlByIdList(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteUrlByIdList", searchVO);
+    }
 }
