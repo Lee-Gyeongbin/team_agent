@@ -37,6 +37,10 @@
         SELECT COUNT(*)
         FROM TB_DOC_FILE A
         WHERE A.USE_YN = 'Y'
+        <choose>
+            <when test="urlIdNotNull != null and urlIdNotNull == true">AND A.URL_ID IS NOT NULL</when>
+            <otherwise>AND A.URL_ID IS NULL</otherwise>
+        </choose>
         <if test="categoryId != null and categoryId != ''">
             AND A.CATEGORY_ID = #{categoryId}
         </if>
@@ -98,6 +102,10 @@
             ) AS DS_NM
         FROM TB_DOC_FILE A
         WHERE A.USE_YN = #{useYn, jdbcType=CHAR}
+        <choose>
+            <when test="urlIdNotNull != null and urlIdNotNull == true">AND A.URL_ID IS NOT NULL</when>
+            <otherwise>AND A.URL_ID IS NULL</otherwise>
+        </choose>
         <if test="categoryId != null and categoryId != ''">
             AND A.CATEGORY_ID = #{categoryId}
         </if>
@@ -282,6 +290,144 @@
         DELETE FROM TB_CONTENT_CAT
         WHERE CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
            OR PARN_CAT_ID = #{categoryId, jdbcType=VARCHAR}
+    </delete>
+
+    <!-- ===== URL ===== -->
+
+    <select id="selectActiveUrlList" resultType="repositoryVO">
+        /* 활성 URL 전체 조회 (배치 스크래핑용) repository.selectActiveUrlList */
+        SELECT
+            URL_ID
+            , URL_NAME
+            , URL_ADDR
+            , CRAWL_DPTH
+            , CRAWL_INTVL
+            , USE_YN
+        FROM TB_CNT_URL
+        WHERE USE_YN = 'Y'
+        ORDER BY URL_ID
+    </select>
+
+    <select id="selectUrlListCnt" parameterType="repositoryVO" resultType="int">
+        /* URL 목록 건수 repository.selectUrlListCnt */
+        SELECT COUNT(*)
+        FROM TB_CNT_URL U
+        WHERE 1 = 1
+        <if test="findContent != null and findContent != ''">
+            AND (
+                U.URL_NAME LIKE CONCAT('%', #{findContent}, '%')
+                OR U.URL_ADDR LIKE CONCAT('%', #{findContent}, '%')
+            )
+        </if>
+        <if test="useYn != null and useYn != ''">
+            AND U.USE_YN = #{useYn, jdbcType=CHAR}
+        </if>
+        <if test="categoryId != null and categoryId != ''">
+            AND U.CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+        </if>
+    </select>
+
+    <select id="selectUrlList" parameterType="repositoryVO" resultType="repositoryVO">
+        /* URL 목록 조회 repository.selectUrlList */
+        SELECT
+            U.URL_ID
+            , U.URL_NAME
+            , U.URL_ADDR
+            , U.CATEGORY_ID
+            , C.CATEGORY_NAME
+            , U.CRAWL_INTVL
+            , U.CRAWL_DPTH
+            , U.USE_YN
+            , U.LAST_CRAWL_DT
+            , U.URL_CRAWL_STATUS_CD
+            , U.CREATE_DT
+            , U.MODIFY_DT
+            , (
+                SELECT COUNT(*)
+                FROM TB_DS_URL DU
+                INNER JOIN TB_DS D ON D.DATASET_ID = DU.DATASET_ID
+                WHERE DU.URL_ID = U.URL_ID
+            ) AS ACTIVE_DS_CNT
+            , (
+                SELECT GROUP_CONCAT(D.DS_NM SEPARATOR ', ')
+                FROM TB_DS_URL DU
+                INNER JOIN TB_DS D ON D.DATASET_ID = DU.DATASET_ID
+                WHERE DU.URL_ID = U.URL_ID
+            ) AS DS_NM
+        FROM TB_CNT_URL U
+        LEFT JOIN TB_CONTENT_CAT C ON C.CATEGORY_ID = U.CATEGORY_ID
+        WHERE 1 = 1
+        <if test="findContent != null and findContent != ''">
+            AND (
+                U.URL_NAME LIKE CONCAT('%', #{findContent}, '%')
+                OR U.URL_ADDR LIKE CONCAT('%', #{findContent}, '%')
+            )
+        </if>
+        <if test="useYn != null and useYn != ''">
+            AND U.USE_YN = #{useYn, jdbcType=CHAR}
+        </if>
+        <if test="categoryId != null and categoryId != ''">
+            AND U.CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+        </if>
+        ORDER BY U.CREATE_DT DESC
+        <if test="startIndex != null and pageSize != null">
+            LIMIT #{startIndex}, #{pageSize}
+        </if>
+    </select>
+
+    <insert id="insertUrl" parameterType="repositoryVO">
+        /* URL 등록 repository.insertUrl */
+        INSERT INTO TB_CNT_URL (
+            URL_ID
+            , URL_NAME
+            , URL_ADDR
+            , CATEGORY_ID
+            , CRAWL_INTVL
+            , CRAWL_DPTH
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{urlId, jdbcType=VARCHAR}
+            , #{urlName, jdbcType=VARCHAR}
+            , #{urlAddr, jdbcType=VARCHAR}
+            , #{categoryId, jdbcType=VARCHAR}
+            , #{crawlIntvl, jdbcType=VARCHAR}
+            , #{crawlDpth, jdbcType=INTEGER}
+            , #{useYn, jdbcType=CHAR}
+            , NOW()
+            , NOW()
+        )
+    </insert>
+
+    <update id="updateUrl" parameterType="repositoryVO">
+        /* URL 수정 repository.updateUrl */
+        UPDATE TB_CNT_URL
+        SET URL_NAME    = #{urlName, jdbcType=VARCHAR}
+          , URL_ADDR    = #{urlAddr, jdbcType=VARCHAR}
+          , CATEGORY_ID = #{categoryId, jdbcType=VARCHAR}
+          , CRAWL_INTVL = #{crawlIntvl, jdbcType=VARCHAR}
+          , CRAWL_DPTH  = #{crawlDpth, jdbcType=INTEGER}
+          , USE_YN      = #{useYn, jdbcType=CHAR}
+          , MODIFY_DT   = NOW()
+        WHERE URL_ID = #{urlId, jdbcType=VARCHAR}
+    </update>
+
+    <update id="updateUrlUseYn" parameterType="repositoryVO">
+        /* URL 사용여부 변경 repository.updateUrlUseYn */
+        UPDATE TB_CNT_URL
+        SET USE_YN = #{useYn, jdbcType=CHAR}
+            , MODIFY_DT = NOW()
+        WHERE URL_ID = #{urlId, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteUrlByIdList" parameterType="repositoryVO">
+        /* URL 배치 삭제 repository.deleteUrlByIdList */
+        DELETE FROM TB_CNT_URL
+        WHERE URL_ID IN
+        <foreach collection="urlIdList" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
     </delete>
 
 </mapper>
