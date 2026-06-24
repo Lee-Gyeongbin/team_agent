@@ -1,5 +1,7 @@
 package kr.teamagent.repository.service.impl;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -348,6 +350,184 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     
+    // ===== URL =====
+
+    public List<RepositoryVO> selectUrlList(RepositoryVO searchVO) throws Exception {
+        int p = searchVO.getPage() == null || searchVO.getPage() < 1 ? 1 : searchVO.getPage();
+        int ps = searchVO.getPageSize() == null || searchVO.getPageSize() < 1 ? 10 : searchVO.getPageSize();
+        searchVO.setStartIndex((p - 1) * ps);
+        searchVO.setPageSize(ps);
+        return repositoryDAO.selectUrlList(searchVO);
+    }
+
+    public Integer selectUrlListCnt(RepositoryVO searchVO) throws Exception {
+        return repositoryDAO.selectUrlListCnt(searchVO);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> saveUrl(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        if (StringUtils.isBlank(dataVO.getUrlId())) {
+            dataVO.setUrlId(keyGenerate.generateTableKey("URL", "TB_CNT_URL", "URL_ID"));
+        }
+        if (StringUtils.isBlank(dataVO.getCrawlIntvl())) {
+            dataVO.setCrawlIntvl("MANUAL");
+        }
+        if (StringUtils.isBlank(dataVO.getCrawlDpth())) {
+            dataVO.setCrawlDpth("1");
+        }
+        if (StringUtils.isBlank(dataVO.getUseYn())) {
+            dataVO.setUseYn("Y");
+        }
+        int result = repositoryDAO.insertUrl(dataVO);
+        if (result > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("urlId", dataVO.getUrlId());
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "URL 저장에 실패하였습니다.");
+        }
+        return resultMap;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateUrl(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        if (StringUtils.isBlank(dataVO.getUrlId())) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "수정할 URL ID가 없습니다.");
+            return resultMap;
+        }
+        int result = repositoryDAO.updateUrl(dataVO);
+        if (result > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "URL 수정에 실패하였습니다.");
+        }
+        return resultMap;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateUrlUseYn(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        int result = repositoryDAO.updateUrlUseYn(dataVO);
+        if (result > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "URL 상태 변경에 실패하였습니다.");
+        }
+        return resultMap;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> deleteUrl(RepositoryVO dataVO) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        List<String> urlIdList = dataVO.getUrlIdList();
+        if (urlIdList == null || urlIdList.isEmpty()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "삭제할 URL을 선택해주세요.");
+            return resultMap;
+        }
+        int deleted = repositoryDAO.deleteUrlByIdList(dataVO);
+        if (deleted > 0) {
+            resultMap.put("successYn", true);
+            resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
+        } else {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "URL 삭제에 실패하였습니다.");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 배치 스크래핑 — 활성 URL 전체를 AI 서버에 전달하여 수집 요청
+     */
+    public Map<String, Object> batchScraping() throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        String apiUrl = PropertyUtil.getProperty("Globals.dataset.scraping.apiUrl");
+        if (StringUtils.isBlank(apiUrl)) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "스크래핑 API URL이 설정되어 있지 않습니다.");
+            return resultMap;
+        }
+
+        List<RepositoryVO> activeUrls = repositoryDAO.selectActiveUrlList();
+        if (activeUrls == null || activeUrls.isEmpty()) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "활성 상태인 URL이 없습니다.");
+            return resultMap;
+        }
+
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+
+        List<Map<String, Object>> urlPayloads = new ArrayList<>();
+        for (RepositoryVO url : activeUrls) {
+            String s3Key = "repository/url/" + url.getUrlId() + "/" + timestamp + "_scraped.txt";
+            int crawlDepth = 1;
+            try {
+                if (StringUtils.isNotBlank(url.getCrawlDpth())) {
+                    crawlDepth = Integer.parseInt(url.getCrawlDpth());
+                }
+            } catch (NumberFormatException ignored) { }
+
+            Map<String, Object> item = new HashMap<>();
+            item.put("url_id", url.getUrlId());
+            item.put("url_addr", url.getUrlAddr());
+            item.put("s3_key", s3Key);
+            item.put("crawl_depth", crawlDepth);
+            urlPayloads.add(item);
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("urls", urlPayloads);
+
+        OkHttpClient client = new OkHttpClient();
+        try {
+            String jsonBody = new com.google.gson.Gson().toJson(payload);
+            RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json; charset=utf-8"));
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    resultMap.put("successYn", false);
+                    resultMap.put("returnMsg", "AI 서버 호출에 실패하였습니다. (HTTP " + response.code() + ")");
+                    return resultMap;
+                }
+
+                String responseBody = response.body().string();
+                com.google.gson.JsonObject jsonResponse = new com.google.gson.Gson().fromJson(responseBody, com.google.gson.JsonObject.class);
+                String status = jsonResponse.has("status") && !jsonResponse.get("status").isJsonNull()
+                        ? jsonResponse.get("status").getAsString()
+                        : "";
+
+                // "done" 또는 "accepted" (비동기) 모두 성공으로 처리
+                if (!"done".equalsIgnoreCase(status) && !"accepted".equalsIgnoreCase(status)) {
+                    resultMap.put("successYn", false);
+                    resultMap.put("returnMsg", "스크래핑 요청에 실패하였습니다. (" + responseBody + ")");
+                    return resultMap;
+                }
+            }
+        } catch (Exception e) {
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "AI 서버 연동 중 오류가 발생하였습니다.");
+            return resultMap;
+        }
+
+        resultMap.put("successYn", true);
+        resultMap.put("returnMsg", "스크래핑 요청이 완료되었습니다. (" + activeUrls.size() + "개 URL)");
+        return resultMap;
+    }
+
     /**
      * 문서 파일 변경사항을 AI 서버에 전송
      */

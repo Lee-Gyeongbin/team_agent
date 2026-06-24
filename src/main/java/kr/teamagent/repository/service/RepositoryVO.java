@@ -71,8 +71,28 @@ public class RepositoryVO {
     /** 연결 데이터셋명 */
     private String dsNm;
 
+    /** TB_CNT_URL */
+    /** URL ID */
+    private String urlId;
+    /** URL 이름 */
+    private String urlName;
+    /** URL 주소 */
+    private String urlAddr;
+    /** 크롤링 간격 */
+    private String crawlIntvl;
+    /** 크롤링 깊이 */
+    private String crawlDpth;
+    /** 마지막 크롤링 일시 */
+    private String lastCrawlDt;
+    /** 크롤링 상태 코드 */
+    private String urlCrawlStatusCd;
+
     /** 문서 파일 ID 목록 */
     private List<String> docFileIdList;
+    /** URL ID 목록 (배치 삭제) */
+    private List<String> urlIdList;
+    /** true: URL_ID IS NOT NULL (URL탭 수집 파일 조회), null/false: URL_ID IS NULL (파일 탭) */
+    private Boolean urlIdNotNull;
     /** 파일 라이브러리 저장 요청 목록 (배치) */
     private List<RepositoryVO> dataList;
 
