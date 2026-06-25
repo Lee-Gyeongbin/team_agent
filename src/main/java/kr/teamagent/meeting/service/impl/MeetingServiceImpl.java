@@ -437,7 +437,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             // --- session ---
             JSONObject sessionConfig = new JSONObject();
             sessionConfig.put("type", "realtime");
-            sessionConfig.put("model", "gpt-4o-realtime-preview");
+            sessionConfig.put("model", "gpt-realtime-2");
             sessionConfig.put("audio", audio);
 
             // --- 최상위 ---
