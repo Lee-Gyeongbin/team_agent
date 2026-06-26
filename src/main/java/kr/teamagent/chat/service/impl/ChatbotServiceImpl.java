@@ -1803,7 +1803,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         return Arrays.stream(result.split("\n"))
                 .map(String::trim)
-                .map(line -> line.replaceFirst("^[\\d\\.\\-\\)\\s]+", ""))
+                .map(line -> line.replaceFirst("^\\d+[.\\)\\-]\\s*", ""))
                 .filter(CommonUtil::isNotEmpty)
                 .map(line -> truncateTitle(line, 50))
                 .limit(3)
