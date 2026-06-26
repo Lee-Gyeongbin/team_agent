@@ -82,14 +82,14 @@ public class DashBoardController extends BaseController {
     }
 
     /**
-     * 카테고리 추이
-     * @return { dataList: DashBoardVO.CategoryTrend[] }
+     * 키워드 추이
+     * @return { dataList: DashBoardVO.KeywordTrend[] }
      */
-    @RequestMapping(value = "/category-trend.do" , method = RequestMethod.POST)
+    @RequestMapping(value = "/keyword-trend.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView categoryTrend(@RequestBody DashBoardVO.CategoryTrend searchVO) throws Exception {
+    public ModelAndView keywordTrend(@RequestBody DashBoardVO.KeywordTrend searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", dashBoardService.selectCategoryTrend(searchVO.getDayCnt()));
+        resultMap.put("dataList", dashBoardService.selectKeywordTrend(searchVO.getDayCnt()));
         return new ModelAndView("jsonView", resultMap);
     }
 }

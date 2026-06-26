@@ -56,17 +56,23 @@ public class DashBoardVO {
         private Long successCnt;
     }
 
-    /** 카테고리 추이 (코드·건수) */
+    /** 키워드 추이 (키워드·건수) */
     @Getter
     @Setter
-    public static class CategoryTrend {
+    public static class KeywordTrend {
         private Integer dayCnt;
-        private String categoryNm;
-        private String categoryCd;
-        private Integer categoryCnt;
+        private String llmKeyword;
+        private Integer keywordCnt;
     }
 
-    /* 카테고리 -> 키워드 교체 예정 */
+    /** 배치용 채팅 로그 (질문·답변) */
+    @Getter
+    @Setter
+    public static class KeywordChatLog {
+        private String qContent;
+        private String rContent;
+    }
+
     /** 채팅 키워드 일별 통계 */
     @Getter
     @Setter
