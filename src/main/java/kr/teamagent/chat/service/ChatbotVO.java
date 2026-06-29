@@ -86,6 +86,10 @@ public class ChatbotVO extends CommonVO {
     private String qContent;
     /** REST 요청 호환용 질문 필드 */
     private String query;
+    /** 질의 진단(diagnoseQuestion)용 질문 텍스트 */
+    private String question;
+    /** 질의 진단 대상 데이터마트 ID */
+    private String datamartId;
     // 응답 내용
     private String rContent;
     // 입력 토큰 수
