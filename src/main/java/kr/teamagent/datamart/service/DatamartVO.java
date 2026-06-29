@@ -246,4 +246,27 @@ public class DatamartVO {
         private String datamartId;
         private List<MetaAbbrDictRowVO> abbrDictList;
     }
+
+    @Getter
+    @Setter
+    public static class MetaTermDictRowVO {
+        private String datamartId;
+        private String termId;
+        private String termType;
+        private String termNm;
+        private String termDesc;
+        private String sampleValues;
+        private String synonyms;
+        private Integer sortOrd;
+        private String useYn;
+        private String createDt;
+        private String modifyDt;
+    }
+
+    @Getter
+    @Setter
+    public static class MetaTermDictSavePayloadVO {
+        private String datamartId;
+        private List<MetaTermDictRowVO> termList;
+    }
 }

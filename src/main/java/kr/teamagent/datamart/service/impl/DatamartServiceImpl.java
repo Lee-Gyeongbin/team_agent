@@ -1256,4 +1256,115 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         batchNextSeq[0]++;
         return key;
     }
+
+    /**
+     * 데이터마트 용어사전 목록 조회
+     * @param searchVO datamartId
+     * @return { datamartId, termList: MetaTermDictRowVO[] }
+     * @throws Exception
+     */
+    public HashMap<String, Object> selectMetaTermDictList(DatamartVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        List<DatamartVO.MetaTermDictRowVO> termList = datamartDAO.selectMetaTermDictList(searchVO);
+        resultMap.put("datamartId", searchVO != null ? searchVO.getDatamartId() : null);
+        resultMap.put("termList", termList != null ? termList : new ArrayList<DatamartVO.MetaTermDictRowVO>());
+        return resultMap;
+    }
+
+    /**
+     * 데이터마트 용어사전 저장 (TB_DM_TERM_DICT 해당 DATAMART_ID 전체 삭제 후 INSERT)
+     * @param payload datamartId, termList
+     * @return { result, msg }
+     * @throws Exception
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public HashMap<String, Object> saveMetaTermDictList(DatamartVO.MetaTermDictSavePayloadVO payload) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        if (payload == null || CommonUtil.isEmpty(payload.getDatamartId())) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "datamartId is required");
+            return resultMap;
+        }
+
+        String datamartId = payload.getDatamartId().trim();
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(datamartId);
+        if (datamartDAO.selectDatamart(dm) == null) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "데이터마트 정보를 찾을 수 없습니다.");
+            return resultMap;
+        }
+
+        datamartDAO.deleteDmTermDictByDatamartId(dm);
+
+        List<DatamartVO.MetaTermDictRowVO> validRows = filterTermDictSaveList(payload.getTermList(), datamartId);
+
+        if (!validRows.isEmpty()) {
+            assignTermDictIdsForSave(validRows);
+            DatamartVO.MetaTermDictSavePayloadVO insertPayload = new DatamartVO.MetaTermDictSavePayloadVO();
+            insertPayload.setDatamartId(datamartId);
+            insertPayload.setTermList(validRows);
+            datamartDAO.insertMetaTermDictBatch(insertPayload);
+        }
+
+        resultMap.put("result", "SUCCESS");
+        resultMap.put("msg", "데이터마트 용어사전 저장 성공");
+        return resultMap;
+    }
+
+    private List<DatamartVO.MetaTermDictRowVO> filterTermDictSaveList(
+            List<DatamartVO.MetaTermDictRowVO> termList, String datamartId) {
+        List<DatamartVO.MetaTermDictRowVO> validRows = new ArrayList<>();
+        if (termList == null) {
+            return validRows;
+        }
+        for (DatamartVO.MetaTermDictRowVO row : termList) {
+            if (row == null || CommonUtil.isEmpty(row.getTermNm()) || CommonUtil.isEmpty(row.getTermType())) {
+                continue;
+            }
+            row.setDatamartId(datamartId);
+            validRows.add(row);
+        }
+        return validRows;
+    }
+
+    /**
+     * 저장 payload 기준으로 TERM_ID·SORT_ORD를 채운다.
+     * - ID 없는 행만 신규 발급 (동일 요청 내 중복 방지)
+     * - SORT_ORD: payload 순서대로 1..N (입력값 무시)
+     */
+    private void assignTermDictIdsForSave(List<DatamartVO.MetaTermDictRowVO> rows) throws Exception {
+        int maxSeq = 0;
+        for (DatamartVO.MetaTermDictRowVO row : rows) {
+            if (row != null && CommonUtil.isNotEmpty(row.getTermId())) {
+                try {
+                    maxSeq = Math.max(maxSeq, Integer.parseInt(row.getTermId().trim().substring(2)));
+                } catch (NumberFormatException ignored) {
+                    // skip invalid id
+                }
+            }
+        }
+        maxSeq = Math.max(maxSeq,
+                Integer.parseInt(keyGenerate.generateTableKey("DA", "TB_DM_TERM_DICT", "TERM_ID").substring(2)) - 1);
+        int[] batchNextSeq = new int[] { maxSeq + 1 };
+        int sortOrd = 1;
+        for (DatamartVO.MetaTermDictRowVO row : rows) {
+            if (row == null) {
+                continue;
+            }
+            if (CommonUtil.isEmpty(row.getTermId())) {
+                row.setTermId(allocateTermDictIdInBatch(batchNextSeq));
+            }
+            row.setSortOrd(sortOrd++);
+        }
+    }
+
+    /**
+     * 동일 저장 요청에서 신규 TERM_ID를 중복 없이 발급한다.
+     */
+    private String allocateTermDictIdInBatch(int[] batchNextSeq) {
+        String key = "DA" + String.format("%06d", batchNextSeq[0]);
+        batchNextSeq[0]++;
+        return key;
+    }
 }

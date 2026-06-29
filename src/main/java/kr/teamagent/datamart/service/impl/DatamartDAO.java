@@ -287,4 +287,34 @@ public class DatamartDAO extends EgovComAbstractDAO {
     public int insertMetaAbbrDictBatch(DatamartVO.MetaAbbrDictSavePayloadVO payload) throws Exception {
         return insert("datamart.insertMetaAbbrDictBatch", payload);
     }
+
+    /**
+     * 데이터마트 용어사전 저장 전 DATAMART_ID 단위 전체 삭제
+     * @param searchVO datamartId
+     * @return 삭제 건수
+     * @throws Exception
+     */
+    public int deleteDmTermDictByDatamartId(DatamartVO searchVO) throws Exception {
+        return delete("datamart.deleteDmTermDictByDatamartId", searchVO);
+    }
+
+    /**
+     * 데이터마트 용어사전 목록 조회
+     * @param searchVO datamartId
+     * @return 용어사전 행 목록
+     * @throws Exception
+     */
+    public List<DatamartVO.MetaTermDictRowVO> selectMetaTermDictList(DatamartVO searchVO) throws Exception {
+        return selectList("datamart.selectDatamartTermDictList", searchVO);
+    }
+
+    /**
+     * 데이터마트 용어사전 일괄 등록
+     * @param payload datamartId, termList
+     * @return 등록 건수
+     * @throws Exception
+     */
+    public int insertMetaTermDictBatch(DatamartVO.MetaTermDictSavePayloadVO payload) throws Exception {
+        return insert("datamart.insertMetaTermDictBatch", payload);
+    }
 }
