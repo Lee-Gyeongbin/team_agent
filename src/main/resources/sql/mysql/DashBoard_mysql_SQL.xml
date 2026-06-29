@@ -7,7 +7,7 @@
     <resultMap id="noticeItemResult" type="kr.teamagent.dashboard.service.DashBoardVO$NoticeItem" autoMapping="true"/>
     <resultMap id="tokenUsageResult" type="kr.teamagent.dashboard.service.DashBoardVO$TokenUsage" autoMapping="true"/>
     <resultMap id="visitorTrendResult" type="kr.teamagent.dashboard.service.DashBoardVO$VisitorTrend" autoMapping="true"/>
-    <resultMap id="categoryTrendResult" type="kr.teamagent.dashboard.service.DashBoardVO$CategoryTrend" autoMapping="true"/>
+    <resultMap id="keywordTrendResult" type="kr.teamagent.dashboard.service.DashBoardVO$KeywordTrend" autoMapping="true"/>
 
     <select id="selectStatSummary" resultMap="statSummaryResult">
         /* 대시보드 상단 통계 카드 dashboard.selectStatSummary */
@@ -191,54 +191,61 @@
         ORDER BY D.DT
     </select>
 
-    <select id="selectCategoryTrend" resultMap="categoryTrendResult">
-        /* 대시보드 카테고리 목록 조회 dashboard.selectCategoryTrend */
+    <select id="selectKeywordTrend" resultMap="keywordTrendResult">
+        /* 대시보드 키워드 추이 조회 dashboard.selectKeywordTrend */
         SELECT
-            C.CODE_NM AS CATEGORY_NM
-            , A.CATEGORY_CD
-            , SUM(IFNULL(A.CATEGORY_CNT, 0)) AS CATEGORY_CNT
-        FROM TB_CHAT_CATEGORY_DAILY_STAT A
-        LEFT JOIN TB_CODE C
-            ON A.CATEGORY_CD COLLATE utf8mb4_unicode_ci = C.CODE_ID COLLATE utf8mb4_unicode_ci
-            AND C.CODE_GRP_ID = 'UC000001'
-        WHERE A.STAT_DATE <![CDATA[>=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL #{dayCnt} DAY), '%Y%m%d')
-            AND A.STAT_DATE <![CDATA[<=]]> DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
-        GROUP BY A.CATEGORY_CD, C.CODE_ID
-        ORDER BY CATEGORY_CNT DESC
-        LIMIT 5
+            A.LLM_KEYWORD AS llmKeyword
+            , SUM(IFNULL(A.KEYWORD_CNT, 0)) AS keywordCnt
+        FROM TB_CHAT_KEYWORD_DAILY_STAT A
+        WHERE A.STAT_DATE <![CDATA[>=]]> DATE_SUB(CURDATE(), INTERVAL #{dayCnt} DAY)
+            AND A.STAT_DATE <![CDATA[<=]]> DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+            AND A.LLM_KEYWORD <![CDATA[<>]]> '기타'
+        GROUP BY A.LLM_KEYWORD
+        ORDER BY keywordCnt DESC
     </select>
 
-    <select id="selectYesterdayQContentList" resultType="string">
-        /* 배치용 어제 질문 목록 조회 dashboard.selectYesterdayQContentList */
+    <select id="selectYesterdayKeywordChatLogList" resultType="kr.teamagent.dashboard.service.DashBoardVO$KeywordChatLog">
+        /* 배치용 어제 질문·답변 목록 조회 dashboard.selectYesterdayKeywordChatLogList */
         SELECT
-            A.Q_CONTENT
+            A.Q_CONTENT AS qContent
+            , A.R_CONTENT AS rContent
         FROM TB_CHAT_LOG A
         WHERE A.CREATE_DT <![CDATA[>=]]> DATE_SUB(CURDATE(), INTERVAL 1 DAY)
             AND A.CREATE_DT <![CDATA[<]]> CURDATE()
             AND NULLIF(TRIM(A.Q_CONTENT), '') IS NOT NULL
     </select>
 
-    <delete id="deleteYesterdayCategoryTrend">
-        /* 배치용 어제 카테고리 통계 삭제 dashboard.deleteYesterdayCategoryTrend */
+    <delete id="deleteYesterdayKeywordDailyStat">
+        /* 배치용 어제 키워드 통계 삭제 dashboard.deleteYesterdayKeywordDailyStat */
         DELETE
-        FROM TB_CHAT_CATEGORY_DAILY_STAT
-        WHERE STAT_DATE = DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
+        FROM TB_CHAT_KEYWORD_DAILY_STAT
+        WHERE STAT_DATE = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     </delete>
 
-    <insert id="insertCategoryTrend">
-        /* 대시보드 카테고리 목록 등록 dashboard.insertCategoryTrend */
-        INSERT INTO TB_CHAT_CATEGORY_DAILY_STAT (
+    <insert id="insertYesterdayKeywordDailyStat">
+        /* 배치용 어제 키워드 일별 통계 등록 dashboard.insertYesterdayKeywordDailyStat */
+        INSERT INTO TB_CHAT_KEYWORD_DAILY_STAT (
             STAT_DATE
-            , CATEGORY_CD
-            , CATEGORY_CNT
+            , LLM_KEYWORD
+            , KEYWORD_CNT
             , CREATE_DT
             , MODIFY_DT
         ) VALUES (
-            DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 DAY), '%Y%m%d')
-            , #{categoryCd}
-            , #{categoryCnt}
+            DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+            , #{llmKeyword}
+            , #{keywordCnt}
             , NOW()
             , NULL
         )
     </insert>
+
+    <select id="selectKeywordDailyStatListByDaysAgo" resultType="kr.teamagent.dashboard.service.DashBoardVO$KeywordDailyStat">
+        /* 배치용 기준 키워드 조회 (N일 전 통계 목록) dashboard.selectKeywordDailyStatListByDaysAgo */
+        SELECT
+            A.LLM_KEYWORD AS llmKeyword
+            , A.KEYWORD_CNT AS keywordCnt
+        FROM TB_CHAT_KEYWORD_DAILY_STAT A
+        WHERE A.STAT_DATE = DATE_SUB(CURDATE(), INTERVAL #{daysAgo} DAY)
+        ORDER BY A.KEYWORD_CNT DESC, A.LLM_KEYWORD
+    </select>
 </mapper>
