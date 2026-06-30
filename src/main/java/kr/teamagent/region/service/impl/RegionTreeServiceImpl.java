@@ -147,8 +147,8 @@ public class RegionTreeServiceImpl extends EgovAbstractServiceImpl {
     }
 
     private Path resolveCacheFilePath() {
-        String fileStorePath = requiredProperty("Globals.fileStorePath");
-        return Paths.get(fileStorePath, "cache", "region-tree.json").normalize();
+        String webRootPath = requiredProperty("Globals.webRootPath");
+        return Paths.get(webRootPath, "resources", "region", "region-tree.json").normalize();
     }
 
     private Map<String, Map<String, List<String>>> requestAndBuildRegionTree() throws Exception {
