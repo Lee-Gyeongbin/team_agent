@@ -1,17 +1,25 @@
 package kr.teamagent.repository.service.impl;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.StringUtils;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
@@ -29,6 +37,9 @@ import okhttp3.Response;
 
 @Service
 public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
+
+    private static final Logger logger = LoggerFactory.getLogger(RepositoryServiceImpl.class);
+    private static final ExecutorService SCRAPING_EXECUTOR = Executors.newFixedThreadPool(2);
 
     @Autowired
     private RepositoryDAO repositoryDAO;
@@ -63,12 +74,42 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     public Map<String, Object> viewDocumentFile(FileVO req) throws Exception {
-        FileVO fileVO = resolveByDocFileId(req);
-        if (fileVO == null) {
+        if (req == null || StringUtils.isBlank(req.getDocFileId())) {
             HashMap<String, Object> resultMap = new HashMap<>();
             resultMap.put("url", "");
             return resultMap;
         }
+
+        RepositoryVO searchVO = new RepositoryVO();
+        searchVO.setDocFileId(req.getDocFileId());
+        RepositoryVO row = repositoryDAO.selectDocFilePoolById(searchVO);
+        if (row == null) {
+            HashMap<String, Object> resultMap = new HashMap<>();
+            resultMap.put("url", "");
+            return resultMap;
+        }
+
+        // urlId가 있으면 외부 수집 URL 파일 → tb_cnt_url에서 원본 URL 조회 후 반환
+        if (StringUtils.isNotBlank(row.getUrlId())) {
+            RepositoryVO urlSearch = new RepositoryVO();
+            urlSearch.setUrlId(row.getUrlId());
+            RepositoryVO urlRow = repositoryDAO.selectCntUrlById(urlSearch);
+            HashMap<String, Object> resultMap = new HashMap<>();
+            if (urlRow != null && StringUtils.isNotBlank(urlRow.getUrlAddr())) {
+                resultMap.put("externalUrl", urlRow.getUrlAddr());
+                resultMap.put("url", "");
+            } else {
+                resultMap.put("url", "");
+            }
+            return resultMap;
+        }
+
+        // 일반 파일 → presigned URL 발급
+        FileVO fileVO = new FileVO();
+        fileVO.setDocFileId(row.getDocFileId());
+        fileVO.setFileName(row.getFileName());
+        fileVO.setFilePath(row.getFilePath());
+        fileVO.setFileType(row.getFileType());
         return fileService.createViewPresignedUrlForStorageObject(fileVO);
     }
 
@@ -433,6 +474,40 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("returnMsg", "삭제할 URL을 선택해주세요.");
             return resultMap;
         }
+
+        // URL에 연결된 TB_DOC_FILE 조회 (AI 서버 삭제 + NCP 삭제에 공통 사용)
+        List<RepositoryVO> docFiles = repositoryDAO.selectDocFilePathsByUrlIds(urlIdList);
+
+        // 1. AI 서버 삭제
+        String aiApiUrl = PropertyUtil.getProperty("Globals.dataset.fileDownload.apiUrl");
+        if (StringUtils.isNotBlank(aiApiUrl)) {
+            List<String> deleteDocFileIds = new ArrayList<>();
+            for (RepositoryVO f : docFiles) {
+                if (StringUtils.isNotBlank(f.getDocFileId())) deleteDocFileIds.add(f.getDocFileId());
+            }
+            if (!deleteDocFileIds.isEmpty()) {
+                Map<String, Object> aiSendResult = sendDocumentFileIdsToAiServer(aiApiUrl, new ArrayList<>(), deleteDocFileIds);
+                if (Boolean.FALSE.equals(aiSendResult.get("successYn"))) {
+                    resultMap.put("successYn", false);
+                    resultMap.put("returnMsg", aiSendResult.get("returnMsg"));
+                    return resultMap;
+                }
+            }
+        }
+
+        // 2. NCP 물리 파일 삭제
+        for (RepositoryVO f : docFiles) {
+            if (StringUtils.isBlank(f.getFilePath())) continue;
+            Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(f.getFilePath());
+            if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + ncpResult.get("returnMsg") + ")");
+                return resultMap;
+            }
+        }
+
+        // 3. TB_DOC_FILE 삭제 후 TB_CNT_URL 삭제
+        repositoryDAO.deleteDocFilesByUrlIdList(dataVO);
         int deleted = repositoryDAO.deleteUrlByIdList(dataVO);
         if (deleted > 0) {
             resultMap.put("successYn", true);
@@ -445,9 +520,10 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 배치 스크래핑 — 활성 URL 전체를 AI 서버에 전달하여 수집 요청
+     * 배치 스크래핑
+     * @param urlIdList null 또는 빈 리스트 → 활성 URL 전체 / 값 있으면 해당 URL만
      */
-    public Map<String, Object> batchScraping() throws Exception {
+    public Map<String, Object> batchScraping(List<String> urlIdList) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
 
         String apiUrl = PropertyUtil.getProperty("Globals.dataset.scraping.apiUrl");
@@ -457,11 +533,29 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
-        List<RepositoryVO> activeUrls = repositoryDAO.selectActiveUrlList();
+        List<RepositoryVO> activeUrls;
+        if (urlIdList != null && !urlIdList.isEmpty()) {
+            activeUrls = repositoryDAO.selectUrlListByIds(urlIdList);
+        } else {
+            activeUrls = repositoryDAO.selectActiveUrlList();
+        }
         if (activeUrls == null || activeUrls.isEmpty()) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "활성 상태인 URL이 없습니다.");
+            resultMap.put("returnMsg", "수집 대상 URL이 없습니다.");
             return resultMap;
+        }
+
+        // 재수집 전 기존 NCP 오브젝트 스토리지 파일 삭제
+        List<String> scrapingUrlIds = new ArrayList<>();
+        for (RepositoryVO url : activeUrls) scrapingUrlIds.add(url.getUrlId());
+        List<RepositoryVO> oldDocFiles = repositoryDAO.selectDocFilePathsByUrlIds(scrapingUrlIds);
+        for (RepositoryVO oldFile : oldDocFiles) {
+            if (StringUtils.isNotBlank(oldFile.getFilePath())) {
+                Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(oldFile.getFilePath());
+                if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
+                    logger.warn("NCP 파일 삭제 실패 (무시 후 재수집 진행) - filePath={}, msg={}", oldFile.getFilePath(), ncpResult.get("returnMsg"));
+                }
+            }
         }
 
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
@@ -523,9 +617,170 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
+        // 스크래핑 완료 후 fileDownload API 호출 (saveFileLibrary와 동일 방식)
+        callFileDownloadAfterScraping(scrapingUrlIds);
+
+        String scope = (urlIdList != null && !urlIdList.isEmpty()) ? "선택" : "전체";
         resultMap.put("successYn", true);
-        resultMap.put("returnMsg", "스크래핑 요청이 완료되었습니다. (" + activeUrls.size() + "개 URL)");
+        resultMap.put("returnMsg", scope + " " + activeUrls.size() + "개 URL 스크래핑 요청이 접수되었습니다.");
         return resultMap;
+    }
+
+    /**
+     * 스크래핑 SSE 스트림 — Python /scrape/stream을 중계하여 프론트에 실시간 진행상황 전송
+     * @param urlIdList null/빈 리스트 → 활성 URL 전체 / 값 있으면 해당 URL만
+     */
+    public SseEmitter streamScraping(List<String> urlIdList) throws Exception {
+        SseEmitter emitter = new SseEmitter(0L);
+        String streamApiUrl = PropertyUtil.getProperty("Globals.dataset.scraping.streamApiUrl");
+
+        if (StringUtils.isBlank(streamApiUrl)) {
+            sendScrapingSseEvent(emitter, "error", "{\"message\":\"스크래핑 Stream API URL이 설정되어 있지 않습니다.\"}");
+            emitter.complete();
+            return emitter;
+        }
+
+        List<RepositoryVO> urls;
+        if (urlIdList != null && !urlIdList.isEmpty()) {
+            urls = repositoryDAO.selectUrlListByIds(urlIdList);
+        } else {
+            urls = repositoryDAO.selectActiveUrlList();
+        }
+
+        if (urls == null || urls.isEmpty()) {
+            sendScrapingSseEvent(emitter, "error", "{\"message\":\"수집 대상 URL이 없습니다.\"}");
+            emitter.complete();
+            return emitter;
+        }
+
+        emitter.onTimeout(() -> {
+            logger.warn("scraping SSE timeout");
+            sendScrapingSseEvent(emitter, "error", "{\"message\":\"scraping stream timeout\"}");
+            emitter.complete();
+        });
+        emitter.onError((e) -> logger.warn("scraping SSE error: {}", e.getMessage()));
+        emitter.onCompletion(() -> logger.info("scraping SSE complete"));
+
+        // 재수집 전 기존 NCP 오브젝트 스토리지 파일 삭제
+        List<String> streamUrlIds = new ArrayList<>();
+        for (RepositoryVO url : urls) streamUrlIds.add(url.getUrlId());
+        try {
+            List<RepositoryVO> oldDocFiles = repositoryDAO.selectDocFilePathsByUrlIds(streamUrlIds);
+            for (RepositoryVO oldFile : oldDocFiles) {
+                if (StringUtils.isNotBlank(oldFile.getFilePath())) {
+                    Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(oldFile.getFilePath());
+                    if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
+                        logger.warn("NCP 파일 삭제 실패 (무시 후 재수집 진행) - filePath={}, msg={}", oldFile.getFilePath(), ncpResult.get("returnMsg"));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("NCP 기존 파일 삭제 중 오류 (무시 후 재수집 진행) - {}", e.getMessage());
+        }
+
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        List<Map<String, Object>> urlPayloads = new ArrayList<>();
+        for (RepositoryVO url : urls) {
+            int crawlDepth = 1;
+            try {
+                if (StringUtils.isNotBlank(url.getCrawlDpth())) crawlDepth = Integer.parseInt(url.getCrawlDpth());
+            } catch (NumberFormatException ignored) {}
+            Map<String, Object> item = new HashMap<>();
+            item.put("url_id", url.getUrlId());
+            item.put("url_addr", url.getUrlAddr());
+            item.put("s3_key", "repository/url/" + url.getUrlId() + "/" + timestamp + "_scraped.txt");
+            item.put("crawl_depth", crawlDepth);
+            urlPayloads.add(item);
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("urls", urlPayloads);
+        final String jsonBody = new com.google.gson.Gson().toJson(payload);
+        final String finalStreamApiUrl = streamApiUrl;
+
+        final List<String> finalStreamUrlIds = streamUrlIds;
+        SCRAPING_EXECUTOR.execute(() -> relayScrapingStream(finalStreamApiUrl, jsonBody, finalStreamUrlIds, emitter));
+        return emitter;
+    }
+
+    private void relayScrapingStream(String apiUrl, String jsonBody, List<String> urlIds, SseEmitter emitter) {
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(3600, TimeUnit.SECONDS) // URL 수에 따라 오래 걸릴 수 있음
+                .build();
+
+        RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+        Request request = new Request.Builder()
+                .url(apiUrl)
+                .post(body)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "text/event-stream")
+                .build();
+
+        try (okhttp3.Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                sendScrapingSseEvent(emitter, "error", "{\"message\":\"scraping stream API error: " + response.code() + "\"}");
+                return;
+            }
+            String currentEvent = null;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body().byteStream(), "UTF-8"), 1)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("event: ")) {
+                        currentEvent = line.substring(7).trim();
+                        continue;
+                    }
+                    if (line.startsWith("data: ")) {
+                        String eventName = (currentEvent != null) ? currentEvent : "message";
+                        String data = line.substring(6).trim();
+                        if (!sendScrapingSseEvent(emitter, eventName, data)) return;
+                        if ("done".equals(eventName)) {
+                            callFileDownloadAfterScraping(urlIds);
+                            return;
+                        }
+                        currentEvent = null;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("scraping stream relay error", e);
+            sendScrapingSseEvent(emitter, "error", "{\"message\":\"scraping stream relay error\"}");
+        } finally {
+            emitter.complete();
+        }
+    }
+
+    /**
+     * 스크래핑 완료 후 fileDownload API 호출 (saveFileLibrary와 동일 방식)
+     * URL ID 목록으로 TB_DOC_FILE 조회 → doc_file_id 목록을 AI 서버에 전송
+     */
+    private void callFileDownloadAfterScraping(List<String> urlIds) {
+        String fileDownloadApiUrl = PropertyUtil.getProperty("Globals.dataset.fileDownload.apiUrl");
+        if (StringUtils.isBlank(fileDownloadApiUrl) || urlIds == null || urlIds.isEmpty()) return;
+        try {
+            List<RepositoryVO> docFiles = repositoryDAO.selectDocFilePathsByUrlIds(urlIds);
+            List<String> docFileIds = new ArrayList<>();
+            for (RepositoryVO f : docFiles) {
+                if (StringUtils.isNotBlank(f.getDocFileId())) docFileIds.add(f.getDocFileId());
+            }
+            if (docFileIds.isEmpty()) return;
+            Map<String, Object> result = sendDocumentFileIdsToAiServer(fileDownloadApiUrl, docFileIds, new ArrayList<>());
+            if (Boolean.FALSE.equals(result.get("successYn"))) {
+                logger.warn("스크래핑 후 fileDownload API 호출 실패 - {}", result.get("returnMsg"));
+            }
+        } catch (Exception e) {
+            logger.warn("스크래핑 후 fileDownload API 호출 중 오류 - {}", e.getMessage());
+        }
+    }
+
+    private boolean sendScrapingSseEvent(SseEmitter emitter, String eventName, String data) {
+        try {
+            emitter.send(SseEmitter.event().name(eventName).data(data));
+            return true;
+        } catch (Exception e) {
+            logger.warn("scraping SSE send failed - event={}: {}", eventName, e.getMessage());
+            return false;
+        }
     }
 
     /**

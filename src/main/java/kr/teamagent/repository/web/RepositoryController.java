@@ -1,6 +1,7 @@
 package kr.teamagent.repository.web;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.service.FileVO;
@@ -321,13 +323,26 @@ public class RepositoryController extends BaseController {
     }
 
     /**
-     * 배치 스크래핑 — 활성 URL 전체 AI 수집 요청
+     * 스크래핑 SSE 스트림 — 진행상황 실시간 전송
+     * urlIdList 있으면 선택 URL만, 없으면 활성 URL 전체
+     */
+    @RequestMapping(value = "/scrapingStream.do", method = RequestMethod.GET, produces = "text/event-stream")
+    public SseEmitter scrapingStream(
+            @RequestParam(value = "urlIdList", required = false) List<String> urlIdList) throws Exception {
+        return repositoryService.streamScraping(urlIdList);
+    }
+
+    /**
+     * 배치 스크래핑
+     * - urlIdList 있으면 선택 URL만, 없으면 활성 URL 전체 수집 요청
      */
     @RequestMapping("/batchScraping.do")
-    public @ResponseBody Map<String, Object> batchScraping() throws Exception {
+    public @ResponseBody Map<String, Object> batchScraping(@RequestBody(required = false) Map<String, Object> body) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
         try {
-            resultMap = repositoryService.batchScraping();
+            @SuppressWarnings("unchecked")
+            List<String> urlIdList = (body != null) ? (List<String>) body.get("urlIdList") : null;
+            resultMap = repositoryService.batchScraping(urlIdList);
         } catch (Exception e) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");

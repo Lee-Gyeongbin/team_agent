@@ -129,15 +129,6 @@ public class DatasetDAO extends EgovComAbstractDAO {
     }
     
     /**
-     * 데이터셋 URL 삭제
-     * @param datasetVO
-     * @throws Exception
-     */
-    public int deleteDatasetUrl(DatasetVO datasetVO) throws Exception {
-        return delete("dataset.deleteDatasetUrl", datasetVO);
-    }
-
-    /**
      * 데이터셋 문서 저장
      * @param datasetVO
      * @throws Exception

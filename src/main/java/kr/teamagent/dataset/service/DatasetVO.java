@@ -90,6 +90,8 @@ public class DatasetVO {
     private String urlName;
     /** URL 주소 */
     private String urlAddr;
+    /** URL별 연결 파일 ID 목록 (콤마 구분, GROUP_CONCAT 결과) */
+    private String docFileIds;
     /** 문서 파일 ID 목록 */
     @JsonAlias({ "docIdList" })
     private List<DocIdItem> docFileIdList;
