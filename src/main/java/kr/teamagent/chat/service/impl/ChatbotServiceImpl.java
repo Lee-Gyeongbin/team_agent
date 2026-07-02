@@ -64,6 +64,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private static final String TRANSLATE_SUB_TY = "TRANSLATE";
     private static final String RESEARCHER_SUB_TY = "RESEARCHER";
     private static final String RISK_SUB_TY = "RISK";
+    private static final String PLANNER_SUB_TY = "PLANNER";
+    /** 기획서·PT 초안 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
+    private static final String PLANNER_DEFAULT_TMPL_ID = "TM000007";
     /** 리스크진단 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
     private static final String RISK_DEFAULT_TMPL_ID = "TM000008";
     /** 리스크진단 생성(9000) 프롬프트에 주입하는 RFP 추출 텍스트 최대 길이(문자).
@@ -315,6 +318,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // TB_CHAT_LOG.SVC_TY는 리스크진단 에이전트(SVC_TY='D') 기준으로 저장한다.
             svcTy = "D";
             deliverRiskReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
+            return;
+        }
+
+        // PLANNER 에이전트: 기획서·PT 초안 생성 (GPT 동기 호출 + 선택적 웹검색 + 템플릿 렌더링)
+        if (isPlannerAgent(agentId)) {
+            deliverPlannerDraftViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, callback);
             return;
         }
 
@@ -732,6 +741,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     private boolean isRiskDiagnosisAgent(String agentId) {
         ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
         return subCfg != null && RISK_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+    }
+
+    /**
+     * SUB_TY=PLANNER 에이전트(기획서·PT 초안 생성) 여부 판별.
+     */
+    private boolean isPlannerAgent(String agentId) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        return subCfg != null && PLANNER_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
     }
 
     private String buildRequestQueryByAgent(String query, String agentId) {
@@ -2231,6 +2248,310 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             }
         }
         return mapped;
+    }
+
+    /**
+     * PLANNER 에이전트: 사용자 주제를 받아 기획서·PT·보고서·제안서 초안을 생성한다.
+     * 1) additionalConfig.features 에서 docTy·audience·pageCount·lang·structureHint·tmplId·webSearch 읽기
+     * 2) webSearch=true 이면 query_search_only 동기 호출 → 웹 정보 보강
+     * 3) 구조화 프롬프트 구성 후 gpt.apiUrl 동기 호출
+     * 4) docTy=PT → 슬라이드 JSON "pptx_data" 청크 전송 (프론트에서 PPTX 다운로드)
+     *    그 외  → 템플릿 HTML 렌더링 후 "report_html" 청크 전송
+     * 5) TB_CHAT_LOG 저장 + 결과 스트리밍 전송
+     */
+    private void deliverPlannerDraftViaWebSocket(
+            String query, String threadId, String userId, String svcTy, String modelId,
+            String refId, String agentId,
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
+        try {
+            // ① additionalConfig.features 읽기
+            ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+            String docTy = "기획서";
+            String audience = "임원";
+            int pageCount = 5;
+            String lang = "ko";
+            String structureHint = "";
+            String tmplId = PLANNER_DEFAULT_TMPL_ID;
+            boolean webSearch = false;
+
+            if (subCfg != null && subCfg.getAdditionalConfigMap() != null) {
+                Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
+                if (featuresObj instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> features = (Map<String, Object>) featuresObj;
+                    if (features.get("docTy") != null) docTy = String.valueOf(features.get("docTy"));
+                    if (features.get("audience") != null) audience = String.valueOf(features.get("audience"));
+                    if (features.get("pageCount") != null) {
+                        try { pageCount = Integer.parseInt(String.valueOf(features.get("pageCount"))); } catch (Exception ignore) {}
+                    }
+                    if (features.get("lang") != null) lang = String.valueOf(features.get("lang"));
+                    if (features.get("structureHint") != null) structureHint = String.valueOf(features.get("structureHint"));
+                    if (features.get("tmplId") != null && CommonUtil.isNotEmpty(String.valueOf(features.get("tmplId")))) {
+                        tmplId = String.valueOf(features.get("tmplId"));
+                    }
+                    if (Boolean.TRUE.equals(features.get("webSearch"))) webSearch = true;
+                }
+            }
+
+            boolean isPt = "PT".equals(docTy);
+
+            // ② 웹 검색 (선택)
+            String webSearchAnswer = "";
+            String webSearchSource = "";
+            if (webSearch) {
+                callback.onStatus("searching_web", "웹 정보 수집 중");
+                String[] webResult = callWebSearchSync(query, modelId);
+                if (webResult != null) {
+                    webSearchAnswer = webResult[0];
+                    webSearchSource = webResult[1];
+                }
+            }
+
+            // ③ 프롬프트 구성
+            callback.onStatus("generating_draft", isPt ? "슬라이드 초안 생성 중" : "초안 생성 중");
+            String langLabel = "ko".equals(lang) ? "한국어" : "English";
+            StringBuilder promptBuilder = new StringBuilder();
+
+            if (isPt) {
+                // PT 전용 프롬프트 — 슬라이드 JSON 반환
+                promptBuilder.append("당신은 PT(발표자료) 전문 작성가입니다.")
+                        .append("\n").append(audience).append("을(를) 위한 PT를 ").append(langLabel).append("로 작성하세요.")
+                        .append("\n\n## 조건")
+                        .append("\n- 슬라이드 수: ").append(pageCount).append("장 (표지 제외)")
+                        .append("\n- 각 슬라이드에는 핵심 불릿 포인트 3~5개");
+                if (CommonUtil.isNotEmpty(structureHint)) {
+                    promptBuilder.append("\n- 구조: ").append(structureHint);
+                }
+                if (CommonUtil.isNotEmpty(webSearchAnswer)) {
+                    promptBuilder.append("\n\n## 참고 정보 (웹 검색)\n").append(webSearchAnswer);
+                }
+                promptBuilder.append("\n\n## 응답 형식 (중요)")
+                        .append("\n반드시 아래 JSON 구조로만 응답하세요. 마크다운 코드블록, 설명 텍스트 없이 순수 JSON만 출력하세요.")
+                        .append("\n{")
+                        .append("\n  \"title\": \"발표 전체 제목\",")
+                        .append("\n  \"slides\": [")
+                        .append("\n    { \"title\": \"슬라이드 제목\", \"content\": [\"항목1\", \"항목2\", \"항목3\"], \"notes\": \"발표자 노트\" },")
+                        .append("\n    ...")
+                        .append("\n  ]")
+                        .append("\n}")
+                        .append("\n\n## 사용자 요청\n").append(query);
+            } else {
+                // 기획서/보고서/제안서 — 기존 템플릿 기반 프롬프트
+                TmplVO tmplSearchVO = new TmplVO();
+                tmplSearchVO.setTmplId(tmplId);
+                TmplVO tmpl = tmplService.selectTmplDetail(tmplSearchVO);
+                List<LibraryVO.TmplFieldItem> tmplFieldList = new ArrayList<>();
+                if (tmpl != null) {
+                    TmplVO fieldSearchVO = new TmplVO();
+                    fieldSearchVO.setTmplId(tmplId);
+                    List<TmplVO.TmplFieldVO> fieldVoList = tmplService.selectTmplFieldList(fieldSearchVO);
+                    if (fieldVoList != null) {
+                        for (TmplVO.TmplFieldVO fv : fieldVoList) {
+                            LibraryVO.TmplFieldItem item = new LibraryVO.TmplFieldItem();
+                            item.setJsonKey(fv.getJsonKey());
+                            item.setFieldNm(fv.getFieldNm());
+                            item.setMultilineYn(fv.getMultilineYn());
+                            item.setLayoutType(fv.getLayoutType());
+                            tmplFieldList.add(item);
+                        }
+                    }
+                }
+
+                String llmPrompt = (tmpl != null && CommonUtil.isNotEmpty(tmpl.getLlmPrompt()))
+                        ? tmpl.getLlmPrompt()
+                        : "당신은 " + docTy + " 작성 전문가입니다. 아래 요청에 따라 " + audience + "을(를) 위한 " + docTy + " 초안을 " + langLabel + "로 작성해주세요.";
+
+                promptBuilder.append(llmPrompt)
+                        .append("\n\n## 문서 정보")
+                        .append("\n- 문서 유형: ").append(docTy)
+                        .append("\n- 보고 대상: ").append(audience)
+                        .append("\n- 목표 분량: ").append(pageCount).append("페이지")
+                        .append("\n- 출력 언어: ").append(langLabel);
+
+                if (CommonUtil.isNotEmpty(structureHint)) {
+                    promptBuilder.append("\n\n## 문서 구조 (반드시 준수)\n").append(structureHint);
+                }
+                if (CommonUtil.isNotEmpty(webSearchAnswer)) {
+                    promptBuilder.append("\n\n## 웹 검색 결과 (참고)\n").append(webSearchAnswer);
+                }
+
+                promptBuilder.append(buildTemplateJsonInstruction(tmplFieldList));
+                promptBuilder.append("\n\n## 사용자 요청\n").append(query);
+
+                // ④-B HTML 렌더링 경로 (PT가 아닐 때만 tmpl 변수 필요하므로 여기서 처리)
+                String aiResponseDoc = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
+                if (CommonUtil.isEmpty(aiResponseDoc)) {
+                    callback.onError("초안 생성에 실패했습니다. AI 응답이 비어 있습니다.");
+                    return;
+                }
+                deliverPlannerDocResult(aiResponseDoc, tmpl, tmplFieldList, webSearchSource,
+                        docTy, svcTy, modelId, refId, agentId, threadId, userId, query, callback);
+                return;
+            }
+
+            // ④-A PT 경로: GPT 호출 → 슬라이드 JSON
+            String aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
+            if (CommonUtil.isEmpty(aiResponse)) {
+                callback.onError("슬라이드 초안 생성에 실패했습니다. AI 응답이 비어 있습니다.");
+                return;
+            }
+
+            // 슬라이드 JSON 추출
+            String jsonContent = aiResponse.trim();
+            if (jsonContent.startsWith("```json")) jsonContent = jsonContent.substring(7);
+            if (jsonContent.startsWith("```"))     jsonContent = jsonContent.substring(3);
+            if (jsonContent.endsWith("```"))       jsonContent = jsonContent.substring(0, jsonContent.length() - 3);
+            jsonContent = jsonContent.trim();
+
+            String presentationTitle = query;
+            try {
+                JSONParser parser = new JSONParser();
+                JSONObject aiJson = (JSONObject) parser.parse(jsonContent);
+                Object t = aiJson.get("title");
+                if (t != null && CommonUtil.isNotEmpty(String.valueOf(t))) {
+                    presentationTitle = String.valueOf(t);
+                }
+            } catch (Exception ignore) {
+                logger.warn("PLANNER PT JSON 파싱 오류 (raw 전송): {}", ignore.getMessage());
+            }
+
+            // pptx_data 청크 전송 (슬라이드 JSON 원문)
+            String summaryText = "PT 초안이 생성되었습니다: " + presentationTitle;
+            callback.onChunk(summaryText, summaryText, null);
+            callback.onChunk(jsonContent, jsonContent, "pptx_data");
+
+            // 웹 검색 출처
+            JSONArray webSourceItems = extractWebSourceItems(webSearchSource);
+            String webGroundingJson = "";
+            if (!webSourceItems.isEmpty()) {
+                JSONObject wgJson = new JSONObject();
+                wgJson.put("items", webSourceItems);
+                webGroundingJson = wgJson.toJSONString();
+                JSONObject sourcePayload = new JSONObject();
+                sourcePayload.put("items", webSourceItems);
+                callback.onChunk(webGroundingJson, sourcePayload.toJSONString(), "answer_source");
+            }
+
+            String savedLogId = this.doInsertAiLog(
+                    threadId, agentId, query, summaryText,
+                    0, 0, svcTy, modelId, refId, userId,
+                    null, null, null, null,
+                    null, null, new ArrayList<>(),
+                    webGroundingJson, null, null);
+
+            this.updateChatRoomLastChatDt(threadId);
+            callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
+                    CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
+                    "", "", "");
+
+        } catch (Exception e) {
+            logger.error("PLANNER 초안 생성 중 오류: {}", e.getMessage(), e);
+            callback.onError("초안 생성 중 오류가 발생했습니다: " + e.getMessage());
+        }
+    }
+
+    /**
+     * PLANNER 기획서/보고서/제안서 경로 — HTML 렌더링 후 report_html 청크 전송.
+     */
+    private void deliverPlannerDocResult(
+            String aiResponse, TmplVO tmpl, List<LibraryVO.TmplFieldItem> tmplFieldList,
+            String webSearchSource, String docTy, String svcTy, String modelId, String refId,
+            String agentId, String threadId, String userId, String query,
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
+
+        String reportHtml = "";
+        String titleSummary = "";
+        try {
+            String jsonContent = aiResponse.trim();
+            if (jsonContent.startsWith("```json")) jsonContent = jsonContent.substring(7);
+            if (jsonContent.startsWith("```"))     jsonContent = jsonContent.substring(3);
+            if (jsonContent.endsWith("```"))       jsonContent = jsonContent.substring(0, jsonContent.length() - 3);
+            jsonContent = jsonContent.trim();
+
+            JSONParser parser = new JSONParser();
+            JSONObject aiJson = (JSONObject) parser.parse(jsonContent);
+
+            if (aiJson.size() == 1) {
+                Object onlyVal = aiJson.values().iterator().next();
+                if (onlyVal instanceof JSONObject) aiJson = (JSONObject) onlyVal;
+            }
+
+            for (String titleKey : new String[]{"title", "제목", "문서제목", "주제"}) {
+                Object v = aiJson.get(titleKey);
+                if (v != null && CommonUtil.isNotEmpty(String.valueOf(v))) {
+                    titleSummary = String.valueOf(v);
+                    break;
+                }
+            }
+
+            if (CommonUtil.isNotEmpty(webSearchSource)) {
+                aiJson.put("sources", SOURCES_TOKEN);
+            }
+
+            if (tmpl != null && CommonUtil.isNotEmpty(tmpl.getTmplHtml()) && !tmplFieldList.isEmpty()) {
+                reportHtml = tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), aiJson, tmplFieldList);
+            } else {
+                reportHtml = "<div>" + aiResponse + "</div>";
+            }
+
+            if (CommonUtil.isNotEmpty(webSearchSource)) {
+                reportHtml = reportHtml.replace(SOURCES_TOKEN,
+                        buildResearcherSourcesHtml(new ArrayList<>(), webSearchSource));
+            }
+        } catch (Exception e) {
+            logger.warn("PLANNER 문서 JSON 파싱/렌더링 오류: {}", e.getMessage());
+            String safe = aiResponse.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    .replace("\n", "<br/>");
+            reportHtml = "<div><p>" + safe + "</p></div>";
+        }
+
+        String summaryText = CommonUtil.isNotEmpty(titleSummary)
+                ? docTy + " 초안이 생성되었습니다: " + titleSummary
+                : docTy + " 초안이 생성되었습니다.";
+        callback.onChunk(summaryText, summaryText, null);
+        if (CommonUtil.isNotEmpty(reportHtml)) {
+            callback.onChunk(reportHtml, reportHtml, "report_html");
+        }
+
+        JSONArray webSourceItems = extractWebSourceItems(webSearchSource);
+        String webGroundingJson = "";
+        if (!webSourceItems.isEmpty()) {
+            JSONObject wgJson = new JSONObject();
+            wgJson.put("items", webSourceItems);
+            webGroundingJson = wgJson.toJSONString();
+            JSONObject sourcePayload = new JSONObject();
+            sourcePayload.put("items", webSourceItems);
+            callback.onChunk(webGroundingJson, sourcePayload.toJSONString(), "answer_source");
+        }
+
+        String savedLogId = this.doInsertAiLog(
+                threadId, agentId, query, summaryText,
+                0, 0, svcTy, modelId, refId, userId,
+                null, null, null, null,
+                null, null, new ArrayList<>(),
+                webGroundingJson, null, reportHtml);
+
+        this.updateChatRoomLastChatDt(threadId);
+        callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
+                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
+                "", "", "");
+    }
+
+    /**
+     * PLANNER PPTX 내보내기 — 슬라이드 JSON → byte[].
+     */
+    public byte[] exportPlannerPptx(String slidesJson) throws Exception {
+        JSONParser parser = new JSONParser();
+        JSONObject root = (JSONObject) parser.parse(slidesJson.trim());
+        String title = root.get("title") != null ? String.valueOf(root.get("title")) : "PT 초안";
+
+        @SuppressWarnings("unchecked")
+        java.util.List<java.util.Map<String, Object>> slides =
+                root.get("slides") instanceof org.json.simple.JSONArray
+                        ? (java.util.List<java.util.Map<String, Object>>) root.get("slides")
+                        : new java.util.ArrayList<>();
+
+        return kr.teamagent.common.util.PlannerPptxUtil.buildPptx(title, slides);
     }
 
     /**
