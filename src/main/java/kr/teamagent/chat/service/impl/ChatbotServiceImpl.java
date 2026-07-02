@@ -41,6 +41,8 @@ import kr.teamagent.common.util.RestApiManager;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.TranslationDocUtil;
 import kr.teamagent.prompt.service.impl.PromptServiceImpl;
+import kr.teamagent.datamart.service.DatamartVO;
+import kr.teamagent.datamart.service.impl.DatamartDAO;
 import kr.teamagent.tmpl.service.impl.TmplHtmlRenderService;
 import kr.teamagent.tmpl.service.impl.TmplServiceImpl;
 import kr.teamagent.tmpl.service.TmplVO;
@@ -152,6 +154,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     PromptServiceImpl promptService;
+
+    @Autowired
+    DatamartDAO datamartDAO;
 
     @Autowired
     RestApiManager restApiManager;
@@ -1919,6 +1924,173 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         return null;
+    }
+
+    /** 질의 진단 프롬프트(평가기준) 관리 ID — RDB(prompt)에 등록 시 우선 사용, 없으면 기본 루브릭 */
+    private static final String DIAGNOSE_PROMPT_ID = "PI_DIAGNOSE";
+
+    /** 기본 평가 루브릭 (제안서 §2·§3·§6) — prompt 테이블에 PI_DIAGNOSE가 없을 때 사용 */
+    private static final String DEFAULT_DIAGNOSE_RUBRIC = String.join("\n",
+            "너는 데이터분석 질의의 품질을 평가하는 심사자다.",
+            "사용자의 자연어 질문이 Text-to-SQL로 정확한 SQL을 만들 수 있을 만큼 구체적인지 판단한다.",
+            "다음 항목을 기준으로 0~100점을 산정한다. (문장 길이·단어 수가 아니라 의미와 구체성으로 평가)",
+            "- 지표(무엇을 조회): 25점",
+            "- 기간: 20점",
+            "- 대상/필터: 20점",
+            "- 집계·분석 방식: 15점",
+            "- 데이터 매핑 가능성(아래 제공된 지표/구분으로 답할 수 있는가): 15점",
+            "- 출력 형태: 5점",
+            "판정 규칙:",
+            "- 제공된 데이터로 답할 수 없는 주제면 status=OUT_OF_SCOPE, 대체 가능한 통계를 alternatives에 제시.",
+            "- '매출' 등 기준이 여러 개인 모호한 용어가 있으면 status=TERM_AMBIGUOUS, 정의 선택지를 clarificationQuestions로.",
+            "- 80점 이상이면 status=READY, sqlGenerationAllowed=true, rewrittenQuestion에 정제된 질문. 이때 clarificationQuestions는 빈 배열로 둔다.",
+            "- 80점 미만이면 status=CLARIFICATION_REQUIRED.",
+            "보완질문(clarificationQuestions) 규칙(엄격히 지킬 것):",
+            "- SQL 생성에 '반드시' 필요한 핵심 누락만 담는다. 있으면 좋은 수준의 선택적 필터·조건은 절대 넣지 않는다.",
+            "- 위 '이 데이터마트에서 제공하는 용어'에 근거가 없는 항목은 보완질문으로 만들지 않는다.",
+            "- 각 항목은 question 텍스트만 작성한다. 선택지(options)는 절대 제공하지 않는다.",
+            "- 정말 필요한 게 없으면 clarificationQuestions는 빈 배열로 둔다.");
+
+    /**
+     * 데이터분석(SVC_TY='S') 질의 품질 진단 — LLM이 평가기준(프롬프트)으로 점수·상태·보완을 산정한다.
+     * 응답은 프론트 QuestionDiagnosis 계약(JSON)과 동일한 맵으로 반환한다.
+     * @param searchVO question, datamartId
+     */
+    public HashMap<String, Object> diagnoseQuestion(ChatbotVO searchVO) throws Exception {
+        String question = searchVO != null && searchVO.getQuestion() != null ? searchVO.getQuestion().trim() : "";
+        String datamartId = searchVO != null && searchVO.getDatamartId() != null ? searchVO.getDatamartId().trim() : "";
+
+        if (CommonUtil.isEmpty(question)) {
+            return diagnosisFallback("질문이 비어 있습니다. 조회할 내용을 입력해주세요.");
+        }
+
+        String prompt = buildDiagnosePrompt(question, buildTermContextForDiagnose(datamartId));
+        String answer = callAiSummary(prompt, "diagnoseQuestion");
+        HashMap<String, Object> parsed = parseDiagnosisJson(answer);
+        return parsed != null ? parsed : diagnosisFallback("질의 검증에 실패했습니다. 잠시 후 다시 시도해주세요.");
+    }
+
+    /** 평가기준 프롬프트 + 용어 컨텍스트 + 질문 + JSON 출력 지시를 합쳐 최종 프롬프트 구성 */
+    private String buildDiagnosePrompt(String question, String termContext) {
+        String base = "";
+        try {
+            base = promptService.getPrompt(DIAGNOSE_PROMPT_ID, "Y");
+        } catch (Exception ignore) {
+            // prompt 미등록 시 기본 루브릭 사용
+        }
+        if (CommonUtil.isEmpty(base)) {
+            base = DEFAULT_DIAGNOSE_RUBRIC;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(base).append("\n\n");
+        if (CommonUtil.isNotEmpty(termContext)) {
+            sb.append("[이 데이터마트에서 제공하는 용어]\n").append(termContext).append("\n");
+        }
+        sb.append("[사용자 질문]\n").append(question).append("\n\n");
+        sb.append("반드시 아래 JSON 형식 하나만 출력해라. 코드블록·설명·주석 없이 JSON만.\n");
+        sb.append("{\n");
+        sb.append("  \"status\": \"READY|CLARIFICATION_REQUIRED|TERM_AMBIGUOUS|OUT_OF_SCOPE\",\n");
+        sb.append("  \"readinessScore\": 0,\n");
+        sb.append("  \"interpretedIntent\": \"질문 의도 요약\",\n");
+        sb.append("  \"rewrittenQuestion\": \"READY일 때 정제된 질문, 아니면 null\",\n");
+        sb.append("  \"clarificationQuestions\": [{ \"item\": \"period\", \"question\": \"반드시 필요한 핵심 보완 항목만 (options 없이 질문 텍스트만)\" }],\n");
+        sb.append("  \"alternatives\": [\"대체 통계1\"],\n");
+        sb.append("  \"sqlGenerationAllowed\": false\n");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    /** 진단 대상 데이터마트의 용어사전(TB_DM_TERM_DICT)을 프롬프트 컨텍스트 문자열로 구성 */
+    private String buildTermContextForDiagnose(String datamartId) {
+        if (CommonUtil.isEmpty(datamartId)) {
+            return "";
+        }
+        try {
+            DatamartVO dmVO = new DatamartVO();
+            dmVO.setDatamartId(datamartId);
+            List<DatamartVO.MetaTermDictRowVO> terms = datamartDAO.selectMetaTermDictList(dmVO);
+            if (terms == null || terms.isEmpty()) {
+                return "";
+            }
+            StringBuilder metrics = new StringBuilder();
+            StringBuilder dims = new StringBuilder();
+            for (DatamartVO.MetaTermDictRowVO t : terms) {
+                if (t == null || "N".equals(t.getUseYn()) || CommonUtil.isEmpty(t.getTermNm())) {
+                    continue;
+                }
+                String label = t.getTermNm();
+                if (CommonUtil.isNotEmpty(t.getSampleValues())) {
+                    label += "(" + t.getSampleValues() + ")";
+                }
+                StringBuilder target = "DIMENSION".equals(t.getTermType()) ? dims : metrics;
+                if (target.length() > 0) {
+                    target.append(", ");
+                }
+                target.append(label);
+            }
+            StringBuilder sb = new StringBuilder();
+            if (metrics.length() > 0) {
+                sb.append("- 조회 가능한 지표: ").append(metrics).append("\n");
+            }
+            if (dims.length() > 0) {
+                sb.append("- 분석 가능한 구분: ").append(dims).append("\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            logger.warn("용어사전 컨텍스트 구성 실패: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** LLM JSON 응답 파싱 — 코드블록/잡텍스트를 제거하고 진단 맵으로 변환. 실패 시 null */
+    private HashMap<String, Object> parseDiagnosisJson(String answer) {
+        if (CommonUtil.isEmpty(answer)) {
+            return null;
+        }
+        String json = answer.trim();
+        if (json.startsWith("```")) {
+            json = json.replaceFirst("^```[a-zA-Z]*", "").replaceFirst("```$", "").trim();
+        }
+        int start = json.indexOf('{');
+        int end = json.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return null;
+        }
+        json = json.substring(start, end + 1);
+        try {
+            Gson gson = new Gson();
+            Type type = new TypeToken<HashMap<String, Object>>() {}.getType();
+            HashMap<String, Object> map = gson.fromJson(json, type);
+            if (map == null || map.get("status") == null) {
+                return null;
+            }
+            boolean ready = "READY".equals(String.valueOf(map.get("status")));
+            if (!(map.get("sqlGenerationAllowed") instanceof Boolean)) {
+                map.put("sqlGenerationAllowed", ready);
+            }
+            return map;
+        } catch (Exception ex) {
+            logger.warn("진단 JSON 파싱 실패: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    /** 진단 실패/예외 시 안전한 폴백 — 전송 차단(sqlGenerationAllowed=false) 유지 */
+    private HashMap<String, Object> diagnosisFallback(String message) {
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("status", "CLARIFICATION_REQUIRED");
+        map.put("readinessScore", 0);
+        map.put("interpretedIntent", message);
+        map.put("rewrittenQuestion", null);
+        Map<String, Object> cq = new HashMap<>();
+        cq.put("item", "retry");
+        cq.put("question", message);
+        List<Map<String, Object>> cqs = new ArrayList<>();
+        cqs.add(cq);
+        map.put("clarificationQuestions", cqs);
+        map.put("sqlGenerationAllowed", false);
+        return map;
     }
 
     /**
