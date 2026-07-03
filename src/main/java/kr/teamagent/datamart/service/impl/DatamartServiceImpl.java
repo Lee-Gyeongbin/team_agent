@@ -82,7 +82,7 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     private static final int META_TABLE_USE_YN_COL_IDX = 2;
     private static final String META_TABLE_EXCEL_GUIDE_TEXT =
             "※ * 표시된 항목은 필수 입력값입니다.\n"
-                + "※ 테이블ID는 수정할 수 없습니다. 테이블 설명·사용여부(Y/N)만 입력·수정하세요.\n"
+                + "※ 테이블ID는 수정 및 행 추가는 할 수 없습니다. 테이블 설명·사용여부(Y/N)만 입력·수정하세요.\n"
                 + "※ 업로드는 미리보기용이며, 저장 시 해당 데이터마트의 테이블 메타정보가 전체 교체됩니다.\n"
                 + "  사용여부가 Y인 테이블을 최소 1개 이상 입력해 주세요.";
 
@@ -499,10 +499,9 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
             throw new IllegalArgumentException("데이터마트 정보를 찾을 수 없습니다.");
         }
 
-        int requiredFailCount = 0;
-        int invalidTblIdFailCount = 0;
         List<DatamartVO.MetaTableItemVO> tableList = new ArrayList<>();
         Set<String> registeredTblIdSet = buildRegisteredMetaTableIdSet(datamartId.trim());
+        MetaTableExcelValidation validation = new MetaTableExcelValidation(registeredTblIdSet);
         DataFormatter formatter = new DataFormatter();
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
@@ -528,31 +527,23 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                if (tblPhyNm.isEmpty() || useYn.isEmpty() || !ExcelUtil.isValidUseYn(useYn)) {
-                    requiredFailCount++;
-                    continue;
-                }
-                if (!registeredTblIdSet.contains(tblPhyNm)) {
-                    invalidTblIdFailCount++;
+                if (!validation.acceptRow(tblPhyNm, useYn)) {
                     continue;
                 }
 
                 DatamartVO.MetaTableItemVO table = new DatamartVO.MetaTableItemVO();
                 table.setId(tblPhyNm);
                 table.setPhysicalNm(tblPhyNm);
+                table.setLogicalNm(tblDesc);
                 table.setTableDescKo(tblDesc);
                 table.setUseYn(useYn);
                 tableList.add(table);
             }
         }
 
-        if (requiredFailCount > 0) {
-            return buildMetaTableUploadPreviewResult(datamartId.trim(), null,
-                    buildMetaTableUploadFailReturnMsg(requiredFailCount));
-        }
-        if (invalidTblIdFailCount > 0) {
-            return buildMetaTableUploadPreviewResult(datamartId.trim(), null,
-                    "업로드 실패 : 등록되지 않은 테이블ID " + invalidTblIdFailCount + "건이 있습니다. 테이블ID는 수정할 수 없습니다.");
+        String validationFailMsg = validation.buildFailReturnMsg();
+        if (validationFailMsg != null) {
+            return buildMetaTableUploadPreviewResult(datamartId.trim(), null, validationFailMsg);
         }
         if (tableList.isEmpty()) {
             return buildMetaTableUploadPreviewResult(datamartId.trim(), null,
@@ -605,8 +596,85 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         return false;
     }
 
-    private static String buildMetaTableUploadFailReturnMsg(int requiredFailCount) {
-        return "업로드 실패 : 필수값 누락 " + requiredFailCount + "건이 있습니다.";
+    private static class MetaTableExcelValidation {
+        private final Set<String> registeredTblIdSet;
+        private final Set<String> uploadedTblIdSet = new HashSet<>();
+        private int dataRowCount;
+        private int tblIdMissingCount;
+        private int tblIdUnknownCount;
+        private int tblIdDuplicateCount;
+        private int useYnMissingCount;
+        private int useYnInvalidCount;
+
+        MetaTableExcelValidation(Set<String> registeredTblIdSet) {
+            this.registeredTblIdSet = registeredTblIdSet;
+        }
+
+        boolean acceptRow(String tblId, String useYn) {
+            dataRowCount++;
+            if (tblId.isEmpty()) {
+                tblIdMissingCount++;
+                return false;
+            }
+            if (!uploadedTblIdSet.add(tblId)) {
+                tblIdDuplicateCount++;
+                return false;
+            }
+            if (!registeredTblIdSet.contains(tblId)) {
+                tblIdUnknownCount++;
+                return false;
+            }
+            if (useYn.isEmpty()) {
+                useYnMissingCount++;
+                return false;
+            }
+            if (!ExcelUtil.isValidUseYn(useYn)) {
+                useYnInvalidCount++;
+                return false;
+            }
+            return true;
+        }
+
+        String buildFailReturnMsg() {
+            List<String> details = new ArrayList<>();
+            if (dataRowCount > registeredTblIdSet.size()) {
+                details.add("행 추가 " + (dataRowCount - registeredTblIdSet.size()) + "건");
+            }
+            int missingRegisteredCount = countMissingRegisteredTblIds();
+            if (missingRegisteredCount > 0) {
+                details.add("테이블ID 누락/삭제 " + missingRegisteredCount + "건");
+            }
+            if (tblIdMissingCount > 0) {
+                details.add("테이블ID 빈값 " + tblIdMissingCount + "건");
+            }
+            if (tblIdUnknownCount > 0) {
+                details.add("테이블ID 수정/추가 " + tblIdUnknownCount + "건");
+            }
+            if (tblIdDuplicateCount > 0) {
+                details.add("테이블ID 중복 " + tblIdDuplicateCount + "건");
+            }
+            if (useYnMissingCount > 0) {
+                details.add("사용여부 누락 " + useYnMissingCount + "건");
+            }
+            if (useYnInvalidCount > 0) {
+                details.add("사용여부 형식오류(Y/N) " + useYnInvalidCount + "건");
+            }
+            if (details.isEmpty()) {
+                return null;
+            }
+            return "업로드 실패 : " + String.join(", ", details)
+                    + ". 테이블ID는 변경/추가/삭제할 수 없고, 사용여부는 Y 또는 N만 입력할 수 있습니다.";
+        }
+
+        private int countMissingRegisteredTblIds() {
+            int count = 0;
+            for (String registeredTblId : registeredTblIdSet) {
+                if (!uploadedTblIdSet.contains(registeredTblId)) {
+                    count++;
+                }
+            }
+            return count;
+        }
     }
 
     /**

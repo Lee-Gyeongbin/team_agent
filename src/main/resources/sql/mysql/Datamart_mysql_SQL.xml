@@ -167,7 +167,7 @@
         /* 메타 관리 > 테이블 선택 엑셀 다운로드 datamart.selectDmTblListByDatamartId */
         SELECT
             A.TBL_PHY_NM AS tblPhyNm
-            , A.TBL_DESC AS tblDesc
+            , COALESCE(NULLIF(A.TBL_DESC, ''), A.TBL_KOR_NM) AS tblDesc
             , A.USE_YN AS useYn
         FROM TB_DM_TBL A
         WHERE A.DATAMART_ID = #{datamartId}
@@ -201,8 +201,8 @@
             #{datamartId}
             , #{item.id}
             , #{item.physicalNm}
-            , #{item.logicalNm}
-            , #{item.tableDescKo}
+            , COALESCE(NULLIF(#{item.logicalNm}, ''), #{item.tableDescKo})
+            , COALESCE(NULLIF(#{item.logicalNm}, ''), #{item.tableDescKo})
             , #{item.colCnt}
             , NULL
             , (#{idx} + 1)
