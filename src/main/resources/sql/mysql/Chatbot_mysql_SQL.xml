@@ -438,9 +438,9 @@
             A.DOC_FILE_ID
             , A.DOC_FILE_ID
             , A.FILE_NAME
-            , A.FILE_PATH 
-            , B.MAIN_PAGE_NO 
-            , B.RELATED_PAGES 
+            , A.FILE_PATH
+            , B.MAIN_PAGE_NO
+            , B.RELATED_PAGES
             , (
                 SELECT
                     B.MAIN_DOC_FILE_ID
@@ -452,19 +452,28 @@
                 )	AS SHOW_DOC_FILE_ID
             , (
                 SELECT
-                    B.MAIN_PAGE 
+                    B.MAIN_PAGE
                 FROM
                     TB_CHAT_LOG B
                 WHERE
                     1 = 1
                     AND B.LOG_ID = #{logId}
                 )	AS SHOW_PAGE_NO
+            , (
+                SELECT
+                    B.RETRIEVER_QUERY
+                FROM
+                    TB_CHAT_LOG B
+                WHERE
+                    1 = 1
+                    AND B.LOG_ID = #{logId}
+                )	AS RETRIEVER_QUERY
         FROM
             TB_DOC_FILE A
         INNER JOIN TB_CHAT_REF B
             ON B.DOC_FILE_ID = A.DOC_FILE_ID
             AND B.LOG_ID = #{logId}
-        WHERE 1=1 
+        WHERE 1=1
             AND A.USE_YN = 'Y'
     </select>
 

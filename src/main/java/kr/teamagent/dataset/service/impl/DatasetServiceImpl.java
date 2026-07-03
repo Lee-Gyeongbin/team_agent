@@ -138,19 +138,16 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
         result += datasetDAO.saveDataset(datasetVO);
 
         // update 시: 기존 매핑은 항상 삭제 (체크 해제=전체 제거)
+        // TB_DS_DOC이 수동 문서 + URL 연결 파일을 모두 관리 (TB_DS_URL 드랍)
         if (mode.equals("update")) {
             datasetDAO.deleteDatasetDoc(datasetVO);
-            datasetDAO.deleteDatasetUrl(datasetVO);
         }
 
-        // incoming 리스트가 비어있지 않을 때만 다시 저장
+        // 수동 문서 + URL 연결 파일 doc_file_id를 프론트에서 합산하여 전달 → TB_DS_DOC에 일괄 insert
         if (CommonUtil.isNotEmpty(datasetVO.getDocFileIdList())) {
             datasetDAO.saveDsDoc(datasetVO);
         }
-        if (CommonUtil.isNotEmpty(datasetVO.getUrlIdList())) {
-            datasetDAO.saveDsUrl(datasetVO);
-        }
-        
+
         return result;
     }
 
@@ -172,9 +169,8 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
      */
     public int deleteDataset(DatasetVO datasetVO) throws Exception {
         int result = 0;
-        // 데이터셋 삭제 전 데이터셋 문서 및 URL 삭제
+        // TB_DS_DOC이 수동 문서 + URL 연결 파일을 모두 관리하므로 한 번에 삭제
         result += datasetDAO.deleteDatasetDoc(datasetVO);
-        result += datasetDAO.deleteDatasetUrl(datasetVO);
         // 데이터셋 삭제
         result += datasetDAO.deleteDataset(datasetVO);
         // 데이터셋 전처리 삭제

@@ -26,6 +26,7 @@ public class DatamartVO {
     private String ipWlistYn;
     private String sslYn;
     private Integer tblCnt;
+    private Integer activeTblCnt;
     private String lastVerifyDt;
     private Integer sortOrd;
     private String useYn;
@@ -60,6 +61,17 @@ public class DatamartVO {
         private Integer colCnt;
         private String useYn;
         private String tableDescKo;
+    }
+
+    /**
+     * 테이블 선택 메타 엑셀 다운로드/업로드 행 (TB_DM_TBL)
+     */
+    @Getter
+    @Setter
+    public static class MetaTableExcelRowVO {
+        private String tblPhyNm;
+        private String tblDesc;
+        private String useYn;
     }
 
     /**

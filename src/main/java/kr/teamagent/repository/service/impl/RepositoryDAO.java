@@ -71,6 +71,13 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * URL 단건 조회 (urlId로 urlAddr 조회)
+     */
+    public RepositoryVO selectCntUrlById(RepositoryVO searchVO) throws Exception {
+        return selectOne("repository.selectCntUrlById", searchVO);
+    }
+
+    /**
      * 카테고리 저장
      * @param searchVO
      * @return
@@ -110,10 +117,24 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     // ===== URL =====
 
     /**
+     * URL ID 목록으로 연결된 TB_DOC_FILE FILE_PATH 조회 (재수집 전 NCP 파일 삭제용)
+     */
+    public List<RepositoryVO> selectDocFilePathsByUrlIds(List<String> urlIdList) throws Exception {
+        return selectList("repository.selectDocFilePathsByUrlIds", urlIdList);
+    }
+
+    /**
      * 활성 URL 전체 조회 (배치 스크래핑용)
      */
     public List<RepositoryVO> selectActiveUrlList() throws Exception {
         return selectList("repository.selectActiveUrlList", new RepositoryVO());
+    }
+
+    /**
+     * 지정 URL ID 목록 조회 (선택 스크래핑용)
+     */
+    public List<RepositoryVO> selectUrlListByIds(List<String> urlIdList) throws Exception {
+        return selectList("repository.selectUrlListByIds", urlIdList);
     }
 
     public Integer selectUrlListCnt(RepositoryVO searchVO) throws Exception {
@@ -134,6 +155,13 @@ public class RepositoryDAO extends EgovComAbstractDAO {
 
     public int updateUrlUseYn(RepositoryVO searchVO) throws Exception {
         return update("repository.updateUrlUseYn", searchVO);
+    }
+
+    /**
+     * URL ID 목록으로 연결된 TB_DOC_FILE 삭제
+     */
+    public int deleteDocFilesByUrlIdList(RepositoryVO searchVO) throws Exception {
+        return delete("repository.deleteDocFilesByUrlIdList", searchVO);
     }
 
     public int deleteUrlByIdList(RepositoryVO searchVO) throws Exception {
