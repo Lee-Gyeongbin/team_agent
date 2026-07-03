@@ -30,6 +30,12 @@
             , A.IP_WLIST_YN
             , A.SSL_YN
             , A.TBL_CNT
+            , COALESCE((
+                SELECT COUNT(*)
+                FROM TB_DM_TBL B
+                WHERE B.DATAMART_ID = A.DATAMART_ID
+                AND B.USE_YN = 'Y'
+            ), 0) AS ACTIVE_TBL_CNT
             , A.LAST_VERIFY_DT
             , A.SORT_ORD
             , A.USE_YN

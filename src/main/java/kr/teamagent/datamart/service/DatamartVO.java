@@ -26,6 +26,7 @@ public class DatamartVO {
     private String ipWlistYn;
     private String sslYn;
     private Integer tblCnt;
+    private Integer activeTblCnt;
     private String lastVerifyDt;
     private Integer sortOrd;
     private String useYn;
