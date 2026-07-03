@@ -163,6 +163,17 @@
         ) AS USE_YN
     </select>
 
+    <select id="selectDmTblListByDatamartId" parameterType="datamartVO" resultType="kr.teamagent.datamart.service.DatamartVO$MetaTableExcelRowVO">
+        /* 메타 관리 > 테이블 선택 엑셀 다운로드 datamart.selectDmTblListByDatamartId */
+        SELECT
+            A.TBL_PHY_NM AS tblPhyNm
+            , A.TBL_DESC AS tblDesc
+            , A.USE_YN AS useYn
+        FROM TB_DM_TBL A
+        WHERE A.DATAMART_ID = #{datamartId}
+        ORDER BY A.SORT_ORD, A.TBL_PHY_NM
+    </select>
+
     <delete id="deleteDmTblByDatamartId" parameterType="datamartVO">
         /* 메타 관리 > 테이블 저장 전 삭제 datamart.deleteDmTblByDatamartId */
         DELETE FROM TB_DM_TBL

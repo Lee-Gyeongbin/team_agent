@@ -79,6 +79,16 @@ public class DatamartDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 데이터마트 메타 테이블 목록 (DATAMART_ID 기준, TB_DM_TBL)
+     * @param searchVO datamartId
+     * @return 테이블 선택 엑셀용 행 목록
+     * @throws Exception
+     */
+    public List<DatamartVO.MetaTableExcelRowVO> selectDmTblListByDatamartId(DatamartVO searchVO) throws Exception {
+        return selectList("datamart.selectDmTblListByDatamartId", searchVO);
+    }
+
+    /**
      * 데이터마트 메타 컬럼 엑셀용 목록
      * @param searchVO datamartId
      * @return TB_DM_COL 행 목록

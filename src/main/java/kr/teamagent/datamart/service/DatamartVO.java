@@ -63,6 +63,17 @@ public class DatamartVO {
     }
 
     /**
+     * 테이블 선택 메타 엑셀 다운로드/업로드 행 (TB_DM_TBL)
+     */
+    @Getter
+    @Setter
+    public static class MetaTableExcelRowVO {
+        private String tblPhyNm;
+        private String tblDesc;
+        private String useYn;
+    }
+
+    /**
      * 메타 관리 > 컬럼 일괄 저장 요청 (datamartId + 테이블별 columns)
      */
     @Getter
