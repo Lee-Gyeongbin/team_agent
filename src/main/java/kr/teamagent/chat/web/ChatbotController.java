@@ -547,6 +547,23 @@ public class ChatbotController extends BaseController {
         response.getOutputStream().flush();
     }
 
+    /**
+     * PROPOSAL 에이전트 — 제안서 슬라이드 JSON을 이미지 기반 PPTX 파일로 변환하여 다운로드 응답한다.
+     */
+    @RequestMapping("/ai/chatbot/exportProposalPptx.do")
+    public void exportProposalPptx(@RequestBody ChatbotVO dataVO, HttpServletResponse response) throws Exception {
+        byte[] bytes = chatbotService.exportProposalPptx(dataVO.getContent());
+        String baseName = (dataVO.getFileName() != null && !dataVO.getFileName().trim().isEmpty()
+                ? dataVO.getFileName().trim() : "제안서");
+        String fileName = baseName + ".pptx";
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%20");
+        response.setContentType("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
+        response.setContentLength(bytes.length);
+        response.getOutputStream().write(bytes);
+        response.getOutputStream().flush();
+    }
+
     @RequestMapping("/ai/chatbot/markChatFileOrphan.do")
     public @ResponseBody Map<String, Object> markChatFileOrphan(@RequestBody ChatbotVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
