@@ -69,8 +69,22 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
     private static final int META_COLUMN_HAS_CODE_YN_COL_IDX = 10;
     private static final String META_COLUMN_EXCEL_GUIDE_TEXT =
             "※ * 표시된 항목은 필수 입력값입니다.\n"
-                    + "※ 업로드는 미리보기용이며, 저장 시 해당 데이터마트의 컬럼 메타가 전체 교체됩니다.\n"
-                    + "  테이블ID·물리컬럼명·데이터타입(필수), 컬럼ID, PK/FK/NULL허용/코드값여부(Y/N)를 입력하세요. 컬럼ID 미입력 시 물리컬럼명이 사용됩니다.";
+                + "※ 업로드는 미리보기용이며, 저장 시 해당 데이터마트의 컬럼 메타정보가 전체 교체됩니다.\n"
+                + "  테이블ID·물리컬럼명·데이터타입(필수), 컬럼ID, PK/FK/NULL허용/코드값여부(Y/N)를 입력하세요. 컬럼ID 미입력 시 물리컬럼명이 사용됩니다.";
+
+    private static final String META_TABLE_HDR_TBL_ID = "테이블ID";
+    private static final String META_TABLE_HDR_TBL_DESC = "테이블 설명";
+    private static final String META_TABLE_HDR_USE_YN = "사용여부 *";
+    private static final String[] META_TABLE_EXCEL_HEADERS = {
+            META_TABLE_HDR_TBL_ID, META_TABLE_HDR_TBL_DESC, META_TABLE_HDR_USE_YN
+    };
+    private static final int[] META_TABLE_AUTO_GEN_HEADER_COLS = { 0 };
+    private static final int META_TABLE_USE_YN_COL_IDX = 2;
+    private static final String META_TABLE_EXCEL_GUIDE_TEXT =
+            "※ * 표시된 항목은 필수 입력값입니다.\n"
+                + "※ 테이블ID는 수정 및 행 추가는 할 수 없습니다. 테이블 설명·사용여부(Y/N)만 입력·수정하세요.\n"
+                + "※ 업로드는 미리보기용이며, 저장 시 해당 데이터마트의 테이블 메타정보가 전체 교체됩니다.\n"
+                + "  사용여부가 Y인 테이블을 최소 1개 이상 입력해 주세요.";
 
     @Autowired
     DatamartDAO datamartDAO;
@@ -406,6 +420,261 @@ public class DatamartServiceImpl extends EgovAbstractServiceImpl {
         resultMap.put("result", "SUCCESS");
         resultMap.put("msg", "메타 테이블 저장 성공");
         return resultMap;
+    }
+
+    /**
+     * 메타 관리 > 테이블 선택 엑셀 다운로드 (datamartId 단위)
+     * @param response
+     * @param datamartId 데이터마트 ID
+     * @throws Exception
+     */
+    public void downloadMetaTableExcel(HttpServletResponse response, String datamartId) throws Exception {
+        if (CommonUtil.isEmpty(datamartId)) {
+            throw new IllegalArgumentException("datamartId is required");
+        }
+        DatamartVO searchVO = new DatamartVO();
+        searchVO.setDatamartId(datamartId.trim());
+        DatamartVO dm = datamartDAO.selectDatamart(searchVO);
+        if (dm == null) {
+            throw new IllegalArgumentException("데이터마트 정보를 찾을 수 없습니다.");
+        }
+        List<DatamartVO.MetaTableExcelRowVO> list = listMetaTableExcelRows(searchVO.getDatamartId());
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            XSSFSheet sheet = ExcelUtil.createSheetWithHeader(workbook, "테이블선택", META_TABLE_EXCEL_HEADERS,
+                    META_TABLE_AUTO_GEN_HEADER_COLS, META_TABLE_EXCEL_GUIDE_TEXT);
+            writeMetaTableExcelRows(workbook, sheet, list);
+            applyMetaTableExcelSheetOptions(sheet);
+            ExcelUtil.writeXlsxResponse(response, workbook);
+        }
+    }
+
+    private List<DatamartVO.MetaTableExcelRowVO> listMetaTableExcelRows(String datamartId) throws Exception {
+        DatamartVO searchVO = new DatamartVO();
+        searchVO.setDatamartId(datamartId);
+        List<DatamartVO.MetaTableExcelRowVO> list = datamartDAO.selectDmTblListByDatamartId(searchVO);
+        return list != null ? list : new ArrayList<DatamartVO.MetaTableExcelRowVO>();
+    }
+
+    private void writeMetaTableExcelRows(XSSFWorkbook workbook, XSSFSheet sheet,
+            List<DatamartVO.MetaTableExcelRowVO> list) {
+        XSSFCellStyle rowStyle = ExcelUtil.createDataStyle(workbook);
+        int rowNum = ExcelUtil.DATA_START_ROW;
+        if (list == null) {
+            return;
+        }
+        for (DatamartVO.MetaTableExcelRowVO vo : list) {
+            if (vo == null) {
+                continue;
+            }
+            Row row = sheet.createRow(rowNum++);
+            ExcelUtil.applyDataCell(row, 0, CommonUtil.nullToBlank(vo.getTblPhyNm()), rowStyle);
+            ExcelUtil.applyDataCell(row, 1, CommonUtil.nullToBlank(vo.getTblDesc()), rowStyle);
+            ExcelUtil.applyDataCell(row, 2, CommonUtil.nullToBlank(vo.getUseYn()), rowStyle);
+        }
+    }
+
+    private void applyMetaTableExcelSheetOptions(XSSFSheet sheet) {
+        ExcelUtil.applyDataSheetLayout(sheet, META_TABLE_EXCEL_HEADERS.length);
+        ExcelUtil.addUseYnListValidations(sheet, META_TABLE_USE_YN_COL_IDX);
+    }
+
+    /**
+     * 메타 관리 > 테이블 선택 엑셀 업로드 (파싱·검증 후 JSON 미리보기 반환, DB 저장 없음)
+     * @param datamartId 데이터마트 ID
+     * @param file 업로드 파일
+     * @return datamartId, tableList(성공 시), returnMsg(실패 시)
+     * @throws Exception
+     */
+    public Map<String, Object> uploadMetaTableExcel(String datamartId, MultipartFile file) throws Exception {
+        if (CommonUtil.isEmpty(datamartId)) {
+            throw new IllegalArgumentException("datamartId is required");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("uploadFile is required");
+        }
+
+        DatamartVO dm = new DatamartVO();
+        dm.setDatamartId(datamartId.trim());
+        if (datamartDAO.selectDatamart(dm) == null) {
+            throw new IllegalArgumentException("데이터마트 정보를 찾을 수 없습니다.");
+        }
+
+        List<DatamartVO.MetaTableItemVO> tableList = new ArrayList<>();
+        Set<String> registeredTblIdSet = buildRegisteredMetaTableIdSet(datamartId.trim());
+        MetaTableExcelValidation validation = new MetaTableExcelValidation(registeredTblIdSet);
+        DataFormatter formatter = new DataFormatter();
+
+        try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+            Map<String, Integer> colIdx = ExcelUtil.detectUploadHeader(sheet, formatter, "테이블 선택",
+                    META_TABLE_HDR_TBL_ID, META_TABLE_HDR_TBL_ID, META_TABLE_HDR_USE_YN);
+
+            Integer tblIdCol = colIdx.get(META_TABLE_HDR_TBL_ID);
+            Integer tblDescCol = colIdx.get(META_TABLE_HDR_TBL_DESC);
+            Integer useYnCol = colIdx.get(META_TABLE_HDR_USE_YN);
+
+            for (int i = ExcelUtil.DATA_START_ROW; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) {
+                    continue;
+                }
+
+                String tblPhyNm = ExcelUtil.getCellString(row, tblIdCol, formatter);
+                String tblDesc = ExcelUtil.getCellString(row, tblDescCol, formatter);
+                String useYn = ExcelUtil.getCellString(row, useYnCol, formatter);
+
+                if (isSkippableMetaTableExcelRow(tblPhyNm, tblDesc, useYn)) {
+                    continue;
+                }
+
+                if (!validation.acceptRow(tblPhyNm, useYn)) {
+                    continue;
+                }
+
+                DatamartVO.MetaTableItemVO table = new DatamartVO.MetaTableItemVO();
+                table.setId(tblPhyNm);
+                table.setPhysicalNm(tblPhyNm);
+                table.setLogicalNm(tblDesc);
+                table.setTableDescKo(tblDesc);
+                table.setUseYn(useYn);
+                tableList.add(table);
+            }
+        }
+
+        String validationFailMsg = validation.buildFailReturnMsg();
+        if (validationFailMsg != null) {
+            return buildMetaTableUploadPreviewResult(datamartId.trim(), null, validationFailMsg);
+        }
+        if (tableList.isEmpty()) {
+            return buildMetaTableUploadPreviewResult(datamartId.trim(), null,
+                    "업로드 실패 : 유효한 데이터가 없습니다.");
+        }
+        if (!hasActiveMetaTableUseYn(tableList)) {
+            return buildMetaTableUploadPreviewResult(datamartId.trim(), null,
+                    "업로드 실패 : 사용여부가 Y인 테이블이 1개 이상 필요합니다.");
+        }
+
+        return buildMetaTableUploadPreviewResult(datamartId.trim(), tableList, null);
+    }
+
+    private Set<String> buildRegisteredMetaTableIdSet(String datamartId) throws Exception {
+        Set<String> registeredTblIdSet = new HashSet<>();
+        for (DatamartVO.MetaTableExcelRowVO row : listMetaTableExcelRows(datamartId)) {
+            if (row != null && CommonUtil.isNotEmpty(row.getTblPhyNm())) {
+                registeredTblIdSet.add(row.getTblPhyNm());
+            }
+        }
+        return registeredTblIdSet;
+    }
+
+    private static Map<String, Object> buildMetaTableUploadPreviewResult(String datamartId,
+            List<DatamartVO.MetaTableItemVO> tableList, String returnMsg) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("datamartId", datamartId);
+        if (returnMsg != null) {
+            result.put("returnMsg", returnMsg);
+        }
+        if (tableList != null) {
+            result.put("tableList", tableList);
+        }
+        return result;
+    }
+
+    private static boolean isSkippableMetaTableExcelRow(String tblPhyNm, String tblDesc, String useYn) {
+        if (ExcelUtil.isGuideMarkerRow(tblPhyNm)) {
+            return true;
+        }
+        return tblPhyNm.isEmpty() && tblDesc.isEmpty() && useYn.isEmpty();
+    }
+
+    private static boolean hasActiveMetaTableUseYn(List<DatamartVO.MetaTableItemVO> tableList) {
+        for (DatamartVO.MetaTableItemVO table : tableList) {
+            if (table != null && "Y".equals(table.getUseYn())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static class MetaTableExcelValidation {
+        private final Set<String> registeredTblIdSet;
+        private final Set<String> uploadedTblIdSet = new HashSet<>();
+        private int dataRowCount;
+        private int tblIdMissingCount;
+        private int tblIdUnknownCount;
+        private int tblIdDuplicateCount;
+        private int useYnMissingCount;
+        private int useYnInvalidCount;
+
+        MetaTableExcelValidation(Set<String> registeredTblIdSet) {
+            this.registeredTblIdSet = registeredTblIdSet;
+        }
+
+        boolean acceptRow(String tblId, String useYn) {
+            dataRowCount++;
+            if (tblId.isEmpty()) {
+                tblIdMissingCount++;
+                return false;
+            }
+            if (!uploadedTblIdSet.add(tblId)) {
+                tblIdDuplicateCount++;
+                return false;
+            }
+            if (!registeredTblIdSet.contains(tblId)) {
+                tblIdUnknownCount++;
+                return false;
+            }
+            if (useYn.isEmpty()) {
+                useYnMissingCount++;
+                return false;
+            }
+            if (!ExcelUtil.isValidUseYn(useYn)) {
+                useYnInvalidCount++;
+                return false;
+            }
+            return true;
+        }
+
+        String buildFailReturnMsg() {
+            List<String> details = new ArrayList<>();
+            if (dataRowCount > registeredTblIdSet.size()) {
+                details.add("행 추가 " + (dataRowCount - registeredTblIdSet.size()) + "건");
+            }
+            int missingRegisteredCount = countMissingRegisteredTblIds();
+            if (missingRegisteredCount > 0) {
+                details.add("테이블ID 누락/삭제 " + missingRegisteredCount + "건");
+            }
+            if (tblIdMissingCount > 0) {
+                details.add("테이블ID 빈값 " + tblIdMissingCount + "건");
+            }
+            if (tblIdUnknownCount > 0) {
+                details.add("테이블ID 수정/추가 " + tblIdUnknownCount + "건");
+            }
+            if (tblIdDuplicateCount > 0) {
+                details.add("테이블ID 중복 " + tblIdDuplicateCount + "건");
+            }
+            if (useYnMissingCount > 0) {
+                details.add("사용여부 누락 " + useYnMissingCount + "건");
+            }
+            if (useYnInvalidCount > 0) {
+                details.add("사용여부 형식오류(Y/N) " + useYnInvalidCount + "건");
+            }
+            if (details.isEmpty()) {
+                return null;
+            }
+            return "업로드 실패 : " + String.join(", ", details)
+                    + ". 테이블ID는 변경/추가/삭제할 수 없고, 사용여부는 Y 또는 N만 입력할 수 있습니다.";
+        }
+
+        private int countMissingRegisteredTblIds() {
+            int count = 0;
+            for (String registeredTblId : registeredTblIdSet) {
+                if (!uploadedTblIdSet.contains(registeredTblId)) {
+                    count++;
+                }
+            }
+            return count;
+        }
     }
 
     /**
