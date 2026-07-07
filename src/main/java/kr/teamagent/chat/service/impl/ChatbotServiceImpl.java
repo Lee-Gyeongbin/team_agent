@@ -61,7 +61,7 @@ import okhttp3.RequestBody;
 public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
-    private static final String MEME_AGENT_ID = "AG000011";
+    private static final String AUTO_RECOMMEND_SUB_TY = "AUTO_RECOMMEND";
     private static final String RECOMMEND_SUB_TY = "RECOMMEND";
     private static final String CURATION_SUB_TY = "CURATION";
     private static final String TRANSLATE_SUB_TY = "TRANSLATE";
@@ -317,16 +317,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
-        ChatbotVO.AgtSubCfgVO curationSubCfg = getAgentSubCfg(agentId);
-        if (curationSubCfg != null && CURATION_SUB_TY.equals(curationSubCfg.getSubTy()) && "Y".equals(curationSubCfg.getUseYn())) {
+        ChatbotVO.AgtSubCfgVO agentSubCfg = getAgentSubCfg(agentId);
+        if (isActiveSubCfg(agentSubCfg, CURATION_SUB_TY)) {
             deliverNewsRecommendationViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId,
-                    attachmentFileIds, curationSubCfg.getAdditionalConfigMap(), callback);
+                    attachmentFileIds, agentSubCfg.getAdditionalConfigMap(), callback);
             return;
         }
 
-        ChatbotVO.AgtSubCfgVO translateSubCfg = getAgentSubCfg(agentId);
-        if (translateSubCfg != null && TRANSLATE_SUB_TY.equals(translateSubCfg.getSubTy())
-                && "Y".equals(translateSubCfg.getUseYn())) {
+        if (isActiveSubCfg(agentSubCfg, TRANSLATE_SUB_TY)) {
             // TB_CHAT_LOG.SVC_TY는 번역 에이전트(SVC_TY='W') 기준으로 저장한다.
             svcTy = "W";
             if (hasNonNullAttachmentId(attachmentFileIds)) {
@@ -398,40 +396,38 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 스트리밍 호출용 URL. 점심·밈 에이전트는 전용 URL.
+     * 스트리밍 호출용 URL. RECOMMEND·AUTO_RECOMMEND 및 기타 에이전트별 전용 URL.
      */
     private String resolveStreamingApiUrl(String svcTy, String agentId, List<Long> attachmentFileIds) {
-        // RECOMMEND 에이전트: 전용 URL이 설정된 경우 사용, 없으면 기본 chat API 사용
-        if (isRecommendAgent(agentId)) {
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        if (isPromptReadyRecommendAgent(subCfg)) {
+            if ("C".equals(svcTy) && isAutoRecommendSearchOnlyAgent(subCfg)) {
+                String searchOnlyApiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIpSearchOnly");
+                if (CommonUtil.isNotEmpty(searchOnlyApiUrl)) {
+                    logger.info("resolveStreamingApiUrl: auto-recommend agent(searchOnly) -> query_search_only URL");
+                    return searchOnlyApiUrl;
+                }
+            }
+            if (isKakaoAddressEnrichmentAgent(subCfg)) {
+                String lunchApiUrl = PropertyUtil.getProperty("Globals.chatbot.lunch.apiUrl");
+                if (CommonUtil.isNotEmpty(lunchApiUrl)) {
+                    logger.info("resolveStreamingApiUrl: kakao address-enrichment agent -> lunch_query URL");
+                    return lunchApiUrl;
+                }
+            }
             String recommendApiUrl = PropertyUtil.getProperty("Globals.chatbot.recommend.apiUrl");
             if (CommonUtil.isNotEmpty(recommendApiUrl)) {
-                logger.info("resolveStreamingApiUrl: recommend agent -> recommend_query URL");
+                logger.info("resolveStreamingApiUrl: recommend-style agent -> recommend_query URL");
                 return recommendApiUrl;
             }
-            logger.info("resolveStreamingApiUrl: recommend agent -> default chat URL");
+            logger.info("resolveStreamingApiUrl: recommend-style agent -> default chat URL");
             return getApiUrl(svcTy);
         }
 
         // TRANSLATE 에이전트: AGENT_ID 기반 agentVO 조회(API_URL_CD 미설정 시 깨짐)를 우회하고 기본 chat API 사용
-        if (isTranslateAgent(agentId)) {
+        if (isActiveSubCfg(subCfg, TRANSLATE_SUB_TY)) {
             logger.info("resolveStreamingApiUrl: translate agent -> default chat URL");
             return getApiUrl(svcTy);
-        }
-
-        if (isKakaoAddressEnrichmentAgent(agentId)) {
-            String lunchApiUrl = PropertyUtil.getProperty("Globals.chatbot.lunch.apiUrl");
-            if (CommonUtil.isNotEmpty(lunchApiUrl)) {
-                logger.info("resolveStreamingApiUrl: kakao address-enrichment agent -> lunch_query URL");
-                return lunchApiUrl;
-            }
-        }
-
-        if ("C".equals(svcTy) && MEME_AGENT_ID.equals(agentId)) {
-            String searchOnlyApiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIpSearchOnly");
-            if (CommonUtil.isNotEmpty(searchOnlyApiUrl)) {
-                logger.info("resolveStreamingApiUrl: meme agent -> query_search_only URL");
-                return searchOnlyApiUrl;
-            }
         }
 
         if ("C".equals(svcTy) && hasNonNullAttachmentId(attachmentFileIds)) {
@@ -739,22 +735,49 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
     }
 
+    private boolean isActiveSubCfg(ChatbotVO.AgtSubCfgVO subCfg, String subTy) {
+        return subCfg != null && subTy.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+    }
+
+    private boolean isActiveSubCfgAgent(String agentId, String subTy) {
+        return isActiveSubCfg(getAgentSubCfg(agentId), subTy);
+    }
+
     /**
-     * SUB_TY=RECOMMEND 에이전트 여부 판별.
-     * RECOMMEND 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
+     * RECOMMEND·AUTO_RECOMMEND 공통 — 프론트 완성형 프롬프트·추천형 API URL 분기 대상.
      */
-    private boolean isRecommendAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+    private boolean isPromptReadyRecommendAgent(String agentId) {
+        return isPromptReadyRecommendAgent(getAgentSubCfg(agentId));
+    }
+
+    private boolean isPromptReadyRecommendAgent(ChatbotVO.AgtSubCfgVO subCfg) {
+        return isActiveSubCfg(subCfg, RECOMMEND_SUB_TY) || isActiveSubCfg(subCfg, AUTO_RECOMMEND_SUB_TY);
+    }
+
+    /**
+     * AUTO_RECOMMEND 중 검색 전용 API를 사용할 대상.
+     * ADDITIONAL_CONFIG.engine.apiMode == "searchOnly" 이면 query_search_only URL로 보낸다.
+     */
+    private boolean isAutoRecommendSearchOnlyAgent(ChatbotVO.AgtSubCfgVO subCfg) {
+        if (!isActiveSubCfg(subCfg, AUTO_RECOMMEND_SUB_TY)) {
+            return false;
+        }
+        if (subCfg.getAdditionalConfigMap() == null) {
+            return false;
+        }
+        Object engineObj = subCfg.getAdditionalConfigMap().get("engine");
+        if (!(engineObj instanceof Map)) {
+            return false;
+        }
+        return "searchOnly".equals(((Map<?, ?>) engineObj).get("apiMode"));
     }
 
     /**
      * RECOMMEND 에이전트 중 ADDITIONAL_CONFIG.features.addressEnrichment == "kakao" 인지 판별.
      * 식당명+위치 기반 카카오 장소 URL 보강 및 전용 스트리밍 처리(answer_linked) 대상 여부에 사용.
      */
-    private boolean isKakaoAddressEnrichmentAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        if (subCfg == null || !RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) || !"Y".equals(subCfg.getUseYn())) {
+    private boolean isKakaoAddressEnrichmentAgent(ChatbotVO.AgtSubCfgVO subCfg) {
+        if (!isActiveSubCfg(subCfg, RECOMMEND_SUB_TY)) {
             return false;
         }
         Object featuresObj = subCfg.getAdditionalConfigMap() != null ? subCfg.getAdditionalConfigMap().get("features") : null;
@@ -763,36 +786,24 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * SUB_TY=TRANSLATE 에이전트 여부 판별.
-     * TRANSLATE 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
-     */
-    private boolean isTranslateAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && TRANSLATE_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
-    }
-
-    /**
      * SUB_TY=RESEARCHER 에이전트 여부 판별.
      */
     private boolean isResearcherAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && RESEARCHER_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+        return isActiveSubCfgAgent(agentId, RESEARCHER_SUB_TY);
     }
 
     /**
      * SUB_TY=RISK 에이전트(프로젝트 리스크진단) 여부 판별.
      */
     private boolean isRiskDiagnosisAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && RISK_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+        return isActiveSubCfgAgent(agentId, RISK_SUB_TY);
     }
 
     /**
      * SUB_TY=PLANNER 에이전트(기획서·PT 초안 생성) 여부 판별.
      */
     private boolean isPlannerAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && PLANNER_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
+        return isActiveSubCfgAgent(agentId, PLANNER_SUB_TY);
     }
 
     /**
@@ -804,8 +815,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     private String buildRequestQueryByAgent(String query, String agentId) {
-        // RECOMMEND 에이전트: Frontend에서 완성형 프롬프트 전달 — 래핑 없이 그대로 반환
-        if (isRecommendAgent(agentId)) {
+        // RECOMMEND·AUTO_RECOMMEND: Frontend에서 완성형 프롬프트 전달 — 래핑 없이 그대로 반환
+        if (isPromptReadyRecommendAgent(agentId)) {
             return query;
         }
 
@@ -1087,9 +1098,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
-        boolean isKakaoAddressEnrichmentAgent = isKakaoAddressEnrichmentAgent(agentId);
-        if (!isKakaoAddressEnrichmentAgent && isRecommendAgent(agentId)) {
-            logger.info("processStreamingResponse: RECOMMEND agent (agentId={}) — 일반 스트리밍 처리", agentId);
+        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        boolean isKakaoAddressEnrichmentAgent = isKakaoAddressEnrichmentAgent(subCfg);
+        if (!isKakaoAddressEnrichmentAgent && isPromptReadyRecommendAgent(subCfg)) {
+            logger.info("processStreamingResponse: recommend-style agent (agentId={}) — 일반 스트리밍 처리", agentId);
         }
 
         String line;
@@ -1363,8 +1375,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         && !hasStreamError
                         && ("C".equals(svcTy) || "S".equals(svcTy) || "M".equals(svcTy))
                         && (!"C".equals(svcTy) || CommonUtil.isEmpty(agentId))
-                        && !MEME_AGENT_ID.equals(agentId)
-                        && !isRecommendAgent(agentId)
+                        && !isPromptReadyRecommendAgent(subCfg)
                         && CommonUtil.isNotEmpty(savedLogId)
                         && CommonUtil.isNotEmpty(finalAnswerContent);
 
