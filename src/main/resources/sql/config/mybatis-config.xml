@@ -40,6 +40,7 @@
         <typeAlias alias="meetingVO"                         type="kr.teamagent.meeting.service.MeetingVO"/>
         <typeAlias alias="dataDashboardVO"                   type="kr.teamagent.datadashboard.service.DataDashboardVO"/>
         <typeAlias alias="myDocumentsVO"                     type="kr.teamagent.mydocuments.service.MyDocumentsVO"/>
+        <typeAlias alias="apiCallLogVO"                      type="kr.teamagent.common.apilog.service.ApiCallLogVO"/>
     </typeAliases>
 
     <typeHandlers>

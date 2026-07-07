@@ -31,6 +31,7 @@ import com.google.gson.reflect.TypeToken;
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.service.ChatbotVO.RssArticleRow;
 import kr.teamagent.chat.socket.ChatbotWebSocketHandler;
+import kr.teamagent.common.apilog.service.impl.ApiCallLogServiceImpl;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.common.util.NewsRssUtil;
@@ -144,6 +145,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.info("스트리밍 응답 중단 요청 처리: sessionId={}", sessionId);
         }
     }
+
+    @Autowired
+    ApiCallLogServiceImpl apiCallLogService;
 
     @Autowired
     ChatbotDAO chatbotDAO;
@@ -478,7 +482,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @throws Exception
      */
     public ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception {
-        chatbotVO.setRoomTitle(generateSummaryTitle(chatbotVO.getContent(),null ));
+        chatbotVO.setRoomTitle(generateSummaryTitle(chatbotVO.getContent(), null, null));
         int result = chatbotDAO.insertChatRoom(chatbotVO);
         return result > 0 ? chatbotVO : null;
     }
@@ -643,6 +647,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
              * 네트워크 지연이나 장시간 스트리밍으로 인해 블로킹되지 않도록 한다.
              */
             String sessionId = session.getId();
+            final long callStartTime = System.currentTimeMillis();
             okhttp3.Call call = client.newCall(request);
             activeStreamCalls.put(sessionId, call);
             call.enqueue(new okhttp3.Callback() {
@@ -656,12 +661,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 @Override
                 public void onFailure(okhttp3.Call call, IOException e) {
                     activeStreamCalls.remove(sessionId, call);
+                    int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
                     if (call.isCanceled()) {
                         logger.info("AI API 호출이 사용자 요청으로 중단되었습니다: threadId={}", threadId);
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", "사용자 중단", userId);
                         callback.onComplete("사용자 요청에 의해 응답 생성이 중단되었습니다.", "", "", new ArrayList<>(), threadId, null, "", "", "");
                         return;
                     }
                     logger.error("AI API 호출 실패: {}", e.getMessage(), e);
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", e.getMessage(), userId);
                     callback.onError("API 호출 실패: " + e.getMessage());
                 }
 
@@ -676,13 +684,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 @Override
                 public void onResponse(okhttp3.Call call, okhttp3.Response response) throws IOException {
                     if (!response.isSuccessful()) {
+                        int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
                         logger.error("AI API 응답 오류: {}", response.code());
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", "HTTP " + response.code(), userId);
                         callback.onError("API 응답 오류: " + response.code());
                         return;
                     }
-                    
+
                     try (okhttp3.ResponseBody responseBody = response.body()) {
                         if (responseBody == null) {
+                            int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
+                            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", "응답 본문 없음", userId);
                             callback.onError("응답 본문이 없습니다.");
                             return;
                         }
@@ -694,7 +706,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                          * - 스트리밍 종료 시 callback.onComplete()
                          를 호출한다.
                          */
-                        processStreamingResponseWebSocket(responseBody, call, sessionId, query, svcTy, modelId, refId, userId, agentId, threadId, attachmentFileIds, callback);
+                        processStreamingResponseWebSocket(responseBody, call, sessionId, query, svcTy, modelId, refId, userId, agentId, threadId, attachmentFileIds, jsonBody, callStartTime, apiUrl, callback);
                     } catch (Exception e) {
                         logger.error("스트리밍 응답 처리 중 오류: {}", e.getMessage(), e);
                         callback.onError("스트리밍 처리 오류: " + e.getMessage());
@@ -880,7 +892,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     public String getLunchMenuImageData(String menu) {
         String prompt = "음식 사진 생성. 설명 없이 음식만 사실적으로 표현. 음식명: " + menu;
-        String imageResult = callAiImageApi(prompt);
+        String imageResult = callAiImageApi(prompt, null);
         if (CommonUtil.isEmpty(imageResult)) {
             return "";
         }
@@ -1071,7 +1083,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * WebSocket 방식으로 스트리밍 응답을 처리하여 클라이언트로 전달
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
-    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, okhttp3.Call call, String sessionId, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
+    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, okhttp3.Call call, String sessionId, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, String reqParamJson, long callStartTime, String apiUrl, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
@@ -1303,9 +1315,20 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 logger.warn("첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
                             }
                         }
+
+                        // API 호출 로그 저장 (성공)
+                        Long refLogIdLong = CommonUtil.isNotEmpty(savedLogId) ? Long.parseLong(savedLogId) : null;
+                        int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
+                        apiCallLogService.insertSilently(agentId, refLogIdLong, apiUrl, modelId, "CHAT", reqParamJson,
+                                inputTokens, outputTokens, respMs, "Y", null, userId);
+
                     } catch (Exception e) {
                         logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
                     }
+                } else if (hasStreamError) {
+                    // 스트리밍 오류 — 채팅 로그 미저장이므로 REF_LOG_ID 없이 기록
+                    int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", reqParamJson, inputTokens, outputTokens, respMs, "N", "스트리밍 오류", userId);
                 }
 
                 if (!isCompleteCalled && (isCancelled || (!hasStreamError && CommonUtil.isNotEmpty(finalAnswerContent)))) {
@@ -1347,11 +1370,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
                 if (shouldSuggestNextQuestions) {
                     final String logIdForRecommend = savedLogId;
+                    final Long refLogIdForRecommend = CommonUtil.isNotEmpty(savedLogId) ? Long.parseLong(savedLogId) : null;
                     final String queryForRecommend = query;
                     final String answerForRecommend = finalAnswerContent;
                     getRecommendQuestionExecutor().execute(() -> {
                         try {
-                            List<String> nextQuestions = generateNextRecommendedQuestions(queryForRecommend, answerForRecommend);
+                            List<String> nextQuestions = generateNextRecommendedQuestions(queryForRecommend, answerForRecommend, refLogIdForRecommend);
                             if (!nextQuestions.isEmpty()) {
                                 callback.onRecommendQuestions(logIdForRecommend, nextQuestions);
                             }
@@ -1767,8 +1791,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setSortOrd(1);
 
         chatbotVO.setSvcTy(chatLog.getSvcTy());
-        chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getQContent()) ? chatLog.getRoomTitle() : generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()));
-        chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent()));
+        Long knowledgeRefLogId = chatLog.getLogId();
+        chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getQContent()) ? chatLog.getRoomTitle() : generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent(), knowledgeRefLogId));
+        chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent(), knowledgeRefLogId));
 
         chatbotVO.setThumbImg(generateSummaryThumbImg(chatLog.getQContent(), chatLog.getRContent()));
 
@@ -1798,7 +1823,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * AI 서버를 통해 질문/답변을 요약한 제목을 생성한다.
      * 실패 시 qContent를 50자로 잘라 반환(fallback).
      */
-    private String generateSummaryTitle(String qContent, String rContent) {
+    private String generateSummaryTitle(String qContent, String rContent, Long refLogId) {
         if (CommonUtil.isEmpty(qContent)) {
             return truncateTitle(rContent, 50);
         }
@@ -1809,7 +1834,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             prompt += " 답변: " + truncateTitle(rContent, 500);
         }
 
-        String result = callAiSummary(prompt, "title");
+        String result = callAiSummary(prompt, "title", refLogId);
         if (CommonUtil.isNotEmpty(result)) {
             return truncateTitle(result, 50);
         }
@@ -1821,7 +1846,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 쉼표(,)로 구분된 최대 5개 태그를 반환한다.
      * 실패 시 빈 문자열 반환(fallback).
      */
-    private String generateSummaryTags(String qContent, String rContent) {
+    private String generateSummaryTags(String qContent, String rContent, Long refLogId) {
         if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
             return "";
         }
@@ -1830,7 +1855,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 + "질문: " + truncateTitle(qContent, 200)
                 + " 답변: " + truncateTitle(rContent, 500);
 
-        String result = callAiSummary(prompt, "tags");
+        String result = callAiSummary(prompt, "tags", refLogId);
         if (CommonUtil.isNotEmpty(result)) {
             return truncateTitle(result.trim(), 200);
         }
@@ -1841,7 +1866,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * AI 서버를 통해 이전 질문/답변 맥락을 기반으로 다음 추천 질문을 생성한다.
      * 줄바꿈으로 구분된 최대 3개의 질문을 반환한다. 실패 시 빈 리스트 반환.
      */
-    private List<String> generateNextRecommendedQuestions(String qContent, String rContent) {
+    private List<String> generateNextRecommendedQuestions(String qContent, String rContent, Long refLogId) {
         if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
             return Collections.emptyList();
         }
@@ -1853,7 +1878,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 + "각 질문은 25자 이내로 간결하게 작성하고, 줄바꿈으로만 구분해서 질문 텍스트만 출력해. "
                 + "번호, 글머리 기호, 따옴표 등 부가 텍스트는 포함하지 마.";
 
-        String result = callAiSummary(prompt, "nextQuestions");
+        String result = callAiSummary(prompt, "nextQuestions", refLogId);
         if (CommonUtil.isEmpty(result)) {
             return Collections.emptyList();
         }
@@ -1872,9 +1897,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * doInsertAiLog를 호출하지 않으므로 로그 테이블에 쌓이지 않는다.
      * @param prompt 요청 프롬프트
      * @param purpose 로깅용 호출 목적 (title, tags, reAskReport 등). reAskReport는 응답 지연 대비 읽기 타임아웃이 더 김.
+     * @param refLogId 참조 로그 ID
      * @return AI 응답 텍스트, 실패 시 null
      */
-    public String callAiSummary(String prompt, String purpose) {
+    public String callAiSummary(String prompt, String purpose, Long refLogId) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.summary.apiUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("{} 생성 실패 - GPT API URL 미설정", purpose);
@@ -1889,14 +1915,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("query", prompt);
         params.put("room_id", "");
 
+        com.google.gson.Gson summaryGson = new com.google.gson.Gson();
+        String summaryReqJson = summaryGson.toJson(params);
+        long summaryStartMs = System.currentTimeMillis();
+
         try {
             OkHttpClient client = new OkHttpClient.Builder()
                     .readTimeout(readTimeoutSec, java.util.concurrent.TimeUnit.SECONDS)
                     .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build();
 
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            String jsonBody = gson.toJson(params);
+            String jsonBody = summaryReqJson;
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
@@ -1909,14 +1938,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.info("AI {} 생성 호출 시작 - url: {}", purpose, apiUrl);
 
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int summaryRespMs = (int) Math.min(System.currentTimeMillis() - summaryStartMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("AI {} 응답 오류: {}", purpose, response.code());
+                    apiCallLogService.insertSilently(null, refLogId, apiUrl, "-", purpose, jsonBody, 0, 0, summaryRespMs, "N", "HTTP " + response.code(), null);
                     return null;
                 }
 
                 try (okhttp3.ResponseBody responseBody = response.body()) {
                     String raw = responseBody.string();
                     if (CommonUtil.isEmpty(raw)) {
+                        apiCallLogService.insertSilently(null, refLogId, apiUrl, "-", purpose, jsonBody, 0, 0, summaryRespMs, "N", "빈 응답", null);
                         return null;
                     }
                     String trimmed = raw.trim();
@@ -1939,6 +1971,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 Object errContentObj = data.get("errorContent");
                                 String errorContent = errContentObj != null ? String.valueOf(errContentObj) : "";
                                 logger.warn("AI {} API 오류 응답: {} - {}", purpose, errorCode, errorContent);
+                                apiCallLogService.insertSilently(null, refLogId, apiUrl, "-", purpose, jsonBody, 0, 0, summaryRespMs, "N", errorCode + ": " + errorContent, null);
                                 return null;
                             }
                         }
@@ -1947,15 +1980,19 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         if (CommonUtil.isNotEmpty(answer)) {
                             String result = answer.trim();
                             logger.info("AI {} 생성 완료", purpose);
+                            apiCallLogService.insertSilently(null, refLogId, apiUrl, "-", purpose, jsonBody, 0, 0, summaryRespMs, "Y", null, null);
                             return result;
                         }
                     } catch (Exception e) {
                         logger.warn("AI {} 응답 파싱 오류: {}", purpose, e.getMessage());
+                        apiCallLogService.insertSilently(null, refLogId, apiUrl, "-", purpose, jsonBody, 0, 0, summaryRespMs, "N", "파싱 오류: " + e.getMessage(), null);
                     }
                 }
             }
         } catch (Exception e) {
+            int summaryRespMs = (int) Math.min(System.currentTimeMillis() - summaryStartMs, Integer.MAX_VALUE);
             logger.warn("AI {} 생성 중 오류 발생: {}", purpose, e.getMessage());
+            apiCallLogService.insertSilently(null, refLogId, apiUrl, "-", purpose, summaryReqJson, 0, 0, summaryRespMs, "N", e.getMessage(), null);
         }
 
         return null;
@@ -2001,7 +2038,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         String prompt = buildDiagnosePrompt(question, buildTermContextForDiagnose(datamartId));
-        String answer = callAiSummary(prompt, "diagnoseQuestion");
+        String answer = callAiSummary(prompt, "diagnoseQuestion", null);
         HashMap<String, Object> parsed = parseDiagnosisJson(answer);
         return parsed != null ? parsed : diagnosisFallback("질의 검증에 실패했습니다. 잠시 후 다시 시도해주세요.");
     }
@@ -2149,14 +2186,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("model_id", modelId != null ? modelId : "");
         params.put("room_id", "");
 
+        com.google.gson.Gson wsGson = new com.google.gson.Gson();
+        String wsReqJson = wsGson.toJson(params);
+        long wsStartMs = System.currentTimeMillis();
+
         try {
             OkHttpClient client = new OkHttpClient.Builder()
                     .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
                     .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build();
 
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            String jsonBody = gson.toJson(params);
+            String jsonBody = wsReqJson;
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
@@ -2169,8 +2209,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.info("웹 검색 호출 시작 - url: {}", apiUrl);
 
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int wsRespMs = (int) Math.min(System.currentTimeMillis() - wsStartMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("웹 검색 응답 오류: {}", response.code());
+                    apiCallLogService.insertSilently(null, null, apiUrl, modelId, "webSearch", wsReqJson, 0, 0, wsRespMs, "N", "HTTP " + response.code(), null);
                     return null;
                 }
 
@@ -2244,11 +2286,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     // done.answer가 있으면 우선 사용, 없으면 델타 누적분 사용
                     String answer = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
                     String answerSource = sourceBuilder.toString();
+                    apiCallLogService.insertSilently(null, null, apiUrl, modelId, "webSearch", wsReqJson, 0, 0, wsRespMs, "Y", null, null);
                     return new String[]{ answer, answerSource };
                 }
             }
         } catch (Exception e) {
+            int wsRespMs = (int) Math.min(System.currentTimeMillis() - wsStartMs, Integer.MAX_VALUE);
             logger.warn("웹 검색 중 오류 발생: {}", e.getMessage());
+            apiCallLogService.insertSilently(null, null, apiUrl, modelId, "webSearch", wsReqJson, 0, 0, wsRespMs, "N", e.getMessage(), null);
         }
         return null;
     }
@@ -2587,7 +2632,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 promptBuilder.append("\n\n## 사용자 요청\n").append(query);
 
                 // ④-B HTML 렌더링 경로 (PT가 아닐 때만 tmpl 변수 필요하므로 여기서 처리)
-                String aiResponseDoc = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
+                String aiResponseDoc = callLlmQuerySync(promptBuilder.toString(), modelId, threadId, agentId);
                 if (CommonUtil.isEmpty(aiResponseDoc)) {
                     callback.onError("초안 생성에 실패했습니다. AI 응답이 비어 있습니다.");
                     return;
@@ -2598,7 +2643,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             }
 
             // ④-A PT 경로: GPT 호출 → 슬라이드 JSON
-            String aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
+            String aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId, agentId);
             if (CommonUtil.isEmpty(aiResponse)) {
                 callback.onError("슬라이드 초안 생성에 실패했습니다. AI 응답이 비어 있습니다.");
                 return;
@@ -2766,7 +2811,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * PROPOSAL 에이전트 — 슬라이드 JSON을 PPTX로 변환.
      * 이미지 생성 API를 호출하지 않고, layoutType 기반 코드 렌더링으로 PPTX를 생성한다.
      */
-    public byte[] exportProposalPptx(String slidesJson) throws Exception {
+    public byte[] exportProposalPptx(String slidesJson, String agentId) throws Exception {
         JSONParser parser = new JSONParser();
         JSONObject root = (JSONObject) parser.parse(slidesJson.trim());
         String title = root.get("title") != null ? String.valueOf(root.get("title")) : "제안서";
@@ -2814,7 +2859,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 futures.add(exec.submit(() -> {
                     try {
                         String q = buildProposalInfographicQuery(sl, finalBaseColor, finalAccentColor);
-                        String b64 = callAiImageApi(q);
+                        String b64 = callAiImageApi(q, agentId);
                         if (b64 != null && !b64.isEmpty()) {
                             infographicImageMap.put(i, b64);
                         } else {
@@ -3283,7 +3328,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 return;
             }
             // 캡 이하면 원문 그대로(빠른 경로), 초과(대용량 RFP)면 청크 병렬 요약으로 압축
-            String rfpTextForPrompt = condenseRfpTextIfLarge(rfpText, modelId, callback);
+            String rfpTextForPrompt = condenseRfpTextIfLarge(rfpText, modelId, callback, agentId);
 
             // ② 템플릿 + 섹션(필드) 로딩
             callback.onStatus("loading_template", "리포트 템플릿 준비 중");
@@ -3380,11 +3425,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             callback.onStatus("analyzing_sections", "리스크 진단 리포트 생성 중");
             String reportPrompt = buildRiskReportPrompt(llmPrompt, tmplFieldList, rfpTextForPrompt,
                     companyContext, CommonUtil.isNotEmpty(query) ? query : "(추가 요청 없음)");
-            String aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId);
+            String aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId, agentId);
             // 응답이 비면 1회 재시도
             if (CommonUtil.isEmpty(aiResponse)) {
                 logger.warn("리스크진단 리포트 1차 응답 없음 — 재시도");
-                aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId);
+                aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId, agentId);
             }
 
             // ⑤ 섹션 구분자([[SEC:키]]…[[/SEC]]) 파싱 → key별 HTML
@@ -3561,7 +3606,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             }
             // 대용량 요구사항 압축
             if (requirementsText.length() > PROPOSAL_RFP_TEXT_MAX_CHARS) {
-                requirementsText = condenseRfpTextIfLarge(requirementsText, modelId, callback);
+                requirementsText = condenseRfpTextIfLarge(requirementsText, modelId, callback, agentId);
             }
 
             // ③ 자사 역량 RAG 검색 (refId 데이터셋, RISK 에이전트와 동일 구조)
@@ -3648,13 +3693,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     .append("\n\n## 슬라이드 구성 및 레이아웃 지침")
                     .append("\n슬라이드는 총 7~9장으로 구성하되, 각 슬라이드마다 제공된 컨텍스트의 내용을 최대한 상세하고 풍부하게 채워 넣으세요.")
                     .append("\n\n- 1장(cover): 사업(과제)명 · 핵심 슬로건 · 컨소시엄 및 추진 단계 키워드 요약 → layoutType: cover")
-                    .append("\n- 2장: 사업의 이해와 필요성 — RFP 기반 핵심 요구사항 분석, 현재 시장/현장의 진짜 문제점 및 본 사업이 반드시 추진되어야 하는 배경 → layoutType: keyword_list 또는 infographic")
-                    .append("\n- 3장: 최종 개발 목표 및 추진 전략 — RFP 요구사항을 달성하기 위한 전체 시스템 개념도, 단계별 접근 방법 및 핵심 방법론 → layoutType: process_cards 또는 infographic")
-                    .append("\n- 4장: 핵심 기술 개발 및 구현 방안 — [자사 역량] 기반의 구체적인 기술 아키텍처, 데이터 파이프라인, 알고리즘 및 성능 검증(정량 목표치 포함) 계획 → layoutType: process_cards")
-                    .append("\n- 5장: 응용 솔루션 및 기능 기능 정의 — 사용자/고객 관점의 주요 기능 시나리오, 플랫폼 구조 및 시스템 연계 방안 → layoutType: grid_cards")
+                    .append("\n- 2장: 사업의 이해와 필요성 — RFP 기반 핵심 요구사항 분석, 현재 시장/현장의 진짜 문제점 및 본 사업이 반드시 추진되어야 하는 배경 → layoutType: infographic")
+                    .append("\n- 3장: 최종 개발 목표 및 추진 전략 — RFP 요구사항을 달성하기 위한 전체 시스템 개념도, 단계별 접근 방법 및 핵심 방법론 → layoutType:  infographic")
+                    .append("\n- 4장: 핵심 기술 개발 및 구현 방안 — [자사 역량] 기반의 구체적인 기술 아키텍처, 데이터 파이프라인, 알고리즘 및 성능 검증(정량 목표치 포함) 계획 → layoutType: infographic")
+                    .append("\n- 5장: 응용 솔루션 및 기능 기능 정의 — 사용자/고객 관점의 주요 기능 시나리오, 플랫폼 구조 및 시스템 연계 방안 → layoutType: infographic")
                     .append("\n- 6장: 수행 조직 및 인력 역량 — 과제 책임자 및 참여 인력의 전문성, 조직 구조, [자사 실적/인증] 기반의 과제 수행 적합성 증명 → layoutType: infographic")
-                    .append("\n- 7장: 사업화 및 확산 전략 — BM(비즈니스 모델) 구조, 시장 진입(Go-To-Market) 전략, 오픈소스/SaaS/구축형 등 다각적 확산 및 수익화 방안 → layoutType: grid_cards")
-                    .append("\n- 8장: 자사 차별화 포인트 및 파급효과 — 경쟁사 대비 독보적 우위 요소 요약, 본 사업 완료 후 예상되는 정량적/정성적 기대효과 → layoutType: keyword_list")
+                    .append("\n- 7장: 사업화 및 확산 전략 — BM(비즈니스 모델) 구조, 시장 진입(Go-To-Market) 전략, 오픈소스/SaaS/구축형 등 다각적 확산 및 수익화 방안 → layoutType: infographic")
+                    .append("\n- 8장: 자사 차별화 포인트 및 파급효과 — 경쟁사 대비 독보적 우위 요소 요약, 본 사업 완료 후 예상되는 정량적/정성적 기대효과 → layoutType: infographic")
                     .append("\n- (선택 사항): RFP상 특수 요구사항(예: 보안, 인프라, 연구윤리 등)이 강조되어 있다면 관련 슬라이드를 1장 추가하세요.")
                 
                     .append("\n\n## 입력 데이터 (참조 컨텍스트)")
@@ -3699,10 +3744,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     .append("\n- infographic: 조직도·시스템 아키텍처·순환 프로세스·다층 계층 구조처럼 단순 카드/리스트로 표현하기 어려운 구조에 사용. 제안서에서 수행 조직 슬라이드, 일정 계획 슬라이드 등에 적극 활용. keywords[]는 다이어그램 주요 구성요소, content[]는 각 요소의 설명 항목.");
 
             // ⑥ LLM 호출
-            String aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
+            String aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId, agentId);
             if (CommonUtil.isEmpty(aiResponse)) {
                 logger.warn("PROPOSAL 슬라이드 1차 응답 없음 — 재시도");
-                aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
+                aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId, agentId);
             }
             if (CommonUtil.isEmpty(aiResponse)) {
                 callback.onError("제안서 슬라이드 초안 생성에 실패했습니다. AI 응답이 비어 있습니다.");
@@ -3839,7 +3884,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 요약은 리스크 진단에 필요한 핵심(개요·과업·조건·평가·자격·일정·금액·보증/패널티·보안 등)만 추출한다.
      */
     private String condenseRfpTextIfLarge(String rfpText, String modelId,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
+            ChatbotWebSocketHandler.ChatbotStreamingCallback callback, String agentId) {
         if (CommonUtil.isEmpty(rfpText)) {
             return "";
         }
@@ -3875,7 +3920,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             futures.add(riskSummarizeExecutor.submit(() -> {
                 long chunkStart = System.currentTimeMillis();
                 logger.info("RFP 청크 요약 시작 - {}/{} (입력:{}자)", chunkNo, chunkCount, fChunk.length());
-                String out = callLlmQuerySync(buildRfpSummaryPrompt(fChunk), modelId, "");
+                String out = callLlmQuerySync(buildRfpSummaryPrompt(fChunk), modelId, "", agentId);
                 logger.info("RFP 청크 요약 완료 - {}/{} (입력:{}자 → 요약:{}자, {}ms)",
                         chunkNo, chunkCount, fChunk.length(), out != null ? out.length() : 0,
                         System.currentTimeMillis() - chunkStart);
@@ -4182,17 +4227,23 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     }
                 }
                 String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                int ragRespMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 logger.info("리스크 RAG 응답 수신 완료 - 길이:{}, 소요:{}ms",
-                        result != null ? result.length() : 0, System.currentTimeMillis() - startMs);
+                        result != null ? result.length() : 0, ragRespMs);
+                apiCallLogService.insertSilently(agentId, null, ragApiUrl, modelId, "ragQuery", ragJsonBody, 0, 0, ragRespMs, "Y", null, null);
                 return result;
             }
         } catch (java.net.SocketTimeoutException te) {
+            int ragRespMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             logger.warn("리스크 RAG 호출 타임아웃 - {}s 초과({}ms 경과). 응답이 너무 길거나 AI 서버 지연일 수 있음: {}",
-                    RISK_QUERY_READ_TIMEOUT_SEC, System.currentTimeMillis() - startMs, te.getMessage());
+                    RISK_QUERY_READ_TIMEOUT_SEC, ragRespMs, te.getMessage());
+            apiCallLogService.insertSilently(agentId, null, ragApiUrl, modelId, "ragQuery", ragJsonBody, 0, 0, ragRespMs, "N", "타임아웃: " + te.getMessage(), null);
             return "";
         } catch (Exception e) {
+            int ragRespMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             logger.warn("리스크 RAG 호출 실패 - {}({}ms 경과): {}",
-                    e.getClass().getSimpleName(), System.currentTimeMillis() - startMs, e.getMessage());
+                    e.getClass().getSimpleName(), ragRespMs, e.getMessage());
+            apiCallLogService.insertSilently(agentId, null, ragApiUrl, modelId, "ragQuery", ragJsonBody, 0, 0, ragRespMs, "N", e.getMessage(), null);
             return "";
         }
     }
@@ -4201,7 +4252,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 일반 LLM 엔드포인트(9000/query)를 동기 호출하고 답변 문자열을 반환한다.
      * 데이터셋(RAG) 없이 RFP 본문만으로 진단할 때 사용 — dataset_id 불필요.
      */
-    private String callLlmQuerySync(String prompt, String modelId, String threadId) {
+    private String callLlmQuerySync(String prompt, String modelId, String threadId, String agentId) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("리스크 LLM 질의 실패 - gpt.apiUrl 미설정");
@@ -4227,63 +4278,80 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 .build();
         logger.info("리스크 LLM 단일 호출 시작 - url:{}, readTimeout:{}s, 요청바디길이:{}",
                 apiUrl, RISK_QUERY_READ_TIMEOUT_SEC, jsonBody.length());
+
         long startMs = System.currentTimeMillis();
+
         try (okhttp3.Response response = client.newCall(request).execute()) {
+
             if (!response.isSuccessful() || response.body() == null) {
+                int llmRespMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 logger.warn("리스크 LLM 질의 응답 오류: {}", response.code());
+                apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "llmQuery", jsonBody, 0, 0, llmRespMs, "N", "HTTP " + response.code(), null);
                 return "";
             }
+
             try (okhttp3.ResponseBody responseBody = response.body()) {
                 BufferedReader reader = new BufferedReader(
                         new InputStreamReader(responseBody.byteStream(), "UTF-8"));
                 StringBuilder answerBuilder = new StringBuilder();
+                String currentEvent = null;
+                int inputTokens = 0;
+                int outputTokens = 0;
                 String doneAnswer = "";
                 String line;
                 JSONParser jsonParser = new JSONParser();
                 while ((line = reader.readLine()) != null) {
                     if (line.startsWith("event: ")) {
+                        currentEvent = line.substring(7).trim();
                         continue;
                     }
-                    String jsonStr;
-                    if (line.startsWith("data: ")) {
-                        jsonStr = line.substring(6).trim();
-                    } else if (line.trim().startsWith("{")) {
-                        jsonStr = line.trim();
-                    } else {
+                    if (!line.startsWith("data: ")) {
                         continue;
                     }
-                    if (jsonStr.isEmpty()) {
-                        continue;
-                    }
+
                     try {
+                        String jsonStr = line.substring(6).trim();
                         JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
-                        Object textObj = data.get("text");
-                        if (textObj != null) {
-                            answerBuilder.append(String.valueOf(textObj));
+
+                        if ("answer_delta".equals(currentEvent)) {
+                            String text = getString(data.get("text"));
+                            if( text != null && !text.isEmpty()) {
+                                answerBuilder.append(text);
+                            }
+                            continue;
                         }
-                        Object answerObj = data.get("answer");
-                        if (answerObj == null) {
-                            answerObj = data.get("답변");
-                        }
-                        if (answerObj != null) {
-                            doneAnswer = String.valueOf(answerObj);
+
+                        if("done".equals(currentEvent)) {
+                            String answerObj = getString(data.get("answer"));
+                            doneAnswer = answerObj;
+                            inputTokens = parseTokenCount(data.get("input_token"));
+                            outputTokens = parseTokenCount(data.get("output_token"));
+                            continue;
                         }
                     } catch (Exception ignore) {
                         // 개별 라인 파싱 실패는 무시
                     }
                 }
+
                 String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                int llmRespMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 logger.info("리스크 LLM 응답 수신 완료 - 길이:{}, 소요:{}ms",
-                        result != null ? result.length() : 0, System.currentTimeMillis() - startMs);
+                        result != null ? result.length() : 0, llmRespMs);
+                apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "llmQuery", jsonBody, inputTokens, outputTokens, llmRespMs, "Y", null, null);
                 return result;
+
             }
         } catch (java.net.SocketTimeoutException te) {
+            int llmRespMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             logger.warn("리스크 LLM 호출 타임아웃 - {}s 초과({}ms 경과). 응답이 너무 길거나 AI 서버 지연일 수 있음: {}",
-                    RISK_QUERY_READ_TIMEOUT_SEC, System.currentTimeMillis() - startMs, te.getMessage());
+                    RISK_QUERY_READ_TIMEOUT_SEC, llmRespMs, te.getMessage());
+            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "llmQuery", jsonBody, 0, 0, llmRespMs, "N", "타임아웃: " + te.getMessage(), null);
             return "";
         } catch (Exception e) {
+            int llmRespMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             logger.warn("리스크 LLM 호출 실패 - {}({}ms 경과): {}",
-                    e.getClass().getSimpleName(), System.currentTimeMillis() - startMs, e.getMessage());
+                    e.getClass().getSimpleName(), llmRespMs, e.getMessage());
+            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "llmQuery", jsonBody, 0, 0, llmRespMs, "N", e.getMessage(), null);
             return "";
         }
     }
@@ -4334,14 +4402,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             promptContent += "\n답변: " + truncateTitle(rContent, 500);
         }
 
-        return callAiImageApi(promptContent);
+        return callAiImageApi(promptContent, null);
     }
 
     /**
      * Globals.chatbot.image.apiUrl 동기 호출. 응답 JSON의 image 필드(base64)를 반환한다.
      * data:image/...;base64, 접두사가 있으면 제거한 순수 base64만 저장한다.
      */
-    private String callAiImageApi(String query) {
+    private String callAiImageApi(String query, String agentId) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.image.apiUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("이미지 생성 실패 - image API URL 미설정");
@@ -4351,10 +4419,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return null;
         }
 
+        String modelId = "gpt";
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
         params.put("room_id", "");
+        params.put("model", modelId);
         params.put("aspect_ratio", "16:9");
+
+        com.google.gson.Gson imgGson = new com.google.gson.Gson();
+        String imgReqJson = imgGson.toJson(params);
+        long imgStartMs = System.currentTimeMillis();
 
         try {
             OkHttpClient client = new OkHttpClient.Builder()
@@ -4362,8 +4436,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build();
 
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            String jsonBody = gson.toJson(params);
+            String jsonBody = imgReqJson;
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
@@ -4376,14 +4449,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.info("AI 썸네일 이미지 호출 시작 - url: {}", apiUrl);
 
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int imgRespMs = (int) Math.min(System.currentTimeMillis() - imgStartMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("AI 썸네일 이미지 응답 오류: {}", response.code());
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "HTTP " + response.code(), null);
                     return null;
                 }
 
                 try (okhttp3.ResponseBody responseBody = response.body()) {
                     String raw = responseBody.string();
                     if (CommonUtil.isEmpty(raw)) {
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "빈 응답", null);
                         return null;
                     }
                     String trimmed = raw.trim();
@@ -4406,27 +4482,34 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 Object errContentObj = data.get("errorContent");
                                 String errorContent = errContentObj != null ? String.valueOf(errContentObj) : "";
                                 logger.warn("AI 썸네일 이미지 API 오류: {} - {}", errorCode, errorContent);
+                                apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", errorCode + ": " + errorContent, null);
                                 return null;
                             }
                         }
 
                         Object imageObj = data.get("image");
                         if (imageObj == null) {
+                            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "이미지 필드 없음", null);
                             return null;
                         }
                         String image = String.valueOf(imageObj).trim();
                         if (CommonUtil.isEmpty(image)) {
+                            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "이미지 값 없음", null);
                             return null;
                         }
                         String normalized = stripDataUrlBase64Prefix(image);
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "Y", null, null);
                         return normalized;
                     } catch (Exception e) {
                         logger.warn("AI 썸네일 이미지 응답 파싱 오류: {}", e.getMessage());
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "파싱 오류: " + e.getMessage(), null);
                     }
                 }
             }
         } catch (Exception e) {
+            int imgRespMs = (int) Math.min(System.currentTimeMillis() - imgStartMs, Integer.MAX_VALUE);
             logger.warn("AI 썸네일 이미지 호출 중 오류: {}", e.getMessage());
+            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", e.getMessage(), null);
         }
 
         return null;
@@ -4832,7 +4915,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
         prompt.append("\n\n## 원문\n").append(content);
 
-        return callAiSummary(prompt.toString(), "instant_translate");
+        return callAiSummary(prompt.toString(), "instant_translate", null);
     }
 
     /**
@@ -4915,7 +4998,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 외부에서 prompt를 받아 AI 요약 API를 호출하고 방사형 차트용 JSON 문자열을 반환한다.
      */
     public String getPsychologyChartData(String prompt) {
-        return callAiSummary(prompt, "방사형 차트 데이터");
+        return callAiSummary(prompt, "방사형 차트 데이터", null);
     }
 
     /**
@@ -4967,7 +5050,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 + "\n\n" + (query != null ? query : "")
                 + "\n\n## 원문\n" + extractedText;
 
-        String translatedText = callAiSummary(prompt, "translate_file");
+        String translatedText = callAiSummary(prompt, "translate_file", null);
         if (CommonUtil.isEmpty(translatedText)) {
             callback.onError("번역에 실패했습니다. 잠시 후 다시 시도해 주세요.");
             return;
@@ -5127,7 +5210,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /** AI 큐레이션 JSON 배열 응답. */
     private String runNewsCuratorAi(String curatorPrompt, List<RssArticleRow> rssCandidateRows) {
-        String curatorAiJson = callAiSummary(curatorPrompt, "news_curate");
+        String curatorAiJson = callAiSummary(curatorPrompt, "news_curate", null);
         if (CommonUtil.isEmpty(curatorAiJson)) {
             return "";
         }

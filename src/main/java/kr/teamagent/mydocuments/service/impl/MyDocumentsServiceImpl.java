@@ -412,7 +412,7 @@ public class MyDocumentsServiceImpl extends EgovAbstractServiceImpl {
         String prompt = "다음 문서 내용을 바탕으로 10자 이내의 한 줄 문서 제목을 만들어줘. 제목만 출력해. "
                 + "내용: " + truncateTitle(rContent, 500);
 
-        String result = chatbotService.callAiSummary(prompt, "title");
+        String result = chatbotService.callAiSummary(prompt, "title", null);
         if (CommonUtil.isNotEmpty(result)) {
             return truncateTitle(result, 50);
         }

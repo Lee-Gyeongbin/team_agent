@@ -552,7 +552,7 @@ public class ChatbotController extends BaseController {
      */
     @RequestMapping("/ai/chatbot/exportProposalPptx.do")
     public void exportProposalPptx(@RequestBody ChatbotVO dataVO, HttpServletResponse response) throws Exception {
-        byte[] bytes = chatbotService.exportProposalPptx(dataVO.getContent());
+        byte[] bytes = chatbotService.exportProposalPptx(dataVO.getContent(), dataVO.getAgentId());
         String baseName = (dataVO.getFileName() != null && !dataVO.getFileName().trim().isEmpty()
                 ? dataVO.getFileName().trim() : "제안서");
         String fileName = baseName + ".pptx";

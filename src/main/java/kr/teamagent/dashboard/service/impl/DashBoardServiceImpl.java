@@ -224,7 +224,7 @@ public class DashBoardServiceImpl extends EgovAbstractServiceImpl {
 
         String prompt = buildKeywordPrompt(qContent, rContent, baseKeywordText);
 
-        String result = chatbotServiceImpl.callAiSummary(prompt, "keyword");
+        String result = chatbotServiceImpl.callAiSummary(prompt, "keyword", null);
         JSONObject aiJson = parseAiJson(result);
         if (aiJson == null) {
             return fallback;

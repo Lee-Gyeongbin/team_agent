@@ -118,7 +118,7 @@ public class MtlcareServiceImpl extends EgovAbstractServiceImpl {
                 .replace("{{CORE_AREAS_SUMMARY}}", CommonUtil.nullToBlank(resultVO.getCoreAreasSummary()))
                 .replace("{{REQ_COMMENT}}", CommonUtil.nullToBlank(reportVO.getReqComment()));
 
-        String aiRes = chatbotService.callAiSummary(prompt, "mtlcareReport");
+        String aiRes = chatbotService.callAiSummary(prompt, "mtlcareReport", null);
         if (CommonUtil.isEmpty(aiRes)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "AI 리포트 생성에 실패했습니다.");

@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import kr.teamagent.common.apilog.service.impl.ApiCallLogServiceImpl;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
@@ -40,6 +41,9 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
 
     private static final Logger logger = LoggerFactory.getLogger(RepositoryServiceImpl.class);
     private static final ExecutorService SCRAPING_EXECUTOR = Executors.newFixedThreadPool(2);
+
+    @Autowired
+    private ApiCallLogServiceImpl apiCallLogService;
 
     @Autowired
     private RepositoryDAO repositoryDAO;
@@ -790,12 +794,13 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> resultMap = new HashMap<>();
         OkHttpClient client = new OkHttpClient();
 
-        try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("doc_file_id", docFileIdList);
-            payload.put("delete_file_ids", deleteFileIds);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("doc_file_id", docFileIdList);
+        payload.put("delete_file_ids", deleteFileIds);
+        String jsonBody = new com.google.gson.Gson().toJson(payload);
 
-            String jsonBody = new com.google.gson.Gson().toJson(payload);
+        long startMs = System.currentTimeMillis();
+        try {
             RequestBody body = RequestBody.create(jsonBody, MediaType.get("application/json; charset=utf-8"));
             Request request = new Request.Builder()
                     .url(apiUrl)
@@ -804,7 +809,9 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                     .build();
 
             try (Response response = client.newCall(request).execute()) {
+                int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
+                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "repo_file_sync", jsonBody, 0, 0, respMs, "N", "HTTP " + response.code(), null);
                     resultMap.put("successYn", false);
                     resultMap.put("returnMsg", "AI 서버 호출에 실패하였습니다. (HTTP " + response.code() + ")");
                     return resultMap;
@@ -820,12 +827,16 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                         : "";
 
                 if (!"done".equalsIgnoreCase(status) || (StringUtils.isNotBlank(errorContent) && !"None".equalsIgnoreCase(errorContent))) {
+                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "repo_file_sync", jsonBody, 0, 0, respMs, "N", "status=" + status + ", error_content=" + errorContent, null);
                     resultMap.put("successYn", false);
                     resultMap.put("returnMsg", "AI 서버 처리에 실패하였습니다. (" + responseBody + ")");
                     return resultMap;
                 }
+                apiCallLogService.insertSilently(null, null, apiUrl, "-", "repo_file_sync", jsonBody, 0, 0, respMs, "Y", null, null);
             }
         } catch (Exception e) {
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+            apiCallLogService.insertSilently(null, null, apiUrl, "-", "repo_file_sync", jsonBody, 0, 0, respMs, "N", e.getMessage(), null);
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "AI 서버 연동 중 오류가 발생하였습니다.");
             return resultMap;
