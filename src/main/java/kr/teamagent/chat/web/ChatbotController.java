@@ -531,23 +531,6 @@ public class ChatbotController extends BaseController {
     }
 
     /**
-     * PLANNER 에이전트 — PT 슬라이드 JSON을 PPTX 파일로 변환하여 다운로드 응답한다.
-     */
-    @RequestMapping("/ai/chatbot/exportPlannerPptx.do")
-    public void exportPlannerPptx(@RequestBody ChatbotVO dataVO, HttpServletResponse response) throws Exception {
-        byte[] bytes = chatbotService.exportPlannerPptx(dataVO.getContent());
-        String baseName = (dataVO.getFileName() != null && !dataVO.getFileName().trim().isEmpty()
-                ? dataVO.getFileName().trim() : "PT초안");
-        String fileName = baseName + ".pptx";
-        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%20");
-        response.setContentType("application/vnd.openxmlformats-officedocument.presentationml.presentation");
-        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
-        response.setContentLength(bytes.length);
-        response.getOutputStream().write(bytes);
-        response.getOutputStream().flush();
-    }
-
-    /**
      * PROPOSAL 에이전트 — 제안서 슬라이드 JSON을 이미지 기반 PPTX 파일로 변환하여 다운로드 응답한다.
      */
     @RequestMapping("/ai/chatbot/exportProposalPptx.do")
