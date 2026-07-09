@@ -2943,12 +2943,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         q.append("- 깨진 문자열, 의미 없는 더미 영문 텍스트(Lorem Ipsum 등), 무작위 알파벳 라벨 생성을 엄격히 금지합니다.\n");
         q.append("- 밝은 배경 위에 텍스트가 올라가므로, 글자가 흐려지지 않도록 대조(Contrast)가 확실한 짙은 색상의 또렷한 폰트를 사용하세요.\n\n");
 
-        // 4. 데이터 세션 입력
+        // 4. 데이터 세션 입력 (제목·부제목은 슬라이드 헤더존에서 이미 표시되므로 이미지에 중복 삽입하지 않음)
         q.append("[인포그래픽에 포함할 실제 데이터]\n");
-        q.append("- 메인 타이틀: ").append(sTitle).append("\n");
-        if (!subtitle.isEmpty()) q.append("- 서브 타이틀: ").append(subtitle).append("\n");
-        if (!headline.isEmpty()) q.append("- 헤드라인 문구: ").append(headline).append("\n");
-        if (!layoutType.isEmpty()) q.append("- 권장 레이아웃 형태: ").append(layoutType).append("\n");
+        if (!headline.isEmpty()) q.append("- 핵심 메시지: ").append(headline).append("\n");
+        if (!layoutType.isEmpty()) q.append("- 권장 다이어그램 유형: ").append(layoutType).append("\n");
         if (!notes.isEmpty()) q.append("- 핵심 강조 노트(강조 박스로 분리 표시): ").append(notes).append("\n\n");
 
         if (!keywords.isEmpty()) {
@@ -3690,28 +3688,53 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             // ⑤ 슬라이드 프롬프트 구성
             callback.onStatus("generating_slides", "제안 슬라이드 초안 생성 중");
             String langLabel = "ko".equals(lang) ? "한국어" : "English";
+
+            // DB 매핑 프롬프트 조회 (TB_PROMPT_APPLY_AGT → TB_PROMPT)
+            String basePrompt = "";
+            try {
+                basePrompt = promptService.getPromptByAgentId(agentId);
+            } catch (Exception e) {
+                logger.warn("PROPOSAL 에이전트 프롬프트 조회 실패 (agentId={}): {}", agentId, e.getMessage());
+            }
+            // DB 프롬프트 없을 경우 기존 하드코딩 fallback
+            if (CommonUtil.isEmpty(basePrompt)) {
+                basePrompt = "당신은 정부 지원 사업 및 기업 B2B 기술 제안서 작성에 정통한 최고의 " + persona + "입니다."
+                        + "\n\n## 과업 목표"
+                        + "\n제공된 [RFP]를 철저히 분석하고, [자사 역량 자료]를 매칭하여 오디언스(" + audience + ")를 완벽히 설득할 수 있는 맞춤형 영업/기술 제안서 슬라이드 초안을 " + langLabel + "로 작성하세요."
+                        + "\n본 제안서의 핵심 목적은 '왜 우리 회사가 이 사업(과제)을 시장의 그 누구보다 왜, 그리고 어떻게 가장 잘 수행할 수 있는지'를 증명하여 수주(선정) 가능성을 극대화하는 것입니다."
+                        + "\n절대로 리스크 진단·감사 보고서·단순 현황 요약 형식으로 작성하지 마세요. 철저한 '수주 목적의 제안서' 포맷을 유지해야 합니다."
+                        + "\n\n## 핵심 작성 원칙 (내용을 풍부하게 만드는 지침)"
+                        + "\n1. [RFP 분석 기반 문제 도출]: RFP에 명시된 문제점, 기술적 요구사항, 정량적 목표를 파악하여 사업의 필요성을 날카롭게 지적하세요."
+                        + "\n2. [자사 역량의 유기적 결합]: [자사 역량 자료]에 포함된 구체적인 기술 스펙, 특허, 인증명, 수치, 유사 사업 수행 실적, 인력 프로필을 그대로 인용하여 제안의 구체성과 신뢰성을 대폭 높이세요. 단순 나열이 아닌, RFP 요구사항을 해결하는 '근거'로 매칭해야 합니다."
+                        + "\n3. [경쟁사 대비 차별화]: [경쟁사 정보]가 있는 경우, 경쟁사 기술의 한계를 짚고 이를 압도하는 자사만의 독점적 우위(차별화 포인트)를 명확히 부각하세요.";
+            }
+
             StringBuilder promptBuilder = new StringBuilder();
-            promptBuilder.append("당신은 정부 지원 사업 및 기업 B2B 기술 제안서 작성에 정통한 최고의 ").append(persona).append("입니다.")
-                    .append("\n\n## 과업 목표")
-                    .append("\n제공된 [RFP]를 철저히 분석하고, [자사 역량 자료]를 매칭하여 오디언스(").append(audience).append(")를 완벽히 설득할 수 있는 맞춤형 영업/기술 제안서 슬라이드 초안을 ").append(langLabel).append("로 작성하세요.")
-                    .append("\n본 제안서의 핵심 목적은 '왜 우리 회사가 이 사업(과제)을 시장의 그 누구보다 왜, 그리고 어떻게 가장 잘 수행할 수 있는지'를 증명하여 수주(선정) 가능성을 극대화하는 것입니다.")
-                    .append("\n절대로 리스크 진단·감사 보고서·단순 현황 요약 형식으로 작성하지 마세요. 철저한 '수주 목적의 제안서' 포맷을 유지해야 합니다.")
-                    .append("\n\n## 핵심 작성 원칙 (내용을 풍부하게 만드는 지침)")
-                    .append("\n1. [RFP 분석 기반 문제 도출]: RFP에 명시된 문제점, 기술적 요구사항, 정량적 목표를 파악하여 사업의 필요성을 날카롭게 지적하세요.")
-                    .append("\n2. [자사 역량의 유기적 결합]: [자사 역량 자료]에 포함된 구체적인 기술 스펙, 특허, 인증명, 수치, 유사 사업 수행 실적, 인력 프로필을 그대로 인용하여 제안의 구체성과 신뢰성을 대폭 높이세요. 단순 나열이 아닌, RFP 요구사항을 해결하는 '근거'로 매칭해야 합니다.")
-                    .append("\n3. [경쟁사 대비 차별화]: [경쟁사 정보]가 있는 경우, 경쟁사 기술의 한계를 짚고 이를 압도하는 자사만의 독점적 우위(차별화 포인트)를 명확히 부각하세요.")
+            promptBuilder.append(basePrompt)
                 
                     .append("\n\n## 슬라이드 구성 및 레이아웃 지침")
-                    .append("\n슬라이드는 총 7~9장으로 구성하되, 각 슬라이드마다 제공된 컨텍스트의 내용을 최대한 상세하고 풍부하게 채워 넣으세요.")
-                    .append("\n\n- 1장(cover): 사업(과제)명 · 핵심 슬로건 · 컨소시엄 및 추진 단계 키워드 요약 → layoutType: cover")
-                    .append("\n- 2장: 사업의 이해와 필요성 — RFP 기반 핵심 요구사항 분석, 현재 시장/현장의 진짜 문제점 및 본 사업이 반드시 추진되어야 하는 배경 → layoutType: infographic")
-                    .append("\n- 3장: 최종 개발 목표 및 추진 전략 — RFP 요구사항을 달성하기 위한 전체 시스템 개념도, 단계별 접근 방법 및 핵심 방법론 → layoutType:  infographic")
-                    .append("\n- 4장: 핵심 기술 개발 및 구현 방안 — [자사 역량] 기반의 구체적인 기술 아키텍처, 데이터 파이프라인, 알고리즘 및 성능 검증(정량 목표치 포함) 계획 → layoutType: infographic")
-                    .append("\n- 5장: 응용 솔루션 및 기능 기능 정의 — 사용자/고객 관점의 주요 기능 시나리오, 플랫폼 구조 및 시스템 연계 방안 → layoutType: infographic")
-                    .append("\n- 6장: 수행 조직 및 인력 역량 — 과제 책임자 및 참여 인력의 전문성, 조직 구조, [자사 실적/인증] 기반의 과제 수행 적합성 증명 → layoutType: infographic")
-                    .append("\n- 7장: 사업화 및 확산 전략 — BM(비즈니스 모델) 구조, 시장 진입(Go-To-Market) 전략, 오픈소스/SaaS/구축형 등 다각적 확산 및 수익화 방안 → layoutType: infographic")
-                    .append("\n- 8장: 자사 차별화 포인트 및 파급효과 — 경쟁사 대비 독보적 우위 요소 요약, 본 사업 완료 후 예상되는 정량적/정성적 기대효과 → layoutType: infographic")
-                    .append("\n- (선택 사항): RFP상 특수 요구사항(예: 보안, 인프라, 연구윤리 등)이 강조되어 있다면 관련 슬라이드를 1장 추가하세요.")
+                    .append("\n슬라이드는 아래 구조를 따르되, 각 슬라이드마다 제공된 컨텍스트 내용을 최대한 상세하고 풍부하게 채워 넣으세요.")
+                    .append("\n\n### 필수 슬라이드 구조")
+                    .append("\n- 1장(cover): 사업(과제)명 · 핵심 슬로건 · 컨소시엄 및 추진 단계 키워드 요약 → layoutType: cover")
+                    .append("\n- 2장(toc): 전체 제안서 목차 — keywords[]에 섹션명(예: '사업의 이해와 필요성'), content[]에 각 섹션 한 줄 설명. 섹션 번호는 자동 부여됨 → layoutType: toc")
+                    .append("\n\n### 섹션별 구조 (간지 + 세부 장표)")
+                    .append("\n각 주제마다 반드시 ① 섹션 간지(section_divider) → ② 세부 내용 슬라이드 1~2장 순서로 구성하세요.")
+                    .append("\n\n[섹션 간지 작성 규칙]")
+                    .append("\n- title: 섹션 번호 (예: '01', '02', '03' ...)")
+                    .append("\n- subtitle: 섹션 제목 (예: '사업의 이해와 필요성')")
+                    .append("\n- headline: 섹션 핵심 메시지 한 문장")
+                    .append("\n- layoutType: section_divider")
+                    .append("\n\n[세부 내용 슬라이드 — 간지 직후 1~2장]")
+                    .append("\n- 모든 세부 내용 슬라이드는 예외 없이 layoutType: infographic 으로 지정하세요.")
+                    .append("\n\n[권장 섹션 구성 예시]")
+                    .append("\n- 01 사업의 이해와 필요성: section_divider → infographic(문제 구조도) → infographic(핵심 요구사항)")
+                    .append("\n- 02 추진 전략: section_divider → infographic(전략 개념도) → infographic(단계별 방법론)")
+                    .append("\n- 03 핵심 기술 구현 방안: section_divider → infographic(기술 아키텍처) → infographic(핵심 기술 역량)")
+                    .append("\n- 04 응용 솔루션 및 기능: section_divider → infographic(기능 시나리오) → infographic(주요 기능 정의)")
+                    .append("\n- 05 수행 조직 및 인력: section_divider → infographic(조직도) → infographic(인력 역량)")
+                    .append("\n- 06 사업화 및 확산 전략: section_divider → infographic(확산 단계) → infographic(수익화 방안)")
+                    .append("\n- 07 차별화 포인트 및 파급효과: section_divider → infographic(Win Theme) → infographic(정량적 기대효과)")
+                    .append("\n- (선택): RFP상 특수 요구사항(보안·인프라·연구윤리 등)이 강조되면 섹션 추가")
                 
                     .append("\n\n## 입력 데이터 (참조 컨텍스트)")
                     .append("\n아래 데이터를 기반으로 내용을 생성하되, 가상의 내용을 지어내지 말고 주어진 텍스트 내의 전문 용어와 수치를 적극 활용하세요.")
@@ -3742,17 +3765,19 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     .append("\n      \"keywords\": [\"키워드1\", \"키워드2\", \"키워드3\"],")
                     .append("\n      \"content\": [\"본문 항목1\", \"본문 항목2\", \"본문 항목3\"],")
                     .append("\n      \"notes\": \"발표자 노트\",")
-                    .append("\n      \"layoutType\": \"cover | keyword_list | process_cards | grid_cards | infographic\"")
+                    .append("\n      \"layoutType\": \"cover | toc | section_divider | keyword_list | process_cards | grid_cards | infographic\"")
                     .append("\n    },")
                     .append("\n    ...")
                     .append("\n  ]")
                     .append("\n}")
                     .append("\n\n## layoutType 선택 기준")
-                    .append("\n- cover: 첫 슬라이드(표지/전체 도입부). 반드시 1개, 첫 번째 슬라이드에만 사용.")
-                    .append("\n- keyword_list: 개요·요약 슬라이드. 핵심 메시지(headline) + 세부 항목 3~5개 나열. keywords에 태그(2~5개), content에 항목 설명.")
-                    .append("\n- process_cards: 2~4개 요소가 단계/전환/비교 관계일 때. (예: 현황→문제→목표, AS-IS→TO-BE). keywords에 카드 제목(2~4개), content에 각 카드의 설명 항목을 순서대로 기재.")
+                    .append("\n- cover: 첫 슬라이드(표지). 반드시 1개, 첫 번째 슬라이드에만 사용.")
+                    .append("\n- toc: 목차 슬라이드. 반드시 1개, cover 바로 다음에만 사용. keywords[]에 섹션명, content[]에 섹션 설명 (1:1 대응).")
+                    .append("\n- section_divider: 섹션 간지. 각 섹션 시작 전 1장. title=섹션번호('01'~), subtitle=섹션제목, headline=핵심메시지.")
+                    .append("\n- keyword_list: 개요·요약 슬라이드. keywords에 태그(2~5개), content에 항목 설명.")
+                    .append("\n- process_cards: 2~4개 요소가 단계/전환/비교 관계일 때. keywords에 카드 제목(2~4개), content에 각 카드 설명 순서대로.")
                     .append("\n- grid_cards: 전략·역량·체크리스트 등 병렬 나열 항목(4~6개). keywords에 카드 소제목, content에 카드별 설명 한 줄씩(1:1 대응).")
-                    .append("\n- infographic: 조직도·시스템 아키텍처·순환 프로세스·다층 계층 구조처럼 단순 카드/리스트로 표현하기 어려운 구조에 사용. 제안서에서 수행 조직 슬라이드, 일정 계획 슬라이드 등에 적극 활용. keywords[]는 다이어그램 주요 구성요소, content[]는 각 요소의 설명 항목.");
+                    .append("\n- infographic: 조직도·시스템 아키텍처·순환 프로세스·다층 계층 구조. AI 이미지로 생성됨. keywords[]는 다이어그램 주요 구성요소, content[]는 각 요소 설명. notes[]에 이미지 생성 힌트(어떤 다이어그램인지 영문으로) 작성.");
 
             // ⑥ LLM 호출
             String aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId, agentId);

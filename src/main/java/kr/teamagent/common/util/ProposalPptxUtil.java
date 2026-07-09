@@ -19,11 +19,13 @@ import java.util.List;
  *
  * <p>지원 layoutType:
  * <ul>
- *   <li>cover         — 표지/도입부 슬라이드</li>
- *   <li>keyword_list  — 개요·요약 (키워드 pill 태그 + 항목 리스트)</li>
- *   <li>process_cards — 단계/전환/비교 (가로 카드 2~4개 + 화살표)</li>
- *   <li>grid_cards    — 전략·역량·체크리스트 (2×N 그리드 카드)</li>
- *   <li>infographic   — 3구역 구조 (헤더존 코드 렌더링 + 본문존 인포그래픽 이미지 1장 + 선택적 푸터존)</li>
+ *   <li>cover            — 표지/도입부 슬라이드</li>
+ *   <li>toc              — 목차 (번호 배지 + 섹션명 + 설명)</li>
+ *   <li>section_divider  — 섹션 간지 (baseColor 풀블리드 + 대형 섹션번호 + 제목)</li>
+ *   <li>keyword_list     — 개요·요약 (키워드 pill 태그 + 항목 리스트)</li>
+ *   <li>process_cards    — 단계/전환/비교 (가로 카드 2~4개 + 화살표)</li>
+ *   <li>grid_cards       — 전략·역량·체크리스트 (2×N 그리드 카드)</li>
+ *   <li>infographic      — 3구역 구조 (헤더존 코드 렌더링 + 본문존 인포그래픽 이미지 1장 + 선택적 푸터존)</li>
  * </ul>
  *
  * <p>모든 색상은 slideDesign.bgColor / baseColor / accentColor 에서 파생한다 (하드코딩 없음).
@@ -140,6 +142,14 @@ public class ProposalPptxUtil {
                         case "cover":
                             addCoverSlide(pptx, wavePd, sTitle, kw, ct,
                                     subtitle, headline, cBg, cBase, cAccent, cIce);
+                            break;
+                        case "toc":
+                            addTocSlide(pptx, wavePd, sTitle, kw, ct,
+                                    cBg, cBase, cAccent, cIce);
+                            break;
+                        case "section_divider":
+                            addSectionDividerSlide(pptx, sTitle, subtitle, headline,
+                                    cBase, cAccent);
                             break;
                         case "process_cards":
                             addProcessCardsSlide(pptx, sTitle, subtitle, headline, kw, ct,
@@ -522,6 +532,96 @@ public class ProposalPptxUtil {
      *   <li>헤더존 높이는 INFOGRAPHIC_HEADER_H 상수로 고정 — 텍스트 길이와 무관.</li>
      * </ol>
      */
+    /**
+     * 목차 슬라이드 (toc).
+     * keywords[] = 섹션명, content[] = 각 섹션 한 줄 설명
+     */
+    private static void addTocSlide(XMLSlideShow pptx, XSLFPictureData wavePd,
+            String sTitle, List<String> kw, List<String> ct,
+            Color cBg, Color cBase, Color cAccent, Color cIce) {
+
+        XSLFSlide slide = pptx.createSlide();
+        addRect(slide, 0, 0, SLIDE_W, SLIDE_H, cBg);
+
+        // 우측 웨이브 장식
+        if (wavePd != null) {
+            addPd(slide, wavePd, SLIDE_W - 220, 0, 220, SLIDE_H);
+        }
+
+        // 좌측 accentColor 세로 강조선
+        addRect(slide, MARGIN - 12, 16, 4, SLIDE_H - 32, cAccent);
+
+        // 제목
+        String tocTitle = (sTitle == null || sTitle.isEmpty()) ? "목   차" : sTitle;
+        text(slide, tocTitle, MARGIN, 14, 320, 34, 22, true, false, cBase, null);
+
+        // 구분선
+        addRect(slide, MARGIN, 52, CONT_W - 220, 2, tint(cBase, 0.75f));
+
+        // 섹션 항목 목록
+        int count  = kw.size();
+        int startY = 62;
+        int availH = SLIDE_H - startY - 16;
+        int itemH  = (count > 0) ? Math.min(46, availH / count) : 46;
+
+        for (int i = 0; i < count; i++) {
+            int y = startY + i * itemH;
+
+            // 번호 배지 (원형 accentColor)
+            addOval(slide, MARGIN, y + 3, 22, 22, cAccent);
+            text(slide, String.format("%02d", i + 1),
+                    MARGIN + 1, y + 5, 22, 18, 9, true, false, WHITE, TextParagraph.TextAlign.CENTER);
+
+            // 섹션명
+            String kwText = (i < kw.size() && kw.get(i) != null) ? kw.get(i) : "";
+            text(slide, kwText, MARGIN + 30, y + 2, CONT_W - 260, 20, 13, true, false, cBase, null);
+
+            // 설명
+            String ctText = (i < ct.size() && ct.get(i) != null) ? ct.get(i) : "";
+            if (!ctText.isEmpty()) {
+                text(slide, ctText, MARGIN + 30, y + 22, CONT_W - 260, 16, 9.5, false, false, GRAY_TEXT, null);
+            }
+
+            // 항목 하단 구분선 (마지막 항목 제외)
+            if (i < count - 1) {
+                addRect(slide, MARGIN + 30, y + itemH - 2, CONT_W - 260, 1, tint(cBase, 0.88f));
+            }
+        }
+    }
+
+    /**
+     * 섹션 간지 슬라이드 (section_divider).
+     * title   = 섹션 번호 (예: "01")
+     * subtitle = 섹션 제목
+     * headline = 한 줄 설명
+     */
+    private static void addSectionDividerSlide(XMLSlideShow pptx,
+            String sTitle, String subtitle, String headline,
+            Color cBase, Color cAccent) {
+
+        XSLFSlide slide = pptx.createSlide();
+
+        // 풀블리드 배경 (baseColor)
+        addRect(slide, 0, 0, SLIDE_W, SLIDE_H, cBase);
+
+        // 우하단 대형 섹션 번호 (ghost — baseColor보다 약간 밝게)
+        Color cGhost = tint(cBase, 0.22f);
+        text(slide, nvl(sTitle, ""), SLIDE_W - 260, SLIDE_H - 180, 260, 180, 130, true, false, cGhost, null);
+
+        // accentColor 가로 강조선 (좌측 중앙 위)
+        int centerY = SLIDE_H / 2;
+        addRect(slide, MARGIN, centerY - 36, 64, 5, cAccent);
+
+        // 섹션 제목 (subtitle)
+        text(slide, nvl(subtitle, ""), MARGIN, centerY - 24, CONT_W - 80, 70, 34, true, false, WHITE, null);
+
+        // 한 줄 설명 (headline)
+        if (headline != null && !headline.isEmpty()) {
+            Color cWhiteSoft = tint(WHITE, 0.35f);
+            text(slide, headline, MARGIN, centerY + 52, CONT_W - 80, 28, 13, false, false, cWhiteSoft, null);
+        }
+    }
+
     private static void addInfographicSlide(XMLSlideShow pptx,
             String sTitle, String subtitle, String headline, String notes,
             String b64Image, Color cBg, Color cBase, Color cAccent) {
