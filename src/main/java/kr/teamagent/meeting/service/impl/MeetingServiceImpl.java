@@ -42,6 +42,7 @@ import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
+import kr.teamagent.common.apilog.service.impl.ApiCallLogServiceImpl;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
@@ -63,6 +64,16 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     private static final String MINUTES_TMPL_ID = "TM000005";
     private static final ExecutorService INFOGRAPHIC_EXECUTOR = Executors.newFixedThreadPool(3);
     private static final ExecutorService MEETING_EXECUTOR = Executors.newFixedThreadPool(5);
+
+    /** AI API 응답에서 토큰 수를 추출한다. Number·String 모두 처리하며 파싱 실패 시 0 반환. */
+    private static int parseTokenCount(Object tokenObj) {
+        if (tokenObj == null) return 0;
+        if (tokenObj instanceof Number) return ((Number) tokenObj).intValue();
+        try { return Integer.parseInt(String.valueOf(tokenObj).trim()); } catch (Exception e) { return 0; }
+    }
+
+    @Autowired
+    private ApiCallLogServiceImpl apiCallLogService;
 
     @Autowired
     private MeetingDAO meetingDAO;
@@ -329,17 +340,19 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> result = new HashMap<>();
         String pythonUrl = PropertyUtil.getProperty("Globals.chatbot.diarize.pythonUrl");
 
+        JSONObject requestJson = new JSONObject();
+        requestJson.put("meeting_id", meetingId);
+        String reqParamJson = requestJson.toJSONString();
+        long startMs = System.currentTimeMillis();
+
         try {
             OkHttpClient client = new OkHttpClient.Builder()
                 .readTimeout(1800, TimeUnit.SECONDS)   // 2시간 오디오 처리 여유
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .build();
 
-            JSONObject requestJson = new JSONObject();
-            requestJson.put("meeting_id", meetingId);
-
             RequestBody body = RequestBody.create(
-                requestJson.toJSONString(),
+                reqParamJson,
                 okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
@@ -349,9 +362,12 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
             logger.info("[DiarizeByMeetingId] AI 서버 호출 시작 - meetingId: {}", meetingId);
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
+                    String errMsg = "AI 서버 오류: " + response.code();
+                    apiCallLogService.insertSilently(null, null, pythonUrl, "-", "meeting_diarize", reqParamJson, 0, 0, respMs, "N", errMsg, null);
                     result.put("successYn", false);
-                    result.put("returnMsg", "AI 서버 오류: " + response.code());
+                    result.put("returnMsg", errMsg);
                     return result;
                 }
 
@@ -360,12 +376,15 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 JSONObject data = (JSONObject) parser.parse(raw);
 
                 if (!Boolean.TRUE.equals(data.get("successYn"))) {
-                    result.put("successYn", false);
                     Object msg = data.get("returnMsg");
-                    result.put("returnMsg", msg != null ? msg : "전사 실패");
+                    String errMsg = msg != null ? String.valueOf(msg) : "전사 실패";
+                    apiCallLogService.insertSilently(null, null, pythonUrl, "-", "meeting_diarize", reqParamJson, 0, 0, respMs, "N", errMsg, null);
+                    result.put("successYn", false);
+                    result.put("returnMsg", errMsg);
                     return result;
                 }
 
+                apiCallLogService.insertSilently(null, null, pythonUrl, "-", "meeting_diarize", reqParamJson, 0, 0, respMs, "Y", null, null);
                 result.put("successYn", true);
                 result.put("segments", data.get("segments"));
                 result.put("text", data.get("text"));
@@ -374,7 +393,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
         } catch (Exception e) {
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             logger.error("[DiarizeByMeetingId] AI 서버 호출 실패 - meetingId: {}", meetingId, e);
+            apiCallLogService.insertSilently(null, null, pythonUrl, "-", "meeting_diarize", reqParamJson, 0, 0, respMs, "N", e.getMessage(), null);
             result.put("successYn", false);
             result.put("returnMsg", "전사 실패: " + e.getMessage());
         }
@@ -444,8 +465,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             JSONObject requestJson = new JSONObject();
             requestJson.put("session", sessionConfig);
 
+            // API Key는 REQ_PARAM에 저장하지 않음 — 세션 설정 JSON만 기록
+            String reqParamJson = requestJson.toJSONString();
+
             RequestBody body = RequestBody.create(
-                requestJson.toJSONString(),
+                reqParamJson,
                 okhttp3.MediaType.get("application/json; charset=utf-8")
             );
 
@@ -457,7 +481,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .build();
 
             logger.info("[Realtime] 전사 세션 임시 토큰 발급 요청 (transcription_sessions) - key: {}", apiKeyFingerprint);
+            long startMs = System.currentTimeMillis();
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     String errorBody = "";
                     if (response.body() != null) {
@@ -470,6 +496,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     }
                     logger.warn("[Realtime] 토큰 발급 실패 - status: {}, key: {}, body: {}",
                         response.code(), apiKeyFingerprint, errorBody);
+                    apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", reqParamJson, 0, 0, respMs, "N",
+                            "HTTP " + response.code() + ": " + errorBody, null);
                     result.put("successYn", false);
                     result.put("returnMsg", "토큰 발급 실패 (HTTP " + response.code() + ")");
                     return result;
@@ -485,16 +513,19 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
                     if (token != null && !token.isEmpty()) {
                         logger.info("[Realtime] 임시 토큰 발급 완료");
+                        apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", reqParamJson, 0, 0, respMs, "Y", null, null);
                         result.put("successYn", true);
                         result.put("token", token);
                         result.put("expiresAt", expiresAt);
                         return result;
                     }
                     logger.warn("[Realtime] 응답에 token(value) 없음: {}", raw);
+                    apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", reqParamJson, 0, 0, respMs, "N", "응답에 token(value) 없음", null);
                 }
             }
         } catch (Exception e) {
             logger.error("[Realtime] 토큰 발급 오류", e);
+            apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", null, 0, 0, 0, "N", e.getMessage(), null);
         }
 
         result.put("successYn", false);
@@ -861,15 +892,17 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         params.put("query", prompt);
         params.put("room_id", "");
 
+        Gson llmGson = new Gson();
+        String reqParamJson = llmGson.toJson(params);
+        long startMs = System.currentTimeMillis();
+
         try {
             OkHttpClient client = new OkHttpClient.Builder()
                 .readTimeout(60, TimeUnit.SECONDS)
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .build();
 
-            Gson gson = new Gson();
-            String jsonBody = gson.toJson(params);
-            RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+            RequestBody body = RequestBody.create(reqParamJson, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
                 .url(apiUrl)
@@ -879,14 +912,19 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .build();
 
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("LLM 응답 오류: {}", response.code());
+                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_llm", reqParamJson, 0, 0, respMs, "N", "HTTP " + response.code(), null);
                     return null;
                 }
 
                 try (okhttp3.ResponseBody responseBody = response.body()) {
                     String raw = responseBody.string();
-                    if (raw == null || raw.trim().isEmpty()) return null;
+                    if (raw == null || raw.trim().isEmpty()) {
+                        apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_llm", reqParamJson, 0, 0, respMs, "N", "빈 응답", null);
+                        return null;
+                    }
 
                     String jsonStr = raw.trim();
                     if (jsonStr.startsWith("data: ")) {
@@ -898,20 +936,28 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     JSONParser parser = new JSONParser();
                     JSONObject data = (JSONObject) parser.parse(jsonStr);
 
+                    int llmInTokens = parseTokenCount(data.get("input_token"));
+                    int llmOutTokens = parseTokenCount(data.get("output_token"));
+
                     Object errCode = data.get("errorCode");
                     if (errCode != null && !errCode.toString().isEmpty() && !"None".equalsIgnoreCase(errCode.toString())) {
                         logger.warn("LLM API 오류: {}", errCode);
+                        apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_llm", reqParamJson, 0, 0, respMs, "N", "LLM 오류: " + errCode, null);
                         return null;
                     }
 
                     String answer = (String) data.get("answer");
                     if (answer != null && !answer.trim().isEmpty()) {
+                        apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_llm", reqParamJson, llmInTokens, llmOutTokens, respMs, "Y", null, null);
                         return answer.trim();
                     }
+                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_llm", reqParamJson, 0, 0, respMs, "N", "answer 없음", null);
                 }
             }
         } catch (Exception e) {
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             logger.error("LLM 호출 실패", e);
+            apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_llm", reqParamJson, 0, 0, respMs, "N", e.getMessage(), null);
         }
         return null;
     }
@@ -1284,15 +1330,17 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         params.put("quality", "medium");
         params.put("room_id", "");
 
+        Gson imgGson = new Gson();
+        String reqParamJson = imgGson.toJson(params);
+        long startMs = System.currentTimeMillis();
+
         try {
             OkHttpClient client = new OkHttpClient.Builder()
                 .readTimeout(120, TimeUnit.SECONDS)
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .build();
 
-            Gson gson = new Gson();
-            String jsonBody = gson.toJson(params);
-            RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
+            RequestBody body = RequestBody.create(reqParamJson, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
                 .url(apiUrl)
@@ -1302,14 +1350,17 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .build();
 
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("인포그래픽 이미지 API 응답 오류: {}", response.code());
+                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "HTTP " + response.code(), null);
                     return null;
                 }
 
                 try (okhttp3.ResponseBody responseBody = response.body()) {
                     String raw = responseBody.string();
                     if (raw == null || raw.trim().isEmpty()) {
+                        apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "빈 응답", null);
                         return null;
                     }
 
@@ -1323,24 +1374,32 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     JSONParser parser = new JSONParser();
                     JSONObject data = (JSONObject) parser.parse(jsonStr);
 
+                    int imgInTokens = parseTokenCount(data.get("input_token"));
+                    int imgOutTokens = parseTokenCount(data.get("output_token"));
+
                     Object errCode = data.get("errorCode");
                     if (errCode != null) {
                         String code = String.valueOf(errCode).trim();
                         if (!code.isEmpty() && !"None".equalsIgnoreCase(code)) {
                             logger.warn("인포그래픽 이미지 API 오류: {}", code);
+                            apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "API 오류: " + code, null);
                             return null;
                         }
                     }
 
                     Object imageObj = data.get("image");
                     if (imageObj == null) {
+                        apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "이미지 필드 없음", null);
                         return null;
                     }
+                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, imgInTokens, imgOutTokens, respMs, "Y", null, null);
                     return stripDataUrlBase64Prefix(String.valueOf(imageObj));
                 }
             }
         } catch (Exception e) {
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             logger.warn("인포그래픽 이미지 API 호출 실패: {}", e.getMessage());
+            apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", e.getMessage(), null);
         }
         return null;
     }

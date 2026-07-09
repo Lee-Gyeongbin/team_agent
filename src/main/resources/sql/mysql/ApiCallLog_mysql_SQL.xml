@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ai.apiCallLog">
+
+    <insert id="insertApiCallLog" parameterType="apiCallLogVO" useGeneratedKeys="true" keyProperty="apiLogId">
+        /* API 호출 로그 등록 ai.apiCallLog.insertApiCallLog */
+        INSERT INTO TB_API_CALL_LOG
+        (
+            AGENT_ID
+            , CALL_TYPE
+            , REF_LOG_ID
+            , API_URL
+            , MODEL_ID
+            , ENV_CD
+            , HOST_NM
+            , IN_TOKENS
+            , OUT_TOKENS
+            , RESP_TIME_MS
+            , SUCCESS_YN
+            , ERROR_MSG
+            , REQ_PARAM
+            , CREATE_USER_ID
+        )
+        VALUES
+        (
+            #{agentId}
+            , #{callType}
+            , #{refLogId}
+            , #{apiUrl}
+            , #{modelId}
+            , #{envCd}
+            , #{hostNm}
+            , #{inTokens}
+            , #{outTokens}
+            , #{respTimeMs}
+            , #{successYn}
+            , #{errorMsg}
+            , #{reqParam, jdbcType=VARCHAR}
+            , #{createUserId}
+        )
+    </insert>
+
+</mapper>

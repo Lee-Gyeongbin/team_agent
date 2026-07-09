@@ -77,7 +77,7 @@ public class TmplServiceImpl extends EgovAbstractServiceImpl {
                     + "다음 LLM 프롬프트를 200자 이내로 한 줄 요약해줘. 요약만 출력해.\n"
                     + "LLM 프롬프트:\n"
                     + truncate(llmPrompt.trim(), 4000);
-            String smry = chatbotService.callAiSummary(prompt, "tmplPromptSmry");
+            String smry = chatbotService.callAiSummary(prompt, "tmplPromptSmry", null);
             if (smry != null && !smry.trim().isEmpty()) {
                 formVO.setLlmPromptSmry(truncate(smry.trim(), 500));
             }
