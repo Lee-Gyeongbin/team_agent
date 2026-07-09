@@ -340,7 +340,7 @@ public class ChatbotController extends BaseController {
      * 데이터분석(SVC_TY='S') 질의 품질 진단 — LLM이 평가기준으로 점수·상태·보완을 산정한다.
      * 검증 통과(status=READY, sqlGenerationAllowed=true) 시에만 프론트에서 Text-to-SQL 전송 허용.
      * @param searchVO question, datamartId
-     * @return QuestionDiagnosis (status, readinessScore, clarificationQuestions, ...)
+     * @return QuestionDiagnosis (status, readinessScore, interpretedIntent, questionPreview, clarificationQuestions, ...)
      */
     @RequestMapping(value = "/ai/chatbot/diagnoseQuestion.do", method = RequestMethod.POST)
     @ResponseBody
