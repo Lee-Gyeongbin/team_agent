@@ -31,6 +31,13 @@ import com.google.gson.reflect.TypeToken;
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.service.ChatbotVO.RssArticleRow;
 import kr.teamagent.chat.socket.ChatbotWebSocketHandler;
+import kr.teamagent.chat.service.impl.agent.NewsCurationAgentService;
+import kr.teamagent.chat.service.impl.agent.ProposalAgentService;
+import kr.teamagent.chat.service.impl.agent.ResearcherAgentService;
+import kr.teamagent.chat.service.impl.agent.RiskDiagnosisAgentService;
+import kr.teamagent.chat.service.impl.agent.SurveyAgentService;
+import kr.teamagent.chat.service.impl.agent.TranslationAgentService;
+import kr.teamagent.common.apilog.service.impl.ApiCallLogServiceImpl;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.common.util.NewsRssUtil;
@@ -60,17 +67,19 @@ import okhttp3.RequestBody;
 public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
-    private static final String MEME_AGENT_ID = "AG000011";
+    private static final String AUTO_RECOMMEND_SUB_TY = "AUTO_RECOMMEND";
     private static final String RECOMMEND_SUB_TY = "RECOMMEND";
     private static final String CURATION_SUB_TY = "CURATION";
     private static final String TRANSLATE_SUB_TY = "TRANSLATE";
     private static final String RESEARCHER_SUB_TY = "RESEARCHER";
     private static final String RISK_SUB_TY = "RISK";
-    private static final String PLANNER_SUB_TY = "PLANNER";
-    /** 기획서·PT 초안 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
-    private static final String PLANNER_DEFAULT_TMPL_ID = "TM000007";
+    private static final String PROPOSAL_SUB_TY = "PROPOSAL";
     /** 리스크진단 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
     private static final String RISK_DEFAULT_TMPL_ID = "TM000008";
+    /** 제안서 초안 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
+    private static final String PROPOSAL_DEFAULT_TMPL_ID = "TM000009";
+    /** 제안서 생성(9000) 프롬프트에 주입하는 요구사항 텍스트 최대 길이(문자). */
+    private static final int PROPOSAL_RFP_TEXT_MAX_CHARS = 24000;
     /** 리스크진단 생성(9000) 프롬프트에 주입하는 RFP 추출 텍스트 최대 길이(문자).
      *  2단계 생성은 대용량 컨텍스트(임베딩 아님)라 RFP 전체를 충분히 담아 분석 충실도를 높인다. */
     private static final int RISK_RFP_TEXT_MAX_CHARS = 24000;
@@ -121,14 +130,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return recommendQuestionExecutor;
     }
 
-    /** 대용량 RFP 청크 병렬 요약용 스레드 풀 (요약은 청크당 작은 입력이라 빠르게 동시 처리) */
-    private static final java.util.concurrent.ExecutorService riskSummarizeExecutor =
-            java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
-                Thread thread = new Thread(r, "risk-summarize-worker");
-                thread.setDaemon(true);
-                return thread;
-            });
-
     /**
      * 세션의 진행 중인 AI API 스트리밍 호출을 취소
      */
@@ -139,6 +140,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.info("스트리밍 응답 중단 요청 처리: sessionId={}", sessionId);
         }
     }
+
+    @Autowired
+    ApiCallLogServiceImpl apiCallLogService;
 
     @Autowired
     ChatbotDAO chatbotDAO;
@@ -166,6 +170,27 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     @Autowired
     TmplHtmlRenderService tmplHtmlRenderService;
+
+    @Autowired
+    ChatbotAgentSupport agentSupport;
+
+    @Autowired
+    NewsCurationAgentService newsCurationAgentService;
+
+    @Autowired
+    TranslationAgentService translationAgentService;
+
+    @Autowired
+    ResearcherAgentService researcherAgentService;
+
+    @Autowired
+    RiskDiagnosisAgentService riskDiagnosisAgentService;
+
+    @Autowired
+    ProposalAgentService proposalAgentService;
+
+    @Autowired
+    SurveyAgentService surveyAgentService;
 
     /**
      * 채팅 에이전트 목록 조회
@@ -197,7 +222,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 if (subCfg == null || CommonUtil.isEmpty(subCfg.getAgentId())) {
                     continue;
                 }
-                parseAgentSubAdditionalConfig(subCfg);
+                agentSupport.parseAgentSubAdditionalConfig(subCfg);
                 subCfgByAgentId.put(subCfg.getAgentId(), subCfg);
             }
         }
@@ -209,20 +234,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * Agent 서브 설정 파싱
+     * Agent 서브 설정 파싱 — ChatbotAgentSupport로 위임
      * @param subCfg
      */
     private void parseAgentSubAdditionalConfig(ChatbotVO.AgtSubCfgVO subCfg) {
-        if (subCfg == null) {
-            return;
-        }
-        String json = subCfg.getAdditionalConfig();
-        if (CommonUtil.isEmpty(json)) {
-            subCfg.setAdditionalConfigMap(null);
-            return;
-        }
-        Type type = new TypeToken<Map<String, Object>>() {}.getType();
-        subCfg.setAdditionalConfigMap(NEWS_CURATE_PROMPT_GSON.fromJson(json, type));
+        agentSupport.parseAgentSubAdditionalConfig(subCfg);
     }
     
     /**
@@ -291,44 +307,58 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     public List<ChatbotVO> selectTableDataList(ChatbotVO searchVO) throws Exception {
         return chatbotDAO.selectTableDataList(searchVO);
     }
+
+    /**
+     * AI API 스트리밍 응답 처리(WebSocket으로 들어온 채팅 요청을 에이전트 종류에 따라 분기하는 라우터)
+     * @param session
+     * @param query
+     * @param threadId
+     * @param userId
+     * @param svcTy
+     * @param modelId
+     * @param refId
+     * @param agentId
+     * @param attachmentFileIds
+     * @param callback
+     * @throws Exception
+     */
     public void streamAiResponseWebSocket(WebSocketSession session, String query, String threadId, String userId, String svcTy, String modelId, String refId, String agentId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
 
-        ChatbotVO.AgtSubCfgVO curationSubCfg = getAgentSubCfg(agentId);
-        if (curationSubCfg != null && CURATION_SUB_TY.equals(curationSubCfg.getSubTy()) && "Y".equals(curationSubCfg.getUseYn())) {
-            deliverNewsRecommendationViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId,
-                    attachmentFileIds, curationSubCfg.getAdditionalConfigMap(), callback);
+        ChatbotVO.AgtSubCfgVO agentSubCfg = agentSupport.getAgentSubCfg(agentId);
+        if (agentSupport.isActiveSubCfg(agentSubCfg, ChatbotAgentSupport.CURATION_SUB_TY)) {
+            newsCurationAgentService.deliverNewsRecommendationViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId,
+                    attachmentFileIds, agentSubCfg.getAdditionalConfigMap(), callback);
             return;
         }
 
-        ChatbotVO.AgtSubCfgVO translateSubCfg = getAgentSubCfg(agentId);
-        if (translateSubCfg != null && TRANSLATE_SUB_TY.equals(translateSubCfg.getSubTy())
-                && "Y".equals(translateSubCfg.getUseYn())) {
+        if (agentSupport.isActiveSubCfg(agentSubCfg, ChatbotAgentSupport.TRANSLATE_SUB_TY)) {
             // TB_CHAT_LOG.SVC_TY는 번역 에이전트(SVC_TY='W') 기준으로 저장한다.
             svcTy = "W";
             if (hasNonNullAttachmentId(attachmentFileIds)) {
-                deliverTranslationFileViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId,
+                translationAgentService.deliverTranslationFileViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId,
                         attachmentFileIds, callback);
                 return;
             }
         }
 
         // RESEARCHER 에이전트: 웹검색 + RAG 통합 리서치 리포트
-        if (isResearcherAgent(agentId)) {
-            deliverResearchReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
+        if (agentSupport.isResearcherAgent(agentId)) {
+            researcherAgentService.deliverResearchReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
             return;
         }
 
         // RISK 에이전트: RFP(PDF) 업로드 → 섹션 분리 → 섹션별 병렬 LLM 진단 → 리포트
-        if (isRiskDiagnosisAgent(agentId)) {
+        if (agentSupport.isRiskDiagnosisAgent(agentId)) {
             // TB_CHAT_LOG.SVC_TY는 리스크진단 에이전트(SVC_TY='D') 기준으로 저장한다.
             svcTy = "D";
-            deliverRiskReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
+            riskDiagnosisAgentService.deliverRiskReportViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
             return;
         }
 
-        // PLANNER 에이전트: 기획서·PT 초안 생성 (GPT 동기 호출 + 선택적 웹검색 + 템플릿 렌더링)
-        if (isPlannerAgent(agentId)) {
-            deliverPlannerDraftViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, callback);
+        // PROPOSAL 에이전트: 요구사항(RFP) 업로드 → 자사RAG + 경쟁사RAG/웹서치 → 제안 슬라이드 JSON 생성
+        if (agentSupport.isProposalAgent(agentId)) {
+            svcTy = "D";
+            proposalAgentService.deliverProposalDraftViaWebSocket(query, threadId, userId, svcTy, modelId, refId, agentId, attachmentFileIds, callback);
             return;
         }
 
@@ -367,68 +397,65 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 스트리밍 호출용 URL. 점심·밈 에이전트는 전용 URL.
+     * 스트리밍 호출용 URL 결정.
+     * selectApiUrlEndpoint DB 조회는 1회만 수행하며, 에이전트 타입별 우선순위로 URL을 반환한다.
      */
     private String resolveStreamingApiUrl(String svcTy, String agentId, List<Long> attachmentFileIds) {
-        // RECOMMEND 에이전트: 전용 URL이 설정된 경우 사용, 없으면 기본 chat API 사용
-        if (isRecommendAgent(agentId)) {
-            String recommendApiUrl = PropertyUtil.getProperty("Globals.chatbot.recommend.apiUrl");
-            if (CommonUtil.isNotEmpty(recommendApiUrl)) {
-                logger.info("resolveStreamingApiUrl: recommend agent -> recommend_query URL");
-                return recommendApiUrl;
-            }
-            logger.info("resolveStreamingApiUrl: recommend agent -> default chat URL");
-            return getApiUrl(svcTy);
-        }
+        ChatbotVO.AgtSubCfgVO subCfg = agentSupport.getAgentSubCfg(agentId);
 
-        // TRANSLATE 에이전트: AGENT_ID 기반 agentVO 조회(API_URL_CD 미설정 시 깨짐)를 우회하고 기본 chat API 사용
-        if (isTranslateAgent(agentId)) {
-            logger.info("resolveStreamingApiUrl: translate agent -> default chat URL");
-            return getApiUrl(svcTy);
-        }
-
-        if (isKakaoAddressEnrichmentAgent(agentId)) {
-            String lunchApiUrl = PropertyUtil.getProperty("Globals.chatbot.lunch.apiUrl");
-            if (CommonUtil.isNotEmpty(lunchApiUrl)) {
-                logger.info("resolveStreamingApiUrl: kakao address-enrichment agent -> lunch_query URL");
-                return lunchApiUrl;
-            }
-        }
-
-        if ("C".equals(svcTy) && MEME_AGENT_ID.equals(agentId)) {
+        // 1. AUTO_RECOMMEND 검색전용 → query_search_only URL
+        if ("C".equals(svcTy) && agentSupport.isAutoRecommendSearchOnlyAgent(subCfg)) {
             String searchOnlyApiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIpSearchOnly");
             if (CommonUtil.isNotEmpty(searchOnlyApiUrl)) {
-                logger.info("resolveStreamingApiUrl: meme agent -> query_search_only URL");
+                logger.info("resolveStreamingApiUrl: auto-recommend agent(searchOnly) -> query_search_only URL");
                 return searchOnlyApiUrl;
             }
         }
 
+        // 2. TRANSLATE → 기본 chat URL (agentVO 조회 우회)
+        if (agentSupport.isActiveSubCfg(subCfg, ChatbotAgentSupport.TRANSLATE_SUB_TY)) {
+            logger.info("resolveStreamingApiUrl: translate agent -> default chat URL");
+            return getApiUrl(svcTy);
+        }
+
+        // 3. 첨부파일 있는 일반채팅 → file_query URL
         if ("C".equals(svcTy) && hasNonNullAttachmentId(attachmentFileIds)) {
-            // 첨부파일이 있는 일반채팅이라면
             String fileUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiFileUrl");
             if (CommonUtil.isNotEmpty(fileUrl)) {
                 logger.info("resolveStreamingApiUrl: svcTy=C with attachments → file_query URL");
                 return fileUrl;
             }
         }
-        // 에이전트 ID가 있으면 에이전트 API URL 조회
-        if(CommonUtil.isNotEmpty(agentId)){
-            ChatbotVO searchVO = new ChatbotVO();
-            searchVO.setAgentId(agentId);
+
+        // 4. DB agentVO URL 조회 — RECOMMEND 포함 모든 에이전트 공통 (1회 호출)
+        //    TB_AGT.API_URL_CD 기반: 런치픽(006 → /lunch_query), 위켄더(003 → /query) 등
+        if (CommonUtil.isNotEmpty(agentId)) {
             try {
+                ChatbotVO searchVO = new ChatbotVO();
+                searchVO.setAgentId(agentId);
                 ChatbotVO agentVO = chatbotDAO.selectApiUrlEndpoint(searchVO);
-                if(agentVO != null){
-                    // 에이전트 API URL 세팅
-                    String apiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIp") + agentVO.getApiPort() + agentVO.getApiEndpoint();
+                if (agentVO != null && CommonUtil.isNotEmpty(agentVO.getApiEndpoint())) {
+                    String apiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIp")
+                            + agentVO.getApiPort() + agentVO.getApiEndpoint();
+                    logger.info("resolveStreamingApiUrl: agent({}) DB URL -> {}", agentId, apiUrl);
                     return apiUrl;
-                } else {
-                    return getApiUrl(svcTy);
                 }
             } catch (Exception e) {
                 logger.error("API URL 조회 중 오류 발생: {}", e.getMessage(), e);
                 return getApiUrl(svcTy);
             }
         }
+
+        // 5. RECOMMEND fallback → recommend_query URL 또는 기본 chat URL
+        if (agentSupport.isPromptReadyRecommendAgent(subCfg)) {
+            String recommendApiUrl = PropertyUtil.getProperty("Globals.chatbot.recommend.apiUrl");
+            if (CommonUtil.isNotEmpty(recommendApiUrl)) {
+                logger.info("resolveStreamingApiUrl: recommend-style agent -> recommend_query URL");
+                return recommendApiUrl;
+            }
+            logger.info("resolveStreamingApiUrl: recommend-style agent -> default chat URL");
+        }
+
         return getApiUrl(svcTy);
     }
 
@@ -451,7 +478,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * @throws Exception
      */
     public ChatbotVO createChatRoom(ChatbotVO chatbotVO) throws Exception {
-        chatbotVO.setRoomTitle(generateSummaryTitle(chatbotVO.getContent(),null ));
+        chatbotVO.setRoomTitle(generateSummaryTitle(chatbotVO.getContent(), null, null));
         int result = chatbotDAO.insertChatRoom(chatbotVO);
         return result > 0 ? chatbotVO : null;
     }
@@ -616,6 +643,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
              * 네트워크 지연이나 장시간 스트리밍으로 인해 블로킹되지 않도록 한다.
              */
             String sessionId = session.getId();
+            final long callStartTime = System.currentTimeMillis();
             okhttp3.Call call = client.newCall(request);
             activeStreamCalls.put(sessionId, call);
             call.enqueue(new okhttp3.Callback() {
@@ -629,12 +657,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 @Override
                 public void onFailure(okhttp3.Call call, IOException e) {
                     activeStreamCalls.remove(sessionId, call);
+                    int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
                     if (call.isCanceled()) {
                         logger.info("AI API 호출이 사용자 요청으로 중단되었습니다: threadId={}", threadId);
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", "사용자 중단", userId);
                         callback.onComplete("사용자 요청에 의해 응답 생성이 중단되었습니다.", "", "", new ArrayList<>(), threadId, null, "", "", "");
                         return;
                     }
                     logger.error("AI API 호출 실패: {}", e.getMessage(), e);
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", e.getMessage(), userId);
                     callback.onError("API 호출 실패: " + e.getMessage());
                 }
 
@@ -649,13 +680,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 @Override
                 public void onResponse(okhttp3.Call call, okhttp3.Response response) throws IOException {
                     if (!response.isSuccessful()) {
+                        int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
                         logger.error("AI API 응답 오류: {}", response.code());
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", "HTTP " + response.code(), userId);
                         callback.onError("API 응답 오류: " + response.code());
                         return;
                     }
-                    
+
                     try (okhttp3.ResponseBody responseBody = response.body()) {
                         if (responseBody == null) {
+                            int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
+                            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", jsonBody, 0, 0, respMs, "N", "응답 본문 없음", userId);
                             callback.onError("응답 본문이 없습니다.");
                             return;
                         }
@@ -667,7 +702,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                          * - 스트리밍 종료 시 callback.onComplete()
                          를 호출한다.
                          */
-                        processStreamingResponseWebSocket(responseBody, call, sessionId, query, svcTy, modelId, refId, userId, agentId, threadId, attachmentFileIds, callback);
+                        processStreamingResponseWebSocket(responseBody, call, sessionId, query, svcTy, modelId, refId, userId, agentId, threadId, attachmentFileIds, jsonBody, callStartTime, apiUrl, callback);
                     } catch (Exception e) {
                         logger.error("스트리밍 응답 처리 중 오류: {}", e.getMessage(), e);
                         callback.onError("스트리밍 처리 오류: " + e.getMessage());
@@ -681,84 +716,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
     }
 
-    /**
-     * 에이전트의 TB_AGT_SUB_CFG 조회 + ADDITIONAL_CONFIG 파싱 — SUB_TY 기반 분기 판별 공용 헬퍼
-     */
-    private ChatbotVO.AgtSubCfgVO getAgentSubCfg(String agentId) {
-        if (CommonUtil.isEmpty(agentId)) return null;
-        try {
-            ChatbotVO searchVO = new ChatbotVO();
-            searchVO.setAgentIdList(java.util.Collections.singletonList(agentId));
-            List<ChatbotVO.AgtSubCfgVO> list = chatbotDAO.selectAgentSubCfgListByAgentIds(searchVO);
-            if (list == null || list.isEmpty()) return null;
-            ChatbotVO.AgtSubCfgVO subCfg = list.get(0);
-            parseAgentSubAdditionalConfig(subCfg);
-            return subCfg;
-        } catch (Exception e) {
-            logger.warn("getAgentSubCfg 조회 중 오류 (agentId={}): {}", agentId, e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * SUB_TY=RECOMMEND 에이전트 여부 판별.
-     * RECOMMEND 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
-     */
-    private boolean isRecommendAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
-    }
-
-    /**
-     * RECOMMEND 에이전트 중 ADDITIONAL_CONFIG.features.addressEnrichment == "kakao" 인지 판별.
-     * 식당명+위치 기반 카카오 장소 URL 보강 및 전용 스트리밍 처리(answer_linked) 대상 여부에 사용.
-     */
-    private boolean isKakaoAddressEnrichmentAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        if (subCfg == null || !RECOMMEND_SUB_TY.equals(subCfg.getSubTy()) || !"Y".equals(subCfg.getUseYn())) {
-            return false;
-        }
-        Object featuresObj = subCfg.getAdditionalConfigMap() != null ? subCfg.getAdditionalConfigMap().get("features") : null;
-        if (!(featuresObj instanceof Map)) return false;
-        return "kakao".equals(((Map<?, ?>) featuresObj).get("addressEnrichment"));
-    }
-
-    /**
-     * SUB_TY=TRANSLATE 에이전트 여부 판별.
-     * TRANSLATE 에이전트는 Frontend에서 완성형 프롬프트를 전달하므로 백엔드 래핑 불필요.
-     */
-    private boolean isTranslateAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && TRANSLATE_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
-    }
-
-    /**
-     * SUB_TY=RESEARCHER 에이전트 여부 판별.
-     */
-    private boolean isResearcherAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && RESEARCHER_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
-    }
-
-    /**
-     * SUB_TY=RISK 에이전트(프로젝트 리스크진단) 여부 판별.
-     */
-    private boolean isRiskDiagnosisAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && RISK_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
-    }
-
-    /**
-     * SUB_TY=PLANNER 에이전트(기획서·PT 초안 생성) 여부 판별.
-     */
-    private boolean isPlannerAgent(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-        return subCfg != null && PLANNER_SUB_TY.equals(subCfg.getSubTy()) && "Y".equals(subCfg.getUseYn());
-    }
-
     private String buildRequestQueryByAgent(String query, String agentId) {
-        // RECOMMEND 에이전트: Frontend에서 완성형 프롬프트 전달 — 래핑 없이 그대로 반환
-        if (isRecommendAgent(agentId)) {
+        // RECOMMEND·AUTO_RECOMMEND: Frontend에서 완성형 프롬프트 전달 — 래핑 없이 그대로 반환
+        if (agentSupport.isPromptReadyRecommendAgent(agentId)) {
             return query;
         }
 
@@ -826,7 +786,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * (예: "aiGenerate", "kakaoImage") — 미설정 시 빈 문자열.
      */
     private String getRecommendImageEnrichmentMode(String agentId) {
-        ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
+        ChatbotVO.AgtSubCfgVO subCfg = agentSupport.getAgentSubCfg(agentId);
         if (subCfg == null || subCfg.getAdditionalConfigMap() == null) {
             return "";
         }
@@ -845,7 +805,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      */
     public String getLunchMenuImageData(String menu) {
         String prompt = "음식 사진 생성. 설명 없이 음식만 사실적으로 표현. 음식명: " + menu;
-        String imageResult = callAiImageApi(prompt);
+        String imageResult = callAiImageApi(prompt, null);
         if (CommonUtil.isEmpty(imageResult)) {
             return "";
         }
@@ -1036,13 +996,14 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * WebSocket 방식으로 스트리밍 응답을 처리하여 클라이언트로 전달
      * 실시간 스트리밍을 위해 작은 버퍼 크기 사용
      */
-    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, okhttp3.Call call, String sessionId, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
+    private void processStreamingResponseWebSocket(okhttp3.ResponseBody responseBody, okhttp3.Call call, String sessionId, String query, String svcTy, String modelId, String refId, String userId, String agentId, String threadId, List<Long> attachmentFileIds, String reqParamJson, long callStartTime, String apiUrl, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws IOException {
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(responseBody.byteStream(), "UTF-8"), 1);
-        boolean isKakaoAddressEnrichmentAgent = isKakaoAddressEnrichmentAgent(agentId);
-        if (!isKakaoAddressEnrichmentAgent && isRecommendAgent(agentId)) {
-            logger.info("processStreamingResponse: RECOMMEND agent (agentId={}) — 일반 스트리밍 처리", agentId);
+        ChatbotVO.AgtSubCfgVO subCfg = agentSupport.getAgentSubCfg(agentId);
+        boolean isKakaoAddressEnrichmentAgent = agentSupport.isKakaoAddressEnrichmentAgent(subCfg);
+        if (!isKakaoAddressEnrichmentAgent && agentSupport.isPromptReadyRecommendAgent(subCfg)) {
+            logger.info("processStreamingResponse: recommend-style agent (agentId={}) — 일반 스트리밍 처리", agentId);
         }
 
         String line;
@@ -1268,9 +1229,20 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 logger.warn("첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
                             }
                         }
+
+                        // API 호출 로그 저장 (성공)
+                        Long refLogIdLong = CommonUtil.isNotEmpty(savedLogId) ? Long.parseLong(savedLogId) : null;
+                        int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
+                        apiCallLogService.insertSilently(agentId, refLogIdLong, apiUrl, modelId, "CHAT", reqParamJson,
+                                inputTokens, outputTokens, respMs, "Y", null, userId);
+
                     } catch (Exception e) {
                         logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
                     }
+                } else if (hasStreamError) {
+                    // 스트리밍 오류 — 채팅 로그 미저장이므로 REF_LOG_ID 없이 기록
+                    int respMs = (int) Math.min(System.currentTimeMillis() - callStartTime, Integer.MAX_VALUE);
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "CHAT", reqParamJson, inputTokens, outputTokens, respMs, "N", "스트리밍 오류", userId);
                 }
 
                 if (!isCompleteCalled && (isCancelled || (!hasStreamError && CommonUtil.isNotEmpty(finalAnswerContent)))) {
@@ -1305,18 +1277,18 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                         && !hasStreamError
                         && ("C".equals(svcTy) || "S".equals(svcTy) || "M".equals(svcTy))
                         && (!"C".equals(svcTy) || CommonUtil.isEmpty(agentId))
-                        && !MEME_AGENT_ID.equals(agentId)
-                        && !isRecommendAgent(agentId)
+                        && !agentSupport.isPromptReadyRecommendAgent(subCfg)
                         && CommonUtil.isNotEmpty(savedLogId)
                         && CommonUtil.isNotEmpty(finalAnswerContent);
 
                 if (shouldSuggestNextQuestions) {
                     final String logIdForRecommend = savedLogId;
+                    final Long refLogIdForRecommend = CommonUtil.isNotEmpty(savedLogId) ? Long.parseLong(savedLogId) : null;
                     final String queryForRecommend = query;
                     final String answerForRecommend = finalAnswerContent;
                     getRecommendQuestionExecutor().execute(() -> {
                         try {
-                            List<String> nextQuestions = generateNextRecommendedQuestions(queryForRecommend, answerForRecommend);
+                            List<String> nextQuestions = generateNextRecommendedQuestions(queryForRecommend, answerForRecommend, refLogIdForRecommend);
                             if (!nextQuestions.isEmpty()) {
                                 callback.onRecommendQuestions(logIdForRecommend, nextQuestions);
                             }
@@ -1454,8 +1426,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * done 페이로드에서 TB_CHAT_REF 저장용 참조 목록 추출.
      * file_info 우선, 없으면 docFileId + page + relatedPages(또는 view_page) 1건.
+     * 패키지-private: 에이전트 서비스에서 호출 가능.
      */
-    private List<ChatRefItem> extractChatRefItems(JSONObject data) {
+    public List<ChatRefItem> extractChatRefItems(JSONObject data) {
         List<ChatRefItem> result = new ArrayList<>();
 
         if (isRootPageZero(data)) {
@@ -1508,8 +1481,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * TB_CHAT_LOG 저장 및 svcTy == M(리서처) 또는 D(리스크진단) 이면 TB_CHAT_REF(chatRefItems) 반복 저장.
      * webGroundingJson: answer_source 스트림 또는 done.data.items — JSON {@code {"items":[{url,title},...]}}.
+     * 패키지-private: 에이전트 서비스에서 호출 가능.
      */
-    private String doInsertAiLog(
+    public String doInsertAiLog(
             String responseThreadId,
             String agentId,
             String query,
@@ -1586,8 +1560,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /**
      * TB_CHAT_LOG 저장 (reportHtml 포함 오버로드).
      * RESEARCHER 에이전트 등 리포트 HTML을 함께 저장해야 하는 경우 사용한다.
+     * 패키지-private: 에이전트 서비스에서 호출 가능.
      */
-    private String doInsertAiLog(
+    public String doInsertAiLog(
             String responseThreadId, String agentId, String query, String answer,
             int inputTokens, int outputTokens, String svcTy, String modelId, String refId,
             String userId, String tableData, String sql, String ttsqParam, String ttsqPeriodParam,
@@ -1637,10 +1612,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /**
      * 챗봇 대화방 마지막 채팅 일시 업데이트
+     * 패키지-private: 에이전트 서비스에서 호출 가능.
      * @param responseThreadId
      * @throws Exception
      */
-    private void updateChatRoomLastChatDt(String responseThreadId) throws Exception {
+    public void updateChatRoomLastChatDt(String responseThreadId) throws Exception {
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setRoomId(Long.parseLong(responseThreadId));
         chatbotDAO.updateChatRoomLastChatDt(chatbotVO);
@@ -1732,8 +1708,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setSortOrd(1);
 
         chatbotVO.setSvcTy(chatLog.getSvcTy());
-        chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getQContent()) ? chatLog.getRoomTitle() : generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent()));
-        chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent()));
+        Long knowledgeRefLogId = chatLog.getLogId();
+        chatbotVO.setTitle(CommonUtil.isEmpty(chatLog.getQContent()) ? chatLog.getRoomTitle() : generateSummaryTitle(chatLog.getQContent(), chatLog.getRContent(), knowledgeRefLogId));
+        chatbotVO.setTags(generateSummaryTags(chatLog.getQContent(), chatLog.getRContent(), knowledgeRefLogId));
 
         chatbotVO.setThumbImg(generateSummaryThumbImg(chatLog.getQContent(), chatLog.getRContent()));
 
@@ -1763,7 +1740,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * AI 서버를 통해 질문/답변을 요약한 제목을 생성한다.
      * 실패 시 qContent를 50자로 잘라 반환(fallback).
      */
-    private String generateSummaryTitle(String qContent, String rContent) {
+    private String generateSummaryTitle(String qContent, String rContent, Long refLogId) {
         if (CommonUtil.isEmpty(qContent)) {
             return truncateTitle(rContent, 50);
         }
@@ -1774,7 +1751,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             prompt += " 답변: " + truncateTitle(rContent, 500);
         }
 
-        String result = callAiSummary(prompt, "title");
+        String result = callAiSummary(prompt, "title", refLogId);
         if (CommonUtil.isNotEmpty(result)) {
             return truncateTitle(result, 50);
         }
@@ -1786,7 +1763,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 쉼표(,)로 구분된 최대 5개 태그를 반환한다.
      * 실패 시 빈 문자열 반환(fallback).
      */
-    private String generateSummaryTags(String qContent, String rContent) {
+    private String generateSummaryTags(String qContent, String rContent, Long refLogId) {
         if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
             return "";
         }
@@ -1795,7 +1772,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 + "질문: " + truncateTitle(qContent, 200)
                 + " 답변: " + truncateTitle(rContent, 500);
 
-        String result = callAiSummary(prompt, "tags");
+        String result = callAiSummary(prompt, "tags", refLogId);
         if (CommonUtil.isNotEmpty(result)) {
             return truncateTitle(result.trim(), 200);
         }
@@ -1806,7 +1783,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * AI 서버를 통해 이전 질문/답변 맥락을 기반으로 다음 추천 질문을 생성한다.
      * 줄바꿈으로 구분된 최대 3개의 질문을 반환한다. 실패 시 빈 리스트 반환.
      */
-    private List<String> generateNextRecommendedQuestions(String qContent, String rContent) {
+    private List<String> generateNextRecommendedQuestions(String qContent, String rContent, Long refLogId) {
         if (CommonUtil.isEmpty(qContent) && CommonUtil.isEmpty(rContent)) {
             return Collections.emptyList();
         }
@@ -1818,7 +1795,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 + "각 질문은 25자 이내로 간결하게 작성하고, 줄바꿈으로만 구분해서 질문 텍스트만 출력해. "
                 + "번호, 글머리 기호, 따옴표 등 부가 텍스트는 포함하지 마.";
 
-        String result = callAiSummary(prompt, "nextQuestions");
+        String result = callAiSummary(prompt, "nextQuestions", refLogId);
         if (CommonUtil.isEmpty(result)) {
             return Collections.emptyList();
         }
@@ -1834,100 +1811,20 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /**
      * GPT endpoint에 동기 호출하여 AI 응답 텍스트를 반환한다.
-     * doInsertAiLog를 호출하지 않으므로 로그 테이블에 쌓이지 않는다.
-     * @param prompt 요청 프롬프트
-     * @param purpose 로깅용 호출 목적 (title, tags, reAskReport 등). reAskReport는 응답 지연 대비 읽기 타임아웃이 더 김.
+     * ChatbotAgentSupport.callAiSummary 로 위임한다.
+     *
+     * @param prompt   요청 프롬프트
+     * @param purpose  로깅용 호출 목적 (title, tags, reAskReport 등)
+     * @param refLogId 참조 로그 ID
      * @return AI 응답 텍스트, 실패 시 null
      */
-    public String callAiSummary(String prompt, String purpose) {
-        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.summary.apiUrl");
-        if (CommonUtil.isEmpty(apiUrl)) {
-            logger.warn("{} 생성 실패 - GPT API URL 미설정", purpose);
-            return null;
-        }
-
-        int readTimeoutSec = ("reAskReport".equals(purpose) || "insightReport".equals(purpose) || "createDoc".equals(purpose) || "news_curate".equals(purpose) || "mtlcareReport".equals(purpose) || "translate_file".equals(purpose))
-                ? SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC
-                : 60;
-
-        Map<String, Object> params = new HashMap<>();
-        params.put("query", prompt);
-        params.put("room_id", "");
-
-        try {
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .readTimeout(readTimeoutSec, java.util.concurrent.TimeUnit.SECONDS)
-                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .build();
-
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            String jsonBody = gson.toJson(params);
-            RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
-
-            Request request = new Request.Builder()
-                    .url(apiUrl)
-                    .post(body)
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Accept", "application/json")
-                    .build();
-
-            logger.info("AI {} 생성 호출 시작 - url: {}", purpose, apiUrl);
-
-            try (okhttp3.Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful() || response.body() == null) {
-                    logger.warn("AI {} 응답 오류: {}", purpose, response.code());
-                    return null;
-                }
-
-                try (okhttp3.ResponseBody responseBody = response.body()) {
-                    String raw = responseBody.string();
-                    if (CommonUtil.isEmpty(raw)) {
-                        return null;
-                    }
-                    String trimmed = raw.trim();
-                    String jsonStr = trimmed;
-                    if (trimmed.startsWith("data: ")) {
-                        jsonStr = trimmed.substring(6).trim();
-                        int nl = jsonStr.indexOf('\n');
-                        if (nl >= 0) {
-                            jsonStr = jsonStr.substring(0, nl).trim();
-                        }
-                    }
-                    try {
-                        JSONParser jsonParser = new JSONParser();
-                        JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
-
-                        Object errCodeObj = data.get("errorCode");
-                        if (errCodeObj != null) {
-                            String errorCode = String.valueOf(errCodeObj).trim();
-                            if (!errorCode.isEmpty() && !"None".equalsIgnoreCase(errorCode)) {
-                                Object errContentObj = data.get("errorContent");
-                                String errorContent = errContentObj != null ? String.valueOf(errContentObj) : "";
-                                logger.warn("AI {} API 오류 응답: {} - {}", purpose, errorCode, errorContent);
-                                return null;
-                            }
-                        }
-
-                        String answer = (String) data.get("answer");
-                        if (CommonUtil.isNotEmpty(answer)) {
-                            String result = answer.trim();
-                            logger.info("AI {} 생성 완료", purpose);
-                            return result;
-                        }
-                    } catch (Exception e) {
-                        logger.warn("AI {} 응답 파싱 오류: {}", purpose, e.getMessage());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("AI {} 생성 중 오류 발생: {}", purpose, e.getMessage());
-        }
-
-        return null;
+    public String callAiSummary(String prompt, String purpose, Long refLogId) {
+        return agentSupport.callAiSummary(prompt, purpose, refLogId);
     }
 
     /** 질의 진단 프롬프트(평가기준) 관리 ID — RDB(prompt)에 등록 시 우선 사용, 없으면 기본 루브릭 */
     private static final String DIAGNOSE_PROMPT_ID = "PI_DIAGNOSE";
+
 
     /** 기본 평가 루브릭 (제안서 §2·§3·§6) — prompt 테이블에 PI_DIAGNOSE가 없을 때 사용 */
     private static final String DEFAULT_DIAGNOSE_RUBRIC = String.join("\n",
@@ -1943,14 +1840,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             "- 출력 형태: 5점",
             "판정 규칙:",
             "- 제공된 데이터로 답할 수 없는 주제면 status=OUT_OF_SCOPE, 대체 가능한 통계를 alternatives에 제시.",
-            "- '매출' 등 기준이 여러 개인 모호한 용어가 있으면 status=TERM_AMBIGUOUS, 정의 선택지를 clarificationQuestions로.",
-            "- 80점 이상이면 status=READY, sqlGenerationAllowed=true, rewrittenQuestion에 정제된 질문. 이때 clarificationQuestions는 빈 배열로 둔다.",
-            "- 80점 미만이면 status=CLARIFICATION_REQUIRED.",
-            "보완질문(clarificationQuestions) 규칙(엄격히 지킬 것):",
+            "- 80점 미만이면 status=CLARIFICATION_REQUIRED 또는 TERM_AMBIGUOUS. 이때만 clarificationQuestions·questionPreview를 작성한다.",
+            "보완질문(clarificationQuestions) 규칙 — 80점 미만일 때만 적용:",
             "- SQL 생성에 '반드시' 필요한 핵심 누락만 담는다. 있으면 좋은 수준의 선택적 필터·조건은 절대 넣지 않는다.",
             "- 위 '이 데이터마트에서 제공하는 용어'에 근거가 없는 항목은 보완질문으로 만들지 않는다.",
-            "- 각 항목은 question 텍스트만 작성한다. 선택지(options)는 절대 제공하지 않는다.",
-            "- 정말 필요한 게 없으면 clarificationQuestions는 빈 배열로 둔다.");
+            "- 각 항목: item, question, placeholder, options. 최대 3개.",
+            "- options는 데이터마트 용어만 사용하고 빈 배열 금지. 원 질문의 placeholder 자리에 대체될 후보 단어·표현이어야 한다.",
+            "- placeholder는 원 질문에서 대체되어야 하는 단어만 적는다(예: 기간, 매출액).",
+            "- questionPreview는 원문을 유지하고, 대체되어야 하는 단어만 placeholder 글자 그대로 남긴다.",
+            "- clarificationQuestions[].placeholder와 questionPreview의 대체 대상 단어가 1:1 일치해야 한다.",
+            "- 80점 이상이면 status=READY, sqlGenerationAllowed=true, rewrittenQuestion 작성, clarificationQuestions=[], questionPreview=null.",
+            "참고: 동의어·의미상 매핑이 가능하다면 OUT_OF_SCOPE로 판정하지 않는다. 실행 가능한 질의는 과도하게 막지 말 것.");
 
     /**
      * 데이터분석(SVC_TY='S') 질의 품질 진단 — LLM이 평가기준(프롬프트)으로 점수·상태·보완을 산정한다.
@@ -1966,9 +1866,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
 
         String prompt = buildDiagnosePrompt(question, buildTermContextForDiagnose(datamartId));
-        String answer = callAiSummary(prompt, "diagnoseQuestion");
+        String answer = callAiSummary(prompt, "diagnoseQuestion", null);
         HashMap<String, Object> parsed = parseDiagnosisJson(answer);
-        return parsed != null ? parsed : diagnosisFallback("질의 검증에 실패했습니다. 잠시 후 다시 시도해주세요.");
+        if (parsed != null) {
+            syncQuestionPreviewPlaceholders(question, parsed);
+            return parsed;
+        }
+        return diagnosisFallback("질의 검증에 실패했습니다. 잠시 후 다시 시도해주세요.");
     }
 
     /** 평가기준 프롬프트 + 용어 컨텍스트 + 질문 + JSON 출력 지시를 합쳐 최종 프롬프트 구성 */
@@ -1995,7 +1899,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         sb.append("  \"readinessScore\": 0,\n");
         sb.append("  \"interpretedIntent\": \"질문 의도 요약\",\n");
         sb.append("  \"rewrittenQuestion\": \"READY일 때 정제된 질문, 아니면 null\",\n");
-        sb.append("  \"clarificationQuestions\": [{ \"item\": \"period\", \"question\": \"반드시 필요한 핵심 보완 항목만 (options 없이 질문 텍스트만)\" }],\n");
+        sb.append("  \"questionPreview\": \"READY이면 null, 보완 필요 시 원문 기반 문장(대체되어야 하는 단어는 placeholder 글자만)\",\n");
+        sb.append("  \"clarificationQuestions\": [{ \"item\": \"period|metric|dimension\", \"question\": \"반드시 필요한 핵심 보완 질문\", \"placeholder\": \"원 질문에서 대체되어야 하는 단어\", \"options\": [\"placeholder 자리에 대체될 데이터마트 용어 후보\"] }],\n");
         sb.append("  \"alternatives\": [\"대체 통계1\"],\n");
         sb.append("  \"sqlGenerationAllowed\": false\n");
         sb.append("}");
@@ -2021,6 +1926,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     continue;
                 }
                 String label = t.getTermNm();
+                if (CommonUtil.isNotEmpty(t.getSynonyms())) {
+                    label += "[동의어:" + t.getSynonyms() + "]";
+                }
                 if (CommonUtil.isNotEmpty(t.getSampleValues())) {
                     label += "(" + t.getSampleValues() + ")";
                 }
@@ -2077,6 +1985,38 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
     }
 
+    /** questionPreview에서 clarificationQuestions.placeholder 위치에 { }를 붙인다. */
+    private void syncQuestionPreviewPlaceholders(String originalQuestion, HashMap<String, Object> map) {
+        if ("READY".equals(String.valueOf(map.get("status"))) || !(map.get("clarificationQuestions") instanceof List)) {
+            return;
+        }
+        List<String> placeholders = new ArrayList<>();
+        for (Object o : (List<?>) map.get("clarificationQuestions")) {
+            if (!(o instanceof Map)) {
+                continue;
+            }
+            Object ph = ((Map<?, ?>) o).get("placeholder");
+            if (ph == null || String.valueOf(ph).trim().isEmpty()) {
+                continue;
+            }
+            placeholders.add(String.valueOf(ph).trim());
+        }
+        if (placeholders.isEmpty()) {
+            return;
+        }
+        String preview = map.get("questionPreview") != null ? String.valueOf(map.get("questionPreview")).trim() : "";
+        if (CommonUtil.isEmpty(preview)) {
+            preview = originalQuestion;
+        }
+        placeholders.sort((a, b) -> b.length() - a.length());
+        for (String label : placeholders) {
+            if (!preview.contains("{" + label + "}")) {
+                preview = preview.replace(label, "{" + label + "}");
+            }
+        }
+        map.put("questionPreview", preview);
+    }
+
     /** 진단 실패/예외 시 안전한 폴백 — 전송 차단(sqlGenerationAllowed=false) 유지 */
     private HashMap<String, Object> diagnosisFallback(String message) {
         HashMap<String, Object> map = new HashMap<>();
@@ -2084,9 +2024,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         map.put("readinessScore", 0);
         map.put("interpretedIntent", message);
         map.put("rewrittenQuestion", null);
+        map.put("questionPreview", null);
+        map.put("alternatives", new ArrayList<>());
         Map<String, Object> cq = new HashMap<>();
         cq.put("item", "retry");
         cq.put("question", message);
+        cq.put("placeholder", "");
+        cq.put("options", new ArrayList<>());
         List<Map<String, Object>> cqs = new ArrayList<>();
         cqs.add(cq);
         map.put("clarificationQuestions", cqs);
@@ -2102,7 +2046,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * - event: done / data: {"answer": "...", ...}
      * @return [0]=answer text, [1]=출처 문자열(제목: URL 줄바꿈 목록). 실패 시 null.
      */
-    private String[] callWebSearchSync(String query, String modelId) {
+    /** 패키지-private: 에이전트 서비스에서 호출 가능. */
+    public String[] callWebSearchSync(String query, String modelId) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.apiIpSearchOnly");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("웹 검색 실패 - query_search_only URL 미설정");
@@ -2114,14 +2059,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         params.put("model_id", modelId != null ? modelId : "");
         params.put("room_id", "");
 
+        com.google.gson.Gson wsGson = new com.google.gson.Gson();
+        String wsReqJson = wsGson.toJson(params);
+        long wsStartMs = System.currentTimeMillis();
+
         try {
             OkHttpClient client = new OkHttpClient.Builder()
                     .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
                     .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build();
 
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            String jsonBody = gson.toJson(params);
+            String jsonBody = wsReqJson;
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
@@ -2134,8 +2082,10 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.info("웹 검색 호출 시작 - url: {}", apiUrl);
 
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int wsRespMs = (int) Math.min(System.currentTimeMillis() - wsStartMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("웹 검색 응답 오류: {}", response.code());
+                    apiCallLogService.insertSilently(null, null, apiUrl, modelId, "webSearch", wsReqJson, 0, 0, wsRespMs, "N", "HTTP " + response.code(), null);
                     return null;
                 }
 
@@ -2209,40 +2159,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     // done.answer가 있으면 우선 사용, 없으면 델타 누적분 사용
                     String answer = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
                     String answerSource = sourceBuilder.toString();
+                    apiCallLogService.insertSilently(null, null, apiUrl, modelId, "webSearch", wsReqJson, 0, 0, wsRespMs, "Y", null, null);
                     return new String[]{ answer, answerSource };
                 }
             }
         } catch (Exception e) {
+            int wsRespMs = (int) Math.min(System.currentTimeMillis() - wsStartMs, Integer.MAX_VALUE);
             logger.warn("웹 검색 중 오류 발생: {}", e.getMessage());
+            apiCallLogService.insertSilently(null, null, apiUrl, modelId, "webSearch", wsReqJson, 0, 0, wsRespMs, "N", e.getMessage(), null);
         }
         return null;
-    }
-
-    /**
-     * 웹 검색 출처 문자열(answer_source)에서 URL을 추출하여 출처 items 배열로 변환한다.
-     * 각 item은 {url, title} 형태. URL이 없으면 빈 배열 반환.
-     */
-    @SuppressWarnings("unchecked")
-    private JSONArray extractWebSourceItems(String source) {
-        JSONArray items = new JSONArray();
-        if (CommonUtil.isEmpty(source)) {
-            return items;
-        }
-        // http(s) URL 추출 (공백·따옴표·괄호·꺾쇠 등 경계 제외)
-        java.util.regex.Pattern urlPattern = java.util.regex.Pattern.compile("https?://[^\\s\"'<>\\)\\]]+");
-        java.util.regex.Matcher matcher = urlPattern.matcher(source);
-        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
-        while (matcher.find()) {
-            String url = matcher.group();
-            // 끝의 문장부호 제거
-            url = url.replaceAll("[.,;]+$", "");
-            if (seen.add(url)) {
-                JSONObject item = new JSONObject();
-                item.put("url", url);
-                items.add(item);
-            }
-        }
-        return items;
     }
 
     /**
@@ -2250,7 +2176,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
      * 어떤 템플릿이든 그 템플릿의 jsonKey 목록에 맞춰 LLM이 응답하도록 강제한다.
      * - layoutType=table → 객체 배열, multilineYn=Y → 문자열 배열, 그 외 → 문자열
      */
-    private String buildTemplateJsonInstruction(List<LibraryVO.TmplFieldItem> tmplFieldList) {
+    /** 패키지-private: 에이전트 서비스에서 호출 가능. */
+    public String buildTemplateJsonInstruction(List<LibraryVO.TmplFieldItem> tmplFieldList) {
         if (tmplFieldList == null || tmplFieldList.isEmpty()) {
             return "\n\n반드시 순수 JSON 형식으로만 응답하세요(코드블록/설명 없이).";
         }
@@ -2296,1126 +2223,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * 리서치 리포트 출처 섹션 HTML을 구성한다.
-     * - 사내 문서(RAG): 파일 뷰 링크 (프론트가 클릭 가로채 파일 열기)
-     * - 웹 출처: 실제 URL 링크 (새 탭)
+     * PROPOSAL 에이전트 — 슬라이드 JSON을 PPTX로 변환.
+     * ProposalAgentService 로 위임한다.
      */
-    private String buildResearcherSourcesHtml(List<ChatbotVO> ragDocs, String webSearchSource) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<ul>");
-
-        // 사내 문서 출처
-        if (ragDocs != null) {
-            for (ChatbotVO doc : ragDocs) {
-                if (doc == null || CommonUtil.isEmpty(doc.getFileName())) {
-                    continue;
-                }
-                String fileName = htmlEscape(doc.getFileName());
-                String docFileId = CommonUtil.nullToBlank(doc.getDocFileId());
-                String href = RAG_DOC_LINK_PREFIX + docFileId;
-                sb.append("<li>사내 문서: <a href=\"").append(href).append("\">")
-                        .append(fileName).append("</a></li>");
-            }
-        }
-
-        // 웹 출처 (answer_source 문자열에서 URL 추출)
-        JSONArray webItems = extractWebSourceItems(webSearchSource);
-        for (Object itemObj : webItems) {
-            if (!(itemObj instanceof JSONObject)) {
-                continue;
-            }
-            String url = String.valueOf(((JSONObject) itemObj).get("url"));
-            if (CommonUtil.isEmpty(url)) {
-                continue;
-            }
-            String urlEsc = htmlEscape(url);
-            sb.append("<li>웹페이지: <a href=\"").append(urlEsc)
-                    .append("\" target=\"_blank\" rel=\"noopener noreferrer\">")
-                    .append(urlEsc).append("</a></li>");
-        }
-
-        sb.append("</ul>");
-        return sb.toString();
-    }
-
-    /** HTML 태그를 제거해 평문으로 변환 (채팅 버블 요약용) */
-    private String stripHtmlTags(String s) {
-        if (CommonUtil.isEmpty(s)) {
-            return "";
-        }
-        String text = s.replaceAll("(?is)<[^>]+>", " ")
-                .replace("&nbsp;", " ")
-                .replace("&amp;", "&")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replaceAll("\\s+", " ")
-                .trim();
-        return text.length() > 300 ? text.substring(0, 300) + "..." : text;
-    }
-
-    /** HTML 특수문자 escape */
-    private String htmlEscape(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
-    }
-
-    /**
-     * AI 응답 JSON의 한글/변형 키를 템플릿 필드의 영문 키로 매핑한다.
-     * 매핑되지 않는 키는 그대로 유지한다.
-     */
-    @SuppressWarnings("unchecked")
-    private JSONObject mapResearcherJsonKeys(JSONObject src) {
-        // 한글 키 → 영문 템플릿 키 매핑 테이블
-        Map<String, String> keyMap = new java.util.LinkedHashMap<>();
-        keyMap.put("제목", "title");
-        keyMap.put("주제", "title");
-        keyMap.put("요약", "executive_summary");
-        keyMap.put("핵심요약", "executive_summary");
-        keyMap.put("핵심_요약", "executive_summary");
-        keyMap.put("summary", "executive_summary");
-        keyMap.put("시장개요", "market_overview");
-        keyMap.put("시장_개요", "market_overview");
-        keyMap.put("시장현황", "market_overview");
-        keyMap.put("시장_현황", "market_overview");
-        keyMap.put("주요발견사항", "key_findings");
-        keyMap.put("주요_발견사항", "key_findings");
-        keyMap.put("경쟁사분석", "competitor_analysis");
-        keyMap.put("경쟁사_분석", "competitor_analysis");
-        keyMap.put("경쟁사비교", "competitor_analysis");
-        keyMap.put("경쟁사_비교", "competitor_analysis");
-        keyMap.put("SWOT분석", "swot");
-        keyMap.put("SWOT_분석", "swot");
-        keyMap.put("결론", "conclusion");
-        keyMap.put("결론및제언", "conclusion");
-        keyMap.put("결론_및_제언", "conclusion");
-        keyMap.put("참고출처", "sources");
-        keyMap.put("참고_출처", "sources");
-        keyMap.put("출처", "sources");
-
-        JSONObject mapped = new JSONObject();
-        for (Object keyObj : src.keySet()) {
-            String key = String.valueOf(keyObj);
-            // 숫자 접두사 제거: "1. AI 반도체 시장 현황" → "AI 반도체 시장 현황"
-            String normalizedKey = key.replaceAll("^\\d+\\.\\s*", "").trim();
-            // 공백/특수문자 제거 후 매핑 시도
-            String compactKey = normalizedKey.replaceAll("[\\s_·.\\-]", "");
-
-            String mappedKey = null;
-            for (Map.Entry<String, String> entry : keyMap.entrySet()) {
-                String candidate = entry.getKey().replaceAll("[\\s_·.\\-]", "");
-                if (candidate.equalsIgnoreCase(compactKey)) {
-                    mappedKey = entry.getValue();
-                    break;
-                }
-            }
-
-            // 매핑 성공 시 영문 키 사용, 실패 시 원본 키 유지
-            String targetKey = mappedKey != null ? mappedKey : key;
-            Object val = src.get(keyObj);
-
-            // 중첩 객체도 재귀 매핑 (1단계만)
-            if (val instanceof JSONObject) {
-                mapped.put(targetKey, mapResearcherJsonKeys((JSONObject) val));
-            } else {
-                mapped.put(targetKey, val);
-            }
-        }
-        return mapped;
-    }
-
-    /**
-     * PLANNER 에이전트: 사용자 주제를 받아 기획서·PT·보고서·제안서 초안을 생성한다.
-     * 1) additionalConfig.features 에서 docTy·audience·pageCount·lang·structureHint·tmplId·webSearch 읽기
-     * 2) webSearch=true 이면 query_search_only 동기 호출 → 웹 정보 보강
-     * 3) 구조화 프롬프트 구성 후 gpt.apiUrl 동기 호출
-     * 4) docTy=PT → 슬라이드 JSON "pptx_data" 청크 전송 (프론트에서 PPTX 다운로드)
-     *    그 외  → 템플릿 HTML 렌더링 후 "report_html" 청크 전송
-     * 5) TB_CHAT_LOG 저장 + 결과 스트리밍 전송
-     */
-    private void deliverPlannerDraftViaWebSocket(
-            String query, String threadId, String userId, String svcTy, String modelId,
-            String refId, String agentId,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
-        try {
-            // ① additionalConfig.features 읽기
-            ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-            String docTy = "기획서";
-            String audience = "임원";
-            int pageCount = 5;
-            String lang = "ko";
-            String structureHint = "";
-            String tmplId = PLANNER_DEFAULT_TMPL_ID;
-            boolean webSearch = false;
-
-            if (subCfg != null && subCfg.getAdditionalConfigMap() != null) {
-                Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
-                if (featuresObj instanceof Map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> features = (Map<String, Object>) featuresObj;
-                    if (features.get("docTy") != null) docTy = String.valueOf(features.get("docTy"));
-                    if (features.get("audience") != null) audience = String.valueOf(features.get("audience"));
-                    if (features.get("pageCount") != null) {
-                        try { pageCount = Integer.parseInt(String.valueOf(features.get("pageCount"))); } catch (Exception ignore) {}
-                    }
-                    if (features.get("lang") != null) lang = String.valueOf(features.get("lang"));
-                    if (features.get("structureHint") != null) structureHint = String.valueOf(features.get("structureHint"));
-                    if (features.get("tmplId") != null && CommonUtil.isNotEmpty(String.valueOf(features.get("tmplId")))) {
-                        tmplId = String.valueOf(features.get("tmplId"));
-                    }
-                    if (Boolean.TRUE.equals(features.get("webSearch"))) webSearch = true;
-                }
-            }
-
-            boolean isPt = "PT".equals(docTy);
-
-            // ② 웹 검색 (선택)
-            String webSearchAnswer = "";
-            String webSearchSource = "";
-            if (webSearch) {
-                callback.onStatus("searching_web", "웹 정보 수집 중");
-                String[] webResult = callWebSearchSync(query, modelId);
-                if (webResult != null) {
-                    webSearchAnswer = webResult[0];
-                    webSearchSource = webResult[1];
-                }
-            }
-
-            // ③ 프롬프트 구성
-            callback.onStatus("generating_draft", isPt ? "슬라이드 초안 생성 중" : "초안 생성 중");
-            String langLabel = "ko".equals(lang) ? "한국어" : "English";
-            StringBuilder promptBuilder = new StringBuilder();
-
-            if (isPt) {
-                // PT 전용 프롬프트 — 슬라이드 JSON 반환
-                promptBuilder.append("당신은 PT(발표자료) 전문 작성가입니다.")
-                        .append("\n").append(audience).append("을(를) 위한 PT를 ").append(langLabel).append("로 작성하세요.")
-                        .append("\n\n## 조건")
-                        .append("\n- 슬라이드 수: ").append(pageCount).append("장 (표지 제외)")
-                        .append("\n- 각 슬라이드에는 핵심 불릿 포인트 3~5개");
-                if (CommonUtil.isNotEmpty(structureHint)) {
-                    promptBuilder.append("\n- 구조: ").append(structureHint);
-                }
-                if (CommonUtil.isNotEmpty(webSearchAnswer)) {
-                    promptBuilder.append("\n\n## 참고 정보 (웹 검색)\n").append(webSearchAnswer);
-                }
-                promptBuilder.append("\n\n## 응답 형식 (중요)")
-                        .append("\n반드시 아래 JSON 구조로만 응답하세요. 마크다운 코드블록, 설명 텍스트 없이 순수 JSON만 출력하세요.")
-                        .append("\n{")
-                        .append("\n  \"title\": \"발표 전체 제목\",")
-                        .append("\n  \"slides\": [")
-                        .append("\n    { \"title\": \"슬라이드 제목\", \"content\": [\"항목1\", \"항목2\", \"항목3\"], \"notes\": \"발표자 노트\" },")
-                        .append("\n    ...")
-                        .append("\n  ]")
-                        .append("\n}")
-                        .append("\n\n## 사용자 요청\n").append(query);
-            } else {
-                // 기획서/보고서/제안서 — 기존 템플릿 기반 프롬프트
-                TmplVO tmplSearchVO = new TmplVO();
-                tmplSearchVO.setTmplId(tmplId);
-                TmplVO tmpl = tmplService.selectTmplDetail(tmplSearchVO);
-                List<LibraryVO.TmplFieldItem> tmplFieldList = new ArrayList<>();
-                if (tmpl != null) {
-                    TmplVO fieldSearchVO = new TmplVO();
-                    fieldSearchVO.setTmplId(tmplId);
-                    List<TmplVO.TmplFieldVO> fieldVoList = tmplService.selectTmplFieldList(fieldSearchVO);
-                    if (fieldVoList != null) {
-                        for (TmplVO.TmplFieldVO fv : fieldVoList) {
-                            LibraryVO.TmplFieldItem item = new LibraryVO.TmplFieldItem();
-                            item.setJsonKey(fv.getJsonKey());
-                            item.setFieldNm(fv.getFieldNm());
-                            item.setMultilineYn(fv.getMultilineYn());
-                            item.setLayoutType(fv.getLayoutType());
-                            tmplFieldList.add(item);
-                        }
-                    }
-                }
-
-                String llmPrompt = (tmpl != null && CommonUtil.isNotEmpty(tmpl.getLlmPrompt()))
-                        ? tmpl.getLlmPrompt()
-                        : "당신은 " + docTy + " 작성 전문가입니다. 아래 요청에 따라 " + audience + "을(를) 위한 " + docTy + " 초안을 " + langLabel + "로 작성해주세요.";
-
-                promptBuilder.append(llmPrompt)
-                        .append("\n\n## 문서 정보")
-                        .append("\n- 문서 유형: ").append(docTy)
-                        .append("\n- 보고 대상: ").append(audience)
-                        .append("\n- 목표 분량: ").append(pageCount).append("페이지")
-                        .append("\n- 출력 언어: ").append(langLabel);
-
-                if (CommonUtil.isNotEmpty(structureHint)) {
-                    promptBuilder.append("\n\n## 문서 구조 (반드시 준수)\n").append(structureHint);
-                }
-                if (CommonUtil.isNotEmpty(webSearchAnswer)) {
-                    promptBuilder.append("\n\n## 웹 검색 결과 (참고)\n").append(webSearchAnswer);
-                }
-
-                promptBuilder.append(buildTemplateJsonInstruction(tmplFieldList));
-                promptBuilder.append("\n\n## 사용자 요청\n").append(query);
-
-                // ④-B HTML 렌더링 경로 (PT가 아닐 때만 tmpl 변수 필요하므로 여기서 처리)
-                String aiResponseDoc = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
-                if (CommonUtil.isEmpty(aiResponseDoc)) {
-                    callback.onError("초안 생성에 실패했습니다. AI 응답이 비어 있습니다.");
-                    return;
-                }
-                deliverPlannerDocResult(aiResponseDoc, tmpl, tmplFieldList, webSearchSource,
-                        docTy, svcTy, modelId, refId, agentId, threadId, userId, query, callback);
-                return;
-            }
-
-            // ④-A PT 경로: GPT 호출 → 슬라이드 JSON
-            String aiResponse = callLlmQuerySync(promptBuilder.toString(), modelId, threadId);
-            if (CommonUtil.isEmpty(aiResponse)) {
-                callback.onError("슬라이드 초안 생성에 실패했습니다. AI 응답이 비어 있습니다.");
-                return;
-            }
-
-            // 슬라이드 JSON 추출
-            String jsonContent = aiResponse.trim();
-            if (jsonContent.startsWith("```json")) jsonContent = jsonContent.substring(7);
-            if (jsonContent.startsWith("```"))     jsonContent = jsonContent.substring(3);
-            if (jsonContent.endsWith("```"))       jsonContent = jsonContent.substring(0, jsonContent.length() - 3);
-            jsonContent = jsonContent.trim();
-
-            String presentationTitle = query;
-            try {
-                JSONParser parser = new JSONParser();
-                JSONObject aiJson = (JSONObject) parser.parse(jsonContent);
-                Object t = aiJson.get("title");
-                if (t != null && CommonUtil.isNotEmpty(String.valueOf(t))) {
-                    presentationTitle = String.valueOf(t);
-                }
-            } catch (Exception ignore) {
-                logger.warn("PLANNER PT JSON 파싱 오류 (raw 전송): {}", ignore.getMessage());
-            }
-
-            // pptx_data 청크 전송 (슬라이드 JSON 원문)
-            String summaryText = "PT 초안이 생성되었습니다: " + presentationTitle;
-            callback.onChunk(summaryText, summaryText, null);
-            callback.onChunk(jsonContent, jsonContent, "pptx_data");
-
-            // 웹 검색 출처
-            JSONArray webSourceItems = extractWebSourceItems(webSearchSource);
-            String webGroundingJson = "";
-            if (!webSourceItems.isEmpty()) {
-                JSONObject wgJson = new JSONObject();
-                wgJson.put("items", webSourceItems);
-                webGroundingJson = wgJson.toJSONString();
-                JSONObject sourcePayload = new JSONObject();
-                sourcePayload.put("items", webSourceItems);
-                callback.onChunk(webGroundingJson, sourcePayload.toJSONString(), "answer_source");
-            }
-
-            String savedLogId = this.doInsertAiLog(
-                    threadId, agentId, query, summaryText,
-                    0, 0, svcTy, modelId, refId, userId,
-                    null, null, null, null,
-                    null, null, new ArrayList<>(),
-                    webGroundingJson, null, null);
-
-            this.updateChatRoomLastChatDt(threadId);
-            callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
-                    CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
-                    "", "", "");
-
-        } catch (Exception e) {
-            logger.error("PLANNER 초안 생성 중 오류: {}", e.getMessage(), e);
-            callback.onError("초안 생성 중 오류가 발생했습니다: " + e.getMessage());
-        }
-    }
-
-    /**
-     * PLANNER 기획서/보고서/제안서 경로 — HTML 렌더링 후 report_html 청크 전송.
-     */
-    private void deliverPlannerDocResult(
-            String aiResponse, TmplVO tmpl, List<LibraryVO.TmplFieldItem> tmplFieldList,
-            String webSearchSource, String docTy, String svcTy, String modelId, String refId,
-            String agentId, String threadId, String userId, String query,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
-
-        String reportHtml = "";
-        String titleSummary = "";
-        try {
-            String jsonContent = aiResponse.trim();
-            if (jsonContent.startsWith("```json")) jsonContent = jsonContent.substring(7);
-            if (jsonContent.startsWith("```"))     jsonContent = jsonContent.substring(3);
-            if (jsonContent.endsWith("```"))       jsonContent = jsonContent.substring(0, jsonContent.length() - 3);
-            jsonContent = jsonContent.trim();
-
-            JSONParser parser = new JSONParser();
-            JSONObject aiJson = (JSONObject) parser.parse(jsonContent);
-
-            if (aiJson.size() == 1) {
-                Object onlyVal = aiJson.values().iterator().next();
-                if (onlyVal instanceof JSONObject) aiJson = (JSONObject) onlyVal;
-            }
-
-            for (String titleKey : new String[]{"title", "제목", "문서제목", "주제"}) {
-                Object v = aiJson.get(titleKey);
-                if (v != null && CommonUtil.isNotEmpty(String.valueOf(v))) {
-                    titleSummary = String.valueOf(v);
-                    break;
-                }
-            }
-
-            if (CommonUtil.isNotEmpty(webSearchSource)) {
-                aiJson.put("sources", SOURCES_TOKEN);
-            }
-
-            if (tmpl != null && CommonUtil.isNotEmpty(tmpl.getTmplHtml()) && !tmplFieldList.isEmpty()) {
-                reportHtml = tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), aiJson, tmplFieldList);
-            } else {
-                reportHtml = "<div>" + aiResponse + "</div>";
-            }
-
-            if (CommonUtil.isNotEmpty(webSearchSource)) {
-                reportHtml = reportHtml.replace(SOURCES_TOKEN,
-                        buildResearcherSourcesHtml(new ArrayList<>(), webSearchSource));
-            }
-        } catch (Exception e) {
-            logger.warn("PLANNER 문서 JSON 파싱/렌더링 오류: {}", e.getMessage());
-            String safe = aiResponse.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    .replace("\n", "<br/>");
-            reportHtml = "<div><p>" + safe + "</p></div>";
-        }
-
-        String summaryText = CommonUtil.isNotEmpty(titleSummary)
-                ? docTy + " 초안이 생성되었습니다: " + titleSummary
-                : docTy + " 초안이 생성되었습니다.";
-        callback.onChunk(summaryText, summaryText, null);
-        if (CommonUtil.isNotEmpty(reportHtml)) {
-            callback.onChunk(reportHtml, reportHtml, "report_html");
-        }
-
-        JSONArray webSourceItems = extractWebSourceItems(webSearchSource);
-        String webGroundingJson = "";
-        if (!webSourceItems.isEmpty()) {
-            JSONObject wgJson = new JSONObject();
-            wgJson.put("items", webSourceItems);
-            webGroundingJson = wgJson.toJSONString();
-            JSONObject sourcePayload = new JSONObject();
-            sourcePayload.put("items", webSourceItems);
-            callback.onChunk(webGroundingJson, sourcePayload.toJSONString(), "answer_source");
-        }
-
-        String savedLogId = this.doInsertAiLog(
-                threadId, agentId, query, summaryText,
-                0, 0, svcTy, modelId, refId, userId,
-                null, null, null, null,
-                null, null, new ArrayList<>(),
-                webGroundingJson, null, reportHtml);
-
-        this.updateChatRoomLastChatDt(threadId);
-        callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
-                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
-                "", "", "");
-    }
-
-    /**
-     * PLANNER PPTX 내보내기 — 슬라이드 JSON → byte[].
-     */
-    public byte[] exportPlannerPptx(String slidesJson) throws Exception {
-        JSONParser parser = new JSONParser();
-        JSONObject root = (JSONObject) parser.parse(slidesJson.trim());
-        String title = root.get("title") != null ? String.valueOf(root.get("title")) : "PT 초안";
-
-        @SuppressWarnings("unchecked")
-        java.util.List<java.util.Map<String, Object>> slides =
-                root.get("slides") instanceof org.json.simple.JSONArray
-                        ? (java.util.List<java.util.Map<String, Object>>) root.get("slides")
-                        : new java.util.ArrayList<>();
-
-        return kr.teamagent.common.util.PlannerPptxUtil.buildPptx(title, slides);
-    }
-
-    /**
-     * RESEARCHER 에이전트: 웹 검색 + 사내 문서 RAG를 통합하여 리서치 리포트를 생성한다.
-     * 1) query_search_only(9000) 동기 호출 → 웹 검색 답변 + 웹 출처(URL)
-     * 2) 템플릿 조회 + 웹 결과를 주입한 enriched query 구성
-     * 3) ragQuery(9111/query) 동기 호출 → dataset_id 벡터 검색 + JSON 리포트 생성 + file_info(참조 문서)
-     * 4) TmplHtmlRenderService → 리포트 HTML 렌더링 (출처: 사내 문서 링크 + 웹 URL)
-     * 5) TB_CHAT_LOG/TB_CHAT_REF 저장 + 결과 스트리밍 전송
-     */
-    private void deliverResearchReportViaWebSocket(
-            String query, String threadId, String userId, String svcTy, String modelId,
-            String refId, String agentId, List<Long> attachmentFileIds,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
-        try {
-            // ① 웹 검색
-            callback.onStatus("searching_web", "웹 검색 중");
-            String[] webSearchResult = callWebSearchSync(query, modelId);
-            String webSearchAnswer = (webSearchResult != null) ? webSearchResult[0] : "";
-            String webSearchSource = (webSearchResult != null) ? webSearchResult[1] : "";
-
-            // ② 템플릿 조회
-            callback.onStatus("loading_template", "리포트 템플릿 준비 중");
-            ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-            String tmplId = "TM000007";
-            if (subCfg != null && subCfg.getAdditionalConfigMap() != null) {
-                Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
-                if (featuresObj instanceof Map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> features = (Map<String, Object>) featuresObj;
-                    String cfgTmplId = (String) features.get("tmplId");
-                    if (CommonUtil.isNotEmpty(cfgTmplId)) {
-                        tmplId = cfgTmplId;
-                    }
-                }
-            }
-
-            TmplVO tmplSearchVO = new TmplVO();
-            tmplSearchVO.setTmplId(tmplId);
-            TmplVO tmpl = tmplService.selectTmplDetail(tmplSearchVO);
-            List<LibraryVO.TmplFieldItem> tmplFieldList = new ArrayList<>();
-            if (tmpl != null) {
-                TmplVO fieldSearchVO = new TmplVO();
-                fieldSearchVO.setTmplId(tmplId);
-                List<TmplVO.TmplFieldVO> fieldVoList = tmplService.selectTmplFieldList(fieldSearchVO);
-                if (fieldVoList != null) {
-                    for (TmplVO.TmplFieldVO fv : fieldVoList) {
-                        LibraryVO.TmplFieldItem item = new LibraryVO.TmplFieldItem();
-                        item.setJsonKey(fv.getJsonKey());
-                        item.setFieldNm(fv.getFieldNm());
-                        item.setMultilineYn(fv.getMultilineYn());
-                        item.setLayoutType(fv.getLayoutType());
-                        tmplFieldList.add(item);
-                    }
-                }
-            }
-
-            // ③ enriched query 구성
-            callback.onStatus("generating_report", "리포트 생성 중");
-            String llmPrompt = (tmpl != null && CommonUtil.isNotEmpty(tmpl.getLlmPrompt()))
-                    ? tmpl.getLlmPrompt()
-                    : "다음 주제에 대해 JSON 형식으로 리서치 리포트를 작성하세요.";
-
-            // dataset_id 배열 구성 (M 모드)
-            List<String> datasetIds = new ArrayList<>();
-            if (refId != null && !refId.trim().isEmpty()) {
-                for (String part : refId.split(",")) {
-                    String trimmed = part.trim();
-                    if (!trimmed.isEmpty()) {
-                        datasetIds.add(trimmed);
-                    }
-                }
-            }
-
-            // RAG 데이터셋의 실제 문서 (docFileId + fileName) 조회
-            List<ChatbotVO> ragDocs = new ArrayList<>();
-            StringBuilder ragDocNames = new StringBuilder();
-            if (!datasetIds.isEmpty()) {
-                try {
-                    for (String dsId : datasetIds) {
-                        ChatbotVO docSearchVO = new ChatbotVO();
-                        docSearchVO.setRefId(dsId);
-                        List<ChatbotVO> docFiles = chatbotDAO.selectDatasetDocFileNames(docSearchVO);
-                        if (docFiles != null) {
-                            for (ChatbotVO doc : docFiles) {
-                                if (CommonUtil.isNotEmpty(doc.getFileName())) {
-                                    ragDocs.add(doc);
-                                    ragDocNames.append("- ").append(doc.getFileName()).append("\n");
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    logger.warn("RAG 문서 파일명 조회 실패: {}", e.getMessage());
-                }
-            }
-
-            // 템플릿 필드(TB_TMPL_FIELD)에서 JSON 키 지시문을 동적으로 생성한다.
-            // → 어떤 템플릿/문서든 해당 템플릿의 정확한 키로 응답하게 강제하여 항상 템플릿 HTML대로 렌더링.
-            String jsonKeyInstruction = buildTemplateJsonInstruction(tmplFieldList);
-
-            // 출처는 LLM이 생성하지 않고 백엔드에서 직접 링크 HTML로 구성하므로
-            // 프롬프트에서는 본문 인용 참고용으로만 문서/웹 목록을 전달한다.
-            String enrichedQuery = llmPrompt.replace("{{web_search_results}}", webSearchAnswer)
-                    + "\n\n## 참조 가능한 사내 문서 목록\n" + (ragDocNames.length() > 0 ? ragDocNames.toString() : "(없음)")
-                    + "\n\n## 참조 가능한 웹 출처\n" + (CommonUtil.isNotEmpty(webSearchSource) ? webSearchSource : "(없음)")
-                    + jsonKeyInstruction
-                    + "\n\n## 사용자 질문\n" + query;
-
-            // ④ RAG 매뉴얼 질의(9111/query) 동기 호출 — dataset_id 벡터 검색 + LLM 생성
-            //    9111/query 명세 입력: query, dataset_id, model_id, room_id, agent_id, attachment_file_ids
-            Map<String, Object> ragParams = new HashMap<>();
-            ragParams.put("query", enrichedQuery);
-            ragParams.put("dataset_id", datasetIds);
-            ragParams.put("model_id", modelId != null ? modelId : "");
-            ragParams.put("room_id", threadId != null ? threadId : "string");
-            ragParams.put("agent_id", agentId != null ? agentId : "");
-            ragParams.put("attachment_file_ids", new ArrayList<String>());
-
-            String ragApiUrl = PropertyUtil.getProperty("Globals.chatbot.ragQuery.apiUrl");
-            if (CommonUtil.isEmpty(ragApiUrl)) {
-                callback.onError("RAG 질의 API URL이 설정되지 않았습니다.");
-                return;
-            }
-
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .readTimeout(SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC, java.util.concurrent.TimeUnit.SECONDS)
-                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .build();
-
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            String ragJsonBody = gson.toJson(ragParams);
-            RequestBody ragBody = RequestBody.create(ragJsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
-
-            Request ragRequest = new Request.Builder()
-                    .url(ragApiUrl)
-                    .post(ragBody)
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Accept", "text/event-stream")
-                    .build();
-
-            logger.info("리서처 RAG 질의 호출 시작 - url: {}, dataset_id: {}", ragApiUrl, datasetIds);
-
-            String aiResponse = null;
-            List<ChatRefItem> chatRefItems = new ArrayList<>();
-            try (okhttp3.Response response = client.newCall(ragRequest).execute()) {
-                if (!response.isSuccessful() || response.body() == null) {
-                    logger.warn("리서처 RAG 질의 응답 오류: {}", response.code());
-                    callback.onError("RAG 질의 API 응답 오류: " + response.code());
-                    return;
-                }
-                try (okhttp3.ResponseBody responseBody = response.body()) {
-                    // 9111/query SSE 응답: event: answer_delta(text) ... event: done(answer/답변, file_info)
-                    BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(responseBody.byteStream(), "UTF-8"));
-                    StringBuilder answerBuilder = new StringBuilder();
-                    String doneAnswer = "";
-                    String line;
-                    JSONParser jsonParser = new JSONParser();
-
-                    while ((line = reader.readLine()) != null) {
-                        if (line.startsWith("event: ")) {
-                            continue;
-                        }
-                        String jsonStr;
-                        if (line.startsWith("data: ")) {
-                            jsonStr = line.substring(6).trim();
-                        } else if (line.trim().startsWith("{")) {
-                            jsonStr = line.trim();
-                        } else {
-                            continue;
-                        }
-                        if (jsonStr.isEmpty()) {
-                            continue;
-                        }
-                        try {
-                            JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
-                            Object textObj = data.get("text");
-                            if (textObj != null) {
-                                answerBuilder.append(String.valueOf(textObj));
-                            }
-                            // done 이벤트 답변 키: "answer" 또는 한글 "답변"
-                            Object answerObj = data.get("answer");
-                            if (answerObj == null) {
-                                answerObj = data.get("답변");
-                            }
-                            if (answerObj != null) {
-                                doneAnswer = String.valueOf(answerObj);
-                            }
-                            // done 이벤트의 file_info → 실제 참조 문서(TB_CHAT_REF)
-                            List<ChatRefItem> refs = extractChatRefItems(data);
-                            if (!refs.isEmpty()) {
-                                chatRefItems = refs;
-                            }
-                        } catch (Exception ignore) {
-                            // 개별 라인 파싱 실패는 무시
-                        }
-                    }
-                    aiResponse = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
-                }
-            }
-
-            // RAG 응답이 참조 문서를 주지 않으면, 데이터셋에 연결된 문서를 참조로 저장(폴백)
-            if (chatRefItems.isEmpty() && !ragDocs.isEmpty()) {
-                for (ChatbotVO doc : ragDocs) {
-                    if (doc == null || CommonUtil.isEmpty(doc.getDocFileId())) {
-                        continue;
-                    }
-                    ChatRefItem item = new ChatRefItem();
-                    item.docFileId = doc.getDocFileId();
-                    item.mainPageNo = "1";
-                    item.relatedPageNos = new ArrayList<>(Collections.singletonList(1));
-                    chatRefItems.add(item);
-                }
-            }
-
-            if (CommonUtil.isEmpty(aiResponse)) {
-                callback.onError("리포트 생성에 실패했습니다. AI 응답이 비어 있습니다.");
-                return;
-            }
-
-            // ⑤ JSON 파싱 → 템플릿 HTML 렌더링
-            String reportHtml = "";
-            String executiveSummary = "";
-            try {
-                // AI 응답에서 JSON 부분 추출 (마크다운 코드블록 처리)
-                String jsonContent = aiResponse.trim();
-                if (jsonContent.startsWith("```json")) {
-                    jsonContent = jsonContent.substring(7);
-                }
-                if (jsonContent.startsWith("```")) {
-                    jsonContent = jsonContent.substring(3);
-                }
-                if (jsonContent.endsWith("```")) {
-                    jsonContent = jsonContent.substring(0, jsonContent.length() - 3);
-                }
-                jsonContent = jsonContent.trim();
-
-                JSONParser parser = new JSONParser();
-                JSONObject aiJson = (JSONObject) parser.parse(jsonContent);
-
-                // 래퍼 키 벗기기: { "리서치리포트": { ... } } → 내부 객체 사용
-                if (aiJson.size() == 1) {
-                    Object onlyVal = aiJson.values().iterator().next();
-                    if (onlyVal instanceof JSONObject) {
-                        aiJson = (JSONObject) onlyVal;
-                    }
-                }
-
-                // AI 한글 키 → 템플릿 영문 키 매핑
-                JSONObject mappedJson = mapResearcherJsonKeys(aiJson);
-
-                // 요약 텍스트 추출 (여러 후보 키 시도)
-                for (String summaryKey : new String[]{"executive_summary", "요약", "summary", "핵심요약"}) {
-                    Object summaryObj = mappedJson.get(summaryKey);
-                    if (summaryObj != null && CommonUtil.isNotEmpty(String.valueOf(summaryObj))) {
-                        executiveSummary = String.valueOf(summaryObj);
-                        break;
-                    }
-                }
-
-                // 출처는 LLM 출력을 버리고 백엔드에서 직접 링크 HTML로 구성한다.
-                // 템플릿 렌더링 시 HTML escape를 우회하기 위해 토큰으로 치환 후 후처리에서 교체.
-                mappedJson.put("sources", SOURCES_TOKEN);
-
-                // 템플릿 HTML 렌더링
-                if (tmpl != null && CommonUtil.isNotEmpty(tmpl.getTmplHtml()) && !tmplFieldList.isEmpty()) {
-                    reportHtml = tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), mappedJson, tmplFieldList);
-                } else {
-                    reportHtml = "<div>" + aiResponse + "</div>";
-                }
-
-                // 출처 토큰 → 실제 링크 HTML 교체
-                String sourcesHtml = buildResearcherSourcesHtml(ragDocs, webSearchSource);
-                reportHtml = reportHtml.replace(SOURCES_TOKEN, sourcesHtml);
-            } catch (Exception e) {
-                logger.warn("리서처 리포트 JSON 파싱/렌더링 오류: {}", e.getMessage());
-                // fallback: 코드블록(<pre>) 대신 일반 문단으로 렌더 — 에디터 코드블록 다크 배경 방지
-                String safe = aiResponse.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                        .replace("\n", "<br/>");
-                reportHtml = "<div><p>" + safe + "</p></div>";
-                executiveSummary = aiResponse.length() > 200 ? aiResponse.substring(0, 200) + "..." : aiResponse;
-            }
-
-            // ⑥ 클라이언트에 결과 전송
-            // 요약 텍스트 (채팅 버블)
-            String summaryText = CommonUtil.isNotEmpty(executiveSummary) ? executiveSummary : "리서치 리포트가 생성되었습니다.";
-            callback.onChunk(summaryText, summaryText, null);
-
-            // 리포트 HTML (사이드 패널)
-            if (CommonUtil.isNotEmpty(reportHtml)) {
-                callback.onChunk(reportHtml, reportHtml, "report_html");
-            }
-
-            // 웹 검색 출처 (answer_source 문자열에서 URL 추출 → items 구성)
-            JSONArray webSourceItems = extractWebSourceItems(webSearchSource);
-            String webGroundingJson = "";
-            if (!webSourceItems.isEmpty()) {
-                JSONObject wgJson = new JSONObject();
-                wgJson.put("items", webSourceItems);
-                webGroundingJson = wgJson.toJSONString();
-
-                // 클라이언트에 출처 청크 전송
-                JSONObject sourcePayload = new JSONObject();
-                sourcePayload.put("items", webSourceItems);
-                callback.onChunk(webGroundingJson, sourcePayload.toJSONString(), "answer_source");
-            }
-
-            String savedLogId = this.doInsertAiLog(
-                    threadId, agentId, query, summaryText,
-                    0, 0, svcTy, modelId, refId, userId,
-                    null, null, null, null,
-                    null, null, chatRefItems,
-                    webGroundingJson, null,
-                    reportHtml);
-
-            this.updateChatRoomLastChatDt(threadId);
-
-            // ⑧ 완료 전송
-            callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
-                    CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
-                    "", "", "");
-
-        } catch (Exception e) {
-            logger.error("리서처 리포트 생성 중 오류: {}", e.getMessage(), e);
-            callback.onError("리서치 리포트 생성 중 오류가 발생했습니다: " + e.getMessage());
-        }
-    }
-
-    /**
-     * RISK 에이전트(프로젝트 리스크진단): RFP(PDF) 업로드 → 텍스트 추출 → 템플릿 섹션 분리
-     * → 섹션별 병렬 LLM 진단(자사 역량 RAG 결합) → 결과 통합 → 리포트 HTML 조립.
-     */
-    private void deliverRiskReportViaWebSocket(
-            String query, String threadId, String userId, String svcTy, String modelId,
-            String refId, String agentId, List<Long> attachmentFileIds,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
-        try {
-            // ① 첨부 RFP 필수 검증 + 텍스트 추출
-            if (!hasNonNullAttachmentId(attachmentFileIds)) {
-                callback.onError("진단할 RFP 파일을 업로드하세요.");
-                return;
-            }
-            callback.onStatus("extracting_file", "RFP 문서 분석 중");
-            StringBuilder rfpTextBuilder = new StringBuilder();
-            List<String> uploadedFileNames = new ArrayList<>();
-            for (Long fileId : attachmentFileIds) {
-                if (fileId == null) {
-                    continue;
-                }
-                try {
-                    ChatbotVO fileSearchVO = new ChatbotVO();
-                    fileSearchVO.setChatFileId(fileId);
-                    ChatbotVO fileVO = chatbotDAO.selectChatFileById(fileSearchVO);
-                    if (fileVO == null || CommonUtil.isEmpty(fileVO.getFilePath())) {
-                        continue;
-                    }
-                    String fileName = CommonUtil.nullToBlank(fileVO.getFileName());
-                    byte[] bytes = fileService.downloadStorageObjectBytes(fileVO.getFilePath());
-                    String text = extractPdfText(bytes, fileName);
-                    if (CommonUtil.isNotEmpty(text)) {
-                        if (CommonUtil.isNotEmpty(fileName)) {
-                            uploadedFileNames.add(fileName);
-                            rfpTextBuilder.append("\n\n===== 파일: ").append(fileName).append(" =====\n");
-                        }
-                        rfpTextBuilder.append(text);
-                    }
-                } catch (Exception e) {
-                    logger.warn("RFP 파일 추출 실패 (chatFileId={}): {}", fileId, e.getMessage());
-                }
-            }
-            String rfpText = rfpTextBuilder.toString().trim();
-            if (CommonUtil.isEmpty(rfpText)) {
-                callback.onError("업로드한 파일에서 텍스트를 추출하지 못했습니다. 텍스트가 포함된 PDF인지 확인하세요.");
-                return;
-            }
-            // 캡 이하면 원문 그대로(빠른 경로), 초과(대용량 RFP)면 청크 병렬 요약으로 압축
-            String rfpTextForPrompt = condenseRfpTextIfLarge(rfpText, modelId, callback);
-
-            // ② 템플릿 + 섹션(필드) 로딩
-            callback.onStatus("loading_template", "리포트 템플릿 준비 중");
-            ChatbotVO.AgtSubCfgVO subCfg = getAgentSubCfg(agentId);
-            String tmplId = RISK_DEFAULT_TMPL_ID;
-            if (subCfg != null && subCfg.getAdditionalConfigMap() != null) {
-                Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
-                if (featuresObj instanceof Map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> features = (Map<String, Object>) featuresObj;
-                    String cfgTmplId = (String) features.get("tmplId");
-                    if (CommonUtil.isNotEmpty(cfgTmplId)) {
-                        tmplId = cfgTmplId;
-                    }
-                }
-            }
-            TmplVO tmplSearchVO = new TmplVO();
-            tmplSearchVO.setTmplId(tmplId);
-            TmplVO tmpl = tmplService.selectTmplDetail(tmplSearchVO);
-            List<LibraryVO.TmplFieldItem> tmplFieldList = new ArrayList<>();
-            if (tmpl != null) {
-                TmplVO fieldSearchVO = new TmplVO();
-                fieldSearchVO.setTmplId(tmplId);
-                List<TmplVO.TmplFieldVO> fieldVoList = tmplService.selectTmplFieldList(fieldSearchVO);
-                if (fieldVoList != null) {
-                    for (TmplVO.TmplFieldVO fv : fieldVoList) {
-                        LibraryVO.TmplFieldItem item = new LibraryVO.TmplFieldItem();
-                        item.setJsonKey(fv.getJsonKey());
-                        item.setFieldNm(fv.getFieldNm());
-                        item.setMultilineYn(fv.getMultilineYn());
-                        item.setLayoutType(fv.getLayoutType());
-                        tmplFieldList.add(item);
-                    }
-                }
-            }
-            if (tmpl == null || tmplFieldList.isEmpty()) {
-                callback.onError("리스크진단 리포트 템플릿이 설정되지 않았습니다. (tmplId=" + tmplId + ")");
-                return;
-            }
-            String llmPrompt = CommonUtil.isNotEmpty(tmpl.getLlmPrompt())
-                    ? tmpl.getLlmPrompt()
-                    : "당신은 RFP(제안요청서) 리스크 진단 전문가입니다. 업로드된 RFP와 자사 역량 자료를 근거로 진단하세요.";
-
-            // ③ 자사 역량 RAG 데이터셋 문서 조회
-            List<String> datasetIds = new ArrayList<>();
-            if (refId != null && !refId.trim().isEmpty()) {
-                for (String part : refId.split(",")) {
-                    String trimmed = part.trim();
-                    if (!trimmed.isEmpty() && !"all".equalsIgnoreCase(trimmed)) {
-                        datasetIds.add(trimmed);
-                    }
-                }
-            }
-            List<ChatbotVO> ragDocs = new ArrayList<>();
-            StringBuilder ragDocNames = new StringBuilder();
-            if (!datasetIds.isEmpty()) {
-                try {
-                    for (String dsId : datasetIds) {
-                        ChatbotVO docSearchVO = new ChatbotVO();
-                        docSearchVO.setRefId(dsId);
-                        List<ChatbotVO> docFiles = chatbotDAO.selectDatasetDocFileNames(docSearchVO);
-                        if (docFiles != null) {
-                            for (ChatbotVO doc : docFiles) {
-                                if (CommonUtil.isNotEmpty(doc.getFileName())) {
-                                    ragDocs.add(doc);
-                                    ragDocNames.append("- ").append(doc.getFileName()).append("\n");
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    logger.warn("리스크진단 RAG 문서 조회 실패: {}", e.getMessage());
-                }
-            }
-
-            // ④-1 자사 역량 RAG 검색 — 항목별 '좁은' 쿼리 여러 개를 병렬로 던져 각 표/섹션을 정확히 끌어온다.
-            //     (한 방 broad 쿼리는 임베딩이 여러 주제의 평균이 되어 인력표·인증표 등 특정 청크를 놓침)
-            String companyContext = "";
-            if (!datasetIds.isEmpty()) {
-                callback.onStatus("searching_rag", "자사 역량 자료 검색 중");
-                companyContext = retrieveCompanyContext(datasetIds, modelId, threadId, agentId);
-                logger.info("리스크진단 자사역량 RAG 컨텍스트 수신 - 길이:{}",
-                        companyContext != null ? companyContext.length() : 0);
-            }
-            if (CommonUtil.isEmpty(companyContext)) {
-                // RAG 미연결/검색 실패 시 — 문서명 목록만 참고로 제공
-                companyContext = ragDocNames.length() > 0
-                        ? "(검색 결과 없음 — 참고 문서 목록)\n" + ragDocNames
-                        : "(자사 역량 자료 없음)";
-            }
-
-            // ④-2 전체 리포트 생성 — 9000/query(대용량 컨텍스트)로 RFP 임베딩 없이 단일 생성(섹션 간 일관성 유지).
-            //     모든 섹션을 [[SEC:키]]…[[/SEC]] 구분자로 한 번에 받는다.
-            callback.onStatus("analyzing_sections", "리스크 진단 리포트 생성 중");
-            String reportPrompt = buildRiskReportPrompt(llmPrompt, tmplFieldList, rfpTextForPrompt,
-                    companyContext, CommonUtil.isNotEmpty(query) ? query : "(추가 요청 없음)");
-            String aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId);
-            // 응답이 비면 1회 재시도
-            if (CommonUtil.isEmpty(aiResponse)) {
-                logger.warn("리스크진단 리포트 1차 응답 없음 — 재시도");
-                aiResponse = callLlmQuerySync(reportPrompt, modelId, threadId);
-            }
-
-            // ⑤ 섹션 구분자([[SEC:키]]…[[/SEC]]) 파싱 → key별 HTML
-            Map<String, String> sectionHtmlMap = parseRiskSections(aiResponse, tmplFieldList);
-            int filledSections = 0;
-            for (String v : sectionHtmlMap.values()) {
-                if (CommonUtil.isNotEmpty(v)) {
-                    filledSections++;
-                }
-            }
-            logger.info("리스크진단 리포트 생성 완료 - 파싱된 섹션:{}/{}, 응답 길이:{}",
-                    filledSections, sectionHtmlMap.size(), aiResponse != null ? aiResponse.length() : 0);
-
-            // 요약 텍스트 (채팅 버블용) — HTML 태그 제거한 평문
-            String executiveSummary = "";
-            for (String summaryKey : new String[]{"executive_summary", "요약", "summary", "핵심요약"}) {
-                String summaryVal = sectionHtmlMap.get(summaryKey);
-                if (CommonUtil.isNotEmpty(summaryVal)) {
-                    executiveSummary = stripHtmlTags(summaryVal);
-                    break;
-                }
-            }
-
-            // ⑥ 리포트 HTML 조립 — LLM이 생성한 HTML 조각을 escape 없이 {{key}}에 직접 주입
-            //    (공용 TmplHtmlRenderService는 값을 escape하므로 리스크 리포트는 직접 치환한다)
-            String reportHtml = CommonUtil.isNotEmpty(tmpl.getTmplHtml())
-                    ? tmpl.getTmplHtml() : "<div class=\"risk-report\"></div>";
-            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
-                if (field == null || CommonUtil.isEmpty(field.getJsonKey())) {
-                    continue;
-                }
-                String key = field.getJsonKey();
-                if ("sources".equalsIgnoreCase(key)) {
-                    continue;
-                }
-                String v = sectionHtmlMap.get(key);
-                String htmlVal = CommonUtil.isNotEmpty(v)
-                        ? v
-                        : "<p class=\"risk-empty\">※ 해당 항목 분석 결과가 비어 있습니다.</p>";
-                reportHtml = reportHtml.replace("{{" + key + "}}", htmlVal);
-            }
-            String sourcesHtml = buildRiskSourcesHtml(uploadedFileNames, ragDocs);
-            reportHtml = reportHtml.replace("{{sources}}", sourcesHtml);
-
-            // ⑦ 전송 + 저장
-            String summaryText = CommonUtil.isNotEmpty(executiveSummary)
-                    ? executiveSummary : "프로젝트 리스크진단 리포트가 생성되었습니다.";
-            callback.onChunk(summaryText, summaryText, null);
-            if (CommonUtil.isNotEmpty(reportHtml)) {
-                callback.onChunk(reportHtml, reportHtml, "report_html");
-            }
-
-            // ⑧ RAG 참조 문서를 TB_CHAT_REF에 저장하기 위해 chatRefItems 구성
-            List<ChatRefItem> chatRefItems = new ArrayList<>();
-            for (ChatbotVO doc : ragDocs) {
-                if (doc == null || CommonUtil.isEmpty(doc.getDocFileId())) {
-                    continue;
-                }
-                ChatRefItem item = new ChatRefItem();
-                item.docFileId = doc.getDocFileId();
-                item.mainPageNo = "1";
-                item.relatedPageNos = new ArrayList<>(Collections.singletonList(1));
-                chatRefItems.add(item);
-            }
-
-            String savedLogId = this.doInsertAiLog(
-                    threadId, agentId, query, summaryText,
-                    0, 0, svcTy, modelId, refId, userId,
-                    null, null, null, null,
-                    null, null, chatRefItems,
-                    null, null,
-                    reportHtml);
-
-            this.updateChatRoomLastChatDt(threadId);
-
-            // 첨부파일(RFP) LOG_ID 연결
-            if (CommonUtil.isNotEmpty(savedLogId) && hasNonNullAttachmentId(attachmentFileIds)) {
-                try {
-                    List<Long> linkFileIds = new ArrayList<>();
-                    for (Long id : attachmentFileIds) {
-                        if (id != null) {
-                            linkFileIds.add(id);
-                        }
-                    }
-                    ChatbotVO linkVO = new ChatbotVO();
-                    linkVO.setChatFileIdList(linkFileIds);
-                    linkVO.setLogId(Long.parseLong(savedLogId));
-                    chatbotDAO.linkChatFilesToLog(linkVO);
-                } catch (Exception e) {
-                    logger.warn("리스크진단 첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
-                }
-            }
-
-            callback.onComplete(summaryText, "", "", new ArrayList<>(), threadId,
-                    CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null,
-                    "", "", "");
-
-        } catch (Exception e) {
-            logger.error("리스크진단 리포트 생성 중 오류: {}", e.getMessage(), e);
-            callback.onError("리스크진단 리포트 생성 중 오류가 발생했습니다: " + e.getMessage());
-        }
-    }
-
-    /** PDFBox로 PDF byte[]에서 텍스트를 추출한다. PDF가 아니거나 실패 시 빈 문자열. */
-    private String extractPdfText(byte[] bytes, String fileName) {
-        if (bytes == null || bytes.length == 0) {
-            return "";
-        }
-        try (org.apache.pdfbox.pdmodel.PDDocument document =
-                     org.apache.pdfbox.pdmodel.PDDocument.load(bytes)) {
-            org.apache.pdfbox.text.PDFTextStripper stripper = new org.apache.pdfbox.text.PDFTextStripper();
-            // 좌표 순서로 추출 — 표/다단 레이아웃에서 같은 행의 셀이 흩어지지 않고 읽기 순서를 유지하도록 한다.
-            stripper.setSortByPosition(true);
-            String text = stripper.getText(document);
-            return text != null ? text.trim() : "";
-        } catch (Exception e) {
-            logger.warn("PDF 텍스트 추출 실패 (file={}): {}", fileName, e.getMessage());
-            return "";
-        }
-    }
-
-    /**
-     * RFP 추출 텍스트가 캡(RISK_RFP_TEXT_MAX_CHARS) 이하면 그대로 반환(빠른 경로),
-     * 초과(대용량 RFP)면 청크로 나눠 9000으로 병렬 요약 후 압축본을 반환한다.
-     * 요약은 리스크 진단에 필요한 핵심(개요·과업·조건·평가·자격·일정·금액·보증/패널티·보안 등)만 추출한다.
-     */
-    private String condenseRfpTextIfLarge(String rfpText, String modelId,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) {
-        if (CommonUtil.isEmpty(rfpText)) {
-            return "";
-        }
-        if (rfpText.length() <= RISK_RFP_TEXT_MAX_CHARS) {
-            return rfpText;
-        }
-        callback.onStatus("condensing_rfp", "대용량 RFP 요약 중");
-
-        int total = rfpText.length();
-        int chunkSize = Math.max(RISK_SUMMARY_MIN_CHUNK_CHARS,
-                (int) Math.ceil((double) total / RISK_SUMMARY_MAX_CHUNKS));
-        // 인접 청크를 overlap만큼 겹쳐 잘라, 청크 경계에 걸친 표·항목(인력표·평가표·일정표 등)이 잘리지 않게 한다.
-        int overlap = Math.min(RISK_SUMMARY_CHUNK_OVERLAP, chunkSize / 4);
-        List<String> chunks = new ArrayList<>();
-        int pos = 0;
-        while (pos < total) {
-            int end = Math.min(total, pos + chunkSize);
-            chunks.add(rfpText.substring(pos, end));
-            if (end >= total) {
-                break;
-            }
-            pos = end - overlap;
-        }
-        logger.info("RFP 요약 시작 - 원본:{}자, 청크:{}개(청크당 ~{}자, overlap:{}자)",
-                total, chunks.size(), chunkSize, overlap);
-
-        // 청크별 병렬 요약 — 순서 보존(원문 순서대로 합쳐야 흐름 유지). 청크 진행 상황을 로그로 남긴다.
-        final int chunkCount = chunks.size();
-        List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
-        for (int ci = 0; ci < chunkCount; ci++) {
-            final int chunkNo = ci + 1;
-            final String fChunk = chunks.get(ci);
-            futures.add(riskSummarizeExecutor.submit(() -> {
-                long chunkStart = System.currentTimeMillis();
-                logger.info("RFP 청크 요약 시작 - {}/{} (입력:{}자)", chunkNo, chunkCount, fChunk.length());
-                String out = callLlmQuerySync(buildRfpSummaryPrompt(fChunk), modelId, "");
-                logger.info("RFP 청크 요약 완료 - {}/{} (입력:{}자 → 요약:{}자, {}ms)",
-                        chunkNo, chunkCount, fChunk.length(), out != null ? out.length() : 0,
-                        System.currentTimeMillis() - chunkStart);
-                return out;
-            }));
-        }
-        StringBuilder condensed = new StringBuilder();
-        int idx = 0;
-        for (java.util.concurrent.Future<String> f : futures) {
-            idx++;
-            try {
-                String s = f.get(RISK_QUERY_READ_TIMEOUT_SEC + 20, java.util.concurrent.TimeUnit.SECONDS);
-                if (CommonUtil.isNotEmpty(s)) {
-                    condensed.append("===== 요약 ").append(idx).append(" =====\n")
-                            .append(s.trim()).append("\n\n");
-                }
-            } catch (Exception e) {
-                logger.warn("RFP 청크 {} 요약 실패: {}", idx, e.getMessage());
-            }
-        }
-
-        String result = condensed.toString().trim();
-        if (CommonUtil.isEmpty(result)) {
-            // 요약이 전부 실패하면 앞부분만이라도 사용(폴백)
-            logger.warn("RFP 요약 결과 없음 — 원문 앞부분으로 폴백");
-            result = rfpText.substring(0, RISK_RFP_TEXT_MAX_CHARS) + "\n...(이하 생략)";
-        } else if (result.length() > RISK_CONDENSED_MAX_CHARS) {
-            // 압축본이 압축 상한(넉넉)을 넘는 극단적 경우에만 안전 절단 — 후반부 요약이 잘리지 않도록 캡을 크게 둔다
-            logger.warn("RFP 압축본이 상한({}자) 초과 — 안전 절단", RISK_CONDENSED_MAX_CHARS);
-            result = result.substring(0, RISK_CONDENSED_MAX_CHARS) + "\n...(요약 일부 생략)";
-        }
-        logger.info("RFP 요약 완료 - 원본:{}자 → 압축:{}자, 청크:{}개", total, result.length(), chunks.size());
-        return result;
-    }
-
-    /** 대용량 RFP 청크 1개를 리스크 진단 관점에서 요약하는 프롬프트. */
-    private String buildRfpSummaryPrompt(String chunk) {
-        return "다음은 RFP(제안요청서)의 일부입니다. 리스크 진단에 필요한 핵심 정보만 항목형으로 요약하세요.\n"
-                + "포함 대상: 사업 개요/목적, 과업 범위·요구사항, 입찰·계약 조건, 평가 기준·배점, 자격 요건, "
-                + "일정·기간, 금액·예산, 보증금·패널티, 보안·개인정보 요건, "
-                + "**붙임·별지·서식·평가표 등 후반부 첨부 내용**, 기타 제약/유의사항.\n"
-                + "규칙:\n"
-                + "- 해당 내용이 없는 항목은 생략.\n"
-                + "- **표 형태 데이터(평가 배점표, 인력 구성표, 일정표, 자격·인증 목록과 만료일, 금액 내역 등)는 "
-                + "요약·생략하지 말고 항목과 수치를 원문 그대로 보존**하세요(마크다운 표 또는 '항목: 값' 나열).\n"
-                + "- 수치·일정·조항·금액·날짜·배점은 절대 생략·반올림하지 말 것.\n"
-                + "- 이 조각이 붙임/별지/평가기준 등 후반부라도 빠짐없이 핵심을 추출할 것.\n"
-                + "- 인사말·설명 없이 요약 본문만 출력.\n\n## RFP 일부\n" + chunk;
+    public byte[] exportProposalPptx(String slidesJson, String agentId) throws Exception {
+        return proposalAgentService.exportProposalPptx(slidesJson, agentId);
     }
 
     /**
@@ -3460,49 +2272,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 + "\n\n## 자사 역량 자료 (사내 문서 검색 결과 — 적정성 진단·대응책의 근거로 활용)\n" + companyContext
                 + "\n\n## 사용자 추가 요청\n" + userQuery
                 + "\n\n## 다시 강조\n각 항목을 [[SEC:키]]…[[/SEC]] 구분자로만 출력하세요. 구분자 밖 텍스트 금지.";
-    }
-
-    /**
-     * 자사 역량 RAG 검색 — 항목별 좁은 쿼리를 병렬로 던져 각 표/섹션 청크를 정확히 끌어와 합친다.
-     * 한 방 broad 쿼리는 임베딩이 여러 주제의 평균이 되어 인력표·인증표 같은 특정 청크를 top-K에서 놓치므로,
-     * 항목별 focused 쿼리로 분리한다(각 쿼리는 짧아 8192 무관, 병렬이라 빠름).
-     */
-    private String retrieveCompanyContext(List<String> datasetIds, String modelId, String threadId, String agentId) {
-        // {제목, 검색 쿼리} 쌍 — 항목별 좁은 질의
-        String[][] aspects = {
-            {"인력 현황", "자사의 핵심 투입 예정 인력과 전사 인력 구성을 알려줘: 역할·성명·경력연수·보유 자격증·담당 업무, "
-                    + "그리고 직군별 인원수와 비율. 인력표의 모든 행과 수치를 그대로."},
-            {"인증·자격·특허", "자사가 보유한 인증·자격·특허·저작권을 알려줘: 인증/특허 명칭, 번호, 취득일, 유효기간(만료일), "
-                    + "발급기관을 표의 항목과 날짜 그대로."},
-            {"수행 실적", "자사의 주요 납품·구축 실적을 알려줘: 연도·발주기관·사업명·수행역할·계약금액을 표 그대로."},
-            {"기술·솔루션·서비스", "자사의 핵심 기술 역량, 주요 솔루션, 서비스 포트폴리오와 수행 방식을 알려줘: "
-                    + "기술 분야·세부 기술·수준, 솔루션명과 핵심 기능."},
-            {"보안·운영(SLA) 역량", "자사의 보안·개인정보보호 대응 역량과 유지보수·운영(SLA) 역량을 알려줘."}
-        };
-
-        // 병렬 검색
-        List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
-        for (String[] aspect : aspects) {
-            final String q = aspect[1] + " 자료에 있는 표·수치·날짜는 요약하지 말고 그대로 포함하고, "
-                    + "없는 항목은 '해당 자료 없음'으로 표기.";
-            futures.add(riskSummarizeExecutor.submit(
-                    () -> callRagQuerySync(q, datasetIds, modelId, threadId, agentId)));
-        }
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < futures.size(); i++) {
-            String title = aspects[i][0];
-            try {
-                String ans = futures.get(i).get(RISK_QUERY_READ_TIMEOUT_SEC + 20, java.util.concurrent.TimeUnit.SECONDS);
-                logger.info("자사역량 RAG 검색 - [{}] 응답 길이:{}", title, ans != null ? ans.length() : 0);
-                if (CommonUtil.isNotEmpty(ans)) {
-                    sb.append("[").append(title).append("]\n").append(ans.trim()).append("\n\n");
-                }
-            } catch (Exception e) {
-                logger.warn("자사역량 RAG 검색 실패 - [{}]: {}", title, e.getMessage());
-            }
-        }
-        return sb.toString().trim();
     }
 
     /** 템플릿 필드 1개의 출력 형식 지시문(단일 호출 프롬프트의 항목별 가이드). */
@@ -3587,227 +2356,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         return s.trim();
     }
 
-    /** 9111/query(RAG)를 동기 호출하고 done 이벤트의 답변 문자열을 반환한다. dataset_id 벡터 검색 포함. */
-    private String callRagQuerySync(String prompt, List<String> datasetIds, String modelId,
-            String threadId, String agentId) {
-        String ragApiUrl = PropertyUtil.getProperty("Globals.chatbot.ragQuery.apiUrl");
-        if (CommonUtil.isEmpty(ragApiUrl)) {
-            logger.warn("RAG 질의 API URL 미설정");
-            return "";
-        }
-        Map<String, Object> ragParams = new HashMap<>();
-        ragParams.put("query", prompt);
-        ragParams.put("dataset_id", datasetIds != null ? datasetIds : new ArrayList<String>());
-        ragParams.put("model_id", modelId != null ? modelId : "");
-        ragParams.put("room_id", threadId != null ? threadId : "string");
-        ragParams.put("agent_id", agentId != null ? agentId : "");
-        ragParams.put("attachment_file_ids", new ArrayList<String>());
-
-        OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(RISK_QUERY_READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
-                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                .build();
-        com.google.gson.Gson gson = new com.google.gson.Gson();
-        String ragJsonBody = gson.toJson(ragParams);
-        RequestBody ragBody = RequestBody.create(ragJsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
-        Request ragRequest = new Request.Builder()
-                .url(ragApiUrl)
-                .post(ragBody)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "text/event-stream")
-                .build();
-        logger.info("리스크 RAG 단일 호출 시작 - url:{}, readTimeout:{}s, 요청바디길이:{}",
-                ragApiUrl, RISK_QUERY_READ_TIMEOUT_SEC, ragJsonBody.length());
-        // AI 담당자 문의용 — 9111/query 요청 본문 전체 출력
-        logger.info("리스크 RAG 요청 본문 전체:\n{}", ragJsonBody);
-        long startMs = System.currentTimeMillis();
-        try (okhttp3.Response response = client.newCall(ragRequest).execute()) {
-            if (!response.isSuccessful() || response.body() == null) {
-                String errBody = "";
-                try {
-                    if (response.body() != null) {
-                        errBody = response.body().string();
-                    }
-                } catch (Exception ignore) {
-                    // 본문 읽기 실패 무시
-                }
-                logger.warn("RAG 질의 응답 오류: {} - body: {}", response.code(), errBody);
-                return "";
-            }
-            try (okhttp3.ResponseBody responseBody = response.body()) {
-                BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(responseBody.byteStream(), "UTF-8"));
-                StringBuilder answerBuilder = new StringBuilder();
-                String doneAnswer = "";
-                String line;
-                JSONParser jsonParser = new JSONParser();
-                while ((line = reader.readLine()) != null) {
-                    if (line.startsWith("event: ")) {
-                        continue;
-                    }
-                    String jsonStr;
-                    if (line.startsWith("data: ")) {
-                        jsonStr = line.substring(6).trim();
-                    } else if (line.trim().startsWith("{")) {
-                        jsonStr = line.trim();
-                    } else {
-                        continue;
-                    }
-                    if (jsonStr.isEmpty()) {
-                        continue;
-                    }
-                    try {
-                        JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
-                        Object textObj = data.get("text");
-                        if (textObj != null) {
-                            answerBuilder.append(String.valueOf(textObj));
-                        }
-                        Object answerObj = data.get("answer");
-                        if (answerObj == null) {
-                            answerObj = data.get("답변");
-                        }
-                        if (answerObj != null) {
-                            doneAnswer = String.valueOf(answerObj);
-                        }
-                    } catch (Exception ignore) {
-                        // 개별 라인 파싱 실패는 무시
-                    }
-                }
-                String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
-                logger.info("리스크 RAG 응답 수신 완료 - 길이:{}, 소요:{}ms",
-                        result != null ? result.length() : 0, System.currentTimeMillis() - startMs);
-                return result;
-            }
-        } catch (java.net.SocketTimeoutException te) {
-            logger.warn("리스크 RAG 호출 타임아웃 - {}s 초과({}ms 경과). 응답이 너무 길거나 AI 서버 지연일 수 있음: {}",
-                    RISK_QUERY_READ_TIMEOUT_SEC, System.currentTimeMillis() - startMs, te.getMessage());
-            return "";
-        } catch (Exception e) {
-            logger.warn("리스크 RAG 호출 실패 - {}({}ms 경과): {}",
-                    e.getClass().getSimpleName(), System.currentTimeMillis() - startMs, e.getMessage());
-            return "";
-        }
-    }
-
-    /**
-     * 일반 LLM 엔드포인트(9000/query)를 동기 호출하고 답변 문자열을 반환한다.
-     * 데이터셋(RAG) 없이 RFP 본문만으로 진단할 때 사용 — dataset_id 불필요.
-     */
-    private String callLlmQuerySync(String prompt, String modelId, String threadId) {
-        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiUrl");
-        if (CommonUtil.isEmpty(apiUrl)) {
-            logger.warn("리스크 LLM 질의 실패 - gpt.apiUrl 미설정");
-            return "";
-        }
-        Map<String, Object> params = new HashMap<>();
-        params.put("query", prompt);
-        params.put("model_id", modelId != null ? modelId : "");
-        params.put("room_id", threadId != null ? threadId : "");
-
-        OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(RISK_QUERY_READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
-                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                .build();
-        com.google.gson.Gson gson = new com.google.gson.Gson();
-        String jsonBody = gson.toJson(params);
-        RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
-        Request request = new Request.Builder()
-                .url(apiUrl)
-                .post(body)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "text/event-stream")
-                .build();
-        logger.info("리스크 LLM 단일 호출 시작 - url:{}, readTimeout:{}s, 요청바디길이:{}",
-                apiUrl, RISK_QUERY_READ_TIMEOUT_SEC, jsonBody.length());
-        long startMs = System.currentTimeMillis();
-        try (okhttp3.Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful() || response.body() == null) {
-                logger.warn("리스크 LLM 질의 응답 오류: {}", response.code());
-                return "";
-            }
-            try (okhttp3.ResponseBody responseBody = response.body()) {
-                BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(responseBody.byteStream(), "UTF-8"));
-                StringBuilder answerBuilder = new StringBuilder();
-                String doneAnswer = "";
-                String line;
-                JSONParser jsonParser = new JSONParser();
-                while ((line = reader.readLine()) != null) {
-                    if (line.startsWith("event: ")) {
-                        continue;
-                    }
-                    String jsonStr;
-                    if (line.startsWith("data: ")) {
-                        jsonStr = line.substring(6).trim();
-                    } else if (line.trim().startsWith("{")) {
-                        jsonStr = line.trim();
-                    } else {
-                        continue;
-                    }
-                    if (jsonStr.isEmpty()) {
-                        continue;
-                    }
-                    try {
-                        JSONObject data = (JSONObject) jsonParser.parse(jsonStr);
-                        Object textObj = data.get("text");
-                        if (textObj != null) {
-                            answerBuilder.append(String.valueOf(textObj));
-                        }
-                        Object answerObj = data.get("answer");
-                        if (answerObj == null) {
-                            answerObj = data.get("답변");
-                        }
-                        if (answerObj != null) {
-                            doneAnswer = String.valueOf(answerObj);
-                        }
-                    } catch (Exception ignore) {
-                        // 개별 라인 파싱 실패는 무시
-                    }
-                }
-                String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
-                logger.info("리스크 LLM 응답 수신 완료 - 길이:{}, 소요:{}ms",
-                        result != null ? result.length() : 0, System.currentTimeMillis() - startMs);
-                return result;
-            }
-        } catch (java.net.SocketTimeoutException te) {
-            logger.warn("리스크 LLM 호출 타임아웃 - {}s 초과({}ms 경과). 응답이 너무 길거나 AI 서버 지연일 수 있음: {}",
-                    RISK_QUERY_READ_TIMEOUT_SEC, System.currentTimeMillis() - startMs, te.getMessage());
-            return "";
-        } catch (Exception e) {
-            logger.warn("리스크 LLM 호출 실패 - {}({}ms 경과): {}",
-                    e.getClass().getSimpleName(), System.currentTimeMillis() - startMs, e.getMessage());
-            return "";
-        }
-    }
-
-    /** 리스크진단 출처 HTML — 업로드한 RFP 파일명 + 자사 역량 RAG 문서 링크. */
-    private String buildRiskSourcesHtml(List<String> uploadedFileNames, List<ChatbotVO> ragDocs) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<ul>");
-        if (uploadedFileNames != null) {
-            for (String name : uploadedFileNames) {
-                if (CommonUtil.isEmpty(name)) {
-                    continue;
-                }
-                sb.append("<li>업로드 RFP: ").append(htmlEscape(name)).append("</li>");
-            }
-        }
-        if (ragDocs != null) {
-            for (ChatbotVO doc : ragDocs) {
-                if (doc == null || CommonUtil.isEmpty(doc.getFileName())) {
-                    continue;
-                }
-                String fileName = htmlEscape(doc.getFileName());
-                String docFileId = CommonUtil.nullToBlank(doc.getDocFileId());
-                String href = RAG_DOC_LINK_PREFIX + docFileId;
-                sb.append("<li>자사 역량 문서: <a href=\"").append(href).append("\">")
-                        .append(fileName).append("</a></li>");
-            }
-        }
-        sb.append("</ul>");
-        return sb.toString();
-    }
-
     /**
      * AI 이미지 API를 호출해 지식 카드 썸네일용 base64 이미지 문자열을 반환한다.
      * 실패 시 null.
@@ -3826,14 +2374,15 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             promptContent += "\n답변: " + truncateTitle(rContent, 500);
         }
 
-        return callAiImageApi(promptContent);
+        return callAiImageApi(promptContent, null);
     }
 
     /**
      * Globals.chatbot.image.apiUrl 동기 호출. 응답 JSON의 image 필드(base64)를 반환한다.
      * data:image/...;base64, 접두사가 있으면 제거한 순수 base64만 저장한다.
+     * 패키지-private: 에이전트 서비스에서 호출 가능.
      */
-    private String callAiImageApi(String query) {
+    public String callAiImageApi(String query, String agentId) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.image.apiUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("이미지 생성 실패 - image API URL 미설정");
@@ -3843,9 +2392,16 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return null;
         }
 
+        String modelId = "gpt";
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
         params.put("room_id", "");
+        params.put("model", modelId);
+        params.put("aspect_ratio", "16:9");
+
+        com.google.gson.Gson imgGson = new com.google.gson.Gson();
+        String imgReqJson = imgGson.toJson(params);
+        long imgStartMs = System.currentTimeMillis();
 
         try {
             OkHttpClient client = new OkHttpClient.Builder()
@@ -3853,8 +2409,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build();
 
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            String jsonBody = gson.toJson(params);
+            String jsonBody = imgReqJson;
             RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
             Request request = new Request.Builder()
@@ -3867,14 +2422,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             logger.info("AI 썸네일 이미지 호출 시작 - url: {}", apiUrl);
 
             try (okhttp3.Response response = client.newCall(request).execute()) {
+                int imgRespMs = (int) Math.min(System.currentTimeMillis() - imgStartMs, Integer.MAX_VALUE);
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("AI 썸네일 이미지 응답 오류: {}", response.code());
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "HTTP " + response.code(), null);
                     return null;
                 }
 
                 try (okhttp3.ResponseBody responseBody = response.body()) {
                     String raw = responseBody.string();
                     if (CommonUtil.isEmpty(raw)) {
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "빈 응답", null);
                         return null;
                     }
                     String trimmed = raw.trim();
@@ -3897,27 +2455,34 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 Object errContentObj = data.get("errorContent");
                                 String errorContent = errContentObj != null ? String.valueOf(errContentObj) : "";
                                 logger.warn("AI 썸네일 이미지 API 오류: {} - {}", errorCode, errorContent);
+                                apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", errorCode + ": " + errorContent, null);
                                 return null;
                             }
                         }
 
                         Object imageObj = data.get("image");
                         if (imageObj == null) {
+                            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "이미지 필드 없음", null);
                             return null;
                         }
                         String image = String.valueOf(imageObj).trim();
                         if (CommonUtil.isEmpty(image)) {
+                            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "이미지 값 없음", null);
                             return null;
                         }
                         String normalized = stripDataUrlBase64Prefix(image);
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "Y", null, null);
                         return normalized;
                     } catch (Exception e) {
                         logger.warn("AI 썸네일 이미지 응답 파싱 오류: {}", e.getMessage());
+                        apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", "파싱 오류: " + e.getMessage(), null);
                     }
                 }
             }
         } catch (Exception e) {
+            int imgRespMs = (int) Math.min(System.currentTimeMillis() - imgStartMs, Integer.MAX_VALUE);
             logger.warn("AI 썸네일 이미지 호출 중 오류: {}", e.getMessage());
+            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "image", imgReqJson, 0, 0, imgRespMs, "N", e.getMessage(), null);
         }
 
         return null;
@@ -4303,27 +2868,18 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
 
     /**
      * 번역 결과 텍스트를 .docx/.txt 파일 바이트로 변환한다.
+     * TranslationAgentService 로 위임한다.
      */
     public byte[] exportTranslationFile(String content, String fileType) throws Exception {
-        if ("docx".equalsIgnoreCase(fileType)) {
-            return TranslationDocUtil.textToDocxBytes(content);
-        }
-        return TranslationDocUtil.textToTxtBytes(content);
+        return translationAgentService.exportTranslationFile(content, fileType);
     }
 
     /**
      * 즉시번역(드래그 선택 번역) — 동기 1회 호출, 채팅 로그를 남기지 않는다.
+     * TranslationAgentService 로 위임한다.
      */
     public String instantTranslate(String content, String targetLang, String tone) {
-        StringBuilder prompt = new StringBuilder(TRANSLATE_BASE_PROMPT);
-        prompt.append("\n\n## 번역 조건");
-        prompt.append("\n- 목표 언어: ").append(CommonUtil.isNotEmpty(targetLang) ? targetLang : "영어");
-        if (CommonUtil.isNotEmpty(tone)) {
-            prompt.append("\n- 톤: ").append(tone);
-        }
-        prompt.append("\n\n## 원문\n").append(content);
-
-        return callAiSummary(prompt.toString(), "instant_translate");
+        return translationAgentService.instantTranslate(content, targetLang, tone);
     }
 
     /**
@@ -4393,316 +2949,22 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     }
 
     /**
-     * done 이벤트의 file_info 배열 항목 (TB_CHAT_REF 다건 INSERT용)
+     * done 이벤트의 file_info 배열 항목 (TB_CHAT_REF 다건 INSERT용).
+     * 패키지-private: 에이전트 서비스에서 참조 가능.
      */
-    private static class ChatRefItem {
+    public static class ChatRefItem {
         /** TB_CHAT_REF.DOC_FILE_ID / API docFileId */
-        String docFileId;
-        String mainPageNo;
-        List<Integer> relatedPageNos = new ArrayList<>();
+        public String docFileId;
+        public String mainPageNo;
+        public List<Integer> relatedPageNos = new ArrayList<>();
     }
 
     /**
      * 외부에서 prompt를 받아 AI 요약 API를 호출하고 방사형 차트용 JSON 문자열을 반환한다.
+     * SurveyAgentService 로 위임한다.
      */
     public String getPsychologyChartData(String prompt) {
-        return callAiSummary(prompt, "방사형 차트 데이터");
-    }
-
-    /**
-     * 번역 에이전트 파일 모드: 첨부된 .docx/.txt 파일에서 텍스트를 추출 → AI 1회 호출로 번역 →
-     * 일반 답변과 동일하게 번역된 텍스트를 채팅 응답으로 전달한다.
-     */
-    private void deliverTranslationFileViaWebSocket(String query, String threadId, String userId, String svcTy,
-            String modelId, String refId, String agentId, List<Long> attachmentFileIds,
-            ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
-
-        Long inputChatFileId = null;
-        for (Long id : attachmentFileIds) {
-            if (id != null) {
-                inputChatFileId = id;
-                break;
-            }
-        }
-        if (inputChatFileId == null) {
-            callback.onError("번역할 첨부파일을 찾을 수 없습니다.");
-            return;
-        }
-
-        ChatbotVO searchVO = new ChatbotVO();
-        searchVO.setChatFileId(inputChatFileId);
-        ChatbotVO fileRow = chatbotDAO.selectChatFileById(searchVO);
-        if (fileRow == null || CommonUtil.isEmpty(fileRow.getFilePath())) {
-            callback.onError("첨부파일 정보를 찾을 수 없습니다.");
-            return;
-        }
-
-        String ext = resolveTranslationFileExtension(fileRow.getFileName(), fileRow.getFileType());
-        if (!"docx".equalsIgnoreCase(ext) && !"txt".equalsIgnoreCase(ext)) {
-            callback.onError("지원하지 않는 파일 형식입니다. (.docx, .txt만 지원)");
-            return;
-        }
-
-        byte[] originalBytes = fileService.downloadStorageObjectBytes(fileRow.getFilePath());
-        List<TranslationDocUtil.Segment> segments = TranslationDocUtil.extractSegments(originalBytes, ext);
-        if (segments.isEmpty()) {
-            callback.onError("번역할 텍스트를 찾을 수 없습니다.");
-            return;
-        }
-
-        String extractedText = segments.stream()
-                .map(TranslationDocUtil.Segment::getText)
-                .collect(Collectors.joining("\n"));
-
-        String prompt = TRANSLATE_BASE_PROMPT
-                + "\n\n" + (query != null ? query : "")
-                + "\n\n## 원문\n" + extractedText;
-
-        String translatedText = callAiSummary(prompt, "translate_file");
-        if (CommonUtil.isEmpty(translatedText)) {
-            callback.onError("번역에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-            return;
-        }
-
-        callback.onChunk(translatedText, translatedText, null);
-
-        String savedLogId = "";
-        if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
-            try {
-                savedLogId = doInsertAiLog(threadId, agentId, query, translatedText, 0, 0, svcTy, modelId, refId, userId,
-                        "", "", "", "", "", "", new ArrayList<>(), "", "", "", "");
-                updateChatRoomLastChatDt(threadId);
-                if (CommonUtil.isNotEmpty(savedLogId)) {
-                    try {
-                        List<Long> linkFileIds = new ArrayList<>();
-                        for (Long id : attachmentFileIds) {
-                            if (id != null) {
-                                linkFileIds.add(id);
-                            }
-                        }
-                        ChatbotVO linkVO = new ChatbotVO();
-                        linkVO.setChatFileIdList(linkFileIds);
-                        linkVO.setLogId(Long.parseLong(savedLogId));
-                        chatbotDAO.linkChatFilesToLog(linkVO);
-                    } catch (Exception e) {
-                        logger.warn("첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
-            }
-        }
-
-        callback.onComplete(translatedText, "", "", new ArrayList<>(), CommonUtil.nullToBlank(threadId),
-                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null, null);
-    }
-
-    private String resolveTranslationFileExtension(String fileName, String fileType) {
-        if (CommonUtil.isNotEmpty(fileName)) {
-            int dotIdx = fileName.lastIndexOf('.');
-            if (dotIdx >= 0 && dotIdx < fileName.length() - 1) {
-                return fileName.substring(dotIdx + 1).toLowerCase();
-            }
-        }
-        if (CommonUtil.isNotEmpty(fileType)) {
-            String normalized = fileType.trim().toLowerCase();
-            int slashIdx = normalized.lastIndexOf('/');
-            return slashIdx >= 0 ? normalized.substring(slashIdx + 1) : normalized;
-        }
-        return "";
-    }
-
-    /**
-     * 뉴스 큐레이션 에이전트 전용.
-     * 관심 카테고리마다 RSS 수집 → AI 호출 → 서버에서 JSON 배열 병합.
-     */
-    @SuppressWarnings("unchecked")
-    private void deliverNewsRecommendationViaWebSocket(String query, String threadId, String userId, String svcTy,
-            String modelId, String refId, String agentId, List<Long> attachmentFileIds,
-            Map<String, Object> additionalConfig, ChatbotWebSocketHandler.ChatbotStreamingCallback callback) throws Exception {
-        String rawQuery = query != null ? query : "";
-        List<String> interestCategories = selectNewsInterestCategoryCodeIds(userId);
-        if (interestCategories.isEmpty()) {
-            callback.onError("뉴스 관심 카테고리가 설정되지 않았습니다.");
-            return;
-        }
-
-        Map<String, Object> config = additionalConfig != null ? additionalConfig : Collections.emptyMap();
-        List<Map<String, Object>> candidateSources = (List<Map<String, Object>>) config.get("candidateSources");
-        Map<String, List<NewsRssUtil.FeedSpec>> feedMap = NewsRssUtil.buildFeedMap(candidateSources);
-
-        String pressLabel = "연합뉴스";
-        int snippetMaxLength = 400;
-        Object engineObj = config.get("engine");
-        if (engineObj instanceof Map) {
-            Object candidateFetchObj = ((Map<String, Object>) engineObj).get("candidateFetch");
-            if (candidateFetchObj instanceof Map) {
-                Map<String, Object> candidateFetch = (Map<String, Object>) candidateFetchObj;
-                Object pressLabelObj = candidateFetch.get("pressLabel");
-                if (pressLabelObj != null && CommonUtil.isNotEmpty(String.valueOf(pressLabelObj))) {
-                    pressLabel = String.valueOf(pressLabelObj);
-                }
-                Object snippetMaxLengthObj = candidateFetch.get("snippetMaxLength");
-                if (snippetMaxLengthObj instanceof Number) {
-                    snippetMaxLength = ((Number) snippetMaxLengthObj).intValue();
-                }
-            }
-        }
-
-        List<String> categoryJsonList = new ArrayList<>();
-        for (String codeId : interestCategories) {
-            List<RssArticleRow> categoryRows = NewsRssUtil.collectCandidatesForCodeId(restApiManager, logger, codeId,
-                    feedMap, pressLabel, snippetMaxLength);
-            if (categoryRows.isEmpty()) {
-                continue;
-            }
-            String categoryLabel = categoryRows.get(0).getRssCategory();
-            String curatorPrompt = appendNewsCandidateArticlesToCuratorQuery(rawQuery, categoryRows, codeId, categoryLabel);
-            String categoryAiJson = runNewsCuratorAi(curatorPrompt, categoryRows);
-            if (CommonUtil.isEmpty(categoryAiJson)) {
-                continue;
-            }
-            categoryJsonList.add(categoryAiJson.trim());
-        }
-        String curatorAiJson = categoryJsonList.isEmpty() ? "" : mergeNewsCuratorCategoryResponses(categoryJsonList);
-        if (CommonUtil.isEmpty(curatorAiJson)) {
-            String msg = "AI가 선정한 뉴스를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
-            callback.onError(msg);
-            return;
-        }
-        callback.onChunk(curatorAiJson, curatorAiJson, null);
-        String qContentForDb = buildNewsCurationQContentForDb(rawQuery, interestCategories);
-        String savedLogId = "";
-        if (!"llmTest".equals(svcTy) && CommonUtil.isNotEmpty(threadId)) {
-            try {
-                savedLogId = doInsertAiLog(
-                        threadId,
-                        agentId,
-                        qContentForDb,
-                        curatorAiJson,
-                        0,
-                        0,
-                        svcTy,
-                        modelId,
-                        refId,
-                        userId,
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        new ArrayList<>(),
-                        "",
-                        "",
-                        "",
-                        "");
-                updateChatRoomLastChatDt(threadId);
-                if (CommonUtil.isNotEmpty(savedLogId) && attachmentFileIds != null && !attachmentFileIds.isEmpty()) {
-                    try {
-                        ChatbotVO fileVO = new ChatbotVO();
-                        fileVO.setChatFileIdList(attachmentFileIds);
-                        fileVO.setLogId(Long.parseLong(savedLogId));
-                        chatbotDAO.linkChatFilesToLog(fileVO);
-                    } catch (Exception e) {
-                        logger.warn("첨부파일 LOG_ID 연결 실패: {}", e.getMessage());
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("챗봇 로그 저장 실패: {}", e.getMessage());
-            }
-        }
-        callback.onComplete(curatorAiJson, "", "", new ArrayList<>(), CommonUtil.nullToBlank(threadId),
-                CommonUtil.isNotEmpty(savedLogId) ? savedLogId : null, null, null, null);
-    }
-
-    /** AI 큐레이션 JSON 배열 응답. */
-    private String runNewsCuratorAi(String curatorPrompt, List<RssArticleRow> rssCandidateRows) {
-        String curatorAiJson = callAiSummary(curatorPrompt, "news_curate");
-        if (CommonUtil.isEmpty(curatorAiJson)) {
-            return "";
-        }
-        return curatorAiJson.trim();
-    }
-
-    private static String appendNewsCandidateArticlesToCuratorQuery(String frontendTemplate, List<RssArticleRow> candidates,
-            String codeId, String categoryLabel) {
-        String block = buildNewsCandidateArticlesMetadataBlock(candidates, codeId, categoryLabel);
-        int roleIdx = frontendTemplate.indexOf("[역할]");
-        if (roleIdx >= 0) {
-            return frontendTemplate.substring(0, roleIdx).trim() + "\n" + block + "\n" + frontendTemplate.substring(roleIdx);
-        }
-        return frontendTemplate.trim() + "\n\n" + block;
-    }
-
-    /** TB_CHAT_LOG.Q_CONTENT — 프롬프트 템플릿 + 관심 카테고리 CODE_ID 목록 */
-    private static String buildNewsCurationQContentForDb(String rawQuery, List<String> categoryCodeIds) {
-        String base = rawQuery != null ? rawQuery.trim() : "";
-        String categoryLine = "- 선정 대상 카테고리: " + NEWS_CURATE_PROMPT_GSON.toJson(categoryCodeIds);
-        if (CommonUtil.isEmpty(base)) {
-            return categoryLine;
-        }
-        return base + "\n\n" + categoryLine;
-    }
-
-    private static String buildNewsCandidateArticlesMetadataBlock(List<RssArticleRow> candidates, String codeId,
-            String categoryLabel) {
-        List<Map<String, Object>> curatorInputArticles = new ArrayList<>(candidates.size());
-        for (RssArticleRow candidateRow : candidates) {
-            curatorInputArticles.add(NewsRssUtil.curatorPromptArticleMap(candidateRow));
-        }
-        String articlesJson = NEWS_CURATE_PROMPT_GSON.toJson(curatorInputArticles);
-        String normalizedCodeId = codeId != null ? codeId.trim() : "";
-        String normalizedCategoryLabel = categoryLabel != null ? categoryLabel.trim() : "";
-        if (normalizedCategoryLabel.isEmpty()) {
-            normalizedCategoryLabel = CommonUtil.isNotEmpty(normalizedCodeId) ? normalizedCodeId : "미분류";
-        }
-        StringBuilder block = new StringBuilder();
-        block.append("- 선정 대상 카테고리: ").append(normalizedCategoryLabel)
-                .append(" (CODE_ID: ").append(normalizedCodeId).append(")\n");
-        block.append("- 후보 기사 목록(JSON 배열): ").append(articlesJson);
-        return block.toString();
-    }
-
-    /**
-     * 카테고리별 AI 응답 JSON 문자열을 파싱 없이 문자열 그대로 이어 붙여 하나의 JSON 배열로 만든다.
-     * 각 응답이 이미 배열 형태([ ... ])라고 가정하며, 그렇지 않으면 원문 그대로 하나의 원소로 포함한다.
-     */
-    private static String mergeNewsCuratorCategoryResponses(List<String> categoryJsonList) {
-        StringBuilder sb = new StringBuilder("[");
-        boolean firstItem = true;
-        for (String json : categoryJsonList) {
-            String trimmed = json.trim();
-            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-                String inner = trimmed.substring(1, trimmed.length() - 1).trim();
-                if (inner.isEmpty()) {
-                    continue;
-                }
-                if (!firstItem) {
-                    sb.append(",");
-                }
-                sb.append(inner);
-            } else {
-                if (!firstItem) {
-                    sb.append(",");
-                }
-                sb.append(trimmed);
-            }
-            firstItem = false;
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    /** TB_USER_INTEREST_NEWS_CATEGORY.NEWS_CATEGORY_CD → RSS용 codeId 목록 */
-    private List<String> selectNewsInterestCategoryCodeIds(String userId) throws Exception {
-        if (CommonUtil.isEmpty(userId)) {
-            return Collections.emptyList();
-        }
-        ChatbotVO param = new ChatbotVO();
-        param.setUserId(userId);
-        ChatbotVO saved = chatbotDAO.selectUserNewsInterestCategory(param);
-        return parseNewsCategoryCdJson(saved != null ? saved.getNewsCategoryCd() : null);
+        return surveyAgentService.getPsychologyChartData(prompt);
     }
 
     private List<String> parseNewsCategoryCdJson(String newsCategoryCdJson) {
@@ -4725,7 +2987,6 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             return Collections.emptyList();
         }
     }
-
 
     public void deleteBatchAuto() throws Exception {
         logger.info("=== 채팅 첨부파일 삭제 배치 시작 ===");

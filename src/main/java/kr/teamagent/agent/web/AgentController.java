@@ -35,8 +35,6 @@ public class AgentController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
-    
-
     /**
      * 모델 옵션 목록 조회 API
      * @return { dataList: ModelVO[] }

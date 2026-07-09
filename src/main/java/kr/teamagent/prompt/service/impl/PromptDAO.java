@@ -132,6 +132,16 @@ public class PromptDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 에이전트 매핑 프롬프트 본문 조회 (TB_PROMPT_APPLY_AGT JOIN)
+     * @param agentId 에이전트 ID
+     * @return CONTENT
+     * @throws Exception
+     */
+    public String selectPromptContentByAgentId(String agentId) throws Exception {
+        return selectOne("prompt.selectPromptContentByAgentId", agentId);
+    }
+
+    /**
      * 에이전트 목록 조회
      * @return
      * @throws Exception

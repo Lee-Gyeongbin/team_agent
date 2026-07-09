@@ -44,6 +44,21 @@
         LIMIT 1
     </select>
 
+    <select id="selectPromptContentByAgentId" parameterType="string" resultType="string">
+        /* 에이전트 매핑 프롬프트 본문 조회 prompt.selectPromptContentByAgentId */
+        SELECT
+            P.CONTENT
+        FROM TB_PROMPT P
+            JOIN TB_PROMPT_APPLY_AGT M ON P.PROMPT_ID = M.PROMPT_ID
+        WHERE 1=1
+            AND M.AGENT_ID = #{agentId}
+            AND M.APPLY_YN = 'Y'
+            AND P.USE_YN = 'Y'
+            AND P.APPLY_LLM_YN = 'Y'
+        ORDER BY P.PRIORITY ASC
+        LIMIT 1
+    </select>
+
     <select id="selectAgentList" resultMap="agentMap">
         /* 에이전트 목록 조회 prompt.selectAgentList */
         SELECT

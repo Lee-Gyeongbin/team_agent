@@ -158,7 +158,7 @@ public class MailServiceImpl {
         }
 
         String prompt     = buildSummaryPrompt(mails);
-        String aiResponse = chatbotService.callAiSummary(prompt, "mail_summary");
+        String aiResponse = chatbotService.callAiSummary(prompt, "mail_summary", null);
 
         if (aiResponse == null) {
             throw new RuntimeException("AI_FAILED");
@@ -175,7 +175,7 @@ public class MailServiceImpl {
             : chatHistory;
 
         String prompt = buildMailChatPrompt(message, mailContext, recentHistory);
-        String answer = chatbotService.callAiSummary(prompt, "mail_chat");
+        String answer = chatbotService.callAiSummary(prompt, "mail_chat", null);
 
         if (isBlank(answer)) {
             throw new RuntimeException("AI_FAILED");
@@ -321,7 +321,7 @@ public class MailServiceImpl {
 
     public HashMap<String, Object> getFollowupDraft(String to, String subject, String originalDate) throws Exception {
         String prompt  = buildFollowupDraftPrompt(to, subject, originalDate);
-        String draft   = chatbotService.callAiSummary(prompt, "mail_followup_draft");
+        String draft   = chatbotService.callAiSummary(prompt, "mail_followup_draft", null);
         if (isBlank(draft)) {
             throw new RuntimeException("AI_FAILED");
         }

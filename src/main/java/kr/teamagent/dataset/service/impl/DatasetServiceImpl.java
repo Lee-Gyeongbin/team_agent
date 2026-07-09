@@ -21,6 +21,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
+import kr.teamagent.common.apilog.service.impl.ApiCallLogServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
@@ -36,6 +37,9 @@ import okhttp3.RequestBody;
 public class DatasetServiceImpl extends EgovAbstractServiceImpl {
     private static final Logger logger = LoggerFactory.getLogger(DatasetServiceImpl.class);
     private static final ExecutorService DATASET_BUILD_EXECUTOR = Executors.newFixedThreadPool(5);
+
+    @Autowired
+    private ApiCallLogServiceImpl apiCallLogService;
 
     @Autowired
     private DatasetDAO datasetDAO;
@@ -308,16 +312,26 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
                 .addHeader("Accept", "application/json")
                 .build();
 
+        long startMs = System.currentTimeMillis();
         try (okhttp3.Response response = client.newCall(request).execute()) {
             okhttp3.ResponseBody respBody = response.body();
             String respStr = respBody != null ? respBody.string() : "";
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
             if (!response.isSuccessful()) {
                 logger.warn("dataset test API 실패 - datasetId={}, status={}, body={}", datasetVO.getDatasetId(), response.code(), respStr);
+                apiCallLogService.insertSilently(null, null, apiUrl, "-", "dataset_query", jsonBody, 0, 0, respMs, "N", "HTTP " + response.code(), null);
                 throw new Exception("dataset test API 호출 실패: HTTP " + response.code());
             }
             Type listType = new TypeToken<List<Map<String, Object>>>() {
             }.getType();
-            return new Gson().fromJson(respStr, listType);
+            List<Map<String, Object>> result = new Gson().fromJson(respStr, listType);
+            apiCallLogService.insertSilently(null, null, apiUrl, "-", "dataset_query", jsonBody, 0, 0, respMs, "Y", null, null);
+            return result;
+        } catch (Exception e) {
+            if (e.getMessage() != null && e.getMessage().startsWith("dataset test API 호출 실패")) throw e;
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+            apiCallLogService.insertSilently(null, null, apiUrl, "-", "dataset_query", jsonBody, 0, 0, respMs, "N", e.getMessage(), null);
+            throw e;
         }
     }
 
@@ -382,9 +396,12 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
                 .build();
 
         // API 호출
+        long startMs = System.currentTimeMillis();
         try (okhttp3.Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful() || response.body() == null) {
                 // 에러 발생 시 처리
+                int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+                apiCallLogService.insertSilently(null, null, apiUrl, "-", "dataset_build", jsonBody, 0, 0, respMs, "N", "HTTP " + response.code(), null);
                 sendSseEvent(emitter, "error", buildErrorData("dataset build API response error: " + response.code()));
                 return;
             }
@@ -409,12 +426,16 @@ public class DatasetServiceImpl extends EgovAbstractServiceImpl {
                             return;
                         }
                         if ("done".equals(eventName)) {
+                            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+                            apiCallLogService.insertSilently(null, null, apiUrl, "-", "dataset_build", jsonBody, 0, 0, respMs, "Y", null, null);
                             return;
                         }
                     }
                 }
             }
         } catch (Exception e) {
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+            apiCallLogService.insertSilently(null, null, apiUrl, "-", "dataset_build", jsonBody, 0, 0, respMs, "N", e.getMessage(), null);
             logger.error("dataset build stream relay error - datasetId={}", datasetId, e);
             sendSseEvent(emitter, "error", buildErrorData("dataset build stream relay error"));
         } finally {

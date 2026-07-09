@@ -168,6 +168,16 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 에이전트 매핑 프롬프트 본문 조회
+     * @param agentId 에이전트 ID
+     * @return CONTENT (없으면 null)
+     * @throws Exception
+     */
+    public String getPromptByAgentId(String agentId) throws Exception {
+        return promptDAO.selectPromptContentByAgentId(agentId);
+    }
+
+    /**
      * 에이전트 목록 조회
      * @return
      * @throws Exception

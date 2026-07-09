@@ -711,7 +711,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
             // STEP5 : AI 호출
             logger.info("prompt: {}", prompt);
-            String res = chatbotService.callAiSummary(prompt, "createDoc");
+            String res = chatbotService.callAiSummary(prompt, "createDoc", null);
 
             if (CommonUtil.isEmpty(res)) {
                 resultMap.put("successYn", false);
@@ -778,7 +778,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
             // STEP3 : AI 호출
             logger.info("prompt: {}", prompt);
-            String res = chatbotService.callAiSummary(prompt, "createDoc");
+            String res = chatbotService.callAiSummary(prompt, "createDoc", null);
 
             if (CommonUtil.isEmpty(res)) {
                 resultMap.put("successYn", false);
@@ -865,7 +865,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
 
         String prompt = buildReAskReportPrompt(strippedHtml, searchVO.getAskQuery());
         logger.info("reAskReport prompt: {}", prompt != null ? prompt : "");
-        String res = chatbotService.callAiSummary(prompt, "reAskReport");
+        String res = chatbotService.callAiSummary(prompt, "reAskReport", null);
         if (CommonUtil.isEmpty(res)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "AI 보고서 보완 요청 실패");
@@ -953,7 +953,7 @@ public class LibraryServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
         logger.info("insightReport prompt (placement={}): {}", placement, prompt);
-        String res = chatbotService.callAiSummary(prompt, "insightReport");
+        String res = chatbotService.callAiSummary(prompt, "insightReport", null);
         if (CommonUtil.isEmpty(res)) {
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "AI 보고서 인사이트 분석 실패");
