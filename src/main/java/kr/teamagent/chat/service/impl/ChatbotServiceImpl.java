@@ -2012,6 +2012,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /** 질의 진단 프롬프트(평가기준) 관리 ID — RDB(prompt)에 등록 시 우선 사용, 없으면 기본 루브릭 */
     private static final String DIAGNOSE_PROMPT_ID = "PI_DIAGNOSE";
 
+
     /** 기본 평가 루브릭 (제안서 §2·§3·§6) — prompt 테이블에 PI_DIAGNOSE가 없을 때 사용 */
     private static final String DEFAULT_DIAGNOSE_RUBRIC = String.join("\n",
             "너는 데이터분석 질의의 품질을 평가하는 심사자다.",
@@ -2026,14 +2027,17 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             "- 출력 형태: 5점",
             "판정 규칙:",
             "- 제공된 데이터로 답할 수 없는 주제면 status=OUT_OF_SCOPE, 대체 가능한 통계를 alternatives에 제시.",
-            "- '매출' 등 기준이 여러 개인 모호한 용어가 있으면 status=TERM_AMBIGUOUS, 정의 선택지를 clarificationQuestions로.",
-            "- 80점 이상이면 status=READY, sqlGenerationAllowed=true, rewrittenQuestion에 정제된 질문. 이때 clarificationQuestions는 빈 배열로 둔다.",
-            "- 80점 미만이면 status=CLARIFICATION_REQUIRED.",
-            "보완질문(clarificationQuestions) 규칙(엄격히 지킬 것):",
+            "- 80점 미만이면 status=CLARIFICATION_REQUIRED 또는 TERM_AMBIGUOUS. 이때만 clarificationQuestions·questionPreview를 작성한다.",
+            "보완질문(clarificationQuestions) 규칙 — 80점 미만일 때만 적용:",
             "- SQL 생성에 '반드시' 필요한 핵심 누락만 담는다. 있으면 좋은 수준의 선택적 필터·조건은 절대 넣지 않는다.",
             "- 위 '이 데이터마트에서 제공하는 용어'에 근거가 없는 항목은 보완질문으로 만들지 않는다.",
-            "- 각 항목은 question 텍스트만 작성한다. 선택지(options)는 절대 제공하지 않는다.",
-            "- 정말 필요한 게 없으면 clarificationQuestions는 빈 배열로 둔다.");
+            "- 각 항목: item, question, placeholder, options. 최대 3개.",
+            "- options는 데이터마트 용어만 사용하고 빈 배열 금지. 원 질문의 placeholder 자리에 대체될 후보 단어·표현이어야 한다.",
+            "- placeholder는 원 질문에서 대체되어야 하는 단어만 적는다(예: 기간, 매출액).",
+            "- questionPreview는 원문을 유지하고, 대체되어야 하는 단어만 placeholder 글자 그대로 남긴다.",
+            "- clarificationQuestions[].placeholder와 questionPreview의 대체 대상 단어가 1:1 일치해야 한다.",
+            "- 80점 이상이면 status=READY, sqlGenerationAllowed=true, rewrittenQuestion 작성, clarificationQuestions=[], questionPreview=null.",
+            "참고: 동의어·의미상 매핑이 가능하다면 OUT_OF_SCOPE로 판정하지 않는다. 실행 가능한 질의는 과도하게 막지 말 것.");
 
     /**
      * 데이터분석(SVC_TY='S') 질의 품질 진단 — LLM이 평가기준(프롬프트)으로 점수·상태·보완을 산정한다.
@@ -2051,7 +2055,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         String prompt = buildDiagnosePrompt(question, buildTermContextForDiagnose(datamartId));
         String answer = callAiSummary(prompt, "diagnoseQuestion", null);
         HashMap<String, Object> parsed = parseDiagnosisJson(answer);
-        return parsed != null ? parsed : diagnosisFallback("질의 검증에 실패했습니다. 잠시 후 다시 시도해주세요.");
+        if (parsed != null) {
+            syncQuestionPreviewPlaceholders(question, parsed);
+            return parsed;
+        }
+        return diagnosisFallback("질의 검증에 실패했습니다. 잠시 후 다시 시도해주세요.");
     }
 
     /** 평가기준 프롬프트 + 용어 컨텍스트 + 질문 + JSON 출력 지시를 합쳐 최종 프롬프트 구성 */
@@ -2078,7 +2086,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         sb.append("  \"readinessScore\": 0,\n");
         sb.append("  \"interpretedIntent\": \"질문 의도 요약\",\n");
         sb.append("  \"rewrittenQuestion\": \"READY일 때 정제된 질문, 아니면 null\",\n");
-        sb.append("  \"clarificationQuestions\": [{ \"item\": \"period\", \"question\": \"반드시 필요한 핵심 보완 항목만 (options 없이 질문 텍스트만)\" }],\n");
+        sb.append("  \"questionPreview\": \"READY이면 null, 보완 필요 시 원문 기반 문장(대체되어야 하는 단어는 placeholder 글자만)\",\n");
+        sb.append("  \"clarificationQuestions\": [{ \"item\": \"period|metric|dimension\", \"question\": \"반드시 필요한 핵심 보완 질문\", \"placeholder\": \"원 질문에서 대체되어야 하는 단어\", \"options\": [\"placeholder 자리에 대체될 데이터마트 용어 후보\"] }],\n");
         sb.append("  \"alternatives\": [\"대체 통계1\"],\n");
         sb.append("  \"sqlGenerationAllowed\": false\n");
         sb.append("}");
@@ -2104,6 +2113,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                     continue;
                 }
                 String label = t.getTermNm();
+                if (CommonUtil.isNotEmpty(t.getSynonyms())) {
+                    label += "[동의어:" + t.getSynonyms() + "]";
+                }
                 if (CommonUtil.isNotEmpty(t.getSampleValues())) {
                     label += "(" + t.getSampleValues() + ")";
                 }
@@ -2160,6 +2172,38 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         }
     }
 
+    /** questionPreview에서 clarificationQuestions.placeholder 위치에 { }를 붙인다. */
+    private void syncQuestionPreviewPlaceholders(String originalQuestion, HashMap<String, Object> map) {
+        if ("READY".equals(String.valueOf(map.get("status"))) || !(map.get("clarificationQuestions") instanceof List)) {
+            return;
+        }
+        List<String> placeholders = new ArrayList<>();
+        for (Object o : (List<?>) map.get("clarificationQuestions")) {
+            if (!(o instanceof Map)) {
+                continue;
+            }
+            Object ph = ((Map<?, ?>) o).get("placeholder");
+            if (ph == null || String.valueOf(ph).trim().isEmpty()) {
+                continue;
+            }
+            placeholders.add(String.valueOf(ph).trim());
+        }
+        if (placeholders.isEmpty()) {
+            return;
+        }
+        String preview = map.get("questionPreview") != null ? String.valueOf(map.get("questionPreview")).trim() : "";
+        if (CommonUtil.isEmpty(preview)) {
+            preview = originalQuestion;
+        }
+        placeholders.sort((a, b) -> b.length() - a.length());
+        for (String label : placeholders) {
+            if (!preview.contains("{" + label + "}")) {
+                preview = preview.replace(label, "{" + label + "}");
+            }
+        }
+        map.put("questionPreview", preview);
+    }
+
     /** 진단 실패/예외 시 안전한 폴백 — 전송 차단(sqlGenerationAllowed=false) 유지 */
     private HashMap<String, Object> diagnosisFallback(String message) {
         HashMap<String, Object> map = new HashMap<>();
@@ -2167,9 +2211,13 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         map.put("readinessScore", 0);
         map.put("interpretedIntent", message);
         map.put("rewrittenQuestion", null);
+        map.put("questionPreview", null);
+        map.put("alternatives", new ArrayList<>());
         Map<String, Object> cq = new HashMap<>();
         cq.put("item", "retry");
         cq.put("question", message);
+        cq.put("placeholder", "");
+        cq.put("options", new ArrayList<>());
         List<Map<String, Object>> cqs = new ArrayList<>();
         cqs.add(cq);
         map.put("clarificationQuestions", cqs);
