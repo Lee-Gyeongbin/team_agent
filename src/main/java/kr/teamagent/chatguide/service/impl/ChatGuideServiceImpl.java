@@ -32,6 +32,15 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 챗봇가이드 점검/장애 키 목록 조회 (MAINT_RECOVERY, MAINT_EMERGENCY, MAINT_SCHEDULED)
+     * @return 점검/장애 가이드 목록
+     * @throws Exception
+     */
+    public List<ChatGuideVO> selectChatGuideMaintList() throws Exception {
+        return chatGuideDAO.selectChatGuideMaintList();
+    }
+
+    /**
      * 챗봇가이드 인사멘트 목록 조회
      * @param searchVO 검색 조건
      * @return 인사멘트 목록

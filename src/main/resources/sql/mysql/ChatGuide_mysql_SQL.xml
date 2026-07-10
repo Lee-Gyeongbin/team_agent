@@ -23,6 +23,28 @@
         ORDER BY A.GUIDE_TP_CD, A.GUIDE_KEY
     </select>
 
+    <select id="selectChatGuideMaintList" resultType="chatGuideVO">
+        /* 챗봇가이드 점검/장애 키 목록 조회 chatGuide.selectChatGuideMaintList */
+        SELECT
+            A.GUIDE_ID
+            , A.GUIDE_TP_CD
+            , A.GUIDE_KEY
+            , A.TITLE
+            , A.ENBL_YN
+            , A.CONTENT
+            , A.DSPL_COND
+            , A.START_DT
+            , A.END_DT
+            , A.ADVANCE_NOTICE_CD
+            , A.MAX_CHARS
+            , A.MODIFY_DT
+            , A.AUTO_DSPL_YN
+            , A.AUTO_DETECT_YN
+        FROM TB_CHAT_GUIDE A
+        WHERE 1=1
+          AND A.GUIDE_TP_CD = '004'
+    </select>
+
     <select id="selectChatGuideGreetingList" resultType="chatGuideVO">
         /* 챗봇가이드 인사멘트 조회 chatGuide.selectChatGuideGreetingList */
         SELECT
