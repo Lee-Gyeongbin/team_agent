@@ -198,6 +198,7 @@ public class ProposalAgentService {
             callback.onStatus("generating_slides", "제안 슬라이드 초안 생성 중");
             String langLabel = "ko".equals(lang) ? "한국어" : "English";
 
+            // 에이전트 시스템 프롬프트 — DB(tb_prompt)에서 조회 (관리 화면에서 수정 가능)
             String basePrompt = "";
             try {
                 basePrompt = promptService.getPromptByAgentId(agentId);
@@ -205,16 +206,7 @@ public class ProposalAgentService {
                 logger.warn("PROPOSAL 에이전트 프롬프트 조회 실패 (agentId={}): {}", agentId, e.getMessage());
             }
             if (CommonUtil.isEmpty(basePrompt)) {
-                basePrompt = "당신은 정부 지원 사업 및 기업 B2B 기술 제안서 작성에 정통한 최고의 " + persona + "입니다."
-                        + "\n\n## 과업 목표"
-                        + "\n제공된 [RFP]를 철저히 분석하고, [자사 역량 자료]를 매칭하여 오디언스(" + audience
-                        + ")를 완벽히 설득할 수 있는 맞춤형 영업/기술 제안서 슬라이드 초안을 " + langLabel + "로 작성하세요."
-                        + "\n본 제안서의 핵심 목적은 '왜 우리 회사가 이 사업(과제)을 시장의 그 누구보다 왜, 그리고 어떻게 가장 잘 수행할 수 있는지'를 증명하여 수주(선정) 가능성을 극대화하는 것입니다."
-                        + "\n절대로 리스크 진단·감사 보고서·단순 현황 요약 형식으로 작성하지 마세요. 철저한 '수주 목적의 제안서' 포맷을 유지해야 합니다."
-                        + "\n\n## 핵심 작성 원칙 (내용을 풍부하게 만드는 지침)"
-                        + "\n1. [RFP 분석 기반 문제 도출]: RFP에 명시된 문제점, 기술적 요구사항, 정량적 목표를 파악하여 사업의 필요성을 날카롭게 지적하세요."
-                        + "\n2. [자사 역량의 유기적 결합]: [자사 역량 자료]에 포함된 구체적인 기술 스펙, 특허, 인증명, 수치, 유사 사업 수행 실적, 인력 프로필을 그대로 인용하여 제안의 구체성과 신뢰성을 대폭 높이세요. 단순 나열이 아닌, RFP 요구사항을 해결하는 '근거'로 매칭해야 합니다."
-                        + "\n3. [경쟁사 대비 차별화]: [경쟁사 정보]가 있는 경우, 경쟁사 기술의 한계를 짚고 이를 압도하는 자사만의 독점적 우위(차별화 포인트)를 명확히 부각하세요.";
+                logger.warn("PROPOSAL 에이전트 프롬프트가 비어 있습니다. DB에 등록 여부를 확인하세요. (agentId={})", agentId);
             }
 
             StringBuilder promptBuilder = new StringBuilder();
