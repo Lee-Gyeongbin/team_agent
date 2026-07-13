@@ -67,49 +67,6 @@ import okhttp3.RequestBody;
 public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     
     private static final Logger logger = LoggerFactory.getLogger(ChatbotServiceImpl.class);
-    private static final String AUTO_RECOMMEND_SUB_TY = "AUTO_RECOMMEND";
-    private static final String RECOMMEND_SUB_TY = "RECOMMEND";
-    private static final String CURATION_SUB_TY = "CURATION";
-    private static final String TRANSLATE_SUB_TY = "TRANSLATE";
-    private static final String RESEARCHER_SUB_TY = "RESEARCHER";
-    private static final String RISK_SUB_TY = "RISK";
-    private static final String PROPOSAL_SUB_TY = "PROPOSAL";
-    /** 리스크진단 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
-    private static final String RISK_DEFAULT_TMPL_ID = "TM000008";
-    /** 제안서 초안 기본 리포트 템플릿 ID (subCfg.features.tmplId 미설정 시 폴백) */
-    private static final String PROPOSAL_DEFAULT_TMPL_ID = "TM000009";
-    /** 제안서 생성(9000) 프롬프트에 주입하는 요구사항 텍스트 최대 길이(문자). */
-    private static final int PROPOSAL_RFP_TEXT_MAX_CHARS = 24000;
-    /** 리스크진단 생성(9000) 프롬프트에 주입하는 RFP 추출 텍스트 최대 길이(문자).
-     *  2단계 생성은 대용량 컨텍스트(임베딩 아님)라 RFP 전체를 충분히 담아 분석 충실도를 높인다. */
-    private static final int RISK_RFP_TEXT_MAX_CHARS = 24000;
-    /** 대용량 RFP 요약 시 청크 최대 개수(문서가 커져도 요약 호출 수를 이 값으로 제한). */
-    private static final int RISK_SUMMARY_MAX_CHUNKS = 16;
-    /** 대용량 RFP 요약 시 청크 최소 길이(문자). 너무 잘게 쪼개지지 않도록 하한. */
-    private static final int RISK_SUMMARY_MIN_CHUNK_CHARS = 15000;
-    /** 청크 요약을 합친 '압축 RFP'의 최대 길이(문자). 후반부(붙임·평가기준) 요약이 잘리지 않도록 넉넉히 둔다.
-     *  (이미 압축된 텍스트라 2단계 9000 대용량 컨텍스트에 충분히 들어간다) */
-    private static final int RISK_CONDENSED_MAX_CHARS = 80000;
-    /** 청크 경계에 걸친 표·항목이 잘리지 않도록 인접 청크 간 겹치는 길이(문자). */
-    private static final int RISK_SUMMARY_CHUNK_OVERLAP = 800;
-    /** 리스크진단 단일 호출은 전체 리포트를 한 번에 생성하므로 읽기 타임아웃을 길게 둔다(초). */
-    private static final int RISK_QUERY_READ_TIMEOUT_SEC = 300;
-    /** 리서처 리포트 출처 섹션 — 템플릿 HTML escape 우회용 치환 토큰 */
-    private static final String SOURCES_TOKEN = "@@RSRC_SOURCES@@";
-    /** RAG 문서 출처 링크 — 백엔드 GET 리다이렉트 엔드포인트.
-     *  native target=_blank로 새 탭이 열리면 presigned 파일 URL로 302 리다이렉트된다.
-     *  (/api는 프론트 프록시 prefix — 브라우저가 프론트 도메인에서 요청 → 백엔드로 포워딩) */
-    private static final String RAG_DOC_LINK_PREFIX = "/api/repository/viewDocRedirect.do?docFileId=";
-
-    /** 번역 에이전트 공통 지시문 — 프론트엔드 translateAgentUtil.ts의 TRANSLATE_BASE_PROMPT와 동일하게 유지 */
-    private static final String TRANSLATE_BASE_PROMPT = String.join("\n",
-            "당신은 전문 비즈니스 번역가입니다.",
-            "- 입력 텍스트를 목표 언어로 번역하세요.",
-            "- 단순 직역이 아닌 비즈니스 문서/메일/채팅 맥락에 맞는 의미를 전달하세요.",
-            "- 지정된 톤을 유지하거나 목표 언어 관습에 맞게 자연스럽게 조정하세요.",
-            "- 숫자, 날짜, 고유명사, 회사명, 제품명, 약어는 원문 그대로 유지하세요.",
-            "- 원문의 줄바꿈, 목록, 강조 등 서식을 그대로 유지하세요.",
-            "- 번역 결과 외 다른 설명은 출력하지 마세요.");
 
     /** summary_query 동기 호출 시 프롬프트·응답이 커 지연이 길어질 수 있는 경우의 OkHttp 읽기 타임아웃(초). */
     private static final int SUMMARY_QUERY_READ_TIMEOUT_LONG_SEC = 180;
