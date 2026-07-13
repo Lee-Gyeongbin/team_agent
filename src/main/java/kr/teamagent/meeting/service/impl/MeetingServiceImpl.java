@@ -402,9 +402,10 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
     /**
-     * OpenAI Realtime API 임시 토큰 발급
-     * POST https://api.openai.com/v1/realtime/sessions
-     * 응답에서 client_secret.value (ephemeral token) 추출 후 반환
+     * OpenAI Realtime Transcription API 임시 토큰 발급
+     * POST https://api.openai.com/v1/realtime/client_secrets
+     * type: "transcription" — 순수 전사 전용 세션 (대화 응답·TTS 없음)
+     * 응답에서 value (ephemeral token) 와 expires_at 추출 후 반환
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> getRealtimeToken() {
@@ -425,7 +426,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .build();
 
-            // --- audio.input.transcription ---
+            // --- audio.input.transcription (전사 모델 지정) ---
             JSONObject transcription = new JSONObject();
             transcription.put("model", "gpt-4o-mini-transcribe");
             transcription.put("language", "ko");
@@ -434,34 +435,36 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             JSONObject noiseReduction = new JSONObject();
             noiseReduction.put("type", "far_field");
 
-            // --- audio.input.turn_detection ---
+            // --- audio.input.turn_detection (server_vad) ---
             JSONObject turnDetection = new JSONObject();
             turnDetection.put("type", "server_vad");
             turnDetection.put("threshold", 0.5);
             turnDetection.put("prefix_padding_ms", 300);
             turnDetection.put("silence_duration_ms", 500);
 
-            // --- audio.input ---
-            JSONObject audioInput = new JSONObject();
+            // --- audio.input (PCM 24kHz mono) ---
             JSONObject inputFormat = new JSONObject();
             inputFormat.put("type", "audio/pcm");
             inputFormat.put("rate", 24000);
+
+            JSONObject audioInput = new JSONObject();
             audioInput.put("format", inputFormat);
-            audioInput.put("transcription", transcription); // ← input_audio_transcription 대신
-            audioInput.put("noise_reduction", noiseReduction); // ← input_audio_noise_reduction 대신
-            audioInput.put("turn_detection", turnDetection);   // ← turn_detection 위치 이동
+            audioInput.put("transcription", transcription);
+            audioInput.put("noise_reduction", noiseReduction);
+            audioInput.put("turn_detection", turnDetection);
 
             // --- audio ---
             JSONObject audio = new JSONObject();
             audio.put("input", audioInput);
 
-            // --- session ---
+            // --- session (type: "transcription" — 대화 응답 모델 없음) ---
+            // ※ "model" 필드는 session 레벨에 지정하지 않음
+            //   전사 모델은 audio.input.transcription.model 에서만 지정
             JSONObject sessionConfig = new JSONObject();
-            sessionConfig.put("type", "realtime");
-            sessionConfig.put("model", "gpt-realtime-2");
+            sessionConfig.put("type", "transcription");
             sessionConfig.put("audio", audio);
 
-            // --- 최상위 ---
+            // --- 최상위 요청 본문 ---
             JSONObject requestJson = new JSONObject();
             requestJson.put("session", sessionConfig);
 
@@ -480,7 +483,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .addHeader("Content-Type", "application/json")
                 .build();
 
-            logger.info("[Realtime] 전사 세션 임시 토큰 발급 요청 (transcription_sessions) - key: {}", apiKeyFingerprint);
+            logger.info("[Realtime] 전사 세션 임시 토큰 발급 요청 (type=transcription, model=gpt-4o-mini-transcribe) - key: {}", apiKeyFingerprint);
             long startMs = System.currentTimeMillis();
             try (okhttp3.Response response = client.newCall(request).execute()) {
                 int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
@@ -496,8 +499,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     }
                     logger.warn("[Realtime] 토큰 발급 실패 - status: {}, key: {}, body: {}",
                         response.code(), apiKeyFingerprint, errorBody);
-                    apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", reqParamJson, 0, 0, respMs, "N",
-                            "HTTP " + response.code() + ": " + errorBody, null);
+                    apiCallLogService.insertSilently(null, null,
+                        "https://api.openai.com/v1/realtime/client_secrets",
+                        "gpt-4o-mini-transcribe", "meeting_realtime_transcription",
+                        reqParamJson, 0, 0, respMs, "N",
+                        "HTTP " + response.code() + ": " + errorBody, null);
                     result.put("successYn", false);
                     result.put("returnMsg", "토큰 발급 실패 (HTTP " + response.code() + ")");
                     return result;
@@ -512,20 +518,29 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     Object expiresAt = data.get("expires_at");
 
                     if (token != null && !token.isEmpty()) {
-                        logger.info("[Realtime] 임시 토큰 발급 완료");
-                        apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", reqParamJson, 0, 0, respMs, "Y", null, null);
+                        logger.info("[Realtime] 전사 세션 임시 토큰 발급 완료 (expires_at: {})", expiresAt);
+                        apiCallLogService.insertSilently(null, null,
+                            "https://api.openai.com/v1/realtime/client_secrets",
+                            "gpt-4o-mini-transcribe", "meeting_realtime_transcription",
+                            reqParamJson, 0, 0, respMs, "Y", null, null);
                         result.put("successYn", true);
                         result.put("token", token);
                         result.put("expiresAt", expiresAt);
                         return result;
                     }
                     logger.warn("[Realtime] 응답에 token(value) 없음: {}", raw);
-                    apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", reqParamJson, 0, 0, respMs, "N", "응답에 token(value) 없음", null);
+                    apiCallLogService.insertSilently(null, null,
+                        "https://api.openai.com/v1/realtime/client_secrets",
+                        "gpt-4o-mini-transcribe", "meeting_realtime_transcription",
+                        reqParamJson, 0, 0, respMs, "N", "응답에 token(value) 없음", null);
                 }
             }
         } catch (Exception e) {
-            logger.error("[Realtime] 토큰 발급 오류", e);
-            apiCallLogService.insertSilently(null, null, "https://api.openai.com/v1/realtime/client_secrets", "gpt-realtime-2", "meeting_realtime", null, 0, 0, 0, "N", e.getMessage(), null);
+            logger.error("[Realtime] 전사 토큰 발급 오류", e);
+            apiCallLogService.insertSilently(null, null,
+                "https://api.openai.com/v1/realtime/client_secrets",
+                "gpt-4o-mini-transcribe", "meeting_realtime_transcription",
+                null, 0, 0, 0, "N", e.getMessage(), null);
         }
 
         result.put("successYn", false);
