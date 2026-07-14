@@ -8,6 +8,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -43,7 +45,15 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     public List<ChatGuideVO> selectLoginMaintNoticeList() throws Exception {
-        return chatGuideDAO.selectChatGuideMaintList();
+        List<ChatGuideVO> list = chatGuideDAO.selectChatGuideMaintList();
+        LocalDateTime now = LocalDateTime.now();
+        List<ChatGuideVO> result = new ArrayList<>();
+        for (ChatGuideVO vo : list) {
+            if (vo != null && isDisplayableMaintNotice(vo, now)) {
+                result.add(vo);
+            }
+        }
+        return result;
     }
 
     /**
@@ -66,8 +76,7 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
         if (vo == null) {
             throw new IllegalArgumentException("요청 본문은 필수입니다.");
         }
-        String guideKey = vo.getGuideKey();
-        if (!(guideKey != null && !guideKey.trim().isEmpty())) {
+        if (StringUtils.isBlank(vo.getGuideKey())) {
             vo.setGuideKey("GREET_WELCOME");
         }
         resolveGuideIdIfBlank(vo);
@@ -104,21 +113,6 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 안내멘트 저장
-     * @param vo 저장 대상
-     * @return 저장 반영된 vo
-     * @throws Exception
-     */
-    public ChatGuideVO saveChatGuideNotice(ChatGuideVO vo) throws Exception {
-        if (vo == null) {
-            throw new IllegalArgumentException("요청 본문은 필수입니다.");
-        }
-        resolveGuideIdIfBlank(vo);
-        chatGuideDAO.upsertChatGuideNotice(vo);
-        return vo;
-    }
-
-    /**
      * 챗봇가이드 오류메시지 목록 조회
      * @param searchVO 검색 조건
      * @return 그룹별 오류메시지 Map
@@ -135,11 +129,11 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
             if (row == null) {
                 continue;
             }
-            String guideKey = row.getGuideKey();
-            if (!(guideKey != null && !guideKey.trim().isEmpty())) {
+            String guideKey = StringUtils.trimToNull(row.getGuideKey());
+            if (guideKey == null) {
                 continue;
             }
-            String normalizedKey = guideKey.trim().toUpperCase();
+            String normalizedKey = guideKey.toUpperCase();
             if (normalizedKey.startsWith("INPUT_")) {
                 grouped.get("inputErrors").add(row);
             } else if (normalizedKey.startsWith("RESP_")) {
@@ -266,10 +260,33 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
         return requestVO;
     }
 
+    /**
+     * 현재 시각 기준 점검/장애 공지 노출 여부
+     * - 공통: START_DT ~ END_DT 구간
+     * - 정기점검(MAINT_SCHEDULED): START_DT - ADVANCE_NOTICE(ETC1)시간 부터
+     */
+    private boolean isDisplayableMaintNotice(ChatGuideVO vo, LocalDateTime now) {
+        String start = StringUtils.trimToNull(vo.getStartDt());
+        String end = StringUtils.trimToNull(vo.getEndDt());
+        if (start == null || end == null) {
+            return false;
+        }
+        try {
+            LocalDateTime startDt = LocalDateTime.parse(start, MAINTENANCE_DATE_TIME_FORMATTER);
+            LocalDateTime endDt = LocalDateTime.parse(end, MAINTENANCE_DATE_TIME_FORMATTER);
+            int advanceHours = "MAINT_SCHEDULED".equalsIgnoreCase(StringUtils.trim(vo.getGuideKey()))
+                    ? NumberUtils.toInt(StringUtils.trim(vo.getAdvanceNoticeHour())) : 0;
+            return !now.isBefore(startDt.minusHours(advanceHours)) && !now.isAfter(endDt);
+        } catch (DateTimeParseException e) {
+            return false;
+        }
+    }
+
     /** 안내멘트 저장 */
     private void saveNoticeIfPresent(ChatGuideVO vo) throws Exception {
         if (vo != null) {
-            saveChatGuideNotice(vo);
+            resolveGuideIdIfBlank(vo);
+            chatGuideDAO.upsertChatGuideNotice(vo);
         }
     }
 
@@ -289,8 +306,9 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
 
     /** guideId 없으면 키 자동 발급 */
     private void resolveGuideIdIfBlank(ChatGuideVO vo) throws Exception {
-        if (vo.getGuideId() != null && !vo.getGuideId().trim().isEmpty()) {
-            vo.setGuideId(vo.getGuideId().trim());
+        String guideId = StringUtils.trimToNull(vo.getGuideId());
+        if (guideId != null) {
+            vo.setGuideId(guideId);
             return;
         }
         vo.setGuideId(keyGenerate.generateTableKey("CH", "TB_CHAT_GUIDE", "GUIDE_ID"));

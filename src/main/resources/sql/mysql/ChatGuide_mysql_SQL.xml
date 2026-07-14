@@ -24,7 +24,7 @@
     </select>
 
     <select id="selectChatGuideMaintList" resultType="chatGuideVO">
-        /* 챗봇가이드 점검/장애 노출 목록 조회 chatGuide.selectChatGuideMaintList */
+        /* 챗봇가이드 점검/장애 목록 조회 chatGuide.selectChatGuideMaintList */
         SELECT
             A.GUIDE_ID
             , A.GUIDE_TP_CD
@@ -50,13 +50,6 @@
         WHERE 1=1
           AND A.GUIDE_TP_CD = '004'
           AND A.ENBL_YN = 'Y'
-          AND A.START_DT IS NOT NULL
-          AND A.END_DT IS NOT NULL
-          AND NOW() &lt;= A.END_DT
-          AND NOW() &gt;= DATE_SUB(
-                A.START_DT
-                , INTERVAL IFNULL(CAST(NULLIF(TRIM(C.ETC1), '') AS UNSIGNED), 0) HOUR
-            )
     </select>
 
     <select id="selectChatGuideGreetingList" resultType="chatGuideVO">
