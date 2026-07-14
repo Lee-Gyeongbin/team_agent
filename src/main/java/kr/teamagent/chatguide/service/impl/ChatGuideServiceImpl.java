@@ -1,5 +1,8 @@
 package kr.teamagent.chatguide.service.impl;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -15,6 +18,9 @@ import kr.teamagent.common.util.KeyGenerate;
 
 @Service
 public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
+
+    private static final DateTimeFormatter MAINTENANCE_DATE_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Autowired
     private ChatGuideDAO chatGuideDAO;
@@ -32,11 +38,11 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 챗봇가이드 점검/장애 키 목록 조회 (MAINT_RECOVERY, MAINT_EMERGENCY, MAINT_SCHEDULED)
-     * @return 점검/장애 가이드 목록
+     * 로그인 화면 점검/장애 공지 목록 조회
+     * @return 점검/장애 공지 목록 (긴급 → 정기 → 복구)
      * @throws Exception
      */
-    public List<ChatGuideVO> selectChatGuideMaintList() throws Exception {
+    public List<ChatGuideVO> selectLoginMaintNoticeList() throws Exception {
         return chatGuideDAO.selectChatGuideMaintList();
     }
 
@@ -183,22 +189,79 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
         if (requestVO == null) {
             throw new IllegalArgumentException("요청 본문은 필수입니다.");
         }
-        if (requestVO.getDataList() != null) {
-            for (ChatGuideVO vo : requestVO.getDataList()) {
-                if (vo == null) {
-                    continue;
-                }
-                if (vo.getStartDt() != null) {
-                    String startDt = vo.getStartDt().trim();
-                    vo.setStartDt(startDt.isEmpty() ? null : startDt);
-                }
-                if (vo.getEndDt() != null) {
-                    String endDt = vo.getEndDt().trim();
-                    vo.setEndDt(endDt.isEmpty() ? null : endDt);
-                }
-                resolveGuideIdIfBlank(vo);
-                chatGuideDAO.upsertChatGuideMaintenance(vo);
+        if (requestVO.getDataList() == null) {
+            return requestVO;
+        }
+
+        ChatGuideVO scheduled = null;
+        ChatGuideVO recovery = null;
+        boolean hasRecoveryInRequest = false;
+        List<ChatGuideVO> saveList = new ArrayList<>();
+
+        for (ChatGuideVO vo : requestVO.getDataList()) {
+            if (vo == null) {
+                continue;
             }
+            if (vo.getStartDt() != null) {
+                String startDt = vo.getStartDt().trim();
+                vo.setStartDt(startDt.isEmpty() ? null : startDt);
+            }
+            if (vo.getEndDt() != null) {
+                String endDt = vo.getEndDt().trim();
+                vo.setEndDt(endDt.isEmpty() ? null : endDt);
+            }
+
+            String guideKey = vo.getGuideKey() == null
+                    ? null : vo.getGuideKey().trim().toUpperCase();
+            if ("MAINT_SCHEDULED".equals(guideKey)) {
+                scheduled = vo;
+            } else if ("MAINT_RECOVERY".equals(guideKey)) {
+                recovery = vo;
+                hasRecoveryInRequest = true;
+            }
+            saveList.add(vo);
+        }
+
+        // 정기점검이 있으면 복구 공지 표시기간을 자동 맞춤
+        // 시작: 정기점검 종료일시 / 종료: 정기점검 종료일 다음날 23:59:59
+        if (scheduled != null) {
+            if (recovery == null) {
+                for (ChatGuideVO row : chatGuideDAO.selectChatGuideMaintenanceList(new ChatGuideVO())) {
+                    if (row != null && row.getGuideKey() != null
+                            && "MAINT_RECOVERY".equals(row.getGuideKey().trim().toUpperCase())) {
+                        recovery = row;
+                        break;
+                    }
+                }
+                if (recovery == null) {
+                    recovery = new ChatGuideVO();
+                    recovery.setGuideKey("MAINT_RECOVERY");
+                }
+            }
+
+            String scheduledEndDt = scheduled.getEndDt();
+            if (scheduledEndDt == null || scheduledEndDt.isEmpty()) {
+                recovery.setStartDt(null);
+                recovery.setEndDt(null);
+            } else {
+                recovery.setStartDt(scheduledEndDt);
+                try {
+                    LocalDateTime endDt = LocalDateTime.parse(scheduledEndDt, MAINTENANCE_DATE_TIME_FORMATTER);
+                    recovery.setEndDt(endDt.toLocalDate().plusDays(1).atTime(23, 59, 59)
+                            .format(MAINTENANCE_DATE_TIME_FORMATTER));
+                } catch (DateTimeParseException e) {
+                    recovery.setEndDt(null);
+                }
+            }
+
+            if (!hasRecoveryInRequest) {
+                saveList.add(recovery);
+            }
+        }
+
+        for (ChatGuideVO vo : saveList) {
+            resolveGuideIdIfBlank(vo);
+            chatGuideDAO.upsertChatGuideMaintenance(vo);
         }
         return requestVO;
     }
@@ -232,4 +295,5 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
         }
         vo.setGuideId(keyGenerate.generateTableKey("CH", "TB_CHAT_GUIDE", "GUIDE_ID"));
     }
+
 }
