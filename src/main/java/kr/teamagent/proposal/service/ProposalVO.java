@@ -1,0 +1,480 @@
+package kr.teamagent.proposal.service;
+
+import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import lombok.Data;
+
+
+public class ProposalVO {
+
+    /**
+     * TB_PT_PROJECT - PT 프로젝트 기본 정보
+     */
+    @Data
+    public static class ProjectVO {
+        /** PT_PROJECT_ID (PK, VARCHAR 20) */
+        private String ptProjectId;
+        /** 프로젝트명 */
+        private String projectNm;
+        /** 발주기관명 */
+        private String orgNm;
+        /** 사업개요 */
+        private String projectOverview;
+        /** 제안 구분 코드 (G=공공, P=민간, 기본값 G) */
+        private String targetTypeCd;
+        /** 제출 마감일 (YYYY-MM-DD) */
+        private String dueDt;
+        /** RFP 파일 ID (TB_PT_FILE.PT_FILE_ID) */
+        private String rfpFileId;
+        /** 평가표 파일 ID (TB_PT_FILE.PT_FILE_ID) */
+        private String evalTableFileId;
+        /** 프로젝트 상태 코드 (PT000002: 001=작성중, 002=검수중, 003=완료, 004=보류) */
+        private String statusCd;
+        /** 프로젝트 상태명 (TB_CODE.CODE_NM) */
+        private String statusNm;
+        /** 제안서 작성지침 JSON (writingGuideline 객체, raw JSON string) */
+        private String writingGuidelineJson;
+        /** 프로젝트 설정 JSON */
+        private String projectConfigJson;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+        /** 수정자 ID */
+        private String modifyUserId;
+        /** 수정일시 */
+        private String modifyDt;
+        /** 목록 검색 키워드 (프로젝트명/발주기관명) */
+        private String keyword;
+        /** 페이징 limit */
+        private Integer limit;
+        /** 페이징 offset */
+        private Integer offset;
+    }
+
+    /**
+     * Step A: 템플릿 설정 요청 VO
+     */
+    @Data
+    public static class TemplateConfigVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 템플릿 방식 코드 (fix=보완, new=생성) */
+        private String mode;
+        /** 템플릿 파일 ID (TB_PT_FILE.PT_FILE_ID, fix 모드 필수) */
+        private String templateFileId;
+        /** 문서 사이즈 코드 (a4, 169, 43) */
+        private String docSize;
+    }
+
+    /**
+     * TB_PT_FILE - PT 제안서 첨부파일
+     */
+    @Data
+    public static class PtFileVO {
+        /** PT_FILE_ID (PK, VARCHAR 20, prefix PTF) */
+        private String ptFileId;
+        /** 프로젝트 ID */
+        private String ptProjectId;
+        /** 파일 용도 코드 (PT000011: 001=RFP원문, 002=평가표, 003=템플릿, 004=기타참고자료, 005=자사정보, 006=경쟁사정보) */
+        private String filePurposeCd;
+        /** NCP 오브젝트 경로 (pt-file/{ptProjectId}/{ptFileId}_{원본파일명}) */
+        private String filePath;
+        /** 원본 파일명 */
+        @JsonProperty("fileName")
+        private String fileNm;
+        /** 파일 크기 (bytes) */
+        private Long fileSize;
+        /** MIME 타입 */
+        private String fileType;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+    }
+
+    /**
+     * TB_PT_REQUIREMENT - PT 요구사항
+     */
+    @Data
+    public static class RequirementVO {
+        /** REQUIREMENT_ID (PK, VARCHAR 20) */
+        private String requirementId;
+        /** 프로젝트 ID */
+        private String ptProjectId;
+        /** 요구사항 식별번호 (RFP 원문 그대로, 예: SFR-010) */
+        private String reqNo;
+        /** 요구사항 분류 코드 (보조 통계용, 애매하면 null) */
+        private String reqCategoryCd;
+        /** 요구사항 원문 내용 */
+        private String reqContent;
+        /** 필수 여부 (Y/N) */
+        private String mandatoryYn;
+        /** 출처 유형 코드 (PT000004: 001=사실, 002=전략적해석, 003=확인필요) */
+        private String sourceTypeCd;
+        /** 근거 페이지 */
+        private String rfpPageRef;
+        /** 평가 영향도 (관련 평가항목) */
+        private String evalImpact;
+        /** 제안서 대응방향 */
+        private String responseDirection;
+        /** 대응 증빙자료 유형 */
+        private String requiredEvidence;
+        /** 확인 필요 여부 (Y/N) */
+        private String confirmNeededYn;
+        /** 확인 필요 사유 */
+        private String confirmNeededNote;
+        /** 정렬 순서 */
+        private Integer sortOrd;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+        /** 수정자 ID */
+        private String modifyUserId;
+        /** 수정일시 */
+        private String modifyDt;
+    }
+
+    /**
+     * TB_PT_EVAL_CRITERIA - PT 평가기준
+     */
+    @Data
+    public static class EvalCriteriaVO {
+        /** EVAL_CRITERIA_ID (PK, VARCHAR 20) */
+        private String evalCriteriaId;
+        /** 프로젝트 ID */
+        private String ptProjectId;
+        /** 평가항목명 */
+        private String evalItemNm;
+        /** 배점 */
+        private double score;
+        /** 평가 의도 (평가위원이 확인하려는 핵심 질문) */
+        private String evalIntent;
+        /** 고득점 조건 */
+        private String highScoreCondition;
+        /** 필수 증빙 */
+        private String requiredEvidence;
+        /** 차별화 방향 */
+        private String differentiationDirection;
+        /** 슬라이드 반영 위치 */
+        private String slideReflectPosition;
+        /** 정렬 순서 */
+        private Integer sortOrd;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+        /** 수정자 ID */
+        private String modifyUserId;
+        /** 수정일시 */
+        private String modifyDt;
+    }
+
+    /**
+     * Stage 1 분석 결과 (LLM 파싱 결과 + DB 조회 결과 조합)
+     */
+    @Data
+    public static class Stage1ResultVO {
+        /** 프로젝트 ID */
+        private String ptProjectId;
+        /** 제안서 작성지침 JSON (raw JSON string) */
+        private String writingGuidelineJson;
+        /** 요구사항 목록 */
+        private List<RequirementVO> requirements;
+        /** 평가기준 목록 */
+        private List<EvalCriteriaVO> evalCriteria;
+    }
+
+    /**
+     * TB_PT_PROBLEM_DEFINITION - 발주기관 문제 정의
+     */
+    @Data
+    public static class ProblemDefinitionVO {
+        /** PROBLEM_ID (PK, VARCHAR 20) */
+        private String problemId;
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 문제 유형 코드 (PT000009: 001기술적 002업무적 003조직적 004운영적 005보안품질) */
+        private String problemTypeCd;
+        /** 현재 문제 */
+        private String currentProblem;
+        /** 근본 원인 */
+        private String rootCause;
+        /** 방치 시 위험 */
+        private String riskIfIgnored;
+        /** 목표 */
+        private String goal;
+        /** 필요 역량 */
+        private String requiredCapability;
+        /** 전략 요약 */
+        private String strategySummary;
+        /** KPI */
+        private String kpi;
+        /** 출처 유형 코드 (default '002') */
+        private String sourceTypeCd;
+        /** 정렬 순서 */
+        private Integer sortOrd;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+    }
+
+    /**
+     * TB_PT_WIN_THEME - Win Theme
+     */
+    @Data
+    public static class WinThemeVO {
+        /** WIN_THEME_ID (PK, VARCHAR 20) */
+        private String winThemeId;
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 핵심 메시지 */
+        private String coreMessage;
+        /** 고객 문제 */
+        private String customerProblem;
+        /** 제안 전략 */
+        private String proposalStrategy;
+        /** 근거/증빙 */
+        private String evidence;
+        /** 기대 효과 */
+        private String expectedEffect;
+        /** 차별화 포인트 */
+        private String differentiation;
+        /** 정렬 순서 */
+        private Integer sortOrd;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+    }
+
+    /**
+     * TB_PT_TOC - 제안서 목차
+     */
+    @Data
+    public static class TocVO {
+        /** TOC_ID (PK, VARCHAR 20) */
+        private String tocId;
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 부모 TOC ID (self reference) */
+        private String parentTocId;
+        /** 섹션 번호 */
+        private String sectionNo;
+        /** 섹션명 */
+        private String sectionNm;
+        /** 연결 평가기준 ID */
+        private String linkedEvalCriteriaId;
+        /** 계획 슬라이드 수 */
+        private int plannedSlideCnt;
+        /** 정렬 순서 */
+        private Integer sortOrd;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+        // ── 파싱/계층 구조용 (DB 컬럼 아님, transient) ──
+        /** LLM 응답에서 받은 평가항목명 */
+        private String linkedEvalCriteriaNm;
+        /** LLM이 지정한 커버 요구사항 목록 */
+        private java.util.List<String> coveredReqNos;
+        /** 계층 레벨 (1=대분류, 2=소분류) */
+        private int level;
+        /** 부모 no (level 2용) */
+        private String parentNo;
+        /** 섹션 번호 원문 (level-1 구조 파악용) */
+        private String no;
+        /** 조회 응답용 계층 구조 */
+        private java.util.List<TocVO> children;
+    }
+
+    /**
+     * Step C: 제안 설정 저장 요청 VO
+     * PROJECT_CONFIG_JSON.settings 에 저장되는 값 (targetTypeCd 제외 — TB_PT_PROJECT 컬럼 직접 UPDATE)
+     */
+    @Data
+    public static class ProjectSettingsVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 자사 정보 파일 ID 목록 (FILE_PURPOSE_CD='005') */
+        private List<String> companyFileIds;
+        /** 경쟁사 정보 파일 ID 목록 (FILE_PURPOSE_CD='006') */
+        private List<String> competitorFileIds;
+        /** 기타 참고자료 파일 ID 목록 (FILE_PURPOSE_CD='004') */
+        private List<String> etcRefFileIds;
+        /** 문체 스타일 코드 (formal=공식·격식체, plain=간결·실무체, persuasive=설득·강조체) */
+        private String writingStyle;
+        /** 기본색조 3순위 (hex 코드) */
+        private List<String> baseColors;
+        /** 강조색조 2순위 (hex 코드) */
+        private List<String> accentColors;
+    }
+
+    /**
+     * Step C: 제안 설정 조회 응답 VO
+     */
+    @Data
+    public static class ProjectSettingsResponseVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 제안 구분 코드 (TB_PT_PROJECT.TARGET_TYPE_CD) */
+        private String targetTypeCd;
+        /** 문체 스타일 코드 */
+        private String writingStyle;
+        /** 자사 정보 파일 목록 */
+        private List<PtFileVO> companyFiles;
+        /** 경쟁사 정보 파일 목록 */
+        private List<PtFileVO> competitorFiles;
+        /** 기타 참고자료 파일 목록 */
+        private List<PtFileVO> etcRefFiles;
+        /** 기본색조 hex 코드 3개 */
+        private List<String> baseColors;
+        /** 강조색조 hex 코드 2개 */
+        private List<String> accentColors;
+    }
+
+    /**
+     * Step C: 제안 대상(공공/민간) 변경 요청 VO
+     */
+    @Data
+    public static class TargetTypeVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 제안 구분 코드 (G=공공, P=민간) */
+        private String targetTypeCd;
+    }
+
+    /**
+     * Step B: TOC 순서 변경 요청 VO
+     */
+    @Data
+    public static class TocReorderVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 항목별 순서 정보 — tocId + sortOrd 만 사용 */
+        private List<TocVO> items;
+    }
+
+    /**
+     * Stage 2 분석 결과 (전략 분석: 문제정의 + Win Theme + 목차)
+     */
+    @Data
+    public static class Stage2ResultVO {
+        /** 프로젝트 ID */
+        private String ptProjectId;
+        /** 문제 정의 목록 */
+        private java.util.List<ProblemDefinitionVO> problemDefinitions;
+        /** Win Theme 목록 */
+        private java.util.List<WinThemeVO> winThemes;
+        /** 목차 (계층 구조, children 포함) */
+        private java.util.List<TocVO> toc;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Step D: 본문 생성
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * TB_PT_SLIDE - 생성된 슬라이드
+     *
+     * DDL (미적용 시 실행 필요):
+     * CREATE TABLE TB_PT_SLIDE (
+     *   SLIDE_ID            VARCHAR(20)  NOT NULL PRIMARY KEY,
+     *   PT_PROJECT_ID       VARCHAR(20)  NOT NULL,
+     *   TOC_ID              VARCHAR(20)  NOT NULL,
+     *   SLIDE_NO            INT          DEFAULT 0,
+     *   COLOR_INDEX         INT          DEFAULT 0,
+     *   LAYOUT_TYPE         VARCHAR(50)  NULL,
+     *   SLIDE_JSON          JSON         NULL,
+     *   IMAGE_GEN_HINT      TEXT         NULL,
+     *   RENDERED_IMAGE_PATH VARCHAR(500) NULL,
+     *   RENDER_STATUS_CD    VARCHAR(3)   DEFAULT '001',
+     *   CREATE_USER_ID      VARCHAR(50)  NULL,
+     *   CREATE_DT           DATETIME     NULL,
+     *   MODIFY_DT           DATETIME     NULL,
+     *   INDEX idx_pt_slide_project (PT_PROJECT_ID),
+     *   INDEX idx_pt_slide_toc     (TOC_ID)
+     * );
+     * RENDER_STATUS_CD: 001=대기, 002=생성중, 003=완료, 004=실패
+     */
+    @Data
+    public static class SlideVO {
+        /** SLIDE_ID (PK, VARCHAR 20, prefix PTS) */
+        private String slideId;
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 소목차 ID */
+        private String tocId;
+        /** 전체 덱 기준 순번 (1부터) */
+        private int slideNo;
+        /** COLOR_INDEX = slideNo % 3 */
+        private int colorIndex;
+        /** 레이아웃 타입 (cover/section_divider/infographic) */
+        private String layoutType;
+        /** 슬라이드 JSON 골격 (raw JSON string) */
+        private String slideJson;
+        /** 이미지 생성 힌트 (Stage3.5 조립 결과) */
+        private String imageGenHint;
+        /** 렌더링된 이미지 NCP 경로 */
+        private String renderedImagePath;
+        /** 렌더 상태 코드 (001=대기, 002=생성중, 003=완료, 004=실패) */
+        private String renderStatusCd;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+        /** 수정일시 */
+        private String modifyDt;
+    }
+
+    /**
+     * D-4 소목차 확인 결과
+     */
+    @Data
+    public static class SectionConfirmResultVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 확인한 소목차 ID */
+        private String tocId;
+        /** 모든 소목차 완료 여부 (true 시 Step E로 이동) */
+        private boolean done;
+        /** 다음 미완료 소목차 ID (done=false 일 때) */
+        private String nextTocId;
+        /** confirm 거부 사유 (미완료 슬라이드 존재 시) */
+        private String rejectReason;
+        /** confirm 거부 시 미완료 슬라이드 목록 */
+        private java.util.List<SlideVO> pendingSlides;
+    }
+
+    /**
+     * D-3 소목차 채팅 요청 VO
+     */
+    @Data
+    public static class SectionChatVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 소목차 ID */
+        private String tocId;
+        /** 사용자 보완 요청 메시지 */
+        private String message;
+        /** LLM 모델 ID */
+        private String modelId;
+        /** 에이전트 ID */
+        private String agentId;
+    }
+
+    /**
+     * D-3 소목차 채팅 응답 VO
+     */
+    @Data
+    public static class SectionChatResultVO {
+        /** 재생성된 슬라이드 목록 */
+        private java.util.List<SlideVO> updatedSlides;
+        /** AI 응답 요약 메시지 */
+        private String aiMessage;
+    }
+}
