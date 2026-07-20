@@ -63,6 +63,22 @@ public class ProposalController extends BaseController {
         return proposalService.savePtFileUploadUrl(dataVO);
     }
 
+    /**
+     * PT 파일 메타 저장 (NCP 업로드 완료 후 TB_PT_FILE INSERT)
+     */
+    @RequestMapping(value = "/ai/proposal/savePtFile.do", method = RequestMethod.POST)
+    public @ResponseBody Map<String, Object> savePtFile(@RequestBody ProposalVO.PtFileVO dataVO) {
+        try {
+            return proposalService.savePtFile(dataVO);
+        } catch (Exception e) {
+            logger.error("[PT] savePtFile 실패: {}", e.getMessage(), e);
+            Map<String, Object> resultMap = new HashMap<>();
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+            return resultMap;
+        }
+    }
+
     @RequestMapping("/ai/proposal/selectPtProjectList.do")
     @ResponseBody
     public ModelAndView selectPtProjectList(ProposalVO.ProjectVO searchVO) throws Exception {

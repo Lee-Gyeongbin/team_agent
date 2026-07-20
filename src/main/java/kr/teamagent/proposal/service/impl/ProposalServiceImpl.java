@@ -601,6 +601,44 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return fileService.createUploadPresignedUrl(req);
     }
 
+    /**
+     * PT 파일 메타 저장 (NCP 업로드 완료 후 TB_PT_FILE INSERT)
+     */
+    public java.util.Map<String, Object> savePtFile(ProposalVO.PtFileVO vo) throws Exception {
+        java.util.Map<String, Object> resultMap = new java.util.HashMap<>();
+
+        if (CommonUtil.isEmpty(vo.getFilePath())) {
+            throw new RuntimeException("filePath는 필수입니다.");
+        }
+        if (CommonUtil.isEmpty(vo.getFileNm())) {
+            throw new RuntimeException("fileName은 필수입니다.");
+        }
+
+        String ptFileId = keyGenerate.generateTableKey("PTF-", "TB_PT_FILE", "PT_FILE_ID", 6);
+
+        ProposalVO.PtFileVO ptFileVO = new ProposalVO.PtFileVO();
+        ptFileVO.setPtFileId(ptFileId);
+        ptFileVO.setPtProjectId(vo.getPtProjectId());
+        ptFileVO.setFilePurposeCd(CommonUtil.isNotEmpty(vo.getFilePurposeCd()) ? vo.getFilePurposeCd() : "001");
+        ptFileVO.setFilePath(vo.getFilePath());
+        ptFileVO.setFileNm(vo.getFileNm());
+        ptFileVO.setFileSize(vo.getFileSize());
+        if (CommonUtil.isNotEmpty(vo.getMimeType())) {
+            ptFileVO.setFileType(vo.getMimeType());
+        } else {
+            ptFileVO.setFileType(CommonUtil.nullToBlank(vo.getFileType()));
+        }
+        ptFileVO.setCreateUserId(SessionUtil.getUserId());
+
+        proposalDAO.insertPtFile(ptFileVO);
+
+        resultMap.put("result", "OK");
+        resultMap.put("ptFileId", ptFileId);
+        resultMap.put("filePath", ptFileVO.getFilePath());
+        resultMap.put("fileNm", ptFileVO.getFileNm());
+        return resultMap;
+    }
+
     // ── Step A: 템플릿 설정 저장 ─────────────────────────────────────────────────
 
     /**

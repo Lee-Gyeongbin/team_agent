@@ -89,6 +89,10 @@ public class ProposalVO {
         private Long fileSize;
         /** MIME 타입 */
         private String fileType;
+        /** MIME 타입 (요청 전용, DB 저장 시 fileType보다 우선) */
+        private String mimeType;
+        /** 저장 파일명 (요청 전용, TB_PT_FILE 미저장) */
+        private String storeFileName;
         /** 생성자 ID */
         private String createUserId;
         /** 생성일시 */
