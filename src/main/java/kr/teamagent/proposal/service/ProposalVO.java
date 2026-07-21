@@ -48,6 +48,8 @@ public class ProposalVO {
         private Integer limit;
         /** 페이징 offset */
         private Integer offset;
+        /** Stage1 완료 여부 (Y/N) — selectPtProjectList 에서만 반환 */
+        private String stage1DoneYn;
     }
 
     /**
@@ -171,6 +173,34 @@ public class ProposalVO {
         private String modifyUserId;
         /** 수정일시 */
         private String modifyDt;
+    }
+
+    /**
+     * Stage2 프롬프트 전용 경량 요구사항 VO
+     * - LLM에 전달하는 필드만 포함 (불필요 필드 제거로 토큰 절감)
+     */
+    @Data
+    public static class RequirementLiteVO {
+        /** 요구사항 식별번호 */
+        private String reqNo;
+        /** 요구사항 분류 코드 */
+        private String reqCategoryCd;
+        /** 요구사항 원문 내용 (400자 초과 시 문장 경계에서 절삭) */
+        private String reqContent;
+        /** 필수 여부 (Y/N) */
+        private String mandatoryYn;
+    }
+
+    /**
+     * Stage2 프롬프트 전용 경량 평가기준 VO
+     * - LLM에 전달하는 필드만 포함 (불필요 필드 제거로 토큰 절감)
+     */
+    @Data
+    public static class EvalCriteriaLiteVO {
+        /** 평가항목명 */
+        private String evalItemNm;
+        /** 배점 */
+        private double score;
     }
 
     /**

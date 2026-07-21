@@ -786,6 +786,23 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 여러 파일 ID의 텍스트를 순서대로 추출해 하나의 문자열로 합쳐 반환.
+     * 추출 실패한 파일은 건너뜀.
+     */
+    private String extractMultiFileText(List<String> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String fileId : fileIds) {
+            String text = extractPtFileText(fileId);
+            if (CommonUtil.isNotEmpty(text)) {
+                if (sb.length() > 0) sb.append("\n\n---\n\n");
+                sb.append(text.trim());
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    /**
      * PT 파일 업로드 (TB_PT_FILE)
      * NCP 업로드 후 TB_PT_FILE에 메타데이터 저장
      * @param file            업로드 파일 (MultipartFile)
@@ -1110,7 +1127,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * DB에 PIPT0001이 없을 경우 사용할 최소 기본 프롬프트
+     * DB에 사용할 최소 기본 프롬프트
      */
     private String buildDefaultStage1Prompt() {
         return "RFP 원문을 분석하여 writingGuideline, requirements, evalCriteria 를 포함하는 JSON을 반환하세요. "
@@ -1317,7 +1334,25 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         logger.info("[PT StepC] targetTypeCd 업데이트 (ptProjectId={}, targetTypeCd={})", vo.getPtProjectId(), vo.getTargetTypeCd());
     }
 
+    /**
+     * PT 프로젝트 단건 조회 (상세 페이지 진입 시 호출)
+     */
+    public ProposalVO.ProjectVO selectPtProject(String ptProjectId) throws Exception {
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+        if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
+        return project;
+    }
+
     // ── Step B: TOC(목차) CRUD ───────────────────────────────────────────────────
+
+    /**
+     * 프로젝트의 용도별 파일 단건 조회 (최근 등록 기준)
+     * @param filePurposeCd 001=RFP원문, 002=평가표, 003=템플릿, 004=기타참고, 005=자사정보, 006=경쟁사정보
+     */
+    public ProposalVO.PtFileVO selectPtRfpFile(String ptProjectId, String filePurposeCd) {
+        List<ProposalVO.PtFileVO> files = proposalDAO.selectPtFileByPurpose(ptProjectId, filePurposeCd);
+        return (files != null && !files.isEmpty()) ? files.get(0) : null;
+    }
 
     /**
      * Step B 자동추출: WRITING_GUIDELINE_JSON.mandatedToc → TB_PT_TOC
@@ -1353,31 +1388,54 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         proposalDAO.deleteTocByProject(ptProjectId);
 
         String userId = SessionUtil.getUserId();
-        java.util.Map<String, String> noToTocId = new java.util.HashMap<>();
         List<ProposalVO.TocVO> result = new java.util.ArrayList<>();
-        int sortOrd = 0;
 
-        // 1st pass — level='main'
+        // Step 1: 대목차만 선 스캔 → no → 메타데이터 맵 구성 (ID는 생성하지 않음)
+        //         generateTableKey는 MAX(TOC_ID) 기반이므로 INSERT 직전에 호출해야 중복을 피할 수 있음
+        java.util.Map<String, ProposalVO.TocVO> mainDataByNo = new java.util.LinkedHashMap<>();
         for (JsonElement el : mandatedArr) {
             JsonObject obj = el.getAsJsonObject();
-            if (!"main".equals(getStrOrNull(obj, "level"))) continue;
-
-            ProposalVO.TocVO toc = buildTocVO(ptProjectId, null, obj, sortOrd++, userId);
-            proposalDAO.insertToc(toc);
-            if (CommonUtil.isNotEmpty(toc.getNo())) noToTocId.put(toc.getNo(), toc.getTocId());
-            result.add(toc);
+            String level = getStrOrNull(obj, "level");
+            if (!"main".equals(level) && !"1".equals(level)) continue;
+            ProposalVO.TocVO toc = new ProposalVO.TocVO();
+            toc.setPtProjectId(ptProjectId);
+            String no = getStrOrNull(obj, "no");
+            toc.setNo(no);
+            toc.setSectionNo(no);
+            toc.setSectionNm(getStrOrNull(obj, "title"));
+            toc.setPlannedSlideCnt(1);
+            toc.setCreateUserId(userId);
+            if (CommonUtil.isNotEmpty(no)) {
+                mainDataByNo.put(no, toc);
+            }
         }
 
-        // 2nd pass — level='sub'
+        // Step 2: mandatedToc 원본 순서대로 전체 처리
+        //         대목차 tocId는 INSERT 직전 생성 → noToTocId에 저장 → 소목차 parentTocId 참조에 사용
+        java.util.Map<String, String> noToTocId = new java.util.LinkedHashMap<>();
+        int sortOrd = 0;
         for (JsonElement el : mandatedArr) {
             JsonObject obj = el.getAsJsonObject();
-            if (!"sub".equals(getStrOrNull(obj, "level"))) continue;
+            String level = getStrOrNull(obj, "level");
+            String no = getStrOrNull(obj, "no");
 
-            String parentNo = getStrOrNull(obj, "parentNo");
-            String parentTocId = CommonUtil.isNotEmpty(parentNo) ? noToTocId.get(parentNo) : null;
-            ProposalVO.TocVO toc = buildTocVO(ptProjectId, parentTocId, obj, sortOrd++, userId);
-            proposalDAO.insertToc(toc);
-            result.add(toc);
+            if ("main".equals(level) || "1".equals(level)) {
+                ProposalVO.TocVO toc = mainDataByNo.get(no);
+                if (toc == null) continue;
+                // INSERT 직전에 ID 생성 → selectMaxId가 이전 INSERT를 반영하여 고유값 보장
+                toc.setTocId(keyGenerate.generateTableKey("PTT", "TB_PT_TOC", "TOC_ID", 6));
+                toc.setSortOrd(sortOrd++);
+                noToTocId.put(no, toc.getTocId());
+                proposalDAO.insertToc(toc);
+                result.add(toc);
+            } else if ("sub".equals(level) || "2".equals(level)) {
+                String parentNo = getStrOrNull(obj, "parentNo");
+                String parentTocId = CommonUtil.isNotEmpty(parentNo) ? noToTocId.get(parentNo) : null;
+                // buildTocVO 내부의 generateTableKey도 직전 INSERT 이후 호출되므로 고유값 보장
+                ProposalVO.TocVO toc = buildTocVO(ptProjectId, parentTocId, obj, sortOrd++, userId);
+                proposalDAO.insertToc(toc);
+                result.add(toc);
+            }
         }
 
         logger.info("[PT StepB] autoExtractToc 완료 (ptProjectId={}, count={})", ptProjectId, result.size());
@@ -1387,7 +1445,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     /** autoExtractToc 내부 헬퍼 — JsonObject → TocVO 변환 */
     private ProposalVO.TocVO buildTocVO(String ptProjectId, String parentTocId, JsonObject obj, int sortOrd, String userId) throws Exception {
         ProposalVO.TocVO toc = new ProposalVO.TocVO();
-        toc.setTocId(keyGenerate.generateTableKey("PTT-", "TB_PT_TOC", "TOC_ID", 6));
+        toc.setTocId(keyGenerate.generateTableKey("PTT", "TB_PT_TOC", "TOC_ID", 6));
         toc.setPtProjectId(ptProjectId);
         toc.setParentTocId(parentTocId);
         String no = getStrOrNull(obj, "no");
@@ -1477,68 +1535,47 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         List<ProposalVO.RequirementVO> requirements = proposalDAO.selectRequirements(ptProjectId);
         List<ProposalVO.EvalCriteriaVO> evalCriteria = proposalDAO.selectEvalCriteria(ptProjectId);
 
-        // 2. agentSubCfg에서 ownDatasetId, competitorDatasetId, webSearch 읽기
-        String ownDsId = "";
-        String competitorDsId = "";
-        boolean webSearch = false;
-        ChatbotVO.AgtSubCfgVO subCfg = agentSupport.getAgentSubCfg(agentId);
-        if (subCfg != null && subCfg.getAdditionalConfigMap() != null) {
-            Object featuresObj = subCfg.getAdditionalConfigMap().get("features");
-            if (featuresObj instanceof java.util.Map) {
-                @SuppressWarnings("unchecked")
-                java.util.Map<String, Object> features = (java.util.Map<String, Object>) featuresObj;
-                if (features.get("ownDatasetId") != null)
-                    ownDsId = String.valueOf(features.get("ownDatasetId"));
-                if (features.get("competitorDatasetId") != null)
-                    competitorDsId = String.valueOf(features.get("competitorDatasetId"));
-                if (features.get("webSearch") != null)
-                    webSearch = Boolean.TRUE.equals(features.get("webSearch"));
+        // 2. PROJECT_CONFIG_JSON.settings에서 파일 ID 목록 읽기
+        List<String> companyFileIds   = java.util.Collections.emptyList();
+        List<String> competitorFileIds = java.util.Collections.emptyList();
+        List<String> etcRefFileIds    = java.util.Collections.emptyList();
+        try {
+            String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+            if (CommonUtil.isNotEmpty(configJson)) {
+                JsonObject root = JsonParser.parseString(configJson).getAsJsonObject();
+                if (root.has("settings") && !root.get("settings").isJsonNull()) {
+                    JsonObject settings = root.getAsJsonObject("settings");
+                    if (settings.has("companyFileIds")    && !settings.get("companyFileIds").isJsonNull())
+                        companyFileIds   = jsonArrayToList(settings.getAsJsonArray("companyFileIds"));
+                    if (settings.has("competitorFileIds") && !settings.get("competitorFileIds").isJsonNull())
+                        competitorFileIds = jsonArrayToList(settings.getAsJsonArray("competitorFileIds"));
+                    if (settings.has("etcRefFileIds")     && !settings.get("etcRefFileIds").isJsonNull())
+                        etcRefFileIds    = jsonArrayToList(settings.getAsJsonArray("etcRefFileIds"));
+                }
             }
+        } catch (Exception e) {
+            logger.warn("[PT Stage2] 설정 파일 ID 파싱 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
         }
 
-        // 3. RAG 검색 쿼리 구성 (요구사항 reqNo 접두사별로 그룹핑, 최대 4개)
-        List<String> ragQueries = buildRagSearchQueries(project.getProjectNm(), requirements, evalCriteria);
+        // 3. 자사 파일 텍스트 추출
+        String ownContext = extractMultiFileText(companyFileIds);
+        if (CommonUtil.isEmpty(ownContext)) ownContext = "(자사 자료 없음)";
 
-        // 4. 자사 RAG 검색
-        String ownContext = "";
-        if (CommonUtil.isNotEmpty(ownDsId)) {
-            List<String> ownDsIds = java.util.Collections.singletonList(ownDsId);
-            StringBuilder ownSb = new StringBuilder();
-            for (String q : ragQueries) {
-                try {
-                    String r = riskDiagnosisAgentService.callRagQuerySync(q, ownDsIds, modelId, "", agentId);
-                    if (CommonUtil.isNotEmpty(r)) ownSb.append("[").append(q, 0, Math.min(q.length(), 30)).append("...]\n").append(r.trim()).append("\n\n");
-                } catch (Exception e) { logger.warn("[PT Stage2] 자사 RAG 검색 실패 q={}: {}", q, e.getMessage()); }
-            }
-            ownContext = ownSb.toString().trim();
-        }
-        if (CommonUtil.isEmpty(ownContext)) ownContext = "(자사 자료 검색 결과 없음)";
-
-        // 5. 경쟁사 RAG 검색 (없으면 webSearch 폴백)
-        String competitorContext = "";
-        if (CommonUtil.isNotEmpty(competitorDsId)) {
-            try {
-                String q = "경쟁사 기술 역량, 주요 솔루션, 수주 실적, 제안 전략, 강점과 약점";
-                List<String> cDsIds = java.util.Collections.singletonList(competitorDsId);
-                competitorContext = riskDiagnosisAgentService.callRagQuerySync(q, cDsIds, modelId, "", agentId);
-            } catch (Exception e) { logger.warn("[PT Stage2] 경쟁사 RAG 검색 실패: {}", e.getMessage()); }
-        }
-        if (CommonUtil.isEmpty(competitorContext) && webSearch) {
-            try {
-                String q = project.getProjectNm() + " 유사 사업 경쟁사 기술역량 제안전략";
-                String[] ws = chatbotService.callWebSearchSync(q, modelId);
-                if (ws != null && CommonUtil.isNotEmpty(ws[0])) competitorContext = ws[0];
-            } catch (Exception e) { logger.warn("[PT Stage2] 웹서치 폴백 실패: {}", e.getMessage()); }
-        }
+        // 4. 경쟁사 파일 텍스트 추출
+        String competitorContext = extractMultiFileText(competitorFileIds);
         if (CommonUtil.isEmpty(competitorContext)) competitorContext = "(경쟁사 자료 없음)";
+
+        // 5. 기타 참고자료 파일 텍스트 추출
+        String etcRefContext = extractMultiFileText(etcRefFileIds);
+        if (CommonUtil.isEmpty(etcRefContext)) etcRefContext = "(기타 참고자료 없음)";
 
         // 6. Stage 2 프롬프트 로드
         String promptContent = null;
-        try { promptContent = promptService.getPrompt("PIPT0002", null); } catch (Exception e) { logger.warn("PIPT0002 프롬프트 조회 실패: {}", e.getMessage()); }
+        try { promptContent = promptService.getPrompt("PI000022", null); } catch (Exception e) { logger.warn("PI000022 프롬프트 조회 실패: {}", e.getMessage()); }
         if (CommonUtil.isEmpty(promptContent)) promptContent = buildDefaultStage2Prompt();
 
         // 7. 전체 프롬프트 조합
-        String fullPrompt = buildStage2FullPrompt(promptContent, project, requirements, evalCriteria, ownContext, competitorContext, totalSlideBudget);
+        String fullPrompt = buildStage2FullPrompt(promptContent, project, requirements, evalCriteria, ownContext, competitorContext, etcRefContext, totalSlideBudget);
 
         // 8. LLM 호출 (1회 재시도)
         String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
@@ -2076,6 +2113,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             List<ProposalVO.EvalCriteriaVO> evalCriteria,
             String ownContext,
             String competitorContext,
+            String etcRefContext,
             int totalSlideBudget) {
 
         StringBuilder sb = new StringBuilder();
@@ -2089,21 +2127,76 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
 
         if (requirements != null && !requirements.isEmpty()) {
-            sb.append("\n\n## 요구사항 목록 (JSON)\n").append(GSON.toJson(requirements));
+            List<ProposalVO.RequirementLiteVO> reqLite = requirements.stream()
+                    .map(this::toRequirementLite)
+                    .collect(java.util.stream.Collectors.toList());
+            sb.append("\n\n## 요구사항 목록 (JSON)\n").append(GSON.toJson(reqLite));
         }
 
         if (evalCriteria != null && !evalCriteria.isEmpty()) {
-            sb.append("\n\n## 평가기준 목록 (JSON)\n").append(GSON.toJson(evalCriteria));
+            List<ProposalVO.EvalCriteriaLiteVO> evalLite = evalCriteria.stream()
+                    .map(this::toEvalCriteriaLite)
+                    .collect(java.util.stream.Collectors.toList());
+            sb.append("\n\n## 평가기준 목록 (JSON)\n").append(GSON.toJson(evalLite));
         }
 
-        sb.append("\n\n## 자사 RAG 검색 결과\n").append(ownContext);
+        sb.append("\n\n## 자사 정보\n").append(ownContext);
         sb.append("\n\n## 경쟁사 정보\n").append(competitorContext);
+        sb.append("\n\n## 기타 참고자료\n").append(etcRefContext);
 
-        return sb.toString();
+        String prompt = sb.toString();
+        logger.info("[PT Stage2] 프롬프트 길이: 원본 요구사항 {}건, 최종 프롬프트 {}자",
+                requirements != null ? requirements.size() : 0, prompt.length());
+        return prompt;
     }
 
     /**
-     * DB에 PIPT0002가 없을 경우 사용할 최소 기본 프롬프트
+     * RequirementVO → RequirementLiteVO 변환 (Stage2 프롬프트 전용)
+     * reqContent 가 400자 초과이면 문장 경계에서 절삭
+     */
+    private ProposalVO.RequirementLiteVO toRequirementLite(ProposalVO.RequirementVO src) {
+        ProposalVO.RequirementLiteVO lite = new ProposalVO.RequirementLiteVO();
+        lite.setReqNo(src.getReqNo());
+        lite.setReqCategoryCd(src.getReqCategoryCd());
+        lite.setReqContent(truncateAtSentenceBoundary(src.getReqContent(), 400));
+        lite.setMandatoryYn(src.getMandatoryYn());
+        return lite;
+    }
+
+    /**
+     * EvalCriteriaVO → EvalCriteriaLiteVO 변환 (Stage2 프롬프트 전용)
+     */
+    private ProposalVO.EvalCriteriaLiteVO toEvalCriteriaLite(ProposalVO.EvalCriteriaVO src) {
+        ProposalVO.EvalCriteriaLiteVO lite = new ProposalVO.EvalCriteriaLiteVO();
+        lite.setEvalItemNm(src.getEvalItemNm());
+        lite.setScore(src.getScore());
+        return lite;
+    }
+
+    /**
+     * 문자열을 maxLen 자 이하로, 문장 경계(마침표·세미콜론·줄바꿈)에서 절삭.
+     * 경계를 찾지 못하면 maxLen 위치에서 단순 절삭 후 "...(생략)" 부가.
+     */
+    private String truncateAtSentenceBoundary(String text, int maxLen) {
+        if (text == null || text.length() <= maxLen) {
+            return text;
+        }
+        // maxLen 이전 구간에서 가장 뒤쪽 문장 경계 탐색
+        String candidate = text.substring(0, maxLen);
+        int lastBoundary = -1;
+        for (int i = candidate.length() - 1; i >= 0; i--) {
+            char c = candidate.charAt(i);
+            if (c == '.' || c == ';' || c == '\n' || c == '·') {
+                lastBoundary = i;
+                break;
+            }
+        }
+        String truncated = lastBoundary > 0 ? text.substring(0, lastBoundary + 1) : candidate;
+        return truncated + "...(생략)";
+    }
+
+    /**
+     * DB에 PI000022가 없을 경우 사용할 최소 기본 프롬프트
      */
     private String buildDefaultStage2Prompt() {
         return "제공된 RFP 구조화 결과와 자사·경쟁사 검색 결과를 바탕으로 "

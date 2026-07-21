@@ -79,6 +79,27 @@ public class ProposalController extends BaseController {
         }
     }
 
+    /** PT 프로젝트 단건 조회 (상세 페이지 진입 시) */
+    @RequestMapping(value = "/ai/proposal/selectPtProject.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectPtProject(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.ProjectVO data = proposalService.selectPtProject(ptProjectId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT] selectPtProject 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT] selectPtProject 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
     @RequestMapping("/ai/proposal/selectPtProjectList.do")
     @ResponseBody
     public ModelAndView selectPtProjectList(ProposalVO.ProjectVO searchVO) throws Exception {
@@ -191,6 +212,25 @@ public class ProposalController extends BaseController {
     }
 
     // ── Step B: TOC(목차) CRUD ────────────────────────────────────────────────
+
+    /** 프로젝트 용도별 파일 단건 조회 (없으면 data=null) */
+    @RequestMapping(value = "/ai/proposal/selectPtRfpFile.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectPtRfpFile(
+            @RequestParam String ptProjectId,
+            @RequestParam(defaultValue = "001") String filePurposeCd) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtFileVO data = proposalService.selectPtRfpFile(ptProjectId, filePurposeCd);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (Exception e) {
+            logger.error("[PT StepB] selectPtRfpFile 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
 
     /** Step B — mandatedToc 기반 목차 자동추출 */
     @RequestMapping(value = "/ai/proposal/autoExtractToc.do", method = RequestMethod.POST)
