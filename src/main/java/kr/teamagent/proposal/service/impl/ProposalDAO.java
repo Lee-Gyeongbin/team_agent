@@ -24,7 +24,7 @@ public class ProposalDAO extends EgovComAbstractDAO {
 
     /**
      * PT 프로젝트 등록
-     * @param vo ProjectVO (ptProjectId, projectNm, rfpChatFileId, evalTableChatFileId, roomId, statusCd, createUserId)
+     * @param vo ProjectVO (ptProjectId, projectNm, orgNm, projectOverview, targetTypeCd, dueDt, statusCd, createUserId)
      */
     public void insertProject(ProposalVO.ProjectVO vo) {
         insert("proposal.insertProject", vo);
@@ -153,6 +153,22 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public ProposalVO.PtFileVO selectPtFileById(String ptFileId) {
         return (ProposalVO.PtFileVO) selectOne("proposal.selectPtFileById", ptFileId);
+    }
+
+    /**
+     * 프로젝트의 용도별 파일 조회 — RFP_FILE_ID/EVAL_TABLE_FILE_ID 컬럼 제거 후 대체 메서드.
+     * FILE_PURPOSE_CD (PT000011): 001=RFP원문, 002=평가표, 003=템플릿, 004=기타참고자료, 005=자사정보, 006=경쟁사정보.
+     * 프로젝트당 1건 전제이나 복수 저장 시 CREATE_DT DESC 순 반환.
+     *
+     * @param ptProjectId   프로젝트 ID
+     * @param filePurposeCd PT000011 코드값
+     * @return List<PtFileVO> (없으면 빈 리스트)
+     */
+    public List<ProposalVO.PtFileVO> selectPtFileByPurpose(String ptProjectId, String filePurposeCd) {
+        java.util.Map<String, Object> params = new java.util.HashMap<>();
+        params.put("ptProjectId", ptProjectId);
+        params.put("filePurposeCd", filePurposeCd);
+        return selectList("proposal.selectPtFileByPurpose", params);
     }
 
     /**
@@ -368,5 +384,95 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public void deleteSlidesByToc(String tocId) {
         delete("proposal.deleteSlidesByToc", tocId);
+    }
+
+    // ── Step E: 검토 ──────────────────────────────────────────────────────────
+
+    /**
+     * 프로젝트 전체 슬라이드 목록 조회 (SLIDE_NO 순)
+     * @param ptProjectId 프로젝트 ID
+     * @return List<SlideVO>
+     */
+    public List<ProposalVO.SlideVO> selectAllSlidesByProject(String ptProjectId) {
+        return selectList("proposal.selectAllSlidesByProject", ptProjectId);
+    }
+
+    /**
+     * Stage4 평가 시뮬레이션 결과 단건 등록
+     * @param vo ReviewVO
+     */
+    public void insertReview(ProposalVO.ReviewVO vo) {
+        insert("proposal.insertReview", vo);
+    }
+
+    /**
+     * 최근 Stage4 실행 시각(분 단위) 조회 — 재실행 이력 분리용
+     * @param ptProjectId 프로젝트 ID
+     * @return "yyyy-MM-dd HH:mm" 문자열, 없으면 null
+     */
+    public String selectLatestReviewRunDt(String ptProjectId) {
+        return (String) selectOne("proposal.selectLatestReviewRunDt", ptProjectId);
+    }
+
+    /**
+     * 특정 실행 시각의 Stage4 결과 조회 (심각도순)
+     * @param ptProjectId 프로젝트 ID
+     * @param runDt "yyyy-MM-dd HH:mm" 형식
+     * @return List<ReviewVO>
+     */
+    public List<ProposalVO.ReviewVO> selectReviewsByRunDt(String ptProjectId, String runDt) {
+        java.util.Map<String, Object> params = new java.util.HashMap<>();
+        params.put("ptProjectId", ptProjectId);
+        params.put("runDt", runDt);
+        return selectList("proposal.selectReviewsByRunDt", params);
+    }
+
+    // ── Step F: 출력 ──────────────────────────────────────────────────────────
+
+    /**
+     * PT 출력 빌드 단건 등록
+     * @param vo ExportVO
+     */
+    public void insertExport(ProposalVO.ExportVO vo) {
+        insert("proposal.insertExport", vo);
+    }
+
+    /**
+     * PT 출력 빌드 상태/결과 수정
+     * @param vo ExportVO (exportId 필수, 나머지 null이면 유지)
+     */
+    public void updateExport(ProposalVO.ExportVO vo) {
+        update("proposal.updateExport", vo);
+    }
+
+    /**
+     * PT 출력 단건 조회
+     * @param exportId EXPORT_ID
+     * @return ExportVO
+     */
+    public ProposalVO.ExportVO selectExportById(String exportId) {
+        return (ProposalVO.ExportVO) selectOne("proposal.selectExportById", exportId);
+    }
+
+    /**
+     * 프로젝트+포맷 기준 최근 완료 출력 빌드 조회 (캐시 재사용 판단용)
+     * @param ptProjectId 프로젝트 ID
+     * @param formatCd    포맷 코드 ('pdf' | 'pptx')
+     * @return 최근 완료 ExportVO (없으면 null)
+     */
+    public ProposalVO.ExportVO selectLatestCompletedExport(String ptProjectId, String formatCd) {
+        java.util.Map<String, Object> params = new java.util.HashMap<>();
+        params.put("ptProjectId", ptProjectId);
+        params.put("formatCd", formatCd);
+        return (ProposalVO.ExportVO) selectOne("proposal.selectLatestCompletedExport", params);
+    }
+
+    /**
+     * 프로젝트 슬라이드 최신 수정일시 조회 (캐시 재사용 판단용)
+     * @param ptProjectId 프로젝트 ID
+     * @return "yyyy-MM-dd HH:mm:ss" 문자열, 없으면 null
+     */
+    public String selectMaxSlideModifyDt(String ptProjectId) {
+        return (String) selectOne("proposal.selectMaxSlideModifyDt", ptProjectId);
     }
 }

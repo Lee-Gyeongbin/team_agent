@@ -66,10 +66,9 @@
         FROM TB_PROMPT P
             JOIN TB_PROMPT_APPLY_AGT M ON P.PROMPT_ID = M.PROMPT_ID
         WHERE M.AGENT_ID = #{agentId}
-            AND (M.STAGE_CD = 'ALL' OR M.STAGE_CD = #{stageCd})
+            AND M.STAGE_CD = #{stageCd}
             AND M.APPLY_YN = 'Y'
             AND P.USE_YN = 'Y'
-        ORDER BY M.PRIORITY ASC
     </select>
 
     <select id="selectAgentList" resultMap="agentMap">

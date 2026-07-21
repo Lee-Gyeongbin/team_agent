@@ -507,4 +507,138 @@ public class ProposalController extends BaseController {
         }
         return new ModelAndView("jsonView", resultMap);
     }
+
+    // ── Step E: 검토 ──────────────────────────────────────────────────────────
+
+    /** E — 전체 슬라이드 썸네일 목록 조회 */
+    @RequestMapping(value = "/ai/proposal/selectAllSlides.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectAllSlides(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            java.util.List<ProposalVO.SlideVO> list = proposalService.selectAllSlides(ptProjectId);
+            resultMap.put("result", "OK");
+            resultMap.put("list", list);
+        } catch (Exception e) {
+            logger.error("[PT E] selectAllSlides 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — 전역 보완 채팅 (특정 슬라이드 지정 또는 전체 톤 변경 등 자유 텍스트) */
+    @RequestMapping(value = "/ai/proposal/reviewChat.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView reviewChat(@RequestBody ProposalVO.ReviewChatVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.ReviewChatResultVO data = proposalService.reviewChat(vo);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] reviewChat 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] reviewChat 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — Stage4 평가 시뮬레이션 실행 */
+    @RequestMapping(value = "/ai/proposal/executeEvalSimulation.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView executeEvalSimulation(
+            @RequestParam String ptProjectId,
+            @RequestParam String modelId,
+            @RequestParam String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.EvalSimulationResultVO data = proposalService.executeEvalSimulation(ptProjectId, modelId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E Stage4] executeEvalSimulation 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E Stage4] executeEvalSimulation 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — Stage4 평가 시뮬레이션 최근 결과 조회 */
+    @RequestMapping(value = "/ai/proposal/selectEvalSimulation.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectEvalSimulation(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            java.util.List<ProposalVO.ReviewVO> list = proposalService.selectEvalSimulation(ptProjectId);
+            resultMap.put("result", "OK");
+            resultMap.put("list", list);
+        } catch (Exception e) {
+            logger.error("[PT E Stage4] selectEvalSimulation 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    // ── Step F: 출력 ──────────────────────────────────────────────────────────
+
+    /**
+     * F — 출력 시작 (PPTX / PDF)
+     * - 캐시 재사용 판단 후 신규 빌드 또는 캐시된 파일 즉시 반환
+     * - body: { ptProjectId, format: "pdf"|"pptx", agentId }
+     */
+    @RequestMapping(value = "/ai/proposal/startExport.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView startExport(@RequestBody ProposalVO.ExportRequestVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.ExportVO data = proposalService.startExport(vo);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT F] startExport 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT F] startExport 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * F — 출력 상태 조회 (폴링용)
+     * - BUILD_STATUS_CD: 001=대기, 002=빌드중, 003=캐시재사용, 004=완료, 005=실패
+     * - 완료/캐시 시 downloadUrl 포함
+     */
+    @RequestMapping(value = "/ai/proposal/selectExportStatus.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectExportStatus(@RequestParam String exportId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.ExportVO data = proposalService.selectExportStatus(exportId);
+            if (data == null) {
+                resultMap.put("result", "FAIL");
+                resultMap.put("msg", "존재하지 않는 exportId입니다: " + exportId);
+            } else {
+                resultMap.put("result", "OK");
+                resultMap.put("data", data);
+            }
+        } catch (Exception e) {
+            logger.error("[PT F] selectExportStatus 오류 (exportId={}): {}", exportId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

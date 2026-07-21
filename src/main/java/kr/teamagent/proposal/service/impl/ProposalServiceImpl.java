@@ -57,8 +57,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private static final int PT_SUMMARY_MIN_CHUNK_CHARS = 15000;
     /** 청크 간 오버랩 (표·항목 경계 잘림 방지) */
     private static final int PT_SUMMARY_CHUNK_OVERLAP = 800;
-    /** 압축 후 최대 길이 */
-    private static final int PT_CONDENSED_MAX_CHARS = 80000;
     /** LLM 호출 타임아웃 (초) */
     private static final int PT_QUERY_TIMEOUT_SEC = 300;
 
@@ -66,6 +64,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private static final ExecutorService PT_SUMMARIZE_EXECUTOR =
             Executors.newFixedThreadPool(4, r -> {
                 Thread t = new Thread(r, "pt-rfp-summarize-worker");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** Step F 출력 빌드 전용 스레드 풀 */
+    private static final ExecutorService EXPORT_EXECUTOR =
+            Executors.newFixedThreadPool(3, r -> {
+                Thread t = new Thread(r, "pt-export-worker");
                 t.setDaemon(true);
                 return t;
             });
@@ -114,7 +120,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * PT 프로젝트 생성
-     * @param vo projectNm, orgNm, projectOverview, targetTypeCd, dueDt, rfpFileId, evalTableFileId
+     * @param vo projectNm, orgNm, projectOverview, targetTypeCd, dueDt
      * @return 생성된 ptProjectId
      * @throws Exception
      */
@@ -167,24 +173,23 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     return;
                 }
 
-                String rfpText = extractPtFileText(project.getRfpFileId());
+                // RFP 파일: FILE_PURPOSE_CD='001'로 조회 (RFP_FILE_ID 컬럼 제거 후 대체)
+                String rfpFileId = resolvePtFileId(ptProjectId, "001");
+                String rfpText = extractPtFileText(rfpFileId);
                 if (CommonUtil.isEmpty(rfpText)) {
                     sendSseEvent(emitter, "error", "{\"message\":\"RFP 파일 텍스트 추출에 실패했습니다. 파일을 다시 첨부해 주세요.\"}");
                     emitter.complete();
                     return;
                 }
 
-                // 대용량 RFP 청크 병렬 요약
-                rfpText = condenseRfpTextIfLarge(rfpText, modelId, emitter, agentId);
-
+                // 평가표 파일: FILE_PURPOSE_CD='002'로 조회 (EVAL_TABLE_FILE_ID 컬럼 제거 후 대체)
                 String evalText = null;
-                if (CommonUtil.isNotEmpty(project.getEvalTableFileId())) {
-                    evalText = extractPtFileText(project.getEvalTableFileId());
+                String evalFileId = resolvePtFileId(ptProjectId, "002");
+                if (CommonUtil.isNotEmpty(evalFileId)) {
+                    evalText = extractPtFileText(evalFileId);
                     if (CommonUtil.isEmpty(evalText)) {
-                        logger.warn("[PT Stage1] 평가표 텍스트 추출 실패 (evalTableFileId={})", project.getEvalTableFileId());
+                        logger.warn("[PT Stage1] 평가표 텍스트 추출 실패 (ptProjectId={}, filePurposeCd=002)", ptProjectId);
                     }
-                    // 평가표도 대용량이면 요약 (emitter는 이미 condense 중 사용됐으므로 null 전달)
-                    evalText = condenseRfpTextIfLarge(evalText, modelId, null, agentId);
                 }
 
                 // Step 2: 프롬프트 조합
@@ -199,41 +204,70 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     promptContent = buildDefaultStage1Prompt();
                 }
 
-                StringBuilder fullPromptSb = new StringBuilder(promptContent);
-                fullPromptSb.append("\n\n## RFP 원문\n").append(rfpText);
-                if (CommonUtil.isNotEmpty(evalText)) {
-                    fullPromptSb.append("\n\n## 평가표\n").append(evalText);
-                }
-                String fullPrompt = fullPromptSb.toString();
-
-                // Step 3: LLM 호출
+                // Step 3: LLM 호출 — 대용량 분기
                 sendSseEvent(emitter, "progress", "{\"step\":\"llm\",\"message\":\"AI 분석 중\"}");
-                String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
-                if (CommonUtil.isEmpty(aiResponse)) {
-                    logger.warn("[PT Stage1] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
-                    aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
-                }
-                if (CommonUtil.isEmpty(aiResponse)) {
-                    sendSseEvent(emitter, "error", "{\"message\":\"AI 응답이 비어 있습니다. 잠시 후 다시 시도해 주세요.\"}");
-                    emitter.complete();
-                    return;
-                }
-
-                // Step 4: JSON 파싱 (실패 시 1회 재시도)
-                sendSseEvent(emitter, "progress", "{\"step\":\"parse\",\"message\":\"분석 결과 검증 중\"}");
                 ProposalVO.Stage1ResultVO parsed;
-                try {
-                    parsed = parseStage1Response(aiResponse);
-                } catch (RuntimeException e) {
-                    logger.warn("[PT Stage1] JSON 파싱 실패, 1회 재시도: {}", e.getMessage());
-                    aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
-                    try {
-                        parsed = parseStage1Response(aiResponse);
-                    } catch (RuntimeException e2) {
-                        logger.error("[PT Stage1] JSON 파싱 재시도 실패 (ptProjectId={}): {}\n응답원문: {}", ptProjectId, e2.getMessage(), aiResponse);
-                        sendSseEvent(emitter, "error", "{\"message\":\"자동 추출에 실패했습니다. 직접 입력해 주세요.\"}");
+                if (rfpText.length() > PT_RFP_TEXT_MAX_CHARS) {
+                    // ── 대용량 경로: 청크 완전 추출 + Java 병합 (LLM 재호출 없음) ────────
+                    sendSseEvent(emitter, "progress",
+                            "{\"step\":\"chunk_extract\",\"message\":\"대용량 RFP 청크 추출 시작\"}");
+                    parsed = extractStage1FromLargeRfp(rfpText, promptContent, modelId, emitter, agentId);
+
+                    // evalText 별도 처리
+                    if (CommonUtil.isNotEmpty(evalText)) {
+                        ProposalVO.Stage1ResultVO evalParsed = null;
+                        try {
+                            if (evalText.length() > PT_RFP_TEXT_MAX_CHARS) {
+                                evalParsed = extractStage1FromLargeRfp(evalText, promptContent, modelId, null, agentId);
+                            } else {
+                                String evalPrompt = promptContent + "\n\n## 평가표\n" + evalText;
+                                String evalResp = riskDiagnosisAgentService.callLlmQuerySync(evalPrompt, modelId, "", agentId);
+                                if (CommonUtil.isNotEmpty(evalResp)) {
+                                    evalParsed = parseStage1Response(evalResp);
+                                }
+                            }
+                        } catch (Exception e) {
+                            logger.warn("[PT Stage1] 평가표 추출 실패 (무시): {}", e.getMessage());
+                        }
+                        if (evalParsed != null && evalParsed.getEvalCriteria() != null && !evalParsed.getEvalCriteria().isEmpty()) {
+                            mergeEvalCriteriaInto(parsed, evalParsed.getEvalCriteria());
+                        }
+                    }
+                } else {
+                    // ── 단일 호출 경로 (rfpText가 임계값 이하) ──────────────────────────
+                    StringBuilder fullPromptSb = new StringBuilder(promptContent);
+                    fullPromptSb.append("\n\n## RFP 원문\n").append(rfpText);
+                    if (CommonUtil.isNotEmpty(evalText)) {
+                        fullPromptSb.append("\n\n## 평가표\n").append(evalText);
+                    }
+                    String fullPrompt = fullPromptSb.toString();
+
+                    String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+                    if (CommonUtil.isEmpty(aiResponse)) {
+                        logger.warn("[PT Stage1] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
+                        aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+                    }
+                    if (CommonUtil.isEmpty(aiResponse)) {
+                        sendSseEvent(emitter, "error", "{\"message\":\"AI 응답이 비어 있습니다. 잠시 후 다시 시도해 주세요.\"}");
                         emitter.complete();
                         return;
+                    }
+
+                    // Step 4: JSON 파싱 (실패 시 1회 재시도)
+                    sendSseEvent(emitter, "progress", "{\"step\":\"parse\",\"message\":\"분석 결과 검증 중\"}");
+                    try {
+                        parsed = parseStage1Response(aiResponse);
+                    } catch (RuntimeException e) {
+                        logger.warn("[PT Stage1] JSON 파싱 실패, 1회 재시도: {}", e.getMessage());
+                        aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+                        try {
+                            parsed = parseStage1Response(aiResponse);
+                        } catch (RuntimeException e2) {
+                            logger.error("[PT Stage1] JSON 파싱 재시도 실패 (ptProjectId={}): {}\n응답원문: {}", ptProjectId, e2.getMessage(), aiResponse);
+                            sendSseEvent(emitter, "error", "{\"message\":\"자동 추출에 실패했습니다. 직접 입력해 주세요.\"}");
+                            emitter.complete();
+                            return;
+                        }
                     }
                 }
 
@@ -297,13 +331,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
         }
 
-        String rfpText = extractPtFileText(project.getRfpFileId());
-        rfpText = condenseRfpTextIfLarge(rfpText, modelId, null, agentId);
+        // RFP 파일: FILE_PURPOSE_CD='001'로 조회 (RFP_FILE_ID 컬럼 제거 후 대체)
+        String rfpText = extractPtFileText(resolvePtFileId(ptProjectId, "001"));
 
+        // 평가표 파일: FILE_PURPOSE_CD='002'로 조회 (EVAL_TABLE_FILE_ID 컬럼 제거 후 대체)
         String evalText = null;
-        if (CommonUtil.isNotEmpty(project.getEvalTableFileId())) {
-            evalText = extractPtFileText(project.getEvalTableFileId());
-            evalText = condenseRfpTextIfLarge(evalText, modelId, null, agentId);
+        String evalFileId = resolvePtFileId(ptProjectId, "002");
+        if (CommonUtil.isNotEmpty(evalFileId)) {
+            evalText = extractPtFileText(evalFileId);
         }
 
         String promptContent = null;
@@ -316,23 +351,50 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             promptContent = buildDefaultStage1Prompt();
         }
 
-        StringBuilder fullPromptSb = new StringBuilder(promptContent);
-        fullPromptSb.append("\n\n## RFP 원문\n").append(rfpText);
-        if (CommonUtil.isNotEmpty(evalText)) {
-            fullPromptSb.append("\n\n## 평가표\n").append(evalText);
-        }
-        String fullPrompt = fullPromptSb.toString();
+        ProposalVO.Stage1ResultVO parsed;
+        if (rfpText.length() > PT_RFP_TEXT_MAX_CHARS) {
+            // ── 대용량 경로: 청크 완전 추출 + Java 병합 ──────────────────────────
+            parsed = extractStage1FromLargeRfp(rfpText, promptContent, modelId, null, agentId);
 
-        String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
-        if (CommonUtil.isEmpty(aiResponse)) {
-            logger.warn("[PT Stage1] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
-            aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
-        }
-        if (CommonUtil.isEmpty(aiResponse)) {
-            throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 1 분석을 완료할 수 없습니다.");
-        }
+            if (CommonUtil.isNotEmpty(evalText)) {
+                ProposalVO.Stage1ResultVO evalParsed = null;
+                try {
+                    if (evalText.length() > PT_RFP_TEXT_MAX_CHARS) {
+                        evalParsed = extractStage1FromLargeRfp(evalText, promptContent, modelId, null, agentId);
+                    } else {
+                        String evalPrompt = promptContent + "\n\n## 평가표\n" + evalText;
+                        String evalResp = riskDiagnosisAgentService.callLlmQuerySync(evalPrompt, modelId, "", agentId);
+                        if (CommonUtil.isNotEmpty(evalResp)) {
+                            evalParsed = parseStage1Response(evalResp);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("[PT Stage1] 평가표 추출 실패 (무시): {}", e.getMessage());
+                }
+                if (evalParsed != null && evalParsed.getEvalCriteria() != null && !evalParsed.getEvalCriteria().isEmpty()) {
+                    mergeEvalCriteriaInto(parsed, evalParsed.getEvalCriteria());
+                }
+            }
+        } else {
+            // ── 단일 호출 경로 ──────────────────────────────────────────────────
+            StringBuilder fullPromptSb = new StringBuilder(promptContent);
+            fullPromptSb.append("\n\n## RFP 원문\n").append(rfpText);
+            if (CommonUtil.isNotEmpty(evalText)) {
+                fullPromptSb.append("\n\n## 평가표\n").append(evalText);
+            }
+            String fullPrompt = fullPromptSb.toString();
 
-        ProposalVO.Stage1ResultVO parsed = parseStage1Response(aiResponse);
+            String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+            if (CommonUtil.isEmpty(aiResponse)) {
+                logger.warn("[PT Stage1] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
+                aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+            }
+            if (CommonUtil.isEmpty(aiResponse)) {
+                throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 1 분석을 완료할 수 없습니다.");
+            }
+
+            parsed = parseStage1Response(aiResponse);
+        }
         validateScoreSum(parsed.getEvalCriteria(), ptProjectId);
         validateWritingGuideline(parsed.getWritingGuidelineJson(), ptProjectId);
         saveStage1Result(ptProjectId, parsed, SessionUtil.getUserId());
@@ -355,7 +417,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             int sortOrd = 0;
             for (ProposalVO.RequirementVO req : parsed.getRequirements()) {
                 req.setRequirementId(
-                        keyGenerate.generateTableKey("PTQ-", "TB_PT_REQUIREMENT", "REQUIREMENT_ID", 6));
+                        keyGenerate.generateTableKey("PTQ", "TB_PT_REQUIREMENT", "REQUIREMENT_ID", 6));
                 req.setPtProjectId(ptProjectId);
                 req.setCreateUserId(userId);
                 if (req.getSortOrd() == null) {
@@ -371,7 +433,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             int sortOrd = 0;
             for (ProposalVO.EvalCriteriaVO ec : parsed.getEvalCriteria()) {
                 ec.setEvalCriteriaId(
-                        keyGenerate.generateTableKey("PTE-", "TB_PT_EVAL_CRITERIA", "EVAL_CRITERIA_ID", 6));
+                        keyGenerate.generateTableKey("PTE", "TB_PT_EVAL_CRITERIA", "EVAL_CRITERIA_ID", 6));
                 ec.setPtProjectId(ptProjectId);
                 ec.setCreateUserId(userId);
                 if (ec.getSortOrd() == null) {
@@ -434,89 +496,270 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * RFP 텍스트가 PT_RFP_TEXT_MAX_CHARS 이하면 그대로 반환,
-     * 초과하면 청크로 나눠 병렬 요약 후 압축본을 반환한다.
+     * 대용량 RFP/평가표 텍스트를 청크로 분할하여 S1_EXTRACT 프롬프트로 병렬 호출 후
+     * 각 청크 응답을 즉시 파싱, Java에서 병합하여 Stage1ResultVO를 반환한다.
+     * LLM 재호출(통합 단계) 없음 — JSON 잘림(max_tokens 초과) 문제 해소.
      *
-     * @param rfpText  추출된 RFP 원문
-     * @param modelId  LLM 모델 ID
-     * @param emitter  SSE 진행 상황 전달용 (null 허용 — sync 경로)
-     * @param agentId  에이전트 ID
-     * @return 압축된 RFP 텍스트
+     * @param text          RFP 또는 평가표 전체 텍스트
+     * @param promptContent S1_EXTRACT 프롬프트 본문
+     * @param modelId       LLM 모델 ID
+     * @param emitter       SSE 진행 이벤트용 (null 허용 — sync 경로)
+     * @param agentId       에이전트 ID
+     * @return 병합된 Stage1ResultVO
      */
-    private String condenseRfpTextIfLarge(String rfpText, String modelId, SseEmitter emitter, String agentId) {
-        if (CommonUtil.isEmpty(rfpText)) return rfpText;
-        if (rfpText.length() <= PT_RFP_TEXT_MAX_CHARS) return rfpText;
+    private ProposalVO.Stage1ResultVO extractStage1FromLargeRfp(
+            String text, String promptContent, String modelId,
+            SseEmitter emitter, String agentId) {
 
-        if (emitter != null) {
-            sendSseEvent(emitter, "progress", "{\"step\":\"condense\",\"message\":\"대용량 RFP 요약 중\"}");
+        java.util.List<String> chunks = splitRfpIntoChunks(text);
+        final int chunkCount = chunks.size();
+        logger.info("[PT Stage1] 청크 분할 완료 - 원본:{}자, 청크:{}개", text.length(), chunkCount);
+
+        final java.util.concurrent.atomic.AtomicInteger completedCount =
+                new java.util.concurrent.atomic.AtomicInteger(0);
+
+        java.util.List<java.util.concurrent.Future<ProposalVO.Stage1ResultVO>> futures =
+                new java.util.ArrayList<>();
+
+        for (int ci = 0; ci < chunkCount; ci++) {
+            final int chunkNo = ci + 1;
+            final String chunk = chunks.get(ci);
+            futures.add(PT_SUMMARIZE_EXECUTOR.submit(() -> {
+                long t0 = System.currentTimeMillis();
+                logger.info("[PT Stage1] 청크 추출 시작 - {}/{} ({}자)", chunkNo, chunkCount, chunk.length());
+                try {
+                    String chunkPrompt = promptContent
+                            + "\n\n## RFP 일부 (" + chunkNo + "/" + chunkCount + ")\n" + chunk;
+                    String response = riskDiagnosisAgentService.callLlmQuerySync(chunkPrompt, modelId, "", agentId);
+                    if (CommonUtil.isEmpty(response)) {
+                        logger.warn("[PT Stage1] 청크 {}/{} LLM 응답 없음 — 스킵", chunkNo, chunkCount);
+                        return null;
+                    }
+                    ProposalVO.Stage1ResultVO chunkResult = parseStage1Response(response);
+                    int done = completedCount.incrementAndGet();
+                    if (emitter != null) {
+                        sendSseEvent(emitter, "progress",
+                                String.format("{\"step\":\"chunk\",\"message\":\"청크 %d/%d 처리 중\",\"current\":%d,\"total\":%d}",
+                                        done, chunkCount, done, chunkCount));
+                    }
+                    logger.info("[PT Stage1] 청크 추출 완료 - {}/{} (요구사항:{}건, {}ms)",
+                            chunkNo, chunkCount,
+                            chunkResult.getRequirements() != null ? chunkResult.getRequirements().size() : 0,
+                            System.currentTimeMillis() - t0);
+                    return chunkResult;
+                } catch (Exception e) {
+                    logger.warn("[PT Stage1] 청크 {}/{} 추출/파싱 실패 — 스킵: {}", chunkNo, chunkCount, e.getMessage());
+                    return null;
+                }
+            }));
         }
 
-        String summaryPromptBase = null;
-        try {
-            summaryPromptBase = promptService.getPromptsByAgentIdAndStageCd(agentId, "S1_EXTRACT");
-        } catch (Exception e) {
-            logger.warn("[PT Stage1] RFP 요약 프롬프트 조회 실패, 기본 프롬프트 사용: {}", e.getMessage());
+        java.util.List<ProposalVO.Stage1ResultVO> chunkResults = new java.util.ArrayList<>();
+        for (int i = 0; i < futures.size(); i++) {
+            try {
+                ProposalVO.Stage1ResultVO r = futures.get(i).get(
+                        PT_QUERY_TIMEOUT_SEC + 20L, java.util.concurrent.TimeUnit.SECONDS);
+                if (r != null) chunkResults.add(r);
+            } catch (Exception e) {
+                logger.warn("[PT Stage1] 청크 {} 결과 수집 실패: {}", i + 1, e.getMessage());
+            }
         }
-        final String fSummaryPromptBase = summaryPromptBase;
 
-        int total = rfpText.length();
+        if (chunkResults.isEmpty()) {
+            throw new RuntimeException("모든 청크 추출이 실패했습니다. 직접 입력해 주세요.");
+        }
+
+        ProposalVO.Stage1ResultVO merged = mergeStage1Results(chunkResults);
+        logger.info("[PT Stage1] 청크 병합 완료 - 요구사항:{}건, 평가기준:{}건 (성공 청크:{}/{})",
+                merged.getRequirements() != null ? merged.getRequirements().size() : 0,
+                merged.getEvalCriteria() != null ? merged.getEvalCriteria().size() : 0,
+                chunkResults.size(), chunkCount);
+        return merged;
+    }
+
+    /**
+     * RFP 텍스트를 페이지 경계(\f 폼피드) 또는 문자 수 기준으로 청크 분할.
+     * PDF 추출 시 \f 가 포함된 경우 페이지 경계를 존중해 자른다.
+     */
+    private java.util.List<String> splitRfpIntoChunks(String text) {
+        int total = text.length();
         int chunkSize = Math.max(PT_SUMMARY_MIN_CHUNK_CHARS,
                 (int) Math.ceil((double) total / PT_SUMMARY_MAX_CHUNKS));
         int overlap = Math.min(PT_SUMMARY_CHUNK_OVERLAP, chunkSize / 4);
 
+        // 폼피드(\f) 기준 페이지 분리 시도
+        if (text.indexOf('\f') >= 0) {
+            String[] pages = text.split("\\f", -1);
+            if (pages.length > 1) {
+                java.util.List<String> chunks = new java.util.ArrayList<>();
+                StringBuilder current = new StringBuilder();
+                for (String page : pages) {
+                    if (current.length() > 0 && current.length() + page.length() > chunkSize) {
+                        chunks.add(current.toString().trim());
+                        // 오버랩: 이전 청크 끝부분 포함
+                        String tail = current.length() > overlap
+                                ? current.substring(current.length() - overlap) : current.toString();
+                        current = new StringBuilder(tail).append('\f').append(page);
+                    } else {
+                        if (current.length() > 0) current.append('\f');
+                        current.append(page);
+                    }
+                }
+                if (current.length() > 0) chunks.add(current.toString().trim());
+                // 최대 청크 수 초과 시 인접 청크 합산
+                if (chunks.size() > PT_SUMMARY_MAX_CHUNKS) {
+                    int mergeN = (int) Math.ceil((double) chunks.size() / PT_SUMMARY_MAX_CHUNKS);
+                    java.util.List<String> merged = new java.util.ArrayList<>();
+                    for (int i = 0; i < chunks.size(); i += mergeN) {
+                        StringBuilder sb = new StringBuilder();
+                        for (int j = i; j < Math.min(i + mergeN, chunks.size()); j++) {
+                            if (sb.length() > 0) sb.append('\f');
+                            sb.append(chunks.get(j));
+                        }
+                        merged.add(sb.toString());
+                    }
+                    return merged;
+                }
+                logger.info("[PT Stage1] 페이지 경계 기준 분할 - 페이지:{}, 청크:{}", pages.length, chunks.size());
+                return chunks;
+            }
+        }
+
+        // 폴백: 문자 수 기준 분할 (기존 로직 유지)
         java.util.List<String> chunks = new java.util.ArrayList<>();
         int pos = 0;
         while (pos < total) {
             int end = Math.min(total, pos + chunkSize);
-            chunks.add(rfpText.substring(pos, end));
+            chunks.add(text.substring(pos, end));
             if (end >= total) break;
             pos = end - overlap;
         }
-        logger.info("[PT Stage1] RFP 요약 시작 - 원본:{}자, 청크:{}개(청크당 ~{}자, overlap:{}자)",
+        logger.info("[PT Stage1] 문자 수 기준 분할 - 원본:{}자, 청크:{}개 (청크당 ~{}자, overlap:{}자)",
                 total, chunks.size(), chunkSize, overlap);
+        return chunks;
+    }
 
-        final int chunkCount = chunks.size();
-        java.util.List<java.util.concurrent.Future<String>> futures = new java.util.ArrayList<>();
-        for (int ci = 0; ci < chunkCount; ci++) {
-            final int chunkNo = ci + 1;
-            final String fChunk = chunks.get(ci);
-            futures.add(PT_SUMMARIZE_EXECUTOR.submit(() -> {
-                long chunkStart = System.currentTimeMillis();
-                logger.info("[PT Stage1] RFP 청크 요약 시작 - {}/{} (입력:{}자)", chunkNo, chunkCount, fChunk.length());
-                String chunkPrompt = fSummaryPromptBase + "\n\n## RFP 일부\n" + fChunk;
-                String out = riskDiagnosisAgentService.callLlmQuerySync(chunkPrompt, modelId, "", agentId);
-                logger.info("[PT Stage1] RFP 청크 요약 완료 - {}/{} (입력:{}자 → 요약:{}자, {}ms)",
-                        chunkNo, chunkCount, fChunk.length(), out != null ? out.length() : 0,
-                        System.currentTimeMillis() - chunkStart);
-                return out;
-            }));
-        }
+    /**
+     * 여러 청크에서 파싱한 Stage1ResultVO 목록을 Java에서 병합한다. LLM 재호출 없음.
+     * - requirements: 전체 concat. reqNo 비null 항목은 첫 번째 유지(중복 경고)
+     * - writingGuideline: tocMandatoryYn='Y'이거나 필드가 채워진 첫 값 채택
+     * - evalCriteria: 전체 concat, 중복 evalItemNm 경고만
+     */
+    private ProposalVO.Stage1ResultVO mergeStage1Results(java.util.List<ProposalVO.Stage1ResultVO> chunkResults) {
+        ProposalVO.Stage1ResultVO merged = new ProposalVO.Stage1ResultVO();
 
-        StringBuilder condensed = new StringBuilder();
-        int idx = 0;
-        for (java.util.concurrent.Future<String> f : futures) {
-            idx++;
-            try {
-                String s = f.get(PT_QUERY_TIMEOUT_SEC + 20, java.util.concurrent.TimeUnit.SECONDS);
-                if (CommonUtil.isNotEmpty(s)) {
-                    condensed.append("===== 요약 ").append(idx).append(" =====\n")
-                            .append(s.trim()).append("\n\n");
+        // requirements 병합
+        java.util.List<ProposalVO.RequirementVO> allReqs = new java.util.ArrayList<>();
+        java.util.Set<String> seenReqNos = new java.util.LinkedHashSet<>();
+        int reqSortBase = 0;
+        for (ProposalVO.Stage1ResultVO cr : chunkResults) {
+            if (cr.getRequirements() == null) continue;
+            for (ProposalVO.RequirementVO req : cr.getRequirements()) {
+                String rn = req.getReqNo();
+                if (CommonUtil.isNotEmpty(rn)) {
+                    if (seenReqNos.contains(rn)) {
+                        logger.warn("[PT Stage1 Merge] 중복 reqNo={} — 첫 번째 유지, 후속 스킵", rn);
+                        continue;
+                    }
+                    seenReqNos.add(rn);
                 }
-            } catch (Exception e) {
-                logger.warn("[PT Stage1] RFP 청크 {} 요약 실패: {}", idx, e.getMessage());
+                if (req.getSortOrd() == null) req.setSortOrd(reqSortBase);
+                reqSortBase++;
+                allReqs.add(req);
             }
         }
+        merged.setRequirements(allReqs);
 
-        String result = condensed.toString().trim();
-        if (CommonUtil.isEmpty(result)) {
-            logger.warn("[PT Stage1] RFP 요약 결과 없음 — 원문 앞부분으로 폴백");
-            result = rfpText.substring(0, PT_RFP_TEXT_MAX_CHARS) + "\n...(이하 생략)";
-        } else if (result.length() > PT_CONDENSED_MAX_CHARS) {
-            logger.warn("[PT Stage1] RFP 압축본이 상한({}자) 초과 — 안전 절단", PT_CONDENSED_MAX_CHARS);
-            result = result.substring(0, PT_CONDENSED_MAX_CHARS) + "\n...(요약 일부 생략)";
+        // writingGuideline 병합: tocMandatoryYn=Y 우선, 없으면 첫 번째 비어있지 않은 값
+        String bestGuideline = null;
+        for (ProposalVO.Stage1ResultVO cr : chunkResults) {
+            String wg = cr.getWritingGuidelineJson();
+            if (CommonUtil.isEmpty(wg)) continue;
+            if (bestGuideline == null) {
+                bestGuideline = wg;
+            } else {
+                try {
+                    JsonObject wgObj = JsonParser.parseString(wg).getAsJsonObject();
+                    if ("Y".equals(getStrOrNull(wgObj, "tocMandatoryYn"))) {
+                        JsonObject bestObj = JsonParser.parseString(bestGuideline).getAsJsonObject();
+                        if (!"Y".equals(getStrOrNull(bestObj, "tocMandatoryYn"))) {
+                            bestGuideline = wg;
+                        }
+                    }
+                } catch (Exception ignored) { }
+            }
         }
-        logger.info("[PT Stage1] RFP 요약 완료 - 원본:{}자 → 압축:{}자, 청크:{}개", total, result.length(), chunks.size());
-        return result;
+        merged.setWritingGuidelineJson(bestGuideline);
+
+        // evalCriteria 병합
+        java.util.List<ProposalVO.EvalCriteriaVO> allEval = new java.util.ArrayList<>();
+        java.util.Set<String> seenEvalNms = new java.util.LinkedHashSet<>();
+        int evalSortBase = 0;
+        for (ProposalVO.Stage1ResultVO cr : chunkResults) {
+            if (cr.getEvalCriteria() == null) continue;
+            for (ProposalVO.EvalCriteriaVO ec : cr.getEvalCriteria()) {
+                String nm = ec.getEvalItemNm();
+                if (CommonUtil.isNotEmpty(nm) && seenEvalNms.contains(nm)) {
+                    logger.warn("[PT Stage1 Merge] 중복 evalItemNm='{}' — 경고만, 유지", nm);
+                }
+                if (CommonUtil.isNotEmpty(nm)) seenEvalNms.add(nm);
+                if (ec.getSortOrd() == null) ec.setSortOrd(evalSortBase);
+                evalSortBase++;
+                allEval.add(ec);
+            }
+        }
+        merged.setEvalCriteria(allEval);
+
+        return merged;
+    }
+
+    /**
+     * evalText 추출 결과의 evalCriteria를 기존 Stage1ResultVO에 병합(append)한다.
+     * 중복 evalItemNm이 있으면 경고 로그만 남기고 유지.
+     */
+    private void mergeEvalCriteriaInto(ProposalVO.Stage1ResultVO target,
+                                        java.util.List<ProposalVO.EvalCriteriaVO> evalItems) {
+        if (evalItems == null || evalItems.isEmpty()) return;
+        java.util.List<ProposalVO.EvalCriteriaVO> existing =
+                target.getEvalCriteria() != null ? target.getEvalCriteria() : new java.util.ArrayList<>();
+
+        java.util.Set<String> existingNms = new java.util.LinkedHashSet<>();
+        for (ProposalVO.EvalCriteriaVO ec : existing) {
+            if (CommonUtil.isNotEmpty(ec.getEvalItemNm())) existingNms.add(ec.getEvalItemNm());
+        }
+
+        int sortOrd = existing.size();
+        for (ProposalVO.EvalCriteriaVO ec : evalItems) {
+            String nm = ec.getEvalItemNm();
+            if (CommonUtil.isNotEmpty(nm) && existingNms.contains(nm)) {
+                logger.warn("[PT Stage1 Merge] evalText 병합 중 중복 evalItemNm='{}' — 경고만, 유지", nm);
+            }
+            if (CommonUtil.isNotEmpty(nm)) existingNms.add(nm);
+            if (ec.getSortOrd() == null) ec.setSortOrd(sortOrd++);
+            existing.add(ec);
+        }
+        target.setEvalCriteria(existing);
+    }
+
+    /**
+     * 프로젝트의 용도별 파일 ID 조회 — RFP_FILE_ID/EVAL_TABLE_FILE_ID 컬럼 제거 후 대체 헬퍼.
+     * FILE_PURPOSE_CD (PT000011): 001=RFP원문, 002=평가표, 003=템플릿, 004=기타참고자료, 005=자사정보, 006=경쟁사정보.
+     * 프로젝트당 1건 전제이므로 목록 중 첫 번째 PT_FILE_ID를 반환한다.
+     *
+     * @param ptProjectId   프로젝트 ID
+     * @param filePurposeCd PT000011 코드값
+     * @return PT_FILE_ID 문자열, 없으면 null
+     */
+    private String resolvePtFileId(String ptProjectId, String filePurposeCd) {
+        try {
+            List<ProposalVO.PtFileVO> files = proposalDAO.selectPtFileByPurpose(ptProjectId, filePurposeCd);
+            if (files != null && !files.isEmpty()) {
+                return files.get(0).getPtFileId();
+            }
+        } catch (Exception e) {
+            logger.warn("[PT] resolvePtFileId 조회 실패 (ptProjectId={}, filePurposeCd={}): {}", ptProjectId, filePurposeCd, e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -551,7 +794,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * @return PtFileVO (ptFileId, filePath 포함)
      */
     public ProposalVO.PtFileVO uploadPtFile(MultipartFile file, String ptProjectId, String filePurposeCd) throws Exception {
-        String ptFileId = keyGenerate.generateTableKey("PTF-", "TB_PT_FILE", "PT_FILE_ID", 6);
+        String ptFileId = keyGenerate.generateTableKey("PTF", "TB_PT_FILE", "PT_FILE_ID");
 
         String originalFilename = file.getOriginalFilename();
         if (CommonUtil.isEmpty(originalFilename)) originalFilename = "file";
@@ -1098,10 +1341,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             return java.util.Collections.emptyList();
         }
 
-        String tocMandatoryYn = getStrOrNull(guideline, "tocMandatoryYn");
-        if (!"Y".equals(tocMandatoryYn)
-                || !guideline.has("mandatedToc")
-                || guideline.get("mandatedToc").isJsonNull()) {
+        // tocMandatoryYn 값과 무관하게 mandatedToc가 있으면 반환 (사용자 명시적 요청이므로)
+        if (!guideline.has("mandatedToc") || guideline.get("mandatedToc").isJsonNull()) {
             return java.util.Collections.emptyList();
         }
 
@@ -2566,5 +2807,594 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      */
     private String getRefIdFromChatLog(Object refId) {
         return refId != null ? refId.toString() : "";
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Step E: 검토 — 전체 슬라이드 조회 / 전역 보완 채팅 / Stage4 평가 시뮬레이션
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * E — 전체 슬라이드 목록 조회 (SLIDE_NO 순)
+     * @param ptProjectId 프로젝트 ID
+     * @return List<SlideVO>
+     */
+    public List<ProposalVO.SlideVO> selectAllSlides(String ptProjectId) {
+        return proposalDAO.selectAllSlidesByProject(ptProjectId);
+    }
+
+    /**
+     * E — 전역 보완 채팅
+     * 1. 사용자 메시지 + 전체 슬라이드 목록 → LLM이 대상 slideId 배열 판단
+     * 2. 대상 슬라이드들을 tocId별로 그룹화 → 각 TOC의 컨텍스트 로드 후 재생성 (D-3 로직 재사용)
+     * 3. TB_CHAT_LOG에 전역 채팅 이력 저장 (svcTy='PTRV', refId=ptProjectId)
+     *
+     * @param vo ptProjectId, message, modelId, agentId
+     * @return ReviewChatResultVO (재생성된 슬라이드 목록 + AI 요약)
+     */
+    public ProposalVO.ReviewChatResultVO reviewChat(ProposalVO.ReviewChatVO vo) throws Exception {
+        String ptProjectId = vo.getPtProjectId();
+        String userMessage = vo.getMessage();
+        String modelId = vo.getModelId();
+        String agentId = vo.getAgentId();
+
+        // 1. 전체 슬라이드 조회
+        List<ProposalVO.SlideVO> allSlides = proposalDAO.selectAllSlidesByProject(ptProjectId);
+        if (allSlides == null || allSlides.isEmpty()) {
+            throw new RuntimeException("생성된 슬라이드가 없습니다. 먼저 Step D에서 슬라이드를 생성해 주세요.");
+        }
+
+        // 2. 대상 슬라이드 판단 (D-3의 identifyTargetSlides 재사용)
+        List<String> targetSlideIds = identifyTargetSlides(allSlides, userMessage, modelId, agentId);
+        if (targetSlideIds == null || targetSlideIds.isEmpty()) {
+            // 전체 대상
+            targetSlideIds = new java.util.ArrayList<>();
+            for (ProposalVO.SlideVO s : allSlides) targetSlideIds.add(s.getSlideId());
+        }
+        final java.util.Set<String> targetSet = new java.util.HashSet<>(targetSlideIds);
+
+        // 3. 대상 슬라이드를 tocId 별로 그룹화
+        java.util.Map<String, List<ProposalVO.SlideVO>> byToc = new java.util.LinkedHashMap<>();
+        for (ProposalVO.SlideVO s : allSlides) {
+            if (!targetSet.contains(s.getSlideId())) continue;
+            byToc.computeIfAbsent(s.getTocId(), k -> new java.util.ArrayList<>()).add(s);
+        }
+
+        // 4. 공통 컨텍스트 로드
+        List<ProposalVO.RequirementVO> requirements = proposalDAO.selectRequirements(ptProjectId);
+        List<ProposalVO.WinThemeVO> winThemes = proposalDAO.selectWinThemes(ptProjectId);
+        List<ProposalVO.ProblemDefinitionVO> problemDefs = proposalDAO.selectProblemDefinitions(ptProjectId);
+        String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+        List<ProposalVO.EvalCriteriaVO> allEc = proposalDAO.selectEvalCriteria(ptProjectId);
+
+        String promptContent = null;
+        try { promptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_SLIDE"); }
+        catch (Exception e) { logger.warn("[PT E] S3_SLIDE 프롬프트 조회 실패: {}", e.getMessage()); }
+        if (CommonUtil.isEmpty(promptContent)) promptContent = buildDefaultStage3Prompt();
+
+        // 5. tocId별 재생성
+        List<ProposalVO.SlideVO> updatedSlides = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, List<ProposalVO.SlideVO>> entry : byToc.entrySet()) {
+            String tocId = entry.getKey();
+            List<ProposalVO.SlideVO> tocTargetSlides = entry.getValue();
+
+            ProposalVO.TocVO tocVO = proposalDAO.selectTocById(tocId);
+            if (tocVO == null) {
+                logger.warn("[PT E] TOC 조회 실패 (tocId={}), 해당 슬라이드 건너뜀", tocId);
+                continue;
+            }
+
+            ProposalVO.EvalCriteriaVO linkedEc = null;
+            if (CommonUtil.isNotEmpty(tocVO.getLinkedEvalCriteriaId())) {
+                for (ProposalVO.EvalCriteriaVO ec : allEc) {
+                    if (tocVO.getLinkedEvalCriteriaId().equals(ec.getEvalCriteriaId())) { linkedEc = ec; break; }
+                }
+            }
+
+            for (ProposalVO.SlideVO existingSlide : tocTargetSlides) {
+                String chatFullPrompt = buildStage3FullPrompt(promptContent, tocVO, linkedEc,
+                        requirements, winThemes, problemDefs, project, configJson)
+                        + "\n\n## 기존 슬라이드 내용\n" + CommonUtil.nullToBlank(existingSlide.getSlideJson())
+                        + "\n\n## 보완 요청\n" + userMessage
+                        + "\n\n슬라이드 1장을 재작성해 주세요. 형식은 위와 동일한 slides 배열 JSON으로 출력하세요.";
+
+                try {
+                    String aiResp = riskDiagnosisAgentService.callLlmQuerySync(chatFullPrompt, modelId, "", agentId);
+                    if (CommonUtil.isNotEmpty(aiResp)) {
+                        List<JsonObject> parsed = parseStage3Response(aiResp);
+                        if (!parsed.isEmpty()) {
+                            ProposalVO.SlideVO updateVO = new ProposalVO.SlideVO();
+                            updateVO.setSlideId(existingSlide.getSlideId());
+                            updateVO.setLayoutType(getStrOrNull(parsed.get(0), "layoutType"));
+                            updateVO.setSlideJson(GSON.toJson(parsed.get(0)));
+                            updateVO.setRenderStatusCd("002");
+                            proposalDAO.updateSlide(updateVO);
+
+                            existingSlide.setSlideJson(GSON.toJson(parsed.get(0)));
+                            existingSlide.setLayoutType(updateVO.getLayoutType());
+                            try { doStyleAssembly(existingSlide, configJson); }
+                            catch (Exception re) { logger.warn("[PT E] 스타일 조립 실패 slideId={}: {}", existingSlide.getSlideId(), re.getMessage()); }
+
+                            updatedSlides.add(existingSlide);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("[PT E] 슬라이드 재생성 실패 (slideId={}): {}", existingSlide.getSlideId(), e.getMessage());
+                }
+            }
+        }
+
+        // 6. 채팅 이력 저장 (svcTy='PTRV', refId=ptProjectId)
+        saveReviewChatLog(ptProjectId, userMessage,
+                "슬라이드 " + updatedSlides.size() + "장이 보완 요청에 따라 재생성되었습니다.",
+                agentId, SessionUtil.getUserId());
+
+        ProposalVO.ReviewChatResultVO result = new ProposalVO.ReviewChatResultVO();
+        result.setUpdatedSlides(updatedSlides);
+        result.setAiMessage("보완 요청에 따라 슬라이드 " + updatedSlides.size() + "장이 수정되었습니다.");
+        return result;
+    }
+
+    /**
+     * E — Stage4 평가 시뮬레이션 실행
+     * 1. 전체 슬라이드(slideNo 포함) + 평가기준을 LLM에 전달
+     * 2. 시스템 프롬프트: STAGE_CD IN ('ALL','S4_REVIEW') 조합
+     * 3. LLM 응답 파싱 → TB_PT_REVIEW INSERT (재실행 시 이전 이력은 남기고 새 row 추가)
+     * 4. 심각도순 정렬 결과 반환
+     *
+     * @param ptProjectId 프로젝트 ID
+     * @param modelId     LLM 모델 ID
+     * @param agentId     에이전트 ID
+     * @return EvalSimulationResultVO (저장 건수 + 심각도순 리뷰 목록)
+     */
+    public ProposalVO.EvalSimulationResultVO executeEvalSimulation(String ptProjectId, String modelId, String agentId) throws Exception {
+        // 1. 전체 슬라이드 조회 (slideNo 기준 정렬)
+        List<ProposalVO.SlideVO> allSlides = proposalDAO.selectAllSlidesByProject(ptProjectId);
+        if (allSlides == null || allSlides.isEmpty()) {
+            throw new RuntimeException("생성된 슬라이드가 없습니다. 먼저 Step D에서 슬라이드를 생성해 주세요.");
+        }
+
+        // slideNo → slideId 맵 (LLM 응답 매핑용)
+        java.util.Map<Integer, String> slideNoToId = new java.util.LinkedHashMap<>();
+        for (ProposalVO.SlideVO s : allSlides) {
+            slideNoToId.put(s.getSlideNo(), s.getSlideId());
+        }
+
+        // 2. 평가기준 조회
+        List<ProposalVO.EvalCriteriaVO> evalCriteriaList = proposalDAO.selectEvalCriteria(ptProjectId);
+
+        // evalItemNm → evalCriteriaId 맵 (정확 매칭용)
+        java.util.Map<String, String> evalNmToId = new java.util.LinkedHashMap<>();
+        for (ProposalVO.EvalCriteriaVO ec : evalCriteriaList) {
+            if (CommonUtil.isNotEmpty(ec.getEvalItemNm())) evalNmToId.put(ec.getEvalItemNm(), ec.getEvalCriteriaId());
+        }
+
+        // 3. S4_REVIEW 프롬프트 로드
+        String promptContent = null;
+        try { promptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S4_REVIEW"); }
+        catch (Exception e) { logger.warn("[PT E Stage4] S4_REVIEW 프롬프트 조회 실패: {}", e.getMessage()); }
+        if (CommonUtil.isEmpty(promptContent)) {
+            promptContent = "아래 슬라이드 목록과 평가기준을 검토해 제안서를 평가위원 관점에서 심층 분석하세요.";
+        }
+
+        // 4. 슬라이드 요약 (slideNo + 제목 + 핵심 내용)
+        StringBuilder sbSlides = new StringBuilder();
+        for (ProposalVO.SlideVO s : allSlides) {
+            String title = "";
+            String headline = "";
+            if (CommonUtil.isNotEmpty(s.getSlideJson())) {
+                try {
+                    JsonObject sObj = JsonParser.parseString(s.getSlideJson()).getAsJsonObject();
+                    title = CommonUtil.nullToBlank(getStrOrNull(sObj, "title"));
+                    headline = CommonUtil.nullToBlank(getStrOrNull(sObj, "headline"));
+                    if (CommonUtil.isEmpty(headline)) headline = CommonUtil.nullToBlank(getStrOrNull(sObj, "highlightBanner"));
+                } catch (Exception ignored) {}
+            }
+            sbSlides.append("slideNo:").append(s.getSlideNo())
+                    .append(" layoutType:").append(CommonUtil.nullToBlank(s.getLayoutType()))
+                    .append(" title:").append(title)
+                    .append(" headline:").append(headline)
+                    .append("\n");
+        }
+
+        // 5. 평가기준 요약
+        StringBuilder sbEc = new StringBuilder();
+        for (ProposalVO.EvalCriteriaVO ec : evalCriteriaList) {
+            sbEc.append("- ").append(CommonUtil.nullToBlank(ec.getEvalItemNm()))
+                .append(" (배점:").append(ec.getScore()).append(")")
+                .append(" 평가의도:").append(CommonUtil.nullToBlank(ec.getEvalIntent()))
+                .append(" 고득점조건:").append(CommonUtil.nullToBlank(ec.getHighScoreCondition()))
+                .append("\n");
+        }
+
+        // 6. LLM 호출 프롬프트 조립
+        String fullPrompt = promptContent
+                + "\n\n## 슬라이드 목록 (slideNo 기준)\n" + sbSlides
+                + "\n## 평가기준\n" + sbEc
+                + "\n\n## 출력 형식 (JSON만, 코드블록 없이)\n"
+                + "{\n  \"reviews\": [\n"
+                + "    {\n"
+                + "      \"severityCd\": \"001\",\n"
+                + "      \"targetSlideNo\": 7,\n"
+                + "      \"evalCriteriaNm\": \"사업이해도\",\n"
+                + "      \"currentIssue\": \"...\",\n"
+                + "      \"scoreImpact\": \"...\",\n"
+                + "      \"fixDirection\": \"...\",\n"
+                + "      \"fixSuggestionTxt\": \"...\",\n"
+                + "      \"expectedScore\": 7.5\n"
+                + "    }\n"
+                + "  ]\n"
+                + "}\n"
+                + "severityCd: 001=치명적, 002=중요, 003=보완권고\n"
+                + "targetSlideNo: 전체 단위 지적이면 null\n";
+
+        // 7. LLM 호출
+        String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+        if (CommonUtil.isEmpty(aiResponse)) {
+            throw new RuntimeException("Stage4 LLM 응답이 비어 있습니다.");
+        }
+
+        // 8. 응답 파싱
+        String json = aiResponse.trim();
+        if (json.startsWith("```")) {
+            int nl = json.indexOf('\n');
+            if (nl != -1) json = json.substring(nl + 1);
+            if (json.endsWith("```")) json = json.substring(0, json.lastIndexOf("```")).trim();
+        }
+        JsonObject root;
+        try {
+            root = JsonParser.parseString(json).getAsJsonObject();
+        } catch (Exception e) {
+            throw new RuntimeException("Stage4 LLM 응답이 유효한 JSON이 아닙니다: " + e.getMessage());
+        }
+        if (!root.has("reviews") || root.get("reviews").isJsonNull() || !root.get("reviews").isJsonArray()) {
+            throw new RuntimeException("Stage4 LLM 응답에 'reviews' 배열이 없습니다.");
+        }
+
+        // 9. DB 저장 (이전 이력은 남기고 새 row 추가 — 실행 시각으로 이력 구분)
+        String userId = SessionUtil.getUserId();
+        List<ProposalVO.ReviewVO> savedList = new java.util.ArrayList<>();
+        for (JsonElement el : root.getAsJsonArray("reviews")) {
+            if (el.isJsonNull() || !el.isJsonObject()) continue;
+            JsonObject item = el.getAsJsonObject();
+
+            ProposalVO.ReviewVO rv = new ProposalVO.ReviewVO();
+            rv.setReviewId(keyGenerate.generateTableKey("PTR-", "TB_PT_REVIEW", "REVIEW_ID", 6));
+            rv.setPtProjectId(ptProjectId);
+            rv.setSeverityCd(getStrOrNull(item, "severityCd"));
+            rv.setEvalCriteriaNm(getStrOrNull(item, "evalCriteriaNm"));
+            rv.setCurrentIssue(getStrOrNull(item, "currentIssue"));
+            rv.setScoreImpact(getStrOrNull(item, "scoreImpact"));
+            rv.setFixDirection(getStrOrNull(item, "fixDirection"));
+            rv.setFixSuggestionTxt(getStrOrNull(item, "fixSuggestionTxt"));
+            rv.setCreateUserId(userId);
+
+            // expectedScore
+            if (item.has("expectedScore") && !item.get("expectedScore").isJsonNull()) {
+                try { rv.setExpectedScore(item.get("expectedScore").getAsDouble()); }
+                catch (Exception ignored) {}
+            }
+
+            // targetSlideNo → SLIDE_ID 매핑
+            if (item.has("targetSlideNo") && !item.get("targetSlideNo").isJsonNull()) {
+                try {
+                    int targetSlideNo = item.get("targetSlideNo").getAsInt();
+                    String mappedSlideId = slideNoToId.get(targetSlideNo);
+                    if (mappedSlideId != null) {
+                        rv.setSlideId(mappedSlideId);
+                    } else {
+                        logger.warn("[PT E Stage4] 존재하지 않는 slideNo={} (ptProjectId={}), SLIDE_ID=NULL 처리", targetSlideNo, ptProjectId);
+                    }
+                } catch (Exception e) {
+                    logger.warn("[PT E Stage4] targetSlideNo 파싱 실패: {}", e.getMessage());
+                }
+            }
+            // null이면 rv.slideId = null (전체 단위 지적)
+
+            // evalCriteriaNm → EVAL_CRITERIA_ID 매핑 (완전일치 → 부분일치 → NULL)
+            if (CommonUtil.isNotEmpty(rv.getEvalCriteriaNm())) {
+                String ecId = evalNmToId.get(rv.getEvalCriteriaNm());
+                if (ecId == null) {
+                    // 부분일치 시도 (contains)
+                    String nm = rv.getEvalCriteriaNm().trim();
+                    for (java.util.Map.Entry<String, String> entry : evalNmToId.entrySet()) {
+                        String key = entry.getKey();
+                        if (key.contains(nm) || nm.contains(key)) {
+                            ecId = entry.getValue();
+                            break;
+                        }
+                    }
+                    if (ecId == null) {
+                        logger.warn("[PT E Stage4] evalCriteriaNm 매칭 실패 (nm={}, ptProjectId={}), EVAL_CRITERIA_ID=NULL", rv.getEvalCriteriaNm(), ptProjectId);
+                    }
+                }
+                rv.setEvalCriteriaId(ecId);
+            }
+
+            proposalDAO.insertReview(rv);
+            savedList.add(rv);
+        }
+
+        // 10. 심각도순 정렬 (001>002>003)
+        savedList.sort((a, b) -> {
+            int oa = severityOrder(a.getSeverityCd());
+            int ob = severityOrder(b.getSeverityCd());
+            return Integer.compare(oa, ob);
+        });
+
+        ProposalVO.EvalSimulationResultVO result = new ProposalVO.EvalSimulationResultVO();
+        result.setSavedCount(savedList.size());
+        result.setReviews(savedList);
+        return result;
+    }
+
+    /**
+     * E — Stage4 평가 시뮬레이션 최근 실행 결과 조회
+     * - CREATE_DT 분 단위로 최근 실행 배치를 식별해 반환
+     * - 심각도순(치명적→중요→보완권고) 정렬
+     *
+     * @param ptProjectId 프로젝트 ID
+     * @return List<ReviewVO> (없으면 빈 리스트)
+     */
+    public List<ProposalVO.ReviewVO> selectEvalSimulation(String ptProjectId) {
+        String latestRunDt = proposalDAO.selectLatestReviewRunDt(ptProjectId);
+        if (CommonUtil.isEmpty(latestRunDt)) return java.util.Collections.emptyList();
+        return proposalDAO.selectReviewsByRunDt(ptProjectId, latestRunDt);
+    }
+
+    /** severityCd 정렬 순서 (001=1, 002=2, 003=3, 기타=4) */
+    private int severityOrder(String cd) {
+        if ("001".equals(cd)) return 1;
+        if ("002".equals(cd)) return 2;
+        if ("003".equals(cd)) return 3;
+        return 4;
+    }
+
+    /** E — 전역 보완 채팅 로그 저장 (svcTy='PTRV', refId=ptProjectId) */
+    private void saveReviewChatLog(String ptProjectId, String qContent, String rContent, String agentId, String userId) {
+        try {
+            ChatbotVO log = new ChatbotVO();
+            log.setAgentId(agentId);
+            log.setSvcTy("PTRV"); // PT Review Chat
+            log.setRefId(ptProjectId);
+            log.setQContent(qContent);
+            log.setRContent(rContent);
+            log.setUserId(userId);
+            chatbotDAO.insertChatLog(log);
+        } catch (Exception e) {
+            logger.warn("[PT E] TB_CHAT_LOG insert 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Step F: 출력 — PPTX/PDF 내보내기
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * F — 출력 시작
+     * 1. 캐시 재사용 판단: 최근 완료 빌드의 COMPLETE_DT vs MAX(TB_PT_SLIDE.MODIFY_DT)
+     *    → 캐시가 최신이면 새 presigned URL 발급 후 즉시 반환 (BUILD_STATUS_CD='003')
+     * 2. 신규 빌드: TB_PT_EXPORT row 생성 → 비동기 빌드 시작 → exportId 즉시 반환
+     *    비동기: ProposalPptxUtil.buildPptx() → (pdf 요청 시) LibreOffice 변환 → NCP 업로드
+     *
+     * @param vo ptProjectId, format('pdf'|'pptx'), agentId
+     * @return ExportVO (캐시 재사용 시 즉시 완료, 신규 빌드 시 BUILD_STATUS_CD='002')
+     */
+    public ProposalVO.ExportVO startExport(ProposalVO.ExportRequestVO vo) throws Exception {
+        String ptProjectId = vo.getPtProjectId();
+        String format = CommonUtil.isNotEmpty(vo.getFormat()) ? vo.getFormat().toLowerCase().trim() : "pptx";
+        if (!"pdf".equals(format) && !"pptx".equals(format)) {
+            throw new RuntimeException("지원하는 포맷은 'pdf', 'pptx'입니다.");
+        }
+
+        // 1. 캐시 재사용 판단
+        ProposalVO.ExportVO cached = proposalDAO.selectLatestCompletedExport(ptProjectId, format);
+        if (cached != null && CommonUtil.isNotEmpty(cached.getCompleteDt()) && CommonUtil.isNotEmpty(cached.getFilePath())) {
+            String maxSlideModifyDt = proposalDAO.selectMaxSlideModifyDt(ptProjectId);
+            boolean cacheValid = CommonUtil.isEmpty(maxSlideModifyDt)
+                    || cached.getCompleteDt().compareTo(maxSlideModifyDt) >= 0;
+            if (cacheValid) {
+                logger.info("[PT F] 캐시 재사용 (ptProjectId={}, format={}, completeDt={})", ptProjectId, format, cached.getCompleteDt());
+                // 새 presigned URL 발급
+                try {
+                    String fileName = ptProjectId + "." + format;
+                    String downloadUrl = fileService.createDownloadPresignedUrlStr(cached.getFilePath(), fileName);
+                    if (CommonUtil.isNotEmpty(downloadUrl)) {
+                        ProposalVO.ExportVO updateVO = new ProposalVO.ExportVO();
+                        updateVO.setExportId(cached.getExportId());
+                        updateVO.setBuildStatusCd("003"); // 캐시재사용
+                        updateVO.setDownloadUrl(downloadUrl);
+                        proposalDAO.updateExport(updateVO);
+                        cached.setBuildStatusCd("003");
+                        cached.setDownloadUrl(downloadUrl);
+                    }
+                } catch (Exception e) {
+                    logger.warn("[PT F] 캐시 presigned URL 갱신 실패: {}", e.getMessage());
+                }
+                return cached;
+            }
+        }
+
+        // 2. 신규 빌드 — TB_PT_EXPORT row 생성
+        String exportId = keyGenerate.generateTableKey("PTE-", "TB_PT_EXPORT", "EXPORT_ID", 6);
+        ProposalVO.ExportVO exportVO = new ProposalVO.ExportVO();
+        exportVO.setExportId(exportId);
+        exportVO.setPtProjectId(ptProjectId);
+        exportVO.setFormatCd(format);
+        exportVO.setBuildStatusCd("001"); // 대기
+        exportVO.setCreateUserId(SessionUtil.getUserId());
+        proposalDAO.insertExport(exportVO);
+
+        // 3. 비동기 빌드 시작
+        final String finalFormat = format;
+        EXPORT_EXECUTOR.submit(() -> {
+            runExportBuild(exportId, ptProjectId, finalFormat);
+        });
+
+        exportVO.setBuildStatusCd("002"); // 빌드중 (반환 시점 기준)
+        return exportVO;
+    }
+
+    /**
+     * F — 출력 상태 조회 (폴링용)
+     * - BUILD_STATUS_CD가 003(캐시) 또는 004(완료)이면 presigned 다운로드 URL 재발급
+     *
+     * @param exportId EXPORT_ID
+     * @return ExportVO (없으면 null)
+     */
+    public ProposalVO.ExportVO selectExportStatus(String exportId) {
+        ProposalVO.ExportVO exportVO = proposalDAO.selectExportById(exportId);
+        if (exportVO == null) return null;
+
+        // 완료/캐시 상태이면 최신 다운로드 URL 발급
+        if (("003".equals(exportVO.getBuildStatusCd()) || "004".equals(exportVO.getBuildStatusCd()))
+                && CommonUtil.isNotEmpty(exportVO.getFilePath())) {
+            try {
+                String fileName = exportVO.getPtProjectId() + "." + exportVO.getFormatCd();
+                String downloadUrl = fileService.createDownloadPresignedUrlStr(exportVO.getFilePath(), fileName);
+                exportVO.setDownloadUrl(downloadUrl);
+            } catch (Exception e) {
+                logger.warn("[PT F] 다운로드 URL 발급 실패 (exportId={}): {}", exportId, e.getMessage());
+            }
+        }
+        return exportVO;
+    }
+
+    /**
+     * F — 비동기 출력 빌드 실행 (EXPORT_EXECUTOR 내부에서 호출)
+     */
+    private void runExportBuild(String exportId, String ptProjectId, String format) {
+        try {
+            // BUILD_STATUS_CD='002' (빌드중) 업데이트
+            ProposalVO.ExportVO progVO = new ProposalVO.ExportVO();
+            progVO.setExportId(exportId);
+            progVO.setBuildStatusCd("002");
+            proposalDAO.updateExport(progVO);
+
+            // 1. 전체 슬라이드 조회 (SLIDE_NO 순)
+            List<ProposalVO.SlideVO> allSlides = proposalDAO.selectAllSlidesByProject(ptProjectId);
+            if (allSlides == null || allSlides.isEmpty()) {
+                throw new RuntimeException("빌드할 슬라이드가 없습니다 (ptProjectId=" + ptProjectId + ")");
+            }
+
+            // 2. 프로젝트 정보 및 색상 설정 로드
+            ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+            String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+
+            String bgColor     = "#FFFFFF";
+            String baseColor   = "#5B4FE9";
+            String accentColor = "#E08A2C";
+            if (CommonUtil.isNotEmpty(configJson)) {
+                try {
+                    JsonObject root = JsonParser.parseString(configJson).getAsJsonObject();
+                    if (root.has("settings") && !root.get("settings").isJsonNull()) {
+                        JsonObject settings = root.getAsJsonObject("settings");
+                        if (settings.has("colors") && !settings.get("colors").isJsonNull()) {
+                            JsonObject colors = settings.getAsJsonObject("colors");
+                            List<String> bases   = colors.has("base")   && !colors.get("base").isJsonNull()   ? jsonArrayToList(colors.getAsJsonArray("base"))   : java.util.Collections.emptyList();
+                            List<String> accents = colors.has("accent") && !colors.get("accent").isJsonNull() ? jsonArrayToList(colors.getAsJsonArray("accent")) : java.util.Collections.emptyList();
+                            if (!bases.isEmpty())   baseColor   = bases.get(0);
+                            if (bases.size() > 2)   bgColor     = bases.get(2);   // 3순위 = 배경색
+                            if (!accents.isEmpty()) accentColor = accents.get(0);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("[PT F] configJson 색상 파싱 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+                }
+            }
+
+            // 3. 슬라이드 Map 목록 조립 (ProposalPptxUtil 입력 형식)
+            List<java.util.Map<String, Object>> slideMaps = new java.util.ArrayList<>();
+            for (ProposalVO.SlideVO s : allSlides) {
+                java.util.Map<String, Object> slideMap = new java.util.LinkedHashMap<>();
+                if (CommonUtil.isNotEmpty(s.getSlideJson())) {
+                    try {
+                        JsonObject sObj = JsonParser.parseString(s.getSlideJson()).getAsJsonObject();
+                        // layoutType
+                        slideMap.put("layoutType", CommonUtil.nullToBlank(getStrOrNull(sObj, "layoutType")));
+                        // title, subtitle, headline, notes
+                        slideMap.put("title",    getStrOrNull(sObj, "title"));
+                        slideMap.put("subtitle", getStrOrNull(sObj, "subtitle"));
+                        slideMap.put("headline", getStrOrNull(sObj, "highlightBanner") != null
+                                ? getStrOrNull(sObj, "highlightBanner") : getStrOrNull(sObj, "headline"));
+                        slideMap.put("notes",    getStrOrNull(sObj, "notes"));
+                        // keywords, content → List<String>
+                        if (sObj.has("keywords") && sObj.get("keywords").isJsonArray()) {
+                            List<String> kws = new java.util.ArrayList<>();
+                            for (JsonElement el : sObj.getAsJsonArray("keywords")) kws.add(el.isJsonNull() ? "" : el.getAsString());
+                            slideMap.put("keywords", kws);
+                        }
+                        if (sObj.has("content") && sObj.get("content").isJsonArray()) {
+                            List<String> ct = new java.util.ArrayList<>();
+                            for (JsonElement el : sObj.getAsJsonArray("content")) ct.add(el.isJsonNull() ? "" : el.getAsString());
+                            slideMap.put("content", ct);
+                        }
+                        // components (for infographic)
+                        if (sObj.has("components")) slideMap.put("components", GSON.fromJson(sObj.get("components"), Object.class));
+                    } catch (Exception e) {
+                        logger.warn("[PT F] 슬라이드 JSON 파싱 실패 (slideId={}): {}", s.getSlideId(), e.getMessage());
+                        slideMap.put("layoutType", CommonUtil.nullToBlank(s.getLayoutType()));
+                    }
+                } else {
+                    slideMap.put("layoutType", CommonUtil.nullToBlank(s.getLayoutType()));
+                }
+                slideMaps.add(slideMap);
+            }
+
+            // 4. PPTX 빌드
+            String projectTitle = project != null ? CommonUtil.nullToBlank(project.getProjectNm()) : ptProjectId;
+            byte[] pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildPptx(
+                    projectTitle, slideMaps, bgColor, baseColor, accentColor);
+
+            // 5. NCP 업로드 및 포맷별 처리
+            String objectKey;
+            byte[] uploadBytes;
+            String contentType;
+
+            if ("pdf".equals(format)) {
+                // PPTX → PDF (LibreOffice 변환)
+                String pptxFileName = "export_" + ptProjectId + ".pptx";
+                byte[] pdfBytes = fileService.convertPptxBytesToPdf(pptxBytes, pptxFileName);
+                objectKey   = "pt-export/" + ptProjectId + "/" + exportId + ".pdf";
+                uploadBytes  = pdfBytes;
+                contentType = "application/pdf";
+            } else {
+                objectKey   = "pt-export/" + ptProjectId + "/" + exportId + ".pptx";
+                uploadBytes  = pptxBytes;
+                contentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            }
+
+            fileService.uploadBytes(objectKey, uploadBytes, contentType);
+            logger.info("[PT F] NCP 업로드 완료 (exportId={}, key={}, size={})", exportId, objectKey, uploadBytes.length);
+
+            // 6. presigned 다운로드 URL 발급
+            String fileName = ptProjectId + "." + format;
+            String downloadUrl = fileService.createDownloadPresignedUrlStr(objectKey, fileName);
+
+            // 7. TB_PT_EXPORT 완료 업데이트
+            ProposalVO.ExportVO doneVO = new ProposalVO.ExportVO();
+            doneVO.setExportId(exportId);
+            doneVO.setBuildStatusCd("004"); // 완료
+            doneVO.setFilePath(objectKey);
+            doneVO.setFileSize((long) uploadBytes.length);
+            doneVO.setDownloadUrl(downloadUrl);
+            doneVO.setCompleteDt(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
+            proposalDAO.updateExport(doneVO);
+            logger.info("[PT F] 출력 빌드 완료 (exportId={}, format={}, ptProjectId={})", exportId, format, ptProjectId);
+
+        } catch (Exception e) {
+            logger.error("[PT F] 출력 빌드 실패 (exportId={}, ptProjectId={}): {}", exportId, ptProjectId, e.getMessage(), e);
+            try {
+                ProposalVO.ExportVO failVO = new ProposalVO.ExportVO();
+                failVO.setExportId(exportId);
+                failVO.setBuildStatusCd("005"); // 실패
+                String errMsg = e.getMessage();
+                if (errMsg != null && errMsg.length() > 2000) errMsg = errMsg.substring(0, 2000);
+                failVO.setErrorMsg(errMsg);
+                proposalDAO.updateExport(failVO);
+            } catch (Exception ex) {
+                logger.error("[PT F] TB_PT_EXPORT 실패 상태 업데이트 오류 (exportId={}): {}", exportId, ex.getMessage());
+            }
+        }
     }
 }

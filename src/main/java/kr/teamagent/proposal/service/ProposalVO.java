@@ -26,10 +26,6 @@ public class ProposalVO {
         private String targetTypeCd;
         /** 제출 마감일 (YYYY-MM-DD) */
         private String dueDt;
-        /** RFP 파일 ID (TB_PT_FILE.PT_FILE_ID) */
-        private String rfpFileId;
-        /** 평가표 파일 ID (TB_PT_FILE.PT_FILE_ID) */
-        private String evalTableFileId;
         /** 프로젝트 상태 코드 (PT000002: 001=작성중, 002=검수중, 003=완료, 004=보류) */
         private String statusCd;
         /** 프로젝트 상태명 (TB_CODE.CODE_NM) */
@@ -480,5 +476,164 @@ public class ProposalVO {
         private java.util.List<SlideVO> updatedSlides;
         /** AI 응답 요약 메시지 */
         private String aiMessage;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Step E: 검토 — 전역 보완 채팅 + Stage4 평가 시뮬레이션
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * TB_PT_REVIEW — Stage4 평가 시뮬레이션 결과 한 건
+     *
+     * DDL:
+     *   CREATE TABLE TB_PT_REVIEW (
+     *     REVIEW_ID          VARCHAR(20)  NOT NULL PRIMARY KEY,
+     *     PT_PROJECT_ID      VARCHAR(20)  NOT NULL,
+     *     SLIDE_ID           VARCHAR(20)  NULL,          -- NULL = 전체 단위 지적
+     *     EVAL_CRITERIA_ID   VARCHAR(20)  NULL,
+     *     SEVERITY_CD        VARCHAR(3)   NULL,          -- PT000008: 001=치명적 002=중요 003=보완권고
+     *     EVAL_CRITERIA_NM   VARCHAR(255) NULL,          -- LLM 반환값 원문 (매칭 실패 시 참조용)
+     *     CURRENT_ISSUE      TEXT         NULL,
+     *     SCORE_IMPACT       TEXT         NULL,
+     *     FIX_DIRECTION      TEXT         NULL,
+     *     FIX_SUGGESTION_TXT TEXT         NULL,
+     *     EXPECTED_SCORE     DECIMAL(5,2) NULL,
+     *     CREATE_USER_ID     VARCHAR(50)  NULL,
+     *     CREATE_DT          DATETIME     NULL,
+     *     INDEX idx_pt_review_project (PT_PROJECT_ID),
+     *     INDEX idx_pt_review_slide   (SLIDE_ID)
+     *   );
+     */
+    @Data
+    public static class ReviewVO {
+        /** REVIEW_ID (PK, VARCHAR 20, prefix PTR-) */
+        private String reviewId;
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 대상 슬라이드 ID (NULL = 전체 단위 지적) */
+        private String slideId;
+        /** 연결된 평가기준 ID (NULL 허용) */
+        private String evalCriteriaId;
+        /** 심각도 코드 (001=치명적, 002=중요, 003=보완권고) */
+        private String severityCd;
+        /** LLM이 반환한 evalCriteriaNm 원문 */
+        private String evalCriteriaNm;
+        /** 현재 문제 내용 */
+        private String currentIssue;
+        /** 점수 영향 */
+        private String scoreImpact;
+        /** 수정 방향 */
+        private String fixDirection;
+        /** 수정 제안 내용 */
+        private String fixSuggestionTxt;
+        /** 예상 점수 */
+        private Double expectedScore;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+    }
+
+    /**
+     * E — 전역 보완 채팅 요청 VO
+     */
+    @Data
+    public static class ReviewChatVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 사용자 보완 요청 메시지 */
+        private String message;
+        /** LLM 모델 ID */
+        private String modelId;
+        /** 에이전트 ID */
+        private String agentId;
+    }
+
+    /**
+     * E — 전역 보완 채팅 응답 VO
+     */
+    @Data
+    public static class ReviewChatResultVO {
+        /** 재생성된 슬라이드 목록 */
+        private java.util.List<SlideVO> updatedSlides;
+        /** AI 응답 요약 메시지 */
+        private String aiMessage;
+    }
+
+    /**
+     * E — Stage4 평가 시뮬레이션 실행 응답 VO
+     */
+    @Data
+    public static class EvalSimulationResultVO {
+        /** 저장된 리뷰 건수 */
+        private int savedCount;
+        /** 심각도순 정렬된 리뷰 목록 */
+        private java.util.List<ReviewVO> reviews;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Step F: 출력 — PPTX/PDF 내보내기
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * TB_PT_EXPORT — 출력 빌드 이력 한 건
+     *
+     * DDL:
+     *   CREATE TABLE TB_PT_EXPORT (
+     *     EXPORT_ID         VARCHAR(20)  NOT NULL PRIMARY KEY,
+     *     PT_PROJECT_ID     VARCHAR(20)  NOT NULL,
+     *     FORMAT_CD         VARCHAR(10)  NOT NULL,   -- 'pdf' | 'pptx'
+     *     BUILD_STATUS_CD   VARCHAR(3)   NOT NULL DEFAULT '001',
+     *                                               -- 001=대기 002=빌드중 003=캐시재사용 004=완료 005=실패
+     *     FILE_PATH         VARCHAR(500) NULL,       -- NCP 파일 경로
+     *     FILE_SIZE         BIGINT       NULL,
+     *     DOWNLOAD_URL      VARCHAR(2000) NULL,      -- 최근 발급된 presigned 다운로드 URL
+     *     ERROR_MSG         TEXT         NULL,
+     *     COMPLETE_DT       DATETIME     NULL,
+     *     CREATE_USER_ID    VARCHAR(50)  NULL,
+     *     CREATE_DT         DATETIME     NULL,
+     *     MODIFY_DT         DATETIME     NULL,
+     *     INDEX idx_pt_export_project (PT_PROJECT_ID)
+     *   );
+     */
+    @Data
+    public static class ExportVO {
+        /** EXPORT_ID (PK, VARCHAR 20, prefix PTE-) */
+        private String exportId;
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 포맷 코드 ('pdf' | 'pptx') */
+        private String formatCd;
+        /** 빌드 상태 (001=대기, 002=빌드중, 003=캐시재사용, 004=완료, 005=실패) */
+        private String buildStatusCd;
+        /** NCP 파일 경로 (스토리지 키) */
+        private String filePath;
+        /** 파일 크기 (bytes) */
+        private Long fileSize;
+        /** 최근 발급된 presigned 다운로드 URL */
+        private String downloadUrl;
+        /** 오류 메시지 (실패 시) */
+        private String errorMsg;
+        /** 완료 일시 */
+        private String completeDt;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+        /** 수정일시 */
+        private String modifyDt;
+    }
+
+    /**
+     * F — 출력 요청 VO
+     */
+    @Data
+    public static class ExportRequestVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 포맷 ('pdf' | 'pptx') */
+        private String format;
+        /** 에이전트 ID (로그용) */
+        private String agentId;
     }
 }

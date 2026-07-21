@@ -58,8 +58,6 @@
             PROJECT_OVERVIEW,
             TARGET_TYPE_CD,
             DUE_DT,
-            RFP_FILE_ID,
-            EVAL_TABLE_FILE_ID,
             STATUS_CD,
             WRITING_GUIDELINE_JSON,
             PROJECT_CONFIG_JSON,
@@ -72,8 +70,6 @@
             #{projectOverview},
             #{targetTypeCd},
             #{dueDt},
-            #{rfpFileId},
-            #{evalTableFileId},
             #{statusCd},
             #{writingGuidelineJson},
             #{projectConfigJson},
@@ -101,8 +97,6 @@
             , PROJECT_OVERVIEW         AS projectOverview
             , TARGET_TYPE_CD           AS targetTypeCd
             , DATE_FORMAT(DUE_DT, '%Y-%m-%d') AS dueDt
-            , RFP_FILE_ID              AS rfpFileId
-            , EVAL_TABLE_FILE_ID       AS evalTableFileId
             , STATUS_CD                AS statusCd
             , CAST(WRITING_GUIDELINE_JSON AS CHAR) AS writingGuidelineJson
             , CREATE_USER_ID           AS createUserId
@@ -188,6 +182,26 @@
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS createDt
         FROM TB_PT_FILE
         WHERE PT_FILE_ID = #{ptFileId}
+    </select>
+
+    <select id="selectPtFileByPurpose" resultType="kr.teamagent.proposal.service.ProposalVO$PtFileVO">
+        /* PT 프로젝트의 용도별 파일 조회 (RFP_FILE_ID/EVAL_TABLE_FILE_ID 컬럼 제거 후 대체 쿼리)
+           FILE_PURPOSE_CD (PT000011): 001=RFP원문, 002=평가표, 003=템플릿, 004=기타참고자료, 005=자사정보, 006=경쟁사정보
+           proposal.selectPtFileByPurpose */
+        SELECT
+            PT_FILE_ID          AS ptFileId
+            , PT_PROJECT_ID     AS ptProjectId
+            , FILE_PURPOSE_CD   AS filePurposeCd
+            , FILE_PATH         AS filePath
+            , FILE_NM           AS fileNm
+            , FILE_SIZE         AS fileSize
+            , FILE_TYPE         AS fileType
+            , CREATE_USER_ID    AS createUserId
+            , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS createDt
+        FROM TB_PT_FILE
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+          AND FILE_PURPOSE_CD = #{filePurposeCd}
+        ORDER BY CREATE_DT DESC
     </select>
 
     <!-- ================================================================== -->
@@ -313,7 +327,7 @@
             #{evalCriteriaId}
             , #{ptProjectId}
             , #{evalItemNm}
-            , #{score}
+            , COALESCE(#{score}, 0)
             , #{evalIntent}
             , #{highScoreCondition}
             , #{requiredEvidence}
@@ -661,5 +675,196 @@
         /* 소목차 슬라이드 전체 삭제 proposal.deleteSlidesByToc */
         DELETE FROM TB_PT_SLIDE WHERE TOC_ID = #{tocId}
     </delete>
+
+    <select id="selectAllSlidesByProject" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
+        /* 프로젝트 전체 슬라이드 목록 조회 (SLIDE_NO 순) proposal.selectAllSlidesByProject */
+        SELECT
+            SLIDE_ID                                         AS slideId,
+            PT_PROJECT_ID                                    AS ptProjectId,
+            TOC_ID                                           AS tocId,
+            SLIDE_NO                                         AS slideNo,
+            COLOR_INDEX                                      AS colorIndex,
+            LAYOUT_TYPE                                      AS layoutType,
+            CAST(SLIDE_JSON AS CHAR)                         AS slideJson,
+            IMAGE_GEN_HINT                                   AS imageGenHint,
+            RENDERED_IMAGE_PATH                              AS renderedImagePath,
+            RENDER_STATUS_CD                                 AS renderStatusCd,
+            CREATE_USER_ID                                   AS createUserId,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS createDt,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS modifyDt
+        FROM TB_PT_SLIDE
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+        ORDER BY SLIDE_NO
+    </select>
+
+    <!-- ================================================================== -->
+    <!-- Step E: TB_PT_REVIEW                                                 -->
+    <!-- DDL:                                                                 -->
+    <!-- CREATE TABLE TB_PT_REVIEW (                                          -->
+    <!--   REVIEW_ID          VARCHAR(20)  NOT NULL PRIMARY KEY,              -->
+    <!--   PT_PROJECT_ID      VARCHAR(20)  NOT NULL,                          -->
+    <!--   SLIDE_ID           VARCHAR(20)  NULL,                              -->
+    <!--   EVAL_CRITERIA_ID   VARCHAR(20)  NULL,                              -->
+    <!--   SEVERITY_CD        VARCHAR(3)   NULL,                              -->
+    <!--   EVAL_CRITERIA_NM   VARCHAR(255) NULL,                              -->
+    <!--   CURRENT_ISSUE      TEXT         NULL,                              -->
+    <!--   SCORE_IMPACT       TEXT         NULL,                              -->
+    <!--   FIX_DIRECTION      TEXT         NULL,                              -->
+    <!--   FIX_SUGGESTION_TXT TEXT         NULL,                              -->
+    <!--   EXPECTED_SCORE     DECIMAL(5,2) NULL,                              -->
+    <!--   CREATE_USER_ID     VARCHAR(50)  NULL,                              -->
+    <!--   CREATE_DT          DATETIME     NULL,                              -->
+    <!--   INDEX idx_pt_review_project (PT_PROJECT_ID),                      -->
+    <!--   INDEX idx_pt_review_slide   (SLIDE_ID)                            -->
+    <!-- );                                                                   -->
+    <!-- ================================================================== -->
+
+    <insert id="insertReview" parameterType="kr.teamagent.proposal.service.ProposalVO$ReviewVO">
+        /* Stage4 평가 시뮬레이션 결과 등록 proposal.insertReview */
+        INSERT INTO TB_PT_REVIEW (
+            REVIEW_ID, PT_PROJECT_ID, SLIDE_ID, EVAL_CRITERIA_ID,
+            SEVERITY_CD, EVAL_CRITERIA_NM,
+            CURRENT_ISSUE, SCORE_IMPACT, FIX_DIRECTION, FIX_SUGGESTION_TXT,
+            EXPECTED_SCORE, CREATE_USER_ID, CREATE_DT
+        ) VALUES (
+            #{reviewId}, #{ptProjectId},
+            #{slideId, jdbcType=VARCHAR}, #{evalCriteriaId, jdbcType=VARCHAR},
+            #{severityCd, jdbcType=VARCHAR}, #{evalCriteriaNm, jdbcType=VARCHAR},
+            #{currentIssue, jdbcType=VARCHAR}, #{scoreImpact, jdbcType=VARCHAR},
+            #{fixDirection, jdbcType=VARCHAR}, #{fixSuggestionTxt, jdbcType=VARCHAR},
+            #{expectedScore, jdbcType=DECIMAL},
+            #{createUserId, jdbcType=VARCHAR}, NOW()
+        )
+    </insert>
+
+    <select id="selectLatestReviewRunDt" parameterType="String" resultType="String">
+        /* 최근 Stage4 실행 시각(분 단위) 조회 proposal.selectLatestReviewRunDt */
+        SELECT DATE_FORMAT(MAX(CREATE_DT), '%Y-%m-%d %H:%i')
+        FROM TB_PT_REVIEW
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </select>
+
+    <select id="selectReviewsByRunDt" parameterType="map" resultType="kr.teamagent.proposal.service.ProposalVO$ReviewVO">
+        /* 특정 실행 시각의 Stage4 결과 조회 (심각도순) proposal.selectReviewsByRunDt */
+        SELECT
+            REVIEW_ID                                        AS reviewId,
+            PT_PROJECT_ID                                    AS ptProjectId,
+            SLIDE_ID                                         AS slideId,
+            EVAL_CRITERIA_ID                                 AS evalCriteriaId,
+            SEVERITY_CD                                      AS severityCd,
+            EVAL_CRITERIA_NM                                 AS evalCriteriaNm,
+            CURRENT_ISSUE                                    AS currentIssue,
+            SCORE_IMPACT                                     AS scoreImpact,
+            FIX_DIRECTION                                    AS fixDirection,
+            FIX_SUGGESTION_TXT                               AS fixSuggestionTxt,
+            EXPECTED_SCORE                                   AS expectedScore,
+            CREATE_USER_ID                                   AS createUserId,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS createDt
+        FROM TB_PT_REVIEW
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+          AND DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i') = #{runDt}
+        ORDER BY
+            CASE SEVERITY_CD WHEN '001' THEN 1 WHEN '002' THEN 2 WHEN '003' THEN 3 ELSE 4 END,
+            CREATE_DT
+    </select>
+
+    <!-- ================================================================== -->
+    <!-- Step F: TB_PT_EXPORT                                                 -->
+    <!-- DDL:                                                                 -->
+    <!-- CREATE TABLE TB_PT_EXPORT (                                          -->
+    <!--   EXPORT_ID         VARCHAR(20)  NOT NULL PRIMARY KEY,               -->
+    <!--   PT_PROJECT_ID     VARCHAR(20)  NOT NULL,                           -->
+    <!--   FORMAT_CD         VARCHAR(10)  NOT NULL,                           -->
+    <!--   BUILD_STATUS_CD   VARCHAR(3)   NOT NULL DEFAULT '001',             -->
+    <!--   FILE_PATH         VARCHAR(500) NULL,                               -->
+    <!--   FILE_SIZE         BIGINT       NULL,                               -->
+    <!--   DOWNLOAD_URL      VARCHAR(2000) NULL,                              -->
+    <!--   ERROR_MSG         TEXT         NULL,                               -->
+    <!--   COMPLETE_DT       DATETIME     NULL,                               -->
+    <!--   CREATE_USER_ID    VARCHAR(50)  NULL,                               -->
+    <!--   CREATE_DT         DATETIME     NULL,                               -->
+    <!--   MODIFY_DT         DATETIME     NULL,                               -->
+    <!--   INDEX idx_pt_export_project (PT_PROJECT_ID)                       -->
+    <!-- );                                                                   -->
+    <!-- BUILD_STATUS_CD: 001=대기, 002=빌드중, 003=캐시재사용, 004=완료, 005=실패 -->
+    <!-- ================================================================== -->
+
+    <insert id="insertExport" parameterType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
+        /* PT 출력 빌드 등록 proposal.insertExport */
+        INSERT INTO TB_PT_EXPORT (
+            EXPORT_ID, PT_PROJECT_ID, FORMAT_CD, BUILD_STATUS_CD,
+            CREATE_USER_ID, CREATE_DT
+        ) VALUES (
+            #{exportId}, #{ptProjectId}, #{formatCd},
+            COALESCE(#{buildStatusCd}, '001'),
+            #{createUserId, jdbcType=VARCHAR}, NOW()
+        )
+    </insert>
+
+    <update id="updateExport" parameterType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
+        /* PT 출력 빌드 상태/결과 수정 proposal.updateExport */
+        UPDATE TB_PT_EXPORT
+        <set>
+            <if test="buildStatusCd != null">BUILD_STATUS_CD = #{buildStatusCd},</if>
+            <if test="filePath != null">FILE_PATH = #{filePath},</if>
+            <if test="fileSize != null">FILE_SIZE = #{fileSize},</if>
+            <if test="downloadUrl != null">DOWNLOAD_URL = #{downloadUrl},</if>
+            <if test="errorMsg != null">ERROR_MSG = #{errorMsg},</if>
+            <if test="completeDt != null">COMPLETE_DT = #{completeDt},</if>
+            MODIFY_DT = NOW()
+        </set>
+        WHERE EXPORT_ID = #{exportId}
+    </update>
+
+    <select id="selectExportById" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
+        /* PT 출력 단건 조회 proposal.selectExportById */
+        SELECT
+            EXPORT_ID                                        AS exportId,
+            PT_PROJECT_ID                                    AS ptProjectId,
+            FORMAT_CD                                        AS formatCd,
+            BUILD_STATUS_CD                                  AS buildStatusCd,
+            FILE_PATH                                        AS filePath,
+            FILE_SIZE                                        AS fileSize,
+            DOWNLOAD_URL                                     AS downloadUrl,
+            ERROR_MSG                                        AS errorMsg,
+            DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS completeDt,
+            CREATE_USER_ID                                   AS createUserId,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS createDt,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS modifyDt
+        FROM TB_PT_EXPORT
+        WHERE EXPORT_ID = #{exportId}
+    </select>
+
+    <select id="selectLatestCompletedExport" resultType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
+        /* 프로젝트+포맷 기준 최근 완료 출력 빌드 조회 proposal.selectLatestCompletedExport */
+        SELECT
+            EXPORT_ID                                        AS exportId,
+            PT_PROJECT_ID                                    AS ptProjectId,
+            FORMAT_CD                                        AS formatCd,
+            BUILD_STATUS_CD                                  AS buildStatusCd,
+            FILE_PATH                                        AS filePath,
+            FILE_SIZE                                        AS fileSize,
+            DOWNLOAD_URL                                     AS downloadUrl,
+            ERROR_MSG                                        AS errorMsg,
+            DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS completeDt,
+            CREATE_USER_ID                                   AS createUserId,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS createDt,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS modifyDt
+        FROM TB_PT_EXPORT
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+          AND FORMAT_CD = #{formatCd}
+          AND BUILD_STATUS_CD IN ('003', '004')
+        ORDER BY COMPLETE_DT DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectMaxSlideModifyDt" parameterType="String" resultType="String">
+        /* 프로젝트 슬라이드 최신 수정일시 조회 (캐시 재사용 판단용) proposal.selectMaxSlideModifyDt */
+        SELECT DATE_FORMAT(MAX(MODIFY_DT), '%Y-%m-%d %H:%i:%s')
+        FROM TB_PT_SLIDE
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </select>
 
 </mapper>
