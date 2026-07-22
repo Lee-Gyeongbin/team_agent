@@ -269,6 +269,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * Stage2 TOC 매핑 업데이트 — LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON 갱신 (단건)
+     * @param vo tocId, linkedEvalCriteriaId (nullable), coveredReqIdsJson (nullable)
+     */
+    public void updateTocEvalLinkAndReqIds(ProposalVO.TocVO vo) {
+        update("proposal.updateTocEvalLinkAndReqIds", vo);
+    }
+
+    /**
      * TOC 항목 제목 수정 (단건)
      * @param vo tocId, sectionNm
      */

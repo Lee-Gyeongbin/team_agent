@@ -299,6 +299,8 @@ public class ProposalVO {
         private String sectionNm;
         /** 연결 평가기준 ID */
         private String linkedEvalCriteriaId;
+        /** 커버 요구사항 REQUIREMENT_ID 배열 (JSON 직렬화, DB 저장용) */
+        private String coveredReqIdsJson;
         /** 계획 슬라이드 수 */
         private int plannedSlideCnt;
         /** 정렬 순서 */
