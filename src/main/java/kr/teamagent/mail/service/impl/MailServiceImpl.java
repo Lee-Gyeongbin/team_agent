@@ -26,6 +26,8 @@ import javax.mail.Session;
 import javax.mail.Store;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeUtility;
+import javax.mail.search.ComparisonTerm;
+import javax.mail.search.ReceivedDateTerm;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -36,6 +38,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
+import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.mail.service.MailVO;
 
@@ -70,6 +73,12 @@ public class MailServiceImpl {
 
     @Autowired
     private ChatbotServiceImpl chatbotService;
+
+    @Autowired
+    private MailDAO mailDAO;
+
+    @Autowired
+    private KeyGenerate keyGenerate;
 
     // ─── 1. IMAP 인증 ────────────────────────────────────────
 
@@ -338,6 +347,557 @@ public class MailServiceImpl {
              + "원본 발송일: " + originalDate + "\n\n"
              + "한국어로 작성하고, 제목과 본문을 구분하여 출력하세요.\n"
              + "형식:\n제목: [제목]\n\n[본문]";
+    }
+
+    // ─── A. 계정 저장 (인증 성공 시 TB_MAIL_ACCOUNT upsert) ────
+
+    /**
+     * IMAP 인증 성공 후 계정 정보를 TB_MAIL_ACCOUNT에 저장.
+     * AES-128-CBC 암호화 적용. 추후 KMS 연동 시 encryptCredential 메서드만 교체.
+     */
+    public String saveMailAccount(String userId, String email, String password) throws Exception {
+        String host = PropertyUtil.getProperty("Globals.mail.imap.host");
+        int    port = Integer.parseInt(PropertyUtil.getProperty("Globals.mail.imap.port"));
+
+        Map<String, Object> checkParam = new HashMap<>();
+        checkParam.put("userId",    userId);
+        checkParam.put("emailAddr", email);
+
+        MailVO.MailAccountVO existing = mailDAO.selectMailAccount(checkParam);
+
+        // AES-128-CBC 암호화
+        byte[] iv = new byte[16];
+        new java.security.SecureRandom().nextBytes(iv);
+        byte[] encCredential = encryptCredential(password, iv);
+
+        if (existing != null) {
+            // 기존 계정: lastLoginDt만 갱신
+            Map<String, Object> updateParam = new HashMap<>();
+            updateParam.put("accountId", existing.getAccountId());
+            mailDAO.updateMailAccountLastLogin(updateParam);
+            return existing.getAccountId();
+        } else {
+            String accountId = keyGenerate.generateTableKey("MA", "TB_MAIL_ACCOUNT", "ACCOUNT_ID");
+            MailVO.MailAccountVO newAccount = new MailVO.MailAccountVO();
+            newAccount.setAccountId(accountId);
+            newAccount.setUserId(userId);
+            newAccount.setEmailAddr(email);
+            newAccount.setImapHost(host);
+            newAccount.setImapPort(port);
+            newAccount.setAuthTypeCd("001"); // PASSWORD
+            newAccount.setCredentialEnc(encCredential);
+            newAccount.setCredentialIv(iv);
+            newAccount.setKeyVersion(1);
+            mailDAO.insertMailAccount(newAccount);
+            return accountId;
+        }
+    }
+
+    private byte[] encryptCredential(String plainText, byte[] iv) {
+        try {
+            // TODO: 프로덕션에서는 NCP KMS 또는 서버 환경변수에서 키 로드
+            String keyStr = PropertyUtil.getProperty("Globals.mail.credential.key");
+            if (keyStr == null || keyStr.length() < 16) {
+                // fallback: 임시 키 (개발용)
+                keyStr = "teamagentmailkey";
+            }
+            byte[] keyBytes = keyStr.substring(0, 16).getBytes("UTF-8");
+            javax.crypto.SecretKey secretKey = new javax.crypto.spec.SecretKeySpec(keyBytes, "AES");
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding");
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secretKey, new javax.crypto.spec.IvParameterSpec(iv));
+            return cipher.doFinal(plainText.getBytes("UTF-8"));
+        } catch (Exception e) {
+            log.error("자격증명 암호화 실패: {}", e.getMessage(), e);
+            throw new RuntimeException("CREDENTIAL_ENCRYPT_FAILED");
+        }
+    }
+
+    // ─── B. IMAP 동기화 (TB_MAIL_MSG + TB_MAIL_SYNC_STATE) ────
+
+    /**
+     * IMAP에서 신규 메일을 증분 동기화하여 TB_MAIL_MSG에 저장.
+     * UID_VALIDITY 비교 → 변경 시 전체 재동기화, 같으면 LAST_SYNC_UID 이후만 조회.
+     * @return 동기화된 신규 mailId 목록 (AI 분류 파이프라인으로 전달)
+     */
+    public List<String> syncMailMessages(String accountId, String email, String password, String folderKey) throws Exception {
+        String host      = PropertyUtil.getProperty("Globals.mail.imap.host");
+        int    port      = Integer.parseInt(PropertyUtil.getProperty("Globals.mail.imap.port"));
+        String folderCd  = "SENT".equals(folderKey) ? "002" : "001"; // 001=INBOX, 002=SENT
+        String folderName = "SENT".equals(folderKey) ? "SENT" : "INBOX";
+
+        List<String> newMailIds = new ArrayList<>();
+
+        Session session = Session.getInstance(buildImapProperties(host, port));
+        Store  store  = null;
+        Folder folder = null;
+        try {
+            store = session.getStore("imaps");
+            store.connect(host, port, email, password);
+
+            folder = store.getFolder(folderName);
+            folder.open(Folder.READ_ONLY);
+
+            com.sun.mail.imap.IMAPFolder imapFolder = (com.sun.mail.imap.IMAPFolder) folder;
+            long currentUidValidity = imapFolder.getUIDValidity();
+
+            // TB_MAIL_SYNC_STATE 조회
+            Map<String, Object> stateParam = new HashMap<>();
+            stateParam.put("accountId", accountId);
+            stateParam.put("folderCd",  folderCd);
+            MailVO.MailSyncStateVO syncState = mailDAO.selectMailSyncState(stateParam);
+
+            long    lastSyncUid = 0L;
+            boolean isFirstSync = (syncState == null);
+            boolean fullSync    = false;
+
+            if (syncState == null) {
+                // 최초 동기화 — SINCE 14일 조건으로 제한 (isFirstSync 플래그로 분기)
+            } else if (syncState.getUidValidity() != currentUidValidity) {
+                fullSync = true;
+                log.info("UID_VALIDITY 변경 감지 (account={}, folder={}): {} → {}",
+                    accountId, folderName, syncState.getUidValidity(), currentUidValidity);
+            } else {
+                lastSyncUid = syncState.getLastSyncUid();
+            }
+
+            long maxUid = lastSyncUid;
+            int  total  = folder.getMessageCount();
+
+            if (total == 0) {
+                // 빈 폴더도 sync state 기록
+                MailVO.MailSyncStateVO newState = new MailVO.MailSyncStateVO();
+                newState.setAccountId(accountId);
+                newState.setFolderCd(folderCd);
+                newState.setUidValidity(currentUidValidity);
+                newState.setLastSyncUid(lastSyncUid);
+                mailDAO.upsertMailSyncState(newState);
+                return newMailIds;
+            }
+
+            // 메시지 목록 취득
+            Message[] allMessages;
+            if (isFirstSync) {
+                // 최초 동기화: 최근 14일치만 (IMAP SEARCH SINCE)
+                Date since = Date.from(LocalDate.now().minusDays(14).atStartOfDay(ZoneId.systemDefault()).toInstant());
+                allMessages = folder.search(new ReceivedDateTerm(ComparisonTerm.GE, since));
+                log.info("최초 동기화 — SINCE 14일 적용 (account={}, folder={})", accountId, folderName);
+            } else if (fullSync) {
+                // UID_VALIDITY 변경 시 재동기화: 최근 200건
+                int startIdx = Math.max(1, total - 199);
+                allMessages = folder.getMessages(startIdx, total);
+            } else {
+                // 증분: 전체 메시지 순회 후 UID > lastSyncUid 필터링
+                allMessages = folder.getMessages();
+            }
+
+            for (Message msg : allMessages) {
+                long uid = imapFolder.getUID(msg);
+
+                // 증분 동기화 시 이미 처리된 UID 스킵
+                if (!fullSync && uid <= lastSyncUid) continue;
+
+                if (uid > maxUid) maxUid = uid;
+
+                String imapUidStr = String.valueOf(uid);
+
+                // 중복 체크
+                Map<String, Object> dupParam = new HashMap<>();
+                dupParam.put("accountId", accountId);
+                dupParam.put("folderCd",  folderCd);
+                dupParam.put("imapUid",   imapUidStr);
+                MailVO.MailMsgVO existingMsg = mailDAO.selectMailMsgByImapUid(dupParam);
+                if (existingMsg != null) continue;
+
+                try {
+                    MailVO imap    = toVO(msg);
+                    String mailId  = keyGenerate.generateTableKey("MS", "TB_MAIL_MSG", "MAIL_ID");
+
+                    MailVO.MailMsgVO msgVO = new MailVO.MailMsgVO();
+                    msgVO.setMailId(mailId);
+                    msgVO.setAccountId(accountId);
+                    msgVO.setFolderCd(folderCd);
+                    msgVO.setImapUid(imapUidStr);
+                    msgVO.setMsgIdHeader(imap.getMessageId());
+
+                    // In-Reply-To 헤더
+                    try {
+                        String[] inReplyToArr = msg.getHeader("In-Reply-To");
+                        if (inReplyToArr != null && inReplyToArr.length > 0) {
+                            msgVO.setInReplyTo(inReplyToArr[0].trim());
+                        }
+                    } catch (Exception ignored) {}
+
+                    msgVO.setSubject(imap.getSubject());
+                    msgVO.setFromAddr(imap.getFrom());
+                    msgVO.setFromName(imap.getFromName());
+
+                    // TO_ADDR_JSON: 첫 번째 수신자만 JSON 배열로 저장
+                    if (imap.getTo() != null) {
+                        msgVO.setToAddrJson("[\"" + imap.getTo().replace("\"", "\\\"") + "\"]");
+                    }
+
+                    Date mailDate = imap.getReceivedDate() != null ? imap.getReceivedDate() : imap.getSentDate();
+                    msgVO.setMailDt(mailDate);
+
+                    // 본문: 최대 5000자 (AI 분석/미리보기용)
+                    String bodyText = imap.getBody();
+                    if (bodyText != null && bodyText.length() > 5000) bodyText = bodyText.substring(0, 5000);
+                    msgVO.setBodyText(bodyText);
+
+                    // 첨부 여부 판단
+                    msgVO.setHasAttachYn(hasAttachment(msg) ? "Y" : "N");
+
+                    mailDAO.insertMailMsg(msgVO);
+                    newMailIds.add(mailId);
+
+                } catch (Exception e) {
+                    log.warn("메일 DB 저장 오류 (uid={}): {}", uid, e.getMessage());
+                }
+            }
+
+            // 체크포인트 업데이트
+            MailVO.MailSyncStateVO newState = new MailVO.MailSyncStateVO();
+            newState.setAccountId(accountId);
+            newState.setFolderCd(folderCd);
+            newState.setUidValidity(currentUidValidity);
+            newState.setLastSyncUid(maxUid);
+            mailDAO.upsertMailSyncState(newState);
+
+            log.info("동기화 완료 (account={}, folder={}, 신규={}건, maxUid={})",
+                accountId, folderName, newMailIds.size(), maxUid);
+
+        } finally {
+            closeQuietly(folder, store);
+        }
+
+        return newMailIds;
+    }
+
+    private boolean hasAttachment(Message msg) {
+        try {
+            Object content = msg.getContent();
+            if (content instanceof Multipart) {
+                Multipart mp = (Multipart) content;
+                for (int i = 0; i < mp.getCount(); i++) {
+                    BodyPart bp = mp.getBodyPart(i);
+                    if (Part.ATTACHMENT.equalsIgnoreCase(bp.getDisposition())) return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ─── C. AI 분류 파이프라인 ───────────────────────────────
+
+    /**
+     * 신규 동기화된 mailId 목록에 대해 AI 분류 수행 → TB_MAIL_AI_ANALYSIS upsert
+     */
+    public void classifyMails(List<String> mailIds) throws Exception {
+        if (mailIds == null || mailIds.isEmpty()) return;
+
+        // 업무영역 코드 동적 로드 (하드코딩 금지)
+        List<Map<String, Object>> workCategories = mailDAO.selectWorkCategoryList();
+        StringBuilder categoryPromptPart = new StringBuilder();
+        for (Map<String, Object> cat : workCategories) {
+            categoryPromptPart.append("  - ").append(cat.get("CODE_ID"))
+                .append(": ").append(cat.get("CODE_NM")).append("\n");
+        }
+
+        for (String mailId : mailIds) {
+            try {
+                MailVO.MailMsgVO msg = mailDAO.selectMailMsgById(mailId);
+                if (msg == null) continue;
+
+                String prompt      = buildClassificationPrompt(msg, categoryPromptPart.toString());
+                String aiResponse  = chatbotService.callAiSummary(prompt, "mail_classify", null);
+
+                if (isBlank(aiResponse)) {
+                    log.warn("AI 분류 응답 없음 (mailId={})", mailId);
+                    continue;
+                }
+
+                MailVO.MailAiAnalysisVO analysis = parseClassificationResponse(aiResponse);
+                analysis.setMailId(mailId);
+
+                // 기존 분석 결과 확인 → INSERT or UPDATE
+                MailVO.MailAiAnalysisVO existing = mailDAO.selectMailAiAnalysis(mailId);
+                if (existing != null) {
+                    mailDAO.updateMailAiAnalysis(analysis);
+                } else {
+                    mailDAO.insertMailAiAnalysis(analysis);
+                }
+
+            } catch (Exception e) {
+                log.error("AI 분류 실패 (mailId={}): {}", mailId, e.getMessage());
+            }
+        }
+    }
+
+    private String buildClassificationPrompt(MailVO.MailMsgVO msg, String categoryList) {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        StringBuilder sb = new StringBuilder();
+        sb.append("다음 이메일을 분석하여 아래 형식의 JSON으로만 응답해주세요.\n\n");
+        sb.append("응답 형식:\n");
+        sb.append("{\n");
+        sb.append("  \"mailPurposeCd\": \"(메일목적 코드)\",\n");
+        sb.append("  \"actionRequiredCd\": \"(필요조치 코드)\",\n");
+        sb.append("  \"urgencyCd\": \"(긴급도 코드)\",\n");
+        sb.append("  \"importanceCd\": \"(중요도 코드)\",\n");
+        sb.append("  \"workCategoryCd\": \"(업무영역 코드)\",\n");
+        sb.append("  \"dueDt\": \"YYYY-MM-DD HH:mm 또는 null\",\n");
+        sb.append("  \"summary\": \"메일 내용 1~2문장 요약\"\n");
+        sb.append("}\n\n");
+        sb.append("코드 기준:\n");
+        sb.append("메일목적(mailPurposeCd): 001=업무요청, 002=보고, 003=문의, 004=일정, 005=정보공유\n");
+        sb.append("필요조치(actionRequiredCd): 001=To-Do, 002=회신, 003=승인, 004=일정등록, 005=조치없음\n");
+        sb.append("긴급도(urgencyCd): 001=긴급, 002=높음, 003=보통, 004=낮음\n");
+        sb.append("중요도(importanceCd): 001=핵심, 002=중요, 003=일반, 004=낮음\n");
+        sb.append("업무영역(workCategoryCd) - 아래 목록에서 가장 적합한 코드 선택:\n");
+        sb.append(categoryList);
+        sb.append("\n기한(dueDt): 메일 본문에서 명시적 기한이 있으면 추출, 없으면 null\n\n");
+        sb.append("이메일:\n");
+        sb.append("제목: ").append(msg.getSubject()).append("\n");
+        sb.append("발신자: ").append(msg.getFromName()).append(" <").append(msg.getFromAddr()).append(">\n");
+        sb.append("날짜: ").append(msg.getMailDt() != null ? sdf.format(msg.getMailDt()) : "").append("\n");
+        if (!isBlank(msg.getBodyText())) {
+            String preview = msg.getBodyText().length() > 800
+                ? msg.getBodyText().substring(0, 800) + "..."
+                : msg.getBodyText();
+            sb.append("본문:\n").append(preview).append("\n");
+        }
+        return sb.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private MailVO.MailAiAnalysisVO parseClassificationResponse(String aiResponse) {
+        MailVO.MailAiAnalysisVO vo = new MailVO.MailAiAnalysisVO();
+        try {
+            String jsonStr = aiResponse;
+            int start = aiResponse.indexOf('{');
+            int end   = aiResponse.lastIndexOf('}');
+            if (start >= 0 && end > start) jsonStr = aiResponse.substring(start, end + 1);
+
+            JSONParser parser = new JSONParser();
+            JSONObject parsed = (JSONObject) parser.parse(jsonStr);
+
+            vo.setMailPurposeCd(toStr(parsed.get("mailPurposeCd")));
+            vo.setActionRequiredCd(toStr(parsed.get("actionRequiredCd")));
+            vo.setUrgencyCd(toStr(parsed.get("urgencyCd")));
+            vo.setImportanceCd(toStr(parsed.get("importanceCd")));
+            vo.setWorkCategoryCd(toStr(parsed.get("workCategoryCd")));
+            vo.setSummary(toStr(parsed.get("summary")));
+
+            String dueDtStr = toStr(parsed.get("dueDt"));
+            if (!isBlank(dueDtStr) && !"null".equals(dueDtStr)) {
+                try {
+                    SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+                    vo.setDueDt(sdf.parse(dueDtStr));
+                } catch (Exception e) {
+                    log.debug("기한 날짜 파싱 실패: {}", dueDtStr);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("AI 분류 응답 파싱 실패: {}", e.getMessage());
+        }
+        return vo;
+    }
+
+    // ─── D. 팔로업 자동 매칭 ───────────────────────────────
+
+    /**
+     * INBOX의 IN_REPLY_TO 헤더 기반으로 TB_MAIL_FOLLOWUP 자동 매칭
+     */
+    public void matchFollowupReplies(String accountId) throws Exception {
+        List<MailVO.MailFollowupVO> waitingList = mailDAO.selectWaitingFollowupList(accountId);
+        if (waitingList.isEmpty()) return;
+
+        List<MailVO.MailMsgVO> inboxWithReply = mailDAO.selectInboxMsgWithInReplyTo(accountId);
+        if (inboxWithReply.isEmpty()) return;
+
+        // sentMailId의 MSG_ID_HEADER를 기준으로 매핑
+        // selectWaitingFollowupList에서 MSG_ID_HEADER를 msgIdHeader 필드 alias로 조회함
+        // MailFollowupVO에 sentMailId 필드를 MSG_ID_HEADER 임시 저장 없이 별도 매핑
+        // → INBOX의 IN_REPLY_TO와 대기중 팔로업의 sentMailId(SENT 메일 MSG_ID_HEADER) 비교
+
+        for (MailVO.MailMsgVO inbox : inboxWithReply) {
+            String inReplyTo = inbox.getInReplyTo();
+            if (isBlank(inReplyTo)) continue;
+
+            for (MailVO.MailFollowupVO fup : waitingList) {
+                // selectWaitingFollowupList에서 MSG_ID_HEADER를 msgIdHeader 컬럼으로 조회하므로
+                // MailFollowupVO의 subject 필드에 alias로 담아서 비교하는 대신,
+                // 현재 구현에서는 팔로업의 recipientAddr과 inbox의 fromAddr 비교 (단순 매칭)
+                // → 정밀 매칭은 추후 MSG_ID_HEADER 전용 필드 추가 시 개선
+                if (!isBlank(fup.getRecipientAddr())
+                        && fup.getRecipientAddr().equalsIgnoreCase(inbox.getFromAddr())) {
+                    Map<String, Object> matchParam = new HashMap<>();
+                    matchParam.put("followupId",    fup.getFollowupId());
+                    matchParam.put("repliedMailId", inbox.getMailId());
+                    mailDAO.updateFollowupMatched(matchParam);
+                    log.info("팔로업 자동 매칭 (followupId={}, repliedMailId={})",
+                        fup.getFollowupId(), inbox.getMailId());
+                    break;
+                }
+            }
+        }
+    }
+
+    // ─── E. KPI 조회 ───────────────────────────────────────
+
+    public HashMap<String, Object> getMailKpi(String accountId) throws Exception {
+        MailVO.MailKpiVO kpi = mailDAO.selectMailKpi(accountId);
+        HashMap<String, Object> result = new HashMap<>();
+        if (kpi != null) {
+            result.put("totalCount",         kpi.getTotalCount());
+            result.put("replyRequiredCount", kpi.getReplyRequiredCount());
+            result.put("urgentCount",        kpi.getUrgentCount());
+            result.put("todayDueCount",      kpi.getTodayDueCount());
+        } else {
+            result.put("totalCount",         0);
+            result.put("replyRequiredCount", 0);
+            result.put("urgentCount",        0);
+            result.put("todayDueCount",      0);
+        }
+        return result;
+    }
+
+    // ─── F. 분류된 메일함 목록 ─────────────────────────────
+
+    public HashMap<String, Object> getInboxClassified(MailVO.MailListParamVO param) throws Exception {
+        List<MailVO.ClassifiedMailVO> list = mailDAO.selectClassifiedMailList(param);
+        int totalCount = mailDAO.selectClassifiedMailCount(param);
+
+        // 탭별 건수
+        List<Map<String, Object>> tabCounts = mailDAO.selectTabCounts(param.getAccountId());
+        Map<String, Integer> tabCountMap = new HashMap<>();
+        for (Map<String, Object> row : tabCounts) {
+            String tabType = (String) row.get("tabType");
+            Object cnt     = row.get("cnt");
+            int    cntInt  = cnt instanceof Number ? ((Number) cnt).intValue() : 0;
+            tabCountMap.put(tabType, cntInt);
+        }
+
+        HashMap<String, Object> result = new HashMap<>();
+        result.put("list",       list);
+        result.put("totalCount", totalCount);
+        result.put("tabCounts",  tabCountMap);
+        return result;
+    }
+
+    // ─── G. 메일 상세 + AI 분석결과 ────────────────────────
+
+    public HashMap<String, Object> getMailDetail(String mailId) throws Exception {
+        MailVO.MailMsgVO msg = mailDAO.selectMailMsgById(mailId);
+        if (msg == null) throw new IllegalArgumentException("MAIL_NOT_FOUND");
+
+        MailVO.MailAiAnalysisVO analysis = mailDAO.selectMailAiAnalysis(mailId);
+
+        HashMap<String, Object> result = new HashMap<>();
+        result.put("mail",     msg);
+        result.put("analysis", analysis);
+        return result;
+    }
+
+    // ─── H. 회신 초안 생성 ─────────────────────────────────
+
+    public HashMap<String, Object> createReplyDraft(String mailId) throws Exception {
+        MailVO.MailMsgVO msg = mailDAO.selectMailMsgById(mailId);
+        if (msg == null) throw new IllegalArgumentException("MAIL_NOT_FOUND");
+
+        MailVO.MailAiAnalysisVO analysis = mailDAO.selectMailAiAnalysis(mailId);
+
+        String prompt = buildReplyDraftPrompt(msg, analysis);
+        String draft  = chatbotService.callAiSummary(prompt, "mail_reply_draft", null);
+
+        if (isBlank(draft)) throw new RuntimeException("AI_FAILED");
+
+        // TB_MAIL_REPLY_DRAFT 저장
+        String draftId = keyGenerate.generateTableKey("DR", "TB_MAIL_REPLY_DRAFT", "DRAFT_ID");
+        MailVO.MailReplyDraftVO draftVO = new MailVO.MailReplyDraftVO();
+        draftVO.setDraftId(draftId);
+        draftVO.setMailId(mailId);
+        draftVO.setDraftContent(draft);
+        mailDAO.insertMailReplyDraft(draftVO);
+
+        HashMap<String, Object> result = new HashMap<>();
+        result.put("draftId",      draftId);
+        result.put("draftContent", draft);
+        return result;
+    }
+
+    private String buildReplyDraftPrompt(MailVO.MailMsgVO msg, MailVO.MailAiAnalysisVO analysis) {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        StringBuilder sb = new StringBuilder();
+        sb.append("당신은 이메일 회신 작성을 도와주는 비서입니다.\n");
+        sb.append("아래 이메일에 대한 자연스럽고 전문적인 한국어 회신 초안을 작성해주세요.\n\n");
+        sb.append("원본 메일:\n");
+        sb.append("제목: ").append(msg.getSubject()).append("\n");
+        sb.append("발신자: ").append(msg.getFromName()).append(" <").append(msg.getFromAddr()).append(">\n");
+        sb.append("날짜: ").append(msg.getMailDt() != null ? sdf.format(msg.getMailDt()) : "").append("\n");
+        if (analysis != null && !isBlank(analysis.getSummary())) {
+            sb.append("AI 요약: ").append(analysis.getSummary()).append("\n");
+        }
+        if (!isBlank(msg.getBodyText())) {
+            String preview = msg.getBodyText().length() > 600
+                ? msg.getBodyText().substring(0, 600) + "..."
+                : msg.getBodyText();
+            sb.append("본문:\n").append(preview).append("\n");
+        }
+        sb.append("\n요청사항:\n");
+        sb.append("- 정중하고 전문적인 어투로 회신 초안 작성\n");
+        sb.append("- 제목(Re: 형태)과 본문 구분\n");
+        sb.append("- 수신자: ").append(msg.getFromName()).append("\n");
+        sb.append("형식:\n제목: [제목]\n\n[본문]");
+        return sb.toString();
+    }
+
+    // ─── I. 액션 완료 토글 ──────────────────────────────────
+
+    public void toggleActionComplete(String mailId, String currentYn) throws Exception {
+        String newYn = "Y".equals(currentYn) ? "N" : "Y";
+        Map<String, Object> param = new HashMap<>();
+        param.put("mailId",           mailId);
+        param.put("actionCompleteYn", newYn);
+        mailDAO.updateActionComplete(param);
+    }
+
+    // ─── J. 팔로업 등록 ────────────────────────────────────
+
+    public HashMap<String, Object> registerFollowup(String mailId, String recipientAddr, Date expectedReplyDt) throws Exception {
+        MailVO.MailMsgVO msg = mailDAO.selectMailMsgById(mailId);
+        if (msg == null) throw new IllegalArgumentException("MAIL_NOT_FOUND");
+
+        String followupId = keyGenerate.generateTableKey("FU", "TB_MAIL_FOLLOWUP", "FOLLOWUP_ID");
+        MailVO.MailFollowupVO vo = new MailVO.MailFollowupVO();
+        vo.setFollowupId(followupId);
+        vo.setSentMailId(mailId);
+        vo.setRecipientAddr(!isBlank(recipientAddr) ? recipientAddr : msg.getFromAddr());
+        vo.setExpectedReplyDt(expectedReplyDt);
+        mailDAO.insertMailFollowup(vo);
+
+        HashMap<String, Object> result = new HashMap<>();
+        result.put("followupId", followupId);
+        return result;
+    }
+
+    // ─── K. 팔로업 목록 조회 ───────────────────────────────
+
+    public HashMap<String, Object> getFollowupList(String accountId) throws Exception {
+        List<MailVO.MailFollowupVO> list = mailDAO.selectMailFollowupList(accountId);
+        HashMap<String, Object> result = new HashMap<>();
+        result.put("list", list);
+        return result;
+    }
+
+    // ─── L. 팔로업 상태 변경 ───────────────────────────────
+
+    public void updateFollowupStatus(String followupId, String statusCd) throws Exception {
+        Map<String, Object> param = new HashMap<>();
+        param.put("followupId", followupId);
+        param.put("statusCd",   statusCd);
+        mailDAO.updateMailFollowupStatus(param);
     }
 
     // ─── 내부: IMAP 메일 조회 ────────────────────────────────

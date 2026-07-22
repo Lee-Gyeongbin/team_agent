@@ -1,0 +1,489 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mail">
+
+    <!-- ============================================================ -->
+    <!-- TB_MAIL_ACCOUNT                                              -->
+    <!-- ============================================================ -->
+
+    <select id="selectMailAccount" parameterType="map" resultType="kr.teamagent.mail.service.MailVO$MailAccountVO">
+        /* TB_MAIL_ACCOUNT 계정 조회 mail.selectMailAccount */
+        SELECT
+            ACCOUNT_ID
+            , USER_ID
+            , EMAIL_ADDR
+            , IMAP_HOST
+            , IMAP_PORT
+            , AUTH_TYPE_CD
+            , CREDENTIAL_ENC
+            , CREDENTIAL_IV
+            , KEY_VERSION
+            , USE_YN
+            , LAST_LOGIN_DT
+            , CREATE_DT
+            , UPDATE_DT
+        FROM TB_MAIL_ACCOUNT
+        WHERE USER_ID   = #{userId}
+          AND EMAIL_ADDR = #{emailAddr}
+    </select>
+
+    <insert id="insertMailAccount" parameterType="kr.teamagent.mail.service.MailVO$MailAccountVO">
+        /* TB_MAIL_ACCOUNT INSERT ON DUPLICATE KEY UPDATE mail.insertMailAccount */
+        INSERT INTO TB_MAIL_ACCOUNT (
+            ACCOUNT_ID, USER_ID, EMAIL_ADDR, IMAP_HOST, IMAP_PORT,
+            AUTH_TYPE_CD, CREDENTIAL_ENC, CREDENTIAL_IV, KEY_VERSION,
+            USE_YN, LAST_LOGIN_DT, CREATE_DT
+        ) VALUES (
+            #{accountId}, #{userId}, #{emailAddr}, #{imapHost}, #{imapPort},
+            #{authTypeCd}, #{credentialEnc}, #{credentialIv}, #{keyVersion},
+            'Y', NOW(), NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            IMAP_HOST      = VALUES(IMAP_HOST),
+            IMAP_PORT      = VALUES(IMAP_PORT),
+            CREDENTIAL_ENC = VALUES(CREDENTIAL_ENC),
+            CREDENTIAL_IV  = VALUES(CREDENTIAL_IV),
+            KEY_VERSION    = VALUES(KEY_VERSION),
+            LAST_LOGIN_DT  = NOW(),
+            UPDATE_DT      = NOW()
+    </insert>
+
+    <update id="updateMailAccountLastLogin" parameterType="map">
+        /* TB_MAIL_ACCOUNT LAST_LOGIN_DT 갱신 mail.updateMailAccountLastLogin */
+        UPDATE TB_MAIL_ACCOUNT
+        SET
+            LAST_LOGIN_DT = NOW()
+            , UPDATE_DT  = NOW()
+        WHERE ACCOUNT_ID = #{accountId}
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- TB_MAIL_SYNC_STATE                                           -->
+    <!-- ============================================================ -->
+
+    <select id="selectMailSyncState" parameterType="map" resultType="kr.teamagent.mail.service.MailVO$MailSyncStateVO">
+        /* TB_MAIL_SYNC_STATE 조회 mail.selectMailSyncState */
+        SELECT
+            ACCOUNT_ID
+            , FOLDER_CD
+            , UID_VALIDITY
+            , LAST_SYNC_UID
+            , LAST_SYNC_DT
+        FROM TB_MAIL_SYNC_STATE
+        WHERE ACCOUNT_ID = #{accountId}
+          AND FOLDER_CD  = #{folderCd}
+    </select>
+
+    <insert id="upsertMailSyncState" parameterType="kr.teamagent.mail.service.MailVO$MailSyncStateVO">
+        /* TB_MAIL_SYNC_STATE UPSERT mail.upsertMailSyncState */
+        INSERT INTO TB_MAIL_SYNC_STATE (
+            ACCOUNT_ID, FOLDER_CD, UID_VALIDITY, LAST_SYNC_UID, LAST_SYNC_DT
+        ) VALUES (
+            #{accountId}, #{folderCd}, #{uidValidity}, #{lastSyncUid}, NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            UID_VALIDITY  = VALUES(UID_VALIDITY),
+            LAST_SYNC_UID = VALUES(LAST_SYNC_UID),
+            LAST_SYNC_DT  = NOW()
+    </insert>
+
+    <!-- ============================================================ -->
+    <!-- TB_MAIL_MSG                                                   -->
+    <!-- ============================================================ -->
+
+    <select id="selectMailMsgByImapUid" parameterType="map" resultType="kr.teamagent.mail.service.MailVO$MailMsgVO">
+        /* TB_MAIL_MSG IMAP_UID 기준 조회 mail.selectMailMsgByImapUid */
+        SELECT
+            MAIL_ID
+            , ACCOUNT_ID
+            , FOLDER_CD
+            , IMAP_UID
+        FROM TB_MAIL_MSG
+        WHERE ACCOUNT_ID = #{accountId}
+          AND FOLDER_CD  = #{folderCd}
+          AND IMAP_UID   = #{imapUid}
+    </select>
+
+    <insert id="insertMailMsg" parameterType="kr.teamagent.mail.service.MailVO$MailMsgVO">
+        /* TB_MAIL_MSG INSERT mail.insertMailMsg */
+        INSERT INTO TB_MAIL_MSG (
+            MAIL_ID, ACCOUNT_ID, FOLDER_CD, IMAP_UID,
+            MSG_ID_HEADER, IN_REPLY_TO,
+            SUBJECT, FROM_ADDR, FROM_NAME,
+            TO_ADDR_JSON, CC_ADDR_JSON,
+            MAIL_DT, BODY_TEXT,
+            HAS_ATTACH_YN, DELETED_YN, CREATE_DT
+        ) VALUES (
+            #{mailId}, #{accountId}, #{folderCd}, #{imapUid},
+            #{msgIdHeader}, #{inReplyTo},
+            #{subject}, #{fromAddr}, #{fromName},
+            #{toAddrJson}, #{ccAddrJson},
+            #{mailDt}, #{bodyText},
+            #{hasAttachYn}, 'N', NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            MSG_ID_HEADER = VALUES(MSG_ID_HEADER),
+            IN_REPLY_TO   = VALUES(IN_REPLY_TO)
+    </insert>
+
+    <select id="selectMailMsgById" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailMsgVO">
+        /* TB_MAIL_MSG ID 조회 mail.selectMailMsgById */
+        SELECT
+            M.MAIL_ID
+            , M.ACCOUNT_ID
+            , M.FOLDER_CD
+            , M.IMAP_UID
+            , M.MSG_ID_HEADER
+            , M.IN_REPLY_TO
+            , M.SUBJECT
+            , M.FROM_ADDR
+            , M.FROM_NAME
+            , M.TO_ADDR_JSON
+            , M.CC_ADDR_JSON
+            , M.MAIL_DT
+            , M.BODY_TEXT
+            , M.HAS_ATTACH_YN
+            , M.DELETED_YN
+            , M.CREATE_DT
+        FROM TB_MAIL_MSG M
+        WHERE M.MAIL_ID    = #{mailId}
+          AND M.DELETED_YN = 'N'
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- TB_MAIL_AI_ANALYSIS                                          -->
+    <!-- ============================================================ -->
+
+    <select id="selectMailAiAnalysis" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailAiAnalysisVO">
+        /* TB_MAIL_AI_ANALYSIS 조회 mail.selectMailAiAnalysis */
+        SELECT
+            MAIL_ID
+            , MAIL_PURPOSE_CD
+            , ACTION_REQUIRED_CD
+            , URGENCY_CD
+            , IMPORTANCE_CD
+            , WORK_CATEGORY_CD
+            , DUE_DT
+            , SUMMARY
+            , ACTION_COMPLETE_YN
+            , ACTION_COMPLETE_DT
+            , PROMPT_ID
+            , ANALYZED_DT
+        FROM TB_MAIL_AI_ANALYSIS
+        WHERE MAIL_ID = #{mailId}
+    </select>
+
+    <insert id="insertMailAiAnalysis" parameterType="kr.teamagent.mail.service.MailVO$MailAiAnalysisVO">
+        /* TB_MAIL_AI_ANALYSIS INSERT mail.insertMailAiAnalysis */
+        INSERT INTO TB_MAIL_AI_ANALYSIS (
+            MAIL_ID, MAIL_PURPOSE_CD, ACTION_REQUIRED_CD,
+            URGENCY_CD, IMPORTANCE_CD, WORK_CATEGORY_CD,
+            DUE_DT, SUMMARY, ACTION_COMPLETE_YN, ANALYZED_DT
+        ) VALUES (
+            #{mailId}, #{mailPurposeCd}, #{actionRequiredCd},
+            #{urgencyCd}, #{importanceCd}, #{workCategoryCd},
+            #{dueDt}, #{summary}, 'N', NOW()
+        )
+    </insert>
+
+    <update id="updateMailAiAnalysis" parameterType="kr.teamagent.mail.service.MailVO$MailAiAnalysisVO">
+        /* TB_MAIL_AI_ANALYSIS UPDATE(재분석 덮어쓰기) mail.updateMailAiAnalysis */
+        UPDATE TB_MAIL_AI_ANALYSIS
+        SET
+            MAIL_PURPOSE_CD    = #{mailPurposeCd}
+            , ACTION_REQUIRED_CD = #{actionRequiredCd}
+            , URGENCY_CD         = #{urgencyCd}
+            , IMPORTANCE_CD      = #{importanceCd}
+            , WORK_CATEGORY_CD   = #{workCategoryCd}
+            , DUE_DT             = #{dueDt}
+            , SUMMARY            = #{summary}
+            , ANALYZED_DT        = NOW()
+        WHERE MAIL_ID = #{mailId}
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- KPI                                                          -->
+    <!-- ============================================================ -->
+
+    <select id="selectMailKpi" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailKpiVO">
+        /* 받은메일함 KPI 집계 mail.selectMailKpi */
+        SELECT
+            COUNT(*)                                                             AS totalCount
+            , SUM(CASE WHEN A.ACTION_REQUIRED_CD = '002' THEN 1 ELSE 0 END)     AS replyRequiredCount
+            , SUM(CASE WHEN A.URGENCY_CD         = '001' THEN 1 ELSE 0 END)     AS urgentCount
+            , SUM(CASE WHEN DATE(A.DUE_DT)       = CURDATE() THEN 1 ELSE 0 END) AS todayDueCount
+        FROM TB_MAIL_MSG M
+            JOIN TB_MAIL_AI_ANALYSIS A ON M.MAIL_ID = A.MAIL_ID
+        WHERE M.ACCOUNT_ID = #{accountId}
+          AND M.FOLDER_CD  = '001'
+          AND M.DELETED_YN = 'N'
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 탭별 건수 (분류된메일함 / 액션아이템 / 회신)                -->
+    <!-- ============================================================ -->
+
+    <select id="selectTabCounts" parameterType="string" resultType="map">
+        /* 탭별 건수 mail.selectTabCounts */
+        SELECT 'all' AS tabType, COUNT(*) AS cnt
+        FROM TB_MAIL_MSG M
+            JOIN TB_MAIL_AI_ANALYSIS A ON M.MAIL_ID = A.MAIL_ID
+        WHERE M.ACCOUNT_ID = #{accountId}
+          AND M.FOLDER_CD  = '001'
+          AND M.DELETED_YN = 'N'
+        UNION ALL
+        SELECT 'action' AS tabType, COUNT(*) AS cnt
+        FROM TB_MAIL_MSG M
+            JOIN TB_MAIL_AI_ANALYSIS A ON M.MAIL_ID = A.MAIL_ID
+        WHERE M.ACCOUNT_ID           = #{accountId}
+          AND M.FOLDER_CD            = '001'
+          AND M.DELETED_YN           = 'N'
+          AND A.ACTION_REQUIRED_CD  != '005'
+          AND A.ACTION_COMPLETE_YN   = 'N'
+        UNION ALL
+        SELECT 'reply' AS tabType, COUNT(*) AS cnt
+        FROM TB_MAIL_MSG M
+            JOIN TB_MAIL_AI_ANALYSIS A ON M.MAIL_ID = A.MAIL_ID
+        WHERE M.ACCOUNT_ID          = #{accountId}
+          AND M.FOLDER_CD           = '001'
+          AND M.DELETED_YN          = 'N'
+          AND A.ACTION_REQUIRED_CD  = '002'
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 분류된 메일함 목록                                           -->
+    <!-- ============================================================ -->
+
+    <sql id="classifiedMailWhere">
+        WHERE M.ACCOUNT_ID = #{accountId}
+          AND M.FOLDER_CD  = '001'
+          AND M.DELETED_YN = 'N'
+        <if test="tabType == 'action'">
+          AND A.ACTION_REQUIRED_CD != '005'
+          AND A.ACTION_COMPLETE_YN  = 'N'
+        </if>
+        <if test="tabType == 'reply'">
+          AND A.ACTION_REQUIRED_CD = '002'
+        </if>
+        <if test="searchKeyword != null and searchKeyword != ''">
+          <choose>
+            <when test="searchField == 'from'">
+              AND (M.FROM_ADDR LIKE CONCAT('%', #{searchKeyword}, '%')
+                OR M.FROM_NAME LIKE CONCAT('%', #{searchKeyword}, '%'))
+            </when>
+            <when test="searchField == 'to'">
+              AND M.TO_ADDR_JSON LIKE CONCAT('%', #{searchKeyword}, '%')
+            </when>
+            <otherwise>
+              AND M.BODY_TEXT LIKE CONCAT('%', #{searchKeyword}, '%')
+            </otherwise>
+          </choose>
+        </if>
+        <if test="purposeCds != null and purposeCds.length > 0">
+          AND A.MAIL_PURPOSE_CD IN
+          <foreach item="cd" collection="purposeCds" open="(" separator="," close=")">#{cd}</foreach>
+        </if>
+        <if test="actionCds != null and actionCds.length > 0">
+          AND A.ACTION_REQUIRED_CD IN
+          <foreach item="cd" collection="actionCds" open="(" separator="," close=")">#{cd}</foreach>
+        </if>
+        <if test="urgencyCds != null and urgencyCds.length > 0">
+          AND A.URGENCY_CD IN
+          <foreach item="cd" collection="urgencyCds" open="(" separator="," close=")">#{cd}</foreach>
+        </if>
+        <if test="importanceCds != null and importanceCds.length > 0">
+          AND A.IMPORTANCE_CD IN
+          <foreach item="cd" collection="importanceCds" open="(" separator="," close=")">#{cd}</foreach>
+        </if>
+        <if test="categoryCds != null and categoryCds.length > 0">
+          AND A.WORK_CATEGORY_CD IN
+          <foreach item="cd" collection="categoryCds" open="(" separator="," close=")">#{cd}</foreach>
+        </if>
+    </sql>
+
+    <select id="selectClassifiedMailCount"
+            parameterType="kr.teamagent.mail.service.MailVO$MailListParamVO"
+            resultType="int">
+        /* 분류된 메일함 건수 mail.selectClassifiedMailCount */
+        SELECT COUNT(*)
+        FROM TB_MAIL_MSG M
+            JOIN TB_MAIL_AI_ANALYSIS A ON M.MAIL_ID = A.MAIL_ID
+        <include refid="classifiedMailWhere"/>
+    </select>
+
+    <select id="selectClassifiedMailList"
+            parameterType="kr.teamagent.mail.service.MailVO$MailListParamVO"
+            resultType="kr.teamagent.mail.service.MailVO$ClassifiedMailVO">
+        /* 분류된 메일함 목록 mail.selectClassifiedMailList */
+        SELECT
+            M.MAIL_ID
+            , M.SUBJECT
+            , M.FROM_ADDR
+            , M.FROM_NAME
+            , M.MAIL_DT
+            , M.BODY_TEXT
+            , M.FOLDER_CD
+            , A.MAIL_PURPOSE_CD
+            , CP.CODE_NM       AS mailPurposeNm
+            , A.ACTION_REQUIRED_CD
+            , CA.CODE_NM       AS actionRequiredNm
+            , A.URGENCY_CD
+            , CU.CODE_NM       AS urgencyNm
+            , A.IMPORTANCE_CD
+            , CI.CODE_NM       AS importanceNm
+            , A.WORK_CATEGORY_CD
+            , CW.CODE_NM       AS workCategoryNm
+            , A.DUE_DT
+            , A.SUMMARY
+            , A.ACTION_COMPLETE_YN
+        FROM TB_MAIL_MSG M
+            JOIN TB_MAIL_AI_ANALYSIS A ON M.MAIL_ID = A.MAIL_ID
+            LEFT JOIN TB_CODE CP ON A.MAIL_PURPOSE_CD    = CP.CODE_ID AND CP.CODE_GRP_ID = 'ML000001'
+            LEFT JOIN TB_CODE CA ON A.ACTION_REQUIRED_CD = CA.CODE_ID AND CA.CODE_GRP_ID = 'ML000002'
+            LEFT JOIN TB_CODE CU ON A.URGENCY_CD         = CU.CODE_ID AND CU.CODE_GRP_ID = 'ML000003'
+            LEFT JOIN TB_CODE CI ON A.IMPORTANCE_CD      = CI.CODE_ID AND CI.CODE_GRP_ID = 'ML000004'
+            LEFT JOIN TB_CODE CW ON A.WORK_CATEGORY_CD   = CW.CODE_ID AND CW.CODE_GRP_ID = 'ML000008'
+        <include refid="classifiedMailWhere"/>
+        ORDER BY M.MAIL_DT DESC
+        LIMIT #{pageSize} OFFSET #{pageNum}
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 액션 완료 처리                                               -->
+    <!-- ============================================================ -->
+
+    <update id="updateActionComplete" parameterType="map">
+        /* ACTION_COMPLETE_YN 토글 mail.updateActionComplete */
+        UPDATE TB_MAIL_AI_ANALYSIS
+        SET
+            ACTION_COMPLETE_YN = #{actionCompleteYn}
+            , ACTION_COMPLETE_DT =
+                <if test="actionCompleteYn == 'Y'">NOW()</if>
+                <if test="actionCompleteYn != 'Y'">NULL</if>
+        WHERE MAIL_ID = #{mailId}
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- TB_MAIL_REPLY_DRAFT                                          -->
+    <!-- ============================================================ -->
+
+    <insert id="insertMailReplyDraft" parameterType="kr.teamagent.mail.service.MailVO$MailReplyDraftVO">
+        /* TB_MAIL_REPLY_DRAFT INSERT mail.insertMailReplyDraft */
+        INSERT INTO TB_MAIL_REPLY_DRAFT (DRAFT_ID, MAIL_ID, DRAFT_CONTENT, CREATE_DT)
+        VALUES (#{draftId}, #{mailId}, #{draftContent}, NOW())
+    </insert>
+
+    <select id="selectLatestReplyDraft" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailReplyDraftVO">
+        /* 최신 회신 초안 조회 mail.selectLatestReplyDraft */
+        SELECT
+            DRAFT_ID
+            , MAIL_ID
+            , DRAFT_CONTENT
+            , CREATE_DT
+        FROM TB_MAIL_REPLY_DRAFT
+        WHERE MAIL_ID = #{mailId}
+        ORDER BY CREATE_DT DESC
+        LIMIT 1
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- TB_MAIL_FOLLOWUP                                             -->
+    <!-- ============================================================ -->
+
+    <insert id="insertMailFollowup" parameterType="kr.teamagent.mail.service.MailVO$MailFollowupVO">
+        /* TB_MAIL_FOLLOWUP INSERT mail.insertMailFollowup */
+        INSERT INTO TB_MAIL_FOLLOWUP (
+            FOLLOWUP_ID, SENT_MAIL_ID, RECIPIENT_ADDR,
+            EXPECTED_REPLY_DT, STATUS_CD, CREATE_DT
+        ) VALUES (
+            #{followupId}, #{sentMailId}, #{recipientAddr},
+            #{expectedReplyDt}, '001', NOW()
+        )
+    </insert>
+
+    <select id="selectMailFollowupList" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailFollowupVO">
+        /* TB_MAIL_FOLLOWUP 목록 mail.selectMailFollowupList */
+        SELECT
+            F.FOLLOWUP_ID
+            , F.SENT_MAIL_ID
+            , F.RECIPIENT_ADDR
+            , F.EXPECTED_REPLY_DT
+            , F.STATUS_CD
+            , CS.CODE_NM       AS statusNm
+            , F.REPLIED_MAIL_ID
+            , F.CREATE_DT
+            , F.UPDATE_DT
+            , M.SUBJECT
+            , M.FROM_NAME
+            , M.MAIL_DT
+        FROM TB_MAIL_FOLLOWUP F
+            JOIN TB_MAIL_MSG M ON F.SENT_MAIL_ID = M.MAIL_ID
+            LEFT JOIN TB_CODE CS ON F.STATUS_CD = CS.CODE_ID AND CS.CODE_GRP_ID = 'ML000005'
+        WHERE M.ACCOUNT_ID = #{accountId}
+        ORDER BY F.CREATE_DT DESC
+    </select>
+
+    <update id="updateMailFollowupStatus" parameterType="map">
+        /* TB_MAIL_FOLLOWUP 상태 변경 mail.updateMailFollowupStatus */
+        UPDATE TB_MAIL_FOLLOWUP
+        SET
+            STATUS_CD  = #{statusCd}
+            , UPDATE_DT = NOW()
+        WHERE FOLLOWUP_ID = #{followupId}
+    </update>
+
+    <update id="updateFollowupMatched" parameterType="map">
+        /* TB_MAIL_FOLLOWUP 자동 매칭 mail.updateFollowupMatched */
+        UPDATE TB_MAIL_FOLLOWUP
+        SET
+            REPLIED_MAIL_ID = #{repliedMailId}
+            , STATUS_CD     = '002'
+            , UPDATE_DT     = NOW()
+        WHERE FOLLOWUP_ID = #{followupId}
+          AND STATUS_CD   = '001'
+    </update>
+
+    <select id="selectWaitingFollowupList" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailFollowupVO">
+        /* 팔로업 대기 목록(자동매칭용) mail.selectWaitingFollowupList */
+        SELECT
+            F.FOLLOWUP_ID
+            , F.SENT_MAIL_ID
+            , F.RECIPIENT_ADDR
+            , M.MSG_ID_HEADER  AS msgIdHeader
+        FROM TB_MAIL_FOLLOWUP F
+            JOIN TB_MAIL_MSG M ON F.SENT_MAIL_ID = M.MAIL_ID
+        WHERE M.ACCOUNT_ID = #{accountId}
+          AND F.STATUS_CD  = '001'
+    </select>
+
+    <select id="selectInboxMsgWithInReplyTo" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailMsgVO">
+        /* IN_REPLY_TO 있는 INBOX 메일 mail.selectInboxMsgWithInReplyTo */
+        SELECT
+            MAIL_ID
+            , IN_REPLY_TO
+            , FROM_ADDR
+        FROM TB_MAIL_MSG
+        WHERE ACCOUNT_ID  = #{accountId}
+          AND FOLDER_CD   = '001'
+          AND IN_REPLY_TO IS NOT NULL
+          AND IN_REPLY_TO != ''
+          AND DELETED_YN  = 'N'
+        ORDER BY MAIL_DT DESC
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 업무영역 코드 목록 (ML000008, AI 프롬프트용)                -->
+    <!-- ============================================================ -->
+
+    <select id="selectWorkCategoryList" resultType="map">
+        /* 업무영역 코드 목록 mail.selectWorkCategoryList */
+        SELECT
+            CODE_ID
+            , CODE_NM
+        FROM TB_CODE
+        WHERE CODE_GRP_ID = 'ML000008'
+          AND USE_YN      = 'Y'
+        ORDER BY SORT_ORD
+    </select>
+
+</mapper>
