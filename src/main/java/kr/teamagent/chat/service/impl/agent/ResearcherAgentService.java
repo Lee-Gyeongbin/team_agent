@@ -297,10 +297,19 @@ public class ResearcherAgentService {
 
                 for (String summaryKey : new String[]{"executive_summary", "요약", "summary", "핵심요약"}) {
                     Object summaryObj = mappedJson.get(summaryKey);
-                    if (summaryObj != null && CommonUtil.isNotEmpty(String.valueOf(summaryObj))) {
+                    if (summaryObj == null) continue;
+                    if (summaryObj instanceof JSONArray) {
+                        // AI가 배열로 반환한 경우 각 항목을 줄바꿈으로 연결
+                        StringBuilder arrSb = new StringBuilder();
+                        for (Object item : (JSONArray) summaryObj) {
+                            if (arrSb.length() > 0) arrSb.append("\n");
+                            arrSb.append(String.valueOf(item));
+                        }
+                        executiveSummary = arrSb.toString();
+                    } else {
                         executiveSummary = String.valueOf(summaryObj);
-                        break;
                     }
+                    if (CommonUtil.isNotEmpty(executiveSummary)) break;
                 }
 
                 mappedJson.put("sources", SOURCES_TOKEN);
