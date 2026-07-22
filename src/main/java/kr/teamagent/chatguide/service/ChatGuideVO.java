@@ -21,6 +21,7 @@ public class ChatGuideVO {
     private String endDt;
     private String advanceNoticeCd;
     private String advanceNoticeNm;
+    private String advanceNoticeHour;
     private String autoDsplYn;
     private Integer maxChars;
     private String modifyDt;

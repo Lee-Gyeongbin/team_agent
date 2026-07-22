@@ -559,6 +559,70 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
+    /**
+     * PPTX 바이트 → PDF 바이트 변환 (LibreOffice 사용).
+     * Step F 출력 기능에서 PPTX를 메모리에서 빌드한 후 PDF로 변환할 때 사용한다.
+     *
+     * @param pptxBytes    변환할 PPTX 바이트 배열
+     * @param baseFileName 임시 파일명 기반 (확장자 포함, e.g. "export_PT000001.pptx")
+     * @return PDF 바이트 배열
+     * @throws Exception LibreOffice 변환 실패 또는 결과 파일이 유효한 PDF가 아닌 경우
+     */
+    public byte[] convertPptxBytesToPdf(byte[] pptxBytes, String baseFileName) throws Exception {
+        if (pptxBytes == null || pptxBytes.length == 0) {
+            throw new IllegalArgumentException("PPTX 바이트가 비어 있습니다.");
+        }
+        Path workDir = createViewWorkDir();
+        String inputFileName = System.currentTimeMillis() + "_" + (baseFileName != null ? baseFileName : "input.pptx");
+        Path inputPath  = workDir.resolve(inputFileName);
+        Path outputPath = workDir.resolve(replaceExtensionToPdf(inputFileName));
+        try {
+            Files.write(inputPath, pptxBytes);
+            runLibreOfficeConvert(inputPath, workDir);
+            if (!Files.exists(outputPath)) {
+                throw new IOException("LibreOffice PDF 변환 결과 파일 없음: " + outputPath);
+            }
+            assertValidPdfFile(outputPath);
+            return Files.readAllBytes(outputPath);
+        } finally {
+            deleteQuietly(inputPath);
+            deleteQuietly(outputPath);
+            deleteQuietly(workDir);
+        }
+    }
+
+    /**
+     * NCP에 바이트 배열을 업로드한다.
+     *
+     * @param key         스토리지 키 (파일 경로)
+     * @param bytes       업로드할 바이트 배열
+     * @param contentType MIME 타입 (e.g. "application/pdf")
+     */
+    public void uploadBytes(String key, byte[] bytes, String contentType) {
+        com.amazonaws.services.s3.model.ObjectMetadata meta = new com.amazonaws.services.s3.model.ObjectMetadata();
+        meta.setContentLength(bytes.length);
+        if (contentType != null && !contentType.isEmpty()) {
+            meta.setContentType(contentType);
+        }
+        s3Client.putObject(getBucketName(), key, new java.io.ByteArrayInputStream(bytes), meta);
+    }
+
+    /**
+     * NCP 스토리지 키에 대한 다운로드용 presigned URL 문자열을 반환한다.
+     *
+     * @param key      스토리지 키
+     * @param fileName 다운로드 시 표시될 파일명
+     * @return presigned URL 문자열 (빈 문자열이면 객체 없음)
+     */
+    public String createDownloadPresignedUrlStr(String key, String fileName) throws Exception {
+        if (CommonUtil.isEmpty(key) || !doesStorageObjectExist(key)) {
+            return "";
+        }
+        URL url = createPresignedUrl(key, HttpMethod.GET,
+                DEFAULT_DOWNLOAD_EXPIRE_MILLIS, createDownloadHeader(fileName));
+        return url.toString();
+    }
+
     private static class TextReadResult {
         private final String content;
         private final boolean truncated;

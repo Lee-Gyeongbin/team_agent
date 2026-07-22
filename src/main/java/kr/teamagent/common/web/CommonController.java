@@ -169,6 +169,23 @@ public class CommonController extends BaseController {
 	}
 
 	/**
+	 * 챗봇 가이드 점검/장애 공지 조회
+	 * @return { list: ChatGuideVO[] }
+	 */
+	@RequestMapping("/chatGuideMaintList.do")
+	public @ResponseBody Map<String, Object> chatGuideMaintList() throws Exception {
+		Map<String, Object> resultMap = new HashMap<>();
+		try {
+			resultMap.put("list", chatGuideService.selectLoginMaintNoticeList());
+		} catch (Exception e) {
+			log.error("chatGuideMaintList failed", e);
+			resultMap.put("successYn", false);
+			resultMap.put("returnMsg", "챗봇 가이드 점검/장애 목록 조회 중 오류가 발생하였습니다. (" + e.getMessage() + ")");
+		}
+		return resultMap;
+	}
+
+	/**
 	 * 카테고리 목록 조회
 	 */
 	@RequestMapping("/selectCategoryList.do")

@@ -142,6 +142,21 @@ public class PromptDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 에이전트 + STAGE_CD 기준 프롬프트 목록 조회 (PRIORITY 순)
+     * STAGE_CD = 'ALL' 또는 지정 stageCd 에 해당하는 프롬프트를 우선순위 순으로 반환
+     * @param agentId  에이전트 ID
+     * @param stageCd  단계 코드 (예: 'S1_EXTRACT')
+     * @return CONTENT 목록
+     * @throws Exception
+     */
+    public List<String> selectPromptContentListByAgentIdAndStageCd(String agentId, String stageCd) throws Exception {
+        java.util.Map<String, Object> param = new java.util.HashMap<>();
+        param.put("agentId", agentId);
+        param.put("stageCd", stageCd);
+        return selectList("prompt.selectPromptContentListByAgentIdAndStageCd", param);
+    }
+
+    /**
      * 에이전트 목록 조회
      * @return
      * @throws Exception

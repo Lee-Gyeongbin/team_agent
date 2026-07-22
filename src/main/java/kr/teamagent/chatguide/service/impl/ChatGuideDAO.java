@@ -14,6 +14,10 @@ public class ChatGuideDAO extends EgovComAbstractDAO {
         return selectList("chatGuide.selectChatGuideList", null);
     }
 
+    public List<ChatGuideVO> selectChatGuideMaintList() throws Exception {
+        return selectList("chatGuide.selectChatGuideMaintList", null);
+    }
+
     public List<ChatGuideVO> selectChatGuideGreetingList(ChatGuideVO searchVO) throws Exception {
         return selectList("chatGuide.selectChatGuideGreetingList", searchVO);
     }

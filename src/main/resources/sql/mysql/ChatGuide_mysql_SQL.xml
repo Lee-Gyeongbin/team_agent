@@ -23,6 +23,35 @@
         ORDER BY A.GUIDE_TP_CD, A.GUIDE_KEY
     </select>
 
+    <select id="selectChatGuideMaintList" resultType="chatGuideVO">
+        /* 챗봇가이드 점검/장애 목록 조회 chatGuide.selectChatGuideMaintList */
+        SELECT
+            A.GUIDE_ID
+            , A.GUIDE_TP_CD
+            , A.GUIDE_KEY
+            , A.TITLE
+            , A.ENBL_YN
+            , A.CONTENT
+            , A.DSPL_COND
+            , A.START_DT
+            , A.END_DT
+            , A.ADVANCE_NOTICE_CD
+            , C.CODE_NM AS ADVANCE_NOTICE_NM
+            , C.ETC1 AS ADVANCE_NOTICE_HOUR
+            , A.MAX_CHARS
+            , A.MODIFY_DT
+            , A.AUTO_DSPL_YN
+            , A.AUTO_DETECT_YN
+        FROM TB_CHAT_GUIDE A
+        LEFT JOIN TB_CODE C
+          ON C.CODE_GRP_ID = 'GI000002'
+         AND C.USE_YN = 'Y'
+         AND C.CODE_ID = A.ADVANCE_NOTICE_CD
+        WHERE 1=1
+          AND A.GUIDE_TP_CD = '004'
+          AND A.ENBL_YN = 'Y'
+    </select>
+
     <select id="selectChatGuideGreetingList" resultType="chatGuideVO">
         /* 챗봇가이드 인사멘트 조회 chatGuide.selectChatGuideGreetingList */
         SELECT
@@ -81,11 +110,12 @@
             , A.END_DT
             , A.ADVANCE_NOTICE_CD
             , C.CODE_NM AS ADVANCE_NOTICE_NM
+            , C.ETC1 AS ADVANCE_NOTICE_HOUR
             , A.MODIFY_DT
             , A.AUTO_DSPL_YN
         FROM TB_CHAT_GUIDE A
         LEFT JOIN TB_CODE C
-          ON C.CODE_GRP_ID = 'GI0000002'
+          ON C.CODE_GRP_ID = 'GI000002'
          AND C.USE_YN = 'Y'
          AND C.CODE_ID = A.ADVANCE_NOTICE_CD
         WHERE 1=1

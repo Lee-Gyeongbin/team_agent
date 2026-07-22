@@ -178,6 +178,27 @@ public class PromptServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 에이전트 + 단계 코드 기준 프롬프트를 PRIORITY 순으로 조회해 이어붙임
+     * STAGE_CD='ALL'(공통) + stageCd(단계 전용) 두 종류가 혼합 조회됨
+     * @param agentId 에이전트 ID
+     * @param stageCd 단계 코드 (예: 'S1_EXTRACT')
+     * @return 조합된 프롬프트 본문 (없으면 null)
+     * @throws Exception
+     */
+    public String getPromptsByAgentIdAndStageCd(String agentId, String stageCd) throws Exception {
+        List<String> contents = promptDAO.selectPromptContentListByAgentIdAndStageCd(agentId, stageCd);
+        if (contents == null || contents.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        for (String content : contents) {
+            if (content != null && !content.isEmpty()) {
+                if (sb.length() > 0) sb.append("\n\n");
+                sb.append(content);
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : null;
+    }
+
+    /**
      * 에이전트 목록 조회
      * @return
      * @throws Exception
