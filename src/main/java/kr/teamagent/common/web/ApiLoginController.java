@@ -161,8 +161,10 @@ public class ApiLoginController {
         } catch (Exception e) {
             log.error("Login error", e);
             result.put("success", false);
+            result.put("result", "FAIL");
+            result.put("errorCode", CommonUtil.resolveGuideKey(e));
             result.put("message", "로그인 처리 중 오류가 발생했습니다.");
-            return ResponseEntity.internalServerError().body(result);
+            return ResponseEntity.ok(result);
         }
     }
 
