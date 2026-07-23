@@ -264,8 +264,13 @@ public class ChatGuideServiceImpl extends EgovAbstractServiceImpl {
      * 현재 시각 기준 점검/장애 공지 노출 여부
      * - 공통: START_DT ~ END_DT 구간
      * - 정기점검(MAINT_SCHEDULED): START_DT - ADVANCE_NOTICE(ETC1)시간 부터
+     * - 장애 안내(MAINT_INCIDENT_*): 기간 없이 항상 포함
      */
     private boolean isDisplayableMaintNotice(ChatGuideVO vo, LocalDateTime now) {
+        String guideKey = StringUtils.trim(vo.getGuideKey());
+        if (StringUtils.startsWithIgnoreCase(guideKey, "MAINT_INCIDENT_")) {
+            return true;
+        }
         String start = StringUtils.trimToNull(vo.getStartDt());
         String end = StringUtils.trimToNull(vo.getEndDt());
         if (start == null || end == null) {
