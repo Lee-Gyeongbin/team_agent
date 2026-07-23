@@ -105,9 +105,9 @@ public class MailDAO extends EgovComAbstractDAO {
         return (int) selectOne("mail.selectClassifiedMailCount", param);
     }
 
-    /** 탭별 건수 조회 (뱃지용: all / action / reply) */
-    public List<Map<String, Object>> selectTabCounts(String accountId) throws Exception {
-        return selectList("mail.selectTabCounts", accountId);
+    /** 탭별 건수 조회 (뱃지용: all / action / reply) — 날짜 범위 반영 */
+    public List<Map<String, Object>> selectTabCounts(MailVO.MailListParamVO param) throws Exception {
+        return selectList("mail.selectTabCounts", param);
     }
 
     // ────────────────────────────────────────────────────────────────────

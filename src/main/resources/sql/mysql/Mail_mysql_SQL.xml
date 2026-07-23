@@ -231,14 +231,16 @@
     <!-- 탭별 건수 (분류된메일함 / 액션아이템 / 회신)                -->
     <!-- ============================================================ -->
 
-    <select id="selectTabCounts" parameterType="string" resultType="map">
-        /* 탭별 건수 mail.selectTabCounts */
+    <select id="selectTabCounts" parameterType="kr.teamagent.mail.service.MailVO$MailListParamVO" resultType="map">
+        /* 탭별 건수 (날짜 범위 반영) mail.selectTabCounts */
         SELECT 'all' AS tabType, COUNT(*) AS cnt
         FROM TB_MAIL_MSG M
             JOIN TB_MAIL_AI_ANALYSIS A ON M.MAIL_ID = A.MAIL_ID
         WHERE M.ACCOUNT_ID = #{accountId}
           AND M.FOLDER_CD  = '001'
           AND M.DELETED_YN = 'N'
+          <if test="startDate != null and startDate != ''">AND DATE(M.MAIL_DT) &gt;= #{startDate}</if>
+          <if test="endDate   != null and endDate   != ''">AND DATE(M.MAIL_DT) &lt;= #{endDate}</if>
         UNION ALL
         SELECT 'action' AS tabType, COUNT(*) AS cnt
         FROM TB_MAIL_MSG M
@@ -246,6 +248,8 @@
         WHERE M.ACCOUNT_ID           = #{accountId}
           AND M.FOLDER_CD            = '001'
           AND M.DELETED_YN           = 'N'
+          <if test="startDate != null and startDate != ''">AND DATE(M.MAIL_DT) &gt;= #{startDate}</if>
+          <if test="endDate   != null and endDate   != ''">AND DATE(M.MAIL_DT) &lt;= #{endDate}</if>
           AND A.ACTION_REQUIRED_CD  != '005'
           AND A.ACTION_COMPLETE_YN   = 'N'
         UNION ALL
@@ -255,6 +259,8 @@
         WHERE M.ACCOUNT_ID          = #{accountId}
           AND M.FOLDER_CD           = '001'
           AND M.DELETED_YN          = 'N'
+          <if test="startDate != null and startDate != ''">AND DATE(M.MAIL_DT) &gt;= #{startDate}</if>
+          <if test="endDate   != null and endDate   != ''">AND DATE(M.MAIL_DT) &lt;= #{endDate}</if>
           AND A.ACTION_REQUIRED_CD  = '002'
     </select>
 

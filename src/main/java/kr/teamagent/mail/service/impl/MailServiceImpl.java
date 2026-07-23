@@ -612,16 +612,18 @@ public class MailServiceImpl {
 
                     com.sun.mail.imap.IMAPFolder imapFolder = (com.sun.mail.imap.IMAPFolder) folder;
 
-                    SearchTerm term = new AndTerm(
-                        new ReceivedDateTerm(ComparisonTerm.GE, since),
-                        new ReceivedDateTerm(ComparisonTerm.LT, before)
-                    );
-                    Message[] messages = folder.search(term);
+                    // IMAP BEFORE 커맨드는 일부 서버에서 미지원/오동작 → syncMailMessages와 동일하게
+                    // GE(SINCE)만 IMAP에 요청하고, 상한선(before)은 Java에서 필터링
+                    Message[] messages = folder.search(new ReceivedDateTerm(ComparisonTerm.GE, since));
 
                     log.info("날짜범위 동기화 시작 (account={}, folder={}, {} ~ {}, {}건 검색)",
                         accountId, folderName, startDateStr, endDateStr, messages.length);
 
                     for (Message msg : messages) {
+                        // 상한선 Java 필터링: before(endDate+1) 이후 메일 스킵
+                        Date msgDate = msg.getReceivedDate() != null ? msg.getReceivedDate() : msg.getSentDate();
+                        if (msgDate != null && !msgDate.before(before)) continue;
+
                         long   uid        = imapFolder.getUID(msg);
                         String imapUidStr = String.valueOf(uid);
 
@@ -727,8 +729,14 @@ public class MailServiceImpl {
                 MailVO.MailMsgVO msg = mailDAO.selectMailMsgById(mailId);
                 if (msg == null) continue;
 
-                String prompt      = buildClassificationPrompt(msg, categoryPromptPart.toString());
-                String aiResponse  = chatbotService.callAiSummary(prompt, "mail_classify", null);
+                // 이미 분류된 메일은 LLM 호출 자체를 건너뜀 (TB_API_CALL_LOG 미적재)
+                if (mailDAO.selectMailAiAnalysis(mailId) != null) {
+                    log.debug("AI 분류 스킵 — 이미 분석됨 (mailId={})", mailId);
+                    continue;
+                }
+
+                String prompt     = buildClassificationPrompt(msg, categoryPromptPart.toString());
+                String aiResponse = chatbotService.callAiSummary(prompt, "mail_classify", null);
 
                 if (isBlank(aiResponse)) {
                     log.warn("AI 분류 응답 없음 (mailId={})", mailId);
@@ -737,14 +745,7 @@ public class MailServiceImpl {
 
                 MailVO.MailAiAnalysisVO analysis = parseClassificationResponse(aiResponse);
                 analysis.setMailId(mailId);
-
-                // 기존 분석 결과 확인 → INSERT or UPDATE
-                MailVO.MailAiAnalysisVO existing = mailDAO.selectMailAiAnalysis(mailId);
-                if (existing != null) {
-                    mailDAO.updateMailAiAnalysis(analysis);
-                } else {
-                    mailDAO.insertMailAiAnalysis(analysis);
-                }
+                mailDAO.insertMailAiAnalysis(analysis);
 
             } catch (Exception e) {
                 log.error("AI 분류 실패 (mailId={}): {}", mailId, e.getMessage());
@@ -919,8 +920,8 @@ public class MailServiceImpl {
         List<MailVO.ClassifiedMailVO> list = mailDAO.selectClassifiedMailList(param);
         int totalCount = mailDAO.selectClassifiedMailCount(param);
 
-        // 탭별 건수
-        List<Map<String, Object>> tabCounts = mailDAO.selectTabCounts(param.getAccountId());
+        // 탭별 건수 (날짜 범위 동일하게 적용)
+        List<Map<String, Object>> tabCounts = mailDAO.selectTabCounts(param);
         Map<String, Integer> tabCountMap = new HashMap<>();
         for (Map<String, Object> row : tabCounts) {
             String tabType = (String) row.get("tabType");
