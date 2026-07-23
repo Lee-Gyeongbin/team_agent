@@ -399,9 +399,12 @@ public class MailController extends BaseController<Object> {
             // SENT 동기화
             List<String> newSentIds  = mailService.syncMailMessages(accountId, email, password, "SENT");
 
-            // AI 분류 (INBOX 신규 메일만)
+            // AI 분류 (INBOX + SENT 신규 메일)
             if (!newInboxIds.isEmpty()) {
                 mailService.classifyMails(newInboxIds);
+            }
+            if (!newSentIds.isEmpty()) {
+                mailService.classifyMails(newSentIds);
             }
 
             // 팔로업 자동 매칭
@@ -416,6 +419,57 @@ public class MailController extends BaseController<Object> {
             log.error("메일 동기화 실패: {}", e.getMessage(), e);
             return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
                 "메일 동기화 중 오류가 발생했습니다.", "MAIL_SYNC_FAILED");
+        }
+    }
+
+    // ─── 9-1. 날짜 범위 동기화 ──────────────────────────────────
+
+    /**
+     * POST /mail/sync-range.do
+     * Body: { startDate: "yyyy-MM-dd", endDate: "yyyy-MM-dd" }
+     * 해당 날짜 범위의 IMAP 메일 중 DB에 없는 것만 동기화 + AI 분류 (LAST_SYNC_UID 갱신 없음)
+     */
+    @RequestMapping(value = "/sync-range.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView syncRange(@RequestBody Map<String, Object> body,
+            HttpServletRequest request, HttpServletResponse response) {
+        try {
+            String email     = getMailSession(request, SESSION_KEY_EMAIL);
+            String password  = getMailSession(request, SESSION_KEY_PASSWORD);
+            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
+
+            if (email == null || password == null) {
+                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "메일 계정이 연결되어 있지 않습니다.", "MAIL_AUTH_REQUIRED");
+            }
+            if (accountId == null) {
+                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
+                    "계정 ID가 없습니다.", "MAIL_ACCOUNT_ID_MISSING");
+            }
+
+            String startDate = toStr(body.get("startDate"));
+            String endDate   = toStr(body.get("endDate"));
+
+            if (isBlank(startDate) || isBlank(endDate)) {
+                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
+                    "날짜 범위가 필요합니다.", "MAIL_DATE_RANGE_REQUIRED");
+            }
+
+            List<String> newMailIds = mailService.syncMailMessagesByDateRange(
+                accountId, email, password, startDate, endDate);
+
+            if (!newMailIds.isEmpty()) {
+                mailService.classifyMails(newMailIds);
+            }
+
+            HashMap<String, Object> result = new HashMap<>();
+            result.put("newCount", newMailIds.size());
+            return makeSuccessJsonData(result);
+
+        } catch (Exception e) {
+            log.error("날짜 범위 동기화 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "메일 동기화 중 오류가 발생했습니다.", "MAIL_SYNC_RANGE_FAILED");
         }
     }
 
@@ -465,6 +519,8 @@ public class MailController extends BaseController<Object> {
             @RequestParam(value = "categoryCds",   required = false)      String categoryCdStr,
             @RequestParam(value = "pageNum",       defaultValue = "0")    int pageNum,
             @RequestParam(value = "pageSize",      defaultValue = "50")   int pageSize,
+            @RequestParam(value = "startDate",     required = false)      String startDate,
+            @RequestParam(value = "endDate",       required = false)      String endDate,
             HttpServletRequest request, HttpServletResponse response) {
         try {
             String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
@@ -480,6 +536,8 @@ public class MailController extends BaseController<Object> {
             param.setSearchKeyword(searchKeyword);
             param.setPageNum(pageNum);
             param.setPageSize(pageSize);
+            param.setStartDate(startDate);
+            param.setEndDate(endDate);
             if (!isBlank(purposeCdStr))    param.setPurposeCds(purposeCdStr.split(","));
             if (!isBlank(actionCdStr))     param.setActionCds(actionCdStr.split(","));
             if (!isBlank(urgencyCdStr))    param.setUrgencyCds(urgencyCdStr.split(","));
@@ -493,6 +551,61 @@ public class MailController extends BaseController<Object> {
             log.error("분류된 메일함 조회 실패: {}", e.getMessage(), e);
             return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
                 "메일 목록 조회 중 오류가 발생했습니다.", "MAIL_CLASSIFIED_LIST_FAILED");
+        }
+    }
+
+    // ─── 11-1. 분류된 받은메일함 AI 요약 ────────────────────────
+
+    /**
+     * POST /mail/inbox-summary.do
+     * Body: { tabType, searchField, searchKeyword, purposeCds[], actionCds[], urgencyCds[], importanceCds[], categoryCds[] }
+     * 현재 필터 조건에 해당하는 메일 목록을 AI로 요약하여 반환
+     */
+    @RequestMapping(value = "/inbox-summary.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView inboxSummary(@RequestBody Map<String, Object> body,
+            HttpServletRequest request, HttpServletResponse response) {
+        try {
+            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
+            if (accountId == null) {
+                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
+            }
+
+            MailVO.MailListParamVO param = new MailVO.MailListParamVO();
+            param.setAccountId(accountId);
+            param.setTabType(body.containsKey("tabType") ? toStr(body.get("tabType")) : "all");
+            param.setSearchField(body.containsKey("searchField") ? toStr(body.get("searchField")) : "subject");
+            param.setSearchKeyword(body.containsKey("searchKeyword") ? toStr(body.get("searchKeyword")) : null);
+
+            String[] purposeCds    = parseCdList(body, "purposeCds");
+            String[] actionCds     = parseCdList(body, "actionCds");
+            String[] urgencyCds    = parseCdList(body, "urgencyCds");
+            String[] importanceCds = parseCdList(body, "importanceCds");
+            String[] categoryCds   = parseCdList(body, "categoryCds");
+            if (purposeCds    != null) param.setPurposeCds(purposeCds);
+            if (actionCds     != null) param.setActionCds(actionCds);
+            if (urgencyCds    != null) param.setUrgencyCds(urgencyCds);
+            if (importanceCds != null) param.setImportanceCds(importanceCds);
+            if (categoryCds   != null) param.setCategoryCds(categoryCds);
+            if (body.containsKey("startDate")) param.setStartDate(toStr(body.get("startDate")));
+            if (body.containsKey("endDate"))   param.setEndDate(toStr(body.get("endDate")));
+
+            HashMap<String, Object> result = mailService.getInboxSummary(param);
+            return makeSuccessJsonData(result);
+
+        } catch (RuntimeException e) {
+            if ("AI_FAILED".equals(e.getMessage())) {
+                return failResponse(response, HttpServletResponse.SC_BAD_GATEWAY,
+                    "AI 요약 생성에 실패했습니다.", "MAIL_INBOX_SUMMARY_AI_FAILED");
+            }
+            log.error("받은메일함 AI 요약 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "AI 요약 생성 중 오류가 발생했습니다.", "MAIL_INBOX_SUMMARY_FAILED");
+        } catch (Exception e) {
+            log.error("받은메일함 AI 요약 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "AI 요약 생성 중 오류가 발생했습니다.", "MAIL_INBOX_SUMMARY_FAILED");
         }
     }
 
@@ -666,6 +779,110 @@ public class MailController extends BaseController<Object> {
         }
     }
 
+    // ─── 17-1. 보낸메일함 분류 목록 조회 (LLM 기반) ─────────────
+
+    /**
+     * GET /mail/sent-classified.do
+     *   ?tabType=all|pending|done
+     *   &startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+     *   &pageNum=1&pageSize=50
+     */
+    @RequestMapping(value = "/sent-classified.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView sentClassified(
+            @RequestParam(value = "tabType",   defaultValue = "all") String tabType,
+            @RequestParam(value = "startDate", required = false)     String startDate,
+            @RequestParam(value = "endDate",   required = false)     String endDate,
+            @RequestParam(value = "pageNum",   defaultValue = "1")   int pageNum,
+            @RequestParam(value = "pageSize",  defaultValue = "50")  int pageSize,
+            HttpServletRequest request, HttpServletResponse response) {
+        try {
+            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
+            if (accountId == null) {
+                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
+            }
+
+            MailVO.SentListParamVO param = new MailVO.SentListParamVO();
+            param.setAccountId(accountId);
+            param.setTabType(tabType);
+            param.setStartDate(startDate);
+            param.setEndDate(endDate);
+            param.setPageNum(pageNum);
+            param.setPageSize(pageSize);
+
+            HashMap<String, Object> result = mailService.getSentClassified(param);
+            return makeSuccessJsonData(result);
+
+        } catch (Exception e) {
+            log.error("보낸메일함 분류 목록 조회 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "보낸메일함 조회 중 오류가 발생했습니다.", "MAIL_SENT_CLASSIFIED_FAILED");
+        }
+    }
+
+    // ─── 17-2. 답장 대기 많은 상대 조회 ─────────────────────────
+
+    /**
+     * GET /mail/sent-top-recipients.do?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+     */
+    @RequestMapping(value = "/sent-top-recipients.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView sentTopRecipients(
+            @RequestParam(value = "startDate", required = false) String startDate,
+            @RequestParam(value = "endDate",   required = false) String endDate,
+            HttpServletRequest request, HttpServletResponse response) {
+        try {
+            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
+            if (accountId == null) {
+                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
+            }
+
+            MailVO.SentListParamVO param = new MailVO.SentListParamVO();
+            param.setAccountId(accountId);
+            param.setTabType("pending");
+            param.setStartDate(startDate);
+            param.setEndDate(endDate);
+            param.setPageNum(0);
+            param.setPageSize(5);
+
+            HashMap<String, Object> result = mailService.getTopPendingRecipients(param);
+            return makeSuccessJsonData(result);
+
+        } catch (Exception e) {
+            log.error("답장 대기 많은 상대 조회 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "조회 중 오류가 발생했습니다.", "MAIL_TOP_RECIPIENTS_FAILED");
+        }
+    }
+
+    // ─── 17-3. 이번 주 회신 통계 조회 ───────────────────────────
+
+    /**
+     * GET /mail/sent-weekly-stats.do
+     * 조회 기간 필터 무관, 캘린더 주 단위 고정 통계
+     */
+    @RequestMapping(value = "/sent-weekly-stats.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView sentWeeklyStats(HttpServletRequest request, HttpServletResponse response) {
+        try {
+            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
+            if (accountId == null) {
+                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
+            }
+
+            HashMap<String, Object> result = mailService.getSentWeeklyStats(accountId);
+            return makeSuccessJsonData(result);
+
+        } catch (Exception e) {
+            log.error("회신 통계 조회 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "통계 조회 중 오류가 발생했습니다.", "MAIL_WEEKLY_STATS_FAILED");
+        }
+    }
+
     // ─── 17. 팔로업 상태 변경 ───────────────────────────────────
 
     /**
@@ -728,6 +945,27 @@ public class MailController extends BaseController<Object> {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    /**
+     * POST body의 JSON 배열 또는 CSV 문자열 → String[] 변환.
+     * 빈 배열이면 null 반환 (필터 미적용과 동일하게 처리).
+     */
+    @SuppressWarnings("unchecked")
+    private String[] parseCdList(Map<String, Object> body, String key) {
+        Object val = body.get(key);
+        if (val == null) return null;
+        if (val instanceof List) {
+            List<?> list = (List<?>) val;
+            if (list.isEmpty()) return null;
+            String[] arr = new String[list.size()];
+            for (int i = 0; i < list.size(); i++) {
+                arr[i] = list.get(i) != null ? list.get(i).toString() : "";
+            }
+            return arr;
+        }
+        String str = val.toString().trim();
+        return str.isEmpty() ? null : str.split(",");
     }
 
     private String toStr(Object value) {

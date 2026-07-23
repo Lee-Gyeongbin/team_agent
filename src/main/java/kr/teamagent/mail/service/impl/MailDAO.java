@@ -175,4 +175,33 @@ public class MailDAO extends EgovComAbstractDAO {
     public List<Map<String, Object>> selectWorkCategoryList() throws Exception {
         return selectList("mail.selectWorkCategoryList");
     }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 보낸메일함 분류 (LLM 기반)
+    // ────────────────────────────────────────────────────────────────────
+
+    /** 보낸메일함 분류 목록 조회 */
+    public List<MailVO.SentClassifiedItemVO> selectSentClassifiedList(MailVO.SentListParamVO param) throws Exception {
+        return selectList("mail.selectSentClassifiedList", param);
+    }
+
+    /** 보낸메일함 분류 건수 조회 */
+    public int selectSentClassifiedCount(MailVO.SentListParamVO param) throws Exception {
+        return (int) selectOne("mail.selectSentClassifiedCount", param);
+    }
+
+    /** 보낸메일함 탭별 건수 조회 */
+    public List<Map<String, Object>> selectSentTabCounts(MailVO.SentListParamVO param) throws Exception {
+        return selectList("mail.selectSentTabCounts", param);
+    }
+
+    /** 답장 대기 많은 상대 조회 */
+    public List<MailVO.TopPendingRecipientVO> selectTopPendingRecipients(MailVO.SentListParamVO param) throws Exception {
+        return selectList("mail.selectTopPendingRecipients", param);
+    }
+
+    /** 이번 주 / 전주 회신 통계 조회 */
+    public Map<String, Object> selectSentWeeklyStats(String accountId) throws Exception {
+        return selectOne("mail.selectSentWeeklyStats", accountId);
+    }
 }
