@@ -102,9 +102,11 @@ public class ApiSignupController {
         } catch (Exception e) {
             log.error("Signup error", e);
             result.put("success", false);
+            result.put("result", "FAIL");
+            result.put("errorCode", CommonUtil.resolveGuideKey(e));
             result.put("errorType", "serverError");
             result.put("message", "회원가입 처리 중 오류가 발생했습니다.");
-            return ResponseEntity.internalServerError().body(result);
+            return ResponseEntity.ok(result);
         }
     }
 }

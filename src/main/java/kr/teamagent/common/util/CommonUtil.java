@@ -8,6 +8,7 @@ import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.spec.RSAPublicKeySpec;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -17,6 +18,8 @@ import javax.servlet.http.HttpSession;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionException;
 
 public class CommonUtil {
 
@@ -354,5 +357,42 @@ public class CommonUtil {
 		}
 
 		return prefix + String.format("%0" + digitLength + "d", nextNum);
+	}
+
+	/** DB 오류 — ChatGuide GUIDE_KEY (Front errorCode) */
+	public static final String RESP_DB_ERROR = "RESP_DB_ERROR";
+
+	/** 시스템 오류 — ChatGuide GUIDE_KEY (Front errorCode) */
+	public static final String RESP_SYS_ERROR = "RESP_SYS_ERROR";
+
+	/**
+	 * Exception → ChatGuide GUIDE_KEY.
+	 * IllegalArgumentException(검증)은 null.
+	 */
+	public static String resolveGuideKey(Throwable t) {
+		if (t == null) {
+			return RESP_SYS_ERROR;
+		}
+		if (t instanceof IllegalArgumentException) {
+			return null;
+		}
+		if (isDbError(t)) {
+			return RESP_DB_ERROR;
+		}
+		return RESP_SYS_ERROR;
+	}
+
+	/** SQL / Spring DataAccess / Transaction 등 DB 계열 예외 여부 */
+	public static boolean isDbError(Throwable t) {
+		Throwable cur = t;
+		while (cur != null) {
+			if (cur instanceof SQLException
+					|| cur instanceof DataAccessException
+					|| cur instanceof TransactionException) {
+				return true;
+			}
+			cur = cur.getCause();
+		}
+		return false;
 	}
 }
