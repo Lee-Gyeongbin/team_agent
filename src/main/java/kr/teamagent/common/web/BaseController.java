@@ -11,7 +11,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.WebDataBinder;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.InitBinder;
+import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.util.WebUtils;
 
@@ -19,6 +21,7 @@ import com.amazonaws.services.s3.AmazonS3;
 
 import egovframework.com.cmm.EgovMessageSource;
 import kr.teamagent.common.CommonVO;
+import kr.teamagent.common.util.CommonUtil;
 
 public class BaseController<T> {
 	public final Logger log = LoggerFactory.getLogger(this.getClass());
@@ -76,6 +79,18 @@ public class BaseController<T> {
 		return makeFailJsonData(resultMap);
 	}
 
+	/**
+	 * 실패 응답 + ChatGuide GUIDE_KEY(errorCode).
+	 */
+	public ModelAndView makeFailJsonData(String msg, String errorCode) {
+		HashMap<String, Object> resultMap = new HashMap<String, Object>();
+		resultMap.put("msg", msg);
+		if (errorCode != null && !errorCode.isEmpty()) {
+			resultMap.put("errorCode", errorCode);
+		}
+		return makeFailJsonData(resultMap);
+	}
+
 	public ModelAndView makeFailJsonData(HashMap<String, Object> resultMap) {
 		resultMap.put("result", AJAX_FAIL);
 		if(resultMap.get("msg") == null) {
@@ -93,5 +108,25 @@ public class BaseController<T> {
 
 	public String getCookie(HttpServletRequest request, String cookieName) {
 		return WebUtils.getCookie(request, cookieName) == null ? null : WebUtils.getCookie(request, cookieName).getValue();
+	}
+
+	/**
+	 * 미처리 예외 → HTTP 200 + result FAIL + errorCode.
+	 * 하위 컨트롤러의 @ExceptionHandler가 있으면 그쪽이 우선.
+	 */
+	@ExceptionHandler(Exception.class)
+	@ResponseBody
+	public ModelAndView handleException(Exception ex) {
+		String errorCode = CommonUtil.resolveGuideKey(ex);
+		if (errorCode == null) {
+			log.warn("요청 오류: {}", ex.getMessage());
+			return makeFailJsonData(ex.getMessage());
+		}
+		if (CommonUtil.RESP_DB_ERROR.equals(errorCode)) {
+			log.error("DB 오류", ex);
+		} else {
+			log.error("시스템 오류", ex);
+		}
+		return makeFailJsonData(egovMessageSource.getMessage(AJAX_FAIL_MSG_CODE), errorCode);
 	}
 }
