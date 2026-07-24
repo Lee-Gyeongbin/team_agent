@@ -41,8 +41,9 @@ public class MailController extends BaseController<Object> {
 
     /**
      * GET /mail/auth-check.do
-     * 서버 세션에 메일 자격증명이 저장되어 있으면 SUCCESS, 없으면 FAIL 반환.
-     * 로그인 모달 표시 여부 판단용 — IMAP 재연결 없이 세션만 확인.
+     * 1) 세션에 메일 자격증명이 있으면 SUCCESS
+     * 2) 없으면 TB_MAIL_ACCOUNT 저장 자격증명으로 IMAP 재연결 시도 → 성공 시 세션 복원
+     * 3) 재연결 실패 시 FAIL (로그인 모달 표시용)
      */
     @RequestMapping(value = "/auth-check.do", method = RequestMethod.GET)
     @ResponseBody
@@ -52,9 +53,28 @@ public class MailController extends BaseController<Object> {
         if (email != null && password != null) {
             return makeSuccessJsonData();
         }
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("message", "인증 정보가 없습니다.");
-        return makeFailJsonData(resultMap);
+
+        String userId = SessionUtil.getUserId();
+        if (isBlank(userId)) {
+            return authCheckFail("MAIL_AUTH_REQUIRED", "인증 정보가 없습니다.");
+        }
+
+        HashMap<String, Object> reconnect = mailService.tryReconnectFromStoredAccount(userId);
+        if (Boolean.TRUE.equals(reconnect.get("success"))) {
+            restoreMailSession(request,
+                (String) reconnect.get("email"),
+                (String) reconnect.get("password"),
+                (String) reconnect.get("accountId"),
+                userId);
+            return makeSuccessJsonData();
+        }
+
+        String code = reconnect.get("code") != null
+            ? reconnect.get("code").toString() : "MAIL_AUTH_REQUIRED";
+        String message = "MAIL_CREDENTIAL_INVALID".equals(code)
+            ? "메일 계정 인증이 만료되었습니다. 다시 로그인해주세요."
+            : "인증 정보가 없습니다.";
+        return authCheckFail(code, message);
     }
 
     // ─── 1. IMAP 로그인 인증 (수정: TB_MAIL_ACCOUNT 저장 추가) ──
@@ -81,8 +101,7 @@ public class MailController extends BaseController<Object> {
         }
 
         HttpSession session = request.getSession(true);
-        session.setAttribute(SESSION_KEY_EMAIL,    email.trim());
-        session.setAttribute(SESSION_KEY_PASSWORD, password);
+        restoreMailSession(session, email.trim(), password, null, userId);
 
         // TB_MAIL_ACCOUNT upsert (실패해도 로그인은 성공 처리)
         String accountId = null;
@@ -90,7 +109,6 @@ public class MailController extends BaseController<Object> {
             if (!isBlank(userId)) {
                 accountId = mailService.saveMailAccount(userId, email.trim(), password);
                 session.setAttribute(SESSION_KEY_ACCOUNT_ID, accountId);
-                session.setAttribute(SESSION_KEY_USER_ID,    userId);
             } else {
                 log.warn("시스템 세션에 userId 없음 — TB_MAIL_ACCOUNT 저장 건너뜀");
             }
@@ -407,7 +425,7 @@ public class MailController extends BaseController<Object> {
                 mailService.classifyMails(newSentIds);
             }
 
-            // 팔로업 자동 매칭
+            // 회신메일 자동 매칭 팔로업
             mailService.matchFollowupReplies(accountId);
 
             HashMap<String, Object> result = new HashMap<>();
@@ -476,18 +494,21 @@ public class MailController extends BaseController<Object> {
     // ─── 10. KPI 집계 조회 ──────────────────────────────────────
 
     /**
-     * GET /mail/kpi.do
+     * GET /mail/kpi.do?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+     * inbox-classified와 동일한 MAIL_DT 기간으로 KPI 집계
      */
     @RequestMapping(value = "/kpi.do", method = RequestMethod.GET)
     @ResponseBody
-    public ModelAndView kpi(HttpServletRequest request, HttpServletResponse response) {
+    public ModelAndView kpi(@RequestParam(value = "startDate", required = false) String startDate,
+                            @RequestParam(value = "endDate",   required = false) String endDate,
+                            HttpServletRequest request, HttpServletResponse response) {
         try {
             String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
             if (accountId == null) {
                 return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
                     "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
             }
-            HashMap<String, Object> result = mailService.getMailKpi(accountId);
+            HashMap<String, Object> result = mailService.getMailKpi(accountId, startDate, endDate);
             return makeSuccessJsonData(result);
         } catch (Exception e) {
             log.error("KPI 조회 실패: {}", e.getMessage(), e);
@@ -883,6 +904,73 @@ public class MailController extends BaseController<Object> {
         }
     }
 
+    // ─── 15-1. AI 회신기대 무시 ──────────────────────────────────
+
+    /**
+     * POST /mail/followup-dismiss.do
+     * Body: { mailId }
+     * AI가 회신기대(Y)로 판단한 메일을 사용자가 "회신 불필요"로 무시.
+     * TB_MAIL_FOLLOWUP에 STATUS_CD='003'(취소) 으로 INSERT → pending 탭에서 제외.
+     * 무시 해제는 followup-cancel.do(DELETE) 재사용.
+     */
+    @RequestMapping(value = "/followup-dismiss.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView followupDismiss(@RequestBody Map<String, String> body,
+            HttpServletRequest request, HttpServletResponse response) {
+        try {
+            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
+            if (accountId == null) {
+                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
+            }
+            String mailId = body.get("mailId");
+            if (isBlank(mailId)) {
+                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
+                    "mailId는 필수입니다.", "MAIL_FOLLOWUP_DISMISS_INVALID");
+            }
+            HashMap<String, Object> result = mailService.dismissFollowup(mailId);
+            return makeSuccessJsonData(result);
+        } catch (IllegalArgumentException e) {
+            return failResponse(response, HttpServletResponse.SC_NOT_FOUND,
+                "메일을 찾을 수 없습니다.", "MAIL_NOT_FOUND");
+        } catch (Exception e) {
+            log.error("AI 무시 등록 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "처리 중 오류가 발생했습니다.", "MAIL_FOLLOWUP_DISMISS_FAILED");
+        }
+    }
+
+    // ─── 15-2. 팔로업 취소(삭제) ─────────────────────────────────
+
+    /**
+     * POST /mail/followup-cancel.do
+     * Body: { followupId }
+     * 사용자가 직접 등록한 팔로업을 해제(삭제)한다.
+     */
+    @RequestMapping(value = "/followup-cancel.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView followupCancel(@RequestBody Map<String, String> body,
+            HttpServletRequest request, HttpServletResponse response) {
+        try {
+            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
+            if (accountId == null) {
+                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
+            }
+            String followupId = body.get("followupId");
+            if (isBlank(followupId)) {
+                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
+                    "followupId는 필수입니다.", "MAIL_FOLLOWUP_CANCEL_INVALID");
+            }
+            mailService.cancelFollowup(followupId);
+            return makeSuccessJsonData();
+        } catch (Exception e) {
+            log.error("팔로업 취소 실패: {}", e.getMessage(), e);
+            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                "팔로업 취소 중 오류가 발생했습니다.", "MAIL_FOLLOWUP_CANCEL_FAILED");
+        }
+    }
+
     // ─── 17. 팔로업 상태 변경 ───────────────────────────────────
 
     /**
@@ -915,6 +1003,31 @@ public class MailController extends BaseController<Object> {
     }
 
     // ─── 내부 헬퍼 ───────────────────────────────────────────
+
+    private ModelAndView authCheckFail(String code, String message) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("message", message);
+        resultMap.put("msg",     message);
+        resultMap.put("code",    code);
+        return makeFailJsonData(resultMap);
+    }
+
+    private void restoreMailSession(HttpServletRequest request, String email, String password,
+                                    String accountId, String userId) {
+        restoreMailSession(request.getSession(true), email, password, accountId, userId);
+    }
+
+    private void restoreMailSession(HttpSession session, String email, String password,
+                                    String accountId, String userId) {
+        session.setAttribute(SESSION_KEY_EMAIL,    email);
+        session.setAttribute(SESSION_KEY_PASSWORD, password);
+        if (accountId != null) {
+            session.setAttribute(SESSION_KEY_ACCOUNT_ID, accountId);
+        }
+        if (userId != null) {
+            session.setAttribute(SESSION_KEY_USER_ID, userId);
+        }
+    }
 
     private String getMailSession(HttpServletRequest request, String key) {
         HttpSession session = request.getSession(false);

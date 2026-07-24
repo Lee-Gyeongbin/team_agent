@@ -138,10 +138,16 @@ public class MailVO {
         private String  toName;              // 수신자 이름
         private String  toAddr;              // 수신자 이메일
         private Date    mailDt;
-        private String  replyExpectedYn;     // Y/N
-        private String  repliedYn;           // Y=회신수신, N=미수신
+        private String  replyExpectedYn;     // Y/N (AI 분석)
+        private String  repliedYn;           // Y=회신수신(IN_REPLY_TO 매칭 또는 FOLLOWUP STATUS=002), N=미수신
         private Integer elapsedDays;         // 발송일 ~ 오늘 또는 발송일 ~ 회신수신일 (백엔드 계산)
         private Integer replyElapsedHours;   // 회신 소요 시간(시간 단위, repliedYn='Y'일 때만)
+        // 팔로업 통합 필드
+        private String  followupId;          // TB_MAIL_FOLLOWUP.FOLLOWUP_ID (없으면 null)
+        private String  followupStatusCd;    // 001=대기, 002=회신됨
+        private Date    expectedReplyDt;     // 사용자 지정 회신 기대일
+        private String  followupRecipientAddr; // 팔로업 등록 시 수신자 이메일
+        private String  trackSource;         // USER(사용자 팔로업) | AI(AI 회신기대) | NONE
     }
 
     /** 답장 대기 많은 상대 */
@@ -180,6 +186,8 @@ public class MailVO {
         private String fromName;
         private Date   mailDt;
         private String statusNm;
+        // selectWaitingFollowupList alias: 발신 메일의 MSG_ID_HEADER (정밀 매칭용)
+        private String msgIdHeader;
     }
 
     /** TB_MAIL_REPLY_DRAFT - 회신 초안 */
@@ -222,6 +230,7 @@ public class MailVO {
     @Getter @Setter
     public static class ClassifiedMailVO {
         private String mailId;
+        private String imapUid;
         private String subject;
         private String fromAddr;
         private String fromName;

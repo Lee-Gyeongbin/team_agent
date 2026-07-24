@@ -20,6 +20,11 @@ public class MailDAO extends EgovComAbstractDAO {
         return selectOne("mail.selectMailAccount", param);
     }
 
+    /** userId 기준 최근 로그인 계정 단건 조회 (세션 만료 시 자동 재연결용) */
+    public MailVO.MailAccountVO selectMailAccountByUserId(String userId) throws Exception {
+        return selectOne("mail.selectMailAccountByUserId", userId);
+    }
+
     /** 계정 INSERT (ON DUPLICATE KEY UPDATE) */
     public void insertMailAccount(MailVO.MailAccountVO vo) throws Exception {
         insert("mail.insertMailAccount", vo);
@@ -28,6 +33,11 @@ public class MailDAO extends EgovComAbstractDAO {
     /** LAST_LOGIN_DT / UPDATE_DT 갱신 */
     public void updateMailAccountLastLogin(Map<String, Object> param) throws Exception {
         update("mail.updateMailAccountLastLogin", param);
+    }
+
+    /** 저장 자격증명(CREDENTIAL_ENC/IV) 및 LAST_LOGIN_DT 갱신 */
+    public void updateMailAccountCredential(Map<String, Object> param) throws Exception {
+        update("mail.updateMailAccountCredential", param);
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -86,9 +96,9 @@ public class MailDAO extends EgovComAbstractDAO {
     // KPI
     // ────────────────────────────────────────────────────────────────────
 
-    /** 받은메일함 KPI 집계 */
-    public MailVO.MailKpiVO selectMailKpi(String accountId) throws Exception {
-        return selectOne("mail.selectMailKpi", accountId);
+    /** 받은메일함 KPI 집계 (startDate/endDate는 inbox-classified와 동일 기준) */
+    public MailVO.MailKpiVO selectMailKpi(MailVO.MailListParamVO param) throws Exception {
+        return selectOne("mail.selectMailKpi", param);
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -160,6 +170,11 @@ public class MailDAO extends EgovComAbstractDAO {
     /** 팔로업 대기 목록 조회 (WAITING 상태, 자동 매칭용) */
     public List<MailVO.MailFollowupVO> selectWaitingFollowupList(String accountId) throws Exception {
         return selectList("mail.selectWaitingFollowupList", accountId);
+    }
+
+    /** 팔로업 취소(삭제) */
+    public void deleteMailFollowup(String followupId) throws Exception {
+        delete("mail.deleteMailFollowup", followupId);
     }
 
     /** IN_REPLY_TO 헤더가 있는 INBOX 메일 조회 (자동 매칭용) */
