@@ -354,8 +354,53 @@ public class MailServiceImpl {
     // ─── A. 계정 저장 (인증 성공 시 TB_MAIL_ACCOUNT upsert) ────
 
     /**
+     * 세션 만료 시 TB_MAIL_ACCOUNT 저장 자격증명으로 IMAP 재연결을 시도한다.
+     * @return success=true 시 email/password/accountId 포함, 실패 시 success=false 및 code
+     */
+    public HashMap<String, Object> tryReconnectFromStoredAccount(String userId) {
+        HashMap<String, Object> result = new HashMap<>();
+        result.put("success", false);
+
+        if (isBlank(userId)) {
+            result.put("code", "MAIL_AUTH_REQUIRED");
+            return result;
+        }
+
+        try {
+            MailVO.MailAccountVO account = mailDAO.selectMailAccountByUserId(userId);
+            if (account == null) {
+                result.put("code", "MAIL_AUTH_REQUIRED");
+                return result;
+            }
+            if (account.getCredentialEnc() == null || account.getCredentialIv() == null) {
+                result.put("code", "MAIL_AUTH_REQUIRED");
+                return result;
+            }
+
+            String email    = account.getEmailAddr();
+            String password = decryptCredential(account.getCredentialEnc(), account.getCredentialIv());
+            if (!authImap(email, password)) {
+                log.warn("저장 자격증명 IMAP 재연결 실패 [{}]", email);
+                result.put("code", "MAIL_CREDENTIAL_INVALID");
+                return result;
+            }
+
+            result.put("success",   true);
+            result.put("email",     email);
+            result.put("password",  password);
+            result.put("accountId", account.getAccountId());
+            result.put("userId",    userId);
+            return result;
+        } catch (Exception e) {
+            log.warn("메일 자동 재연결 실패: {}", e.getMessage());
+            result.put("code", "MAIL_CREDENTIAL_INVALID");
+            return result;
+        }
+    }
+
+    /**
      * IMAP 인증 성공 후 계정 정보를 TB_MAIL_ACCOUNT에 저장.
-     * AES-128-CBC 암호화 적용. 추후 KMS 연동 시 encryptCredential 메서드만 교체.
+     * AES-128-CBC 암호화 적용. 추후 KMS 연동 시 encryptCredential/decryptCredential 메서드만 교체.
      */
     public String saveMailAccount(String userId, String email, String password) throws Exception {
         String host = PropertyUtil.getProperty("Globals.mail.imap.host");
@@ -367,16 +412,17 @@ public class MailServiceImpl {
 
         MailVO.MailAccountVO existing = mailDAO.selectMailAccount(checkParam);
 
-        // AES-128-CBC 암호화
         byte[] iv = new byte[16];
         new java.security.SecureRandom().nextBytes(iv);
         byte[] encCredential = encryptCredential(password, iv);
 
         if (existing != null) {
-            // 기존 계정: lastLoginDt만 갱신
             Map<String, Object> updateParam = new HashMap<>();
-            updateParam.put("accountId", existing.getAccountId());
-            mailDAO.updateMailAccountLastLogin(updateParam);
+            updateParam.put("accountId",     existing.getAccountId());
+            updateParam.put("credentialEnc", encCredential);
+            updateParam.put("credentialIv",  iv);
+            updateParam.put("keyVersion",    1);
+            mailDAO.updateMailAccountCredential(updateParam);
             return existing.getAccountId();
         } else {
             String accountId = keyGenerate.generateTableKey("MA", "TB_MAIL_ACCOUNT", "ACCOUNT_ID");
@@ -395,22 +441,35 @@ public class MailServiceImpl {
         }
     }
 
+    private byte[] getCredentialKeyBytes() throws Exception {
+        String keyStr = PropertyUtil.getProperty("Globals.mail.credential.key");
+        if (keyStr == null || keyStr.length() < 16) {
+            keyStr = "teamagentmailkey";
+        }
+        return keyStr.substring(0, 16).getBytes("UTF-8");
+    }
+
     private byte[] encryptCredential(String plainText, byte[] iv) {
         try {
-            // TODO: 프로덕션에서는 NCP KMS 또는 서버 환경변수에서 키 로드
-            String keyStr = PropertyUtil.getProperty("Globals.mail.credential.key");
-            if (keyStr == null || keyStr.length() < 16) {
-                // fallback: 임시 키 (개발용)
-                keyStr = "teamagentmailkey";
-            }
-            byte[] keyBytes = keyStr.substring(0, 16).getBytes("UTF-8");
-            javax.crypto.SecretKey secretKey = new javax.crypto.spec.SecretKeySpec(keyBytes, "AES");
+            javax.crypto.SecretKey secretKey = new javax.crypto.spec.SecretKeySpec(getCredentialKeyBytes(), "AES");
             javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding");
             cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secretKey, new javax.crypto.spec.IvParameterSpec(iv));
             return cipher.doFinal(plainText.getBytes("UTF-8"));
         } catch (Exception e) {
             log.error("자격증명 암호화 실패: {}", e.getMessage(), e);
             throw new RuntimeException("CREDENTIAL_ENCRYPT_FAILED");
+        }
+    }
+
+    private String decryptCredential(byte[] encCredential, byte[] iv) {
+        try {
+            javax.crypto.SecretKey secretKey = new javax.crypto.spec.SecretKeySpec(getCredentialKeyBytes(), "AES");
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding");
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secretKey, new javax.crypto.spec.IvParameterSpec(iv));
+            return new String(cipher.doFinal(encCredential), "UTF-8");
+        } catch (Exception e) {
+            log.error("자격증명 복호화 실패: {}", e.getMessage(), e);
+            throw new RuntimeException("CREDENTIAL_DECRYPT_FAILED");
         }
     }
 
@@ -459,6 +518,7 @@ public class MailServiceImpl {
                 log.info("UID_VALIDITY 변경 감지 (account={}, folder={}): {} → {}",
                     accountId, folderName, syncState.getUidValidity(), currentUidValidity);
             } else {
+                // TB_MAIL_SYNC_STATE에서 LAST_SYNC_UID
                 lastSyncUid = syncState.getLastSyncUid();
             }
 
@@ -492,12 +552,14 @@ public class MailServiceImpl {
                 allMessages = folder.getMessages();
             }
 
+            // IMAP 폴더 메일 순회 (allMessages)
             for (Message msg : allMessages) {
                 long uid = imapFolder.getUID(msg);
 
                 // 증분 동기화 시 이미 처리된 UID 스킵
                 if (!fullSync && uid <= lastSyncUid) continue;
 
+                //각 메일 uid가 LAST_SYNC_UID보다 크면 → 가져올 후보 (maxUid 갱신)
                 if (uid > maxUid) maxUid = uid;
 
                 String imapUidStr = String.valueOf(uid);
@@ -507,6 +569,7 @@ public class MailServiceImpl {
                 dupParam.put("accountId", accountId);
                 dupParam.put("folderCd",  folderCd);
                 dupParam.put("imapUid",   imapUidStr);
+                // TB_MAIL_MSG에 같은 IMAP_UID가 이미 있으면 → INSERT 스킵
                 MailVO.MailMsgVO existingMsg = mailDAO.selectMailMsgByImapUid(dupParam);
                 if (existingMsg != null) continue;
 
@@ -557,7 +620,7 @@ public class MailServiceImpl {
                 }
             }
 
-            // 체크포인트 업데이트
+            // 체크포인트 업데이트(sync 끝나면 LAST_SYNC_UID = 이번에 본 uid 중 최대값(maxUid)으로 갱신)
             MailVO.MailSyncStateVO newState = new MailVO.MailSyncStateVO();
             newState.setAccountId(accountId);
             newState.setFolderCd(folderCd);
@@ -798,6 +861,7 @@ public class MailServiceImpl {
         return sb.toString();
     }
 
+    // AI 분류 응답 파싱
     @SuppressWarnings("unchecked")
     private MailVO.MailAiAnalysisVO parseClassificationResponse(String aiResponse) {
         MailVO.MailAiAnalysisVO vo = new MailVO.MailAiAnalysisVO();
@@ -853,10 +917,11 @@ public class MailServiceImpl {
         return vo;
     }
 
-    // ─── D. 팔로업 자동 매칭 ───────────────────────────────
+    // ─── D. 회신메일 자동 매칭 팔로업 ───────────────────────
 
     /**
      * INBOX의 IN_REPLY_TO 헤더 기반으로 TB_MAIL_FOLLOWUP 자동 매칭
+     * 회신메일 자동 매칭 팔로업
      */
     public void matchFollowupReplies(String accountId) throws Exception {
         List<MailVO.MailFollowupVO> waitingList = mailDAO.selectWaitingFollowupList(accountId);
@@ -865,22 +930,25 @@ public class MailServiceImpl {
         List<MailVO.MailMsgVO> inboxWithReply = mailDAO.selectInboxMsgWithInReplyTo(accountId);
         if (inboxWithReply.isEmpty()) return;
 
-        // sentMailId의 MSG_ID_HEADER를 기준으로 매핑
-        // selectWaitingFollowupList에서 MSG_ID_HEADER를 msgIdHeader 필드 alias로 조회함
-        // MailFollowupVO에 sentMailId 필드를 MSG_ID_HEADER 임시 저장 없이 별도 매핑
-        // → INBOX의 IN_REPLY_TO와 대기중 팔로업의 sentMailId(SENT 메일 MSG_ID_HEADER) 비교
-
         for (MailVO.MailMsgVO inbox : inboxWithReply) {
             String inReplyTo = inbox.getInReplyTo();
             if (isBlank(inReplyTo)) continue;
 
             for (MailVO.MailFollowupVO fup : waitingList) {
-                // selectWaitingFollowupList에서 MSG_ID_HEADER를 msgIdHeader 컬럼으로 조회하므로
-                // MailFollowupVO의 subject 필드에 alias로 담아서 비교하는 대신,
-                // 현재 구현에서는 팔로업의 recipientAddr과 inbox의 fromAddr 비교 (단순 매칭)
-                // → 정밀 매칭은 추후 MSG_ID_HEADER 전용 필드 추가 시 개선
-                if (!isBlank(fup.getRecipientAddr())
+                boolean matched = false;
+
+                // 1순위: IN_REPLY_TO ↔ MSG_ID_HEADER 정밀 매칭
+                if (!isBlank(fup.getMsgIdHeader())
+                        && inReplyTo.equalsIgnoreCase(fup.getMsgIdHeader())) {
+                    matched = true;
+                }
+                // 2순위: 발신자 이메일 fallback (MSG_ID_HEADER 없거나 불일치 시)
+                else if (!isBlank(fup.getRecipientAddr())
                         && fup.getRecipientAddr().equalsIgnoreCase(inbox.getFromAddr())) {
+                    matched = true;
+                }
+
+                if (matched) {
                     Map<String, Object> matchParam = new HashMap<>();
                     matchParam.put("followupId",    fup.getFollowupId());
                     matchParam.put("repliedMailId", inbox.getMailId());
@@ -895,8 +963,12 @@ public class MailServiceImpl {
 
     // ─── E. KPI 조회 ───────────────────────────────────────
 
-    public HashMap<String, Object> getMailKpi(String accountId) throws Exception {
-        MailVO.MailKpiVO kpi = mailDAO.selectMailKpi(accountId);
+    public HashMap<String, Object> getMailKpi(String accountId, String startDate, String endDate) throws Exception {
+        MailVO.MailListParamVO param = new MailVO.MailListParamVO();
+        param.setAccountId(accountId);
+        param.setStartDate(startDate);
+        param.setEndDate(endDate);
+        MailVO.MailKpiVO kpi = mailDAO.selectMailKpi(param);
         HashMap<String, Object> result = new HashMap<>();
         if (kpi != null) {
             result.put("totalCount",         kpi.getTotalCount());
@@ -909,6 +981,12 @@ public class MailServiceImpl {
             result.put("urgentCount",        0);
             result.put("todayDueCount",      0);
         }
+        // INBOX 폴더의 UID_VALIDITY (그룹웨어 boxnameSeq에 해당)
+        java.util.Map<String, Object> syncParam = new HashMap<>();
+        syncParam.put("accountId", accountId);
+        syncParam.put("folderCd", "INBOX");
+        MailVO.MailSyncStateVO syncState = mailDAO.selectMailSyncState(syncParam);
+        result.put("inboxUidValidity", syncState != null ? syncState.getUidValidity() : null);
         return result;
     }
 
@@ -965,12 +1043,21 @@ public class MailServiceImpl {
         SimpleDateFormat sdf = new SimpleDateFormat("MM/dd HH:mm");
         StringBuilder sb = new StringBuilder();
         sb.append("당신은 이메일 비서입니다.\n");
-        sb.append("아래 메일 목록을 분석하여 사용자가 현황을 빠르게 파악할 수 있도록 한국어로 간결하게 요약해주세요.\n\n");
-        sb.append("요약 지침:\n");
-        sb.append("- 전체 맥락을 2~3문장으로 요약\n");
-        sb.append("- 긴급/중요 메일이 있으면 강조\n");
-        sb.append("- 처리가 필요한 핵심 사항을 간결하게 나열 (없으면 생략)\n");
-        sb.append("- 요약 텍스트만 출력하고 제목/레이블 등 부가 형식 없이 작성\n\n");
+        sb.append("아래 메일 목록을 분석하여 사용자가 현황을 빠르게 파악할 수 있도록 한국어로 마크다운 형식으로 요약해주세요.\n\n");
+        sb.append("출력 형식 (아래 구조만 사용, 절대 변형 금지):\n\n");
+        sb.append("전체 흐름을 2~3문장으로 요약. 긴급하거나 중요한 내용은 **굵게** 표시.\n\n");
+        sb.append("처리 사항이 있으면 아래처럼 라벨별로 묶어서 출력:\n\n");
+        sb.append("**[긴급]**\n");
+        sb.append("- 긴급 처리 항목\n\n");
+        sb.append("**[회신 필요]**\n");
+        sb.append("- 회신이 필요한 항목\n\n");
+        sb.append("**[To-Do]**\n");
+        sb.append("- 기한 내 처리가 필요한 항목\n\n");
+        sb.append("규칙:\n");
+        sb.append("- 해당 라벨에 속하는 항목이 없으면 그 섹션 전체 생략\n");
+        sb.append("- 각 항목은 동사로 끝나는 한 문장. 마감일이 있으면 괄호로 표기\n");
+        sb.append("- 처리 사항이 아예 없으면 요약 단락만 출력\n");
+        sb.append("- 위 3가지 라벨 외 다른 라벨 사용 금지. 헤딩(#) 사용 금지. 코드블록 사용 금지\n\n");
         sb.append("메일 목록 (").append(mails.size()).append("건):\n");
 
         for (int i = 0; i < mails.size(); i++) {
@@ -1075,6 +1162,15 @@ public class MailServiceImpl {
     // ─── J. 팔로업 등록 ────────────────────────────────────
 
     public HashMap<String, Object> registerFollowup(String mailId, String recipientAddr, Date expectedReplyDt) throws Exception {
+        return insertFollowupWithStatus(mailId, recipientAddr, expectedReplyDt, "001");
+    }
+
+    public HashMap<String, Object> dismissFollowup(String mailId) throws Exception {
+        return insertFollowupWithStatus(mailId, null, null, "003");
+    }
+
+    private HashMap<String, Object> insertFollowupWithStatus(String mailId, String recipientAddr,
+            Date expectedReplyDt, String statusCd) throws Exception {
         MailVO.MailMsgVO msg = mailDAO.selectMailMsgById(mailId);
         if (msg == null) throw new IllegalArgumentException("MAIL_NOT_FOUND");
 
@@ -1084,6 +1180,7 @@ public class MailServiceImpl {
         vo.setSentMailId(mailId);
         vo.setRecipientAddr(!isBlank(recipientAddr) ? recipientAddr : msg.getFromAddr());
         vo.setExpectedReplyDt(expectedReplyDt);
+        vo.setStatusCd(statusCd);
         mailDAO.insertMailFollowup(vo);
 
         HashMap<String, Object> result = new HashMap<>();
@@ -1107,6 +1204,12 @@ public class MailServiceImpl {
         param.put("followupId", followupId);
         param.put("statusCd",   statusCd);
         mailDAO.updateMailFollowupStatus(param);
+    }
+
+    // ─── L-2. 팔로업 취소(삭제) ────────────────────────────
+
+    public void cancelFollowup(String followupId) throws Exception {
+        mailDAO.deleteMailFollowup(followupId);
     }
 
     // ─── M. 보낸메일함 분류 목록 조회 (LLM 기반) ───────────────
