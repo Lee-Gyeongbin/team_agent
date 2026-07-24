@@ -133,6 +133,8 @@ public class MailVO {
     @Getter @Setter
     public static class SentClassifiedItemVO {
         private String  mailId;
+        private String  imapUid;             // TB_MAIL_MSG.IMAP_UID — 그룹웨어 메일 URL의 uid 파라미터
+        private Long    uidValidity;         // TB_MAIL_SYNC_STATE.UID_VALIDITY (SENT 메일박스) — boxnameSeq 파라미터
         private String  subject;
         private String  toAddrRaw;           // TO_ADDR_JSON[0] raw (파싱 후 toName/toAddr 채움)
         private String  toName;              // 수신자 이름

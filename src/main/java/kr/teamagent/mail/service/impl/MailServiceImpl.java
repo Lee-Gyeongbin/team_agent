@@ -26,10 +26,8 @@ import javax.mail.Session;
 import javax.mail.Store;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeUtility;
-import javax.mail.search.AndTerm;
 import javax.mail.search.ComparisonTerm;
 import javax.mail.search.ReceivedDateTerm;
-import javax.mail.search.SearchTerm;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;

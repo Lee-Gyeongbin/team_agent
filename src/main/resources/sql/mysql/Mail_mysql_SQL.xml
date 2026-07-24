@@ -570,6 +570,9 @@
                 ORDER BY CREATE_DT DESC
                 LIMIT 1
             )
+        LEFT JOIN TB_MAIL_SYNC_STATE S
+            ON S.ACCOUNT_ID = M.ACCOUNT_ID
+           AND S.FOLDER_CD  = '002'
     </sql>
 
     <!--
@@ -631,6 +634,8 @@
         /* 보낸메일함 분류 목록 mail.selectSentClassifiedList */
         SELECT
             M.MAIL_ID
+            , M.IMAP_UID      AS imapUid
+            , S.UID_VALIDITY  AS uidValidity
             , M.SUBJECT
             , JSON_UNQUOTE(JSON_EXTRACT(M.TO_ADDR_JSON, '$[0]')) AS toAddrRaw
             , M.MAIL_DT
