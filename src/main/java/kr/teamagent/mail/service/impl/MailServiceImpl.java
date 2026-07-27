@@ -192,7 +192,7 @@ public class MailServiceImpl {
         return answer;
     }
 
-    // ─── 6. 보낸 메일 목록 조회 (팔로업 트래커용, 경량 버전) ──
+    // ─── 6. 보낸 메일 목록 조회 (경량 버전) ──
 
     public HashMap<String, Object> getSentListResult(String email, String password, String startDateStr, String endDateStr) throws Exception {
         DateRange dateRange = resolveDateRange(startDateStr, endDateStr);
@@ -607,9 +607,6 @@ public class MailServiceImpl {
                     if (bodyText != null && bodyText.length() > 5000) bodyText = bodyText.substring(0, 5000);
                     msgVO.setBodyText(bodyText);
 
-                    // 첨부 여부 판단
-                    msgVO.setHasAttachYn(hasAttachment(msg) ? "Y" : "N");
-
                     mailDAO.insertMailMsg(msgVO);
                     newMailIds.add(mailId);
 
@@ -728,8 +725,6 @@ public class MailServiceImpl {
                             if (bodyText != null && bodyText.length() > 5000) bodyText = bodyText.substring(0, 5000);
                             msgVO.setBodyText(bodyText);
 
-                            msgVO.setHasAttachYn(hasAttachment(msg) ? "Y" : "N");
-
                             mailDAO.insertMailMsg(msgVO);
                             newMailIds.add(mailId);
 
@@ -751,22 +746,6 @@ public class MailServiceImpl {
         }
 
         return newMailIds;
-    }
-
-    private boolean hasAttachment(Message msg) {
-        try {
-            Object content = msg.getContent();
-            if (content instanceof Multipart) {
-                Multipart mp = (Multipart) content;
-                for (int i = 0; i < mp.getCount(); i++) {
-                    BodyPart bp = mp.getBodyPart(i);
-                    if (Part.ATTACHMENT.equalsIgnoreCase(bp.getDisposition())) return true;
-                }
-            }
-            return false;
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     // ─── C. AI 분류 파이프라인 ───────────────────────────────
@@ -913,50 +892,6 @@ public class MailServiceImpl {
             log.warn("AI 분류 응답 파싱 실패: {}", e.getMessage());
         }
         return vo;
-    }
-
-    // ─── D. 회신메일 자동 매칭 팔로업 ───────────────────────
-
-    /**
-     * INBOX의 IN_REPLY_TO 헤더 기반으로 TB_MAIL_FOLLOWUP 자동 매칭
-     * 회신메일 자동 매칭 팔로업
-     */
-    public void matchFollowupReplies(String accountId) throws Exception {
-        List<MailVO.MailFollowupVO> waitingList = mailDAO.selectWaitingFollowupList(accountId);
-        if (waitingList.isEmpty()) return;
-
-        List<MailVO.MailMsgVO> inboxWithReply = mailDAO.selectInboxMsgWithInReplyTo(accountId);
-        if (inboxWithReply.isEmpty()) return;
-
-        for (MailVO.MailMsgVO inbox : inboxWithReply) {
-            String inReplyTo = inbox.getInReplyTo();
-            if (isBlank(inReplyTo)) continue;
-
-            for (MailVO.MailFollowupVO fup : waitingList) {
-                boolean matched = false;
-
-                // 1순위: IN_REPLY_TO ↔ MSG_ID_HEADER 정밀 매칭
-                if (!isBlank(fup.getMsgIdHeader())
-                        && inReplyTo.equalsIgnoreCase(fup.getMsgIdHeader())) {
-                    matched = true;
-                }
-                // 2순위: 발신자 이메일 fallback (MSG_ID_HEADER 없거나 불일치 시)
-                else if (!isBlank(fup.getRecipientAddr())
-                        && fup.getRecipientAddr().equalsIgnoreCase(inbox.getFromAddr())) {
-                    matched = true;
-                }
-
-                if (matched) {
-                    Map<String, Object> matchParam = new HashMap<>();
-                    matchParam.put("followupId",    fup.getFollowupId());
-                    matchParam.put("repliedMailId", inbox.getMailId());
-                    mailDAO.updateFollowupMatched(matchParam);
-                    log.info("팔로업 자동 매칭 (followupId={}, repliedMailId={})",
-                        fup.getFollowupId(), inbox.getMailId());
-                    break;
-                }
-            }
-        }
     }
 
     // ─── E. KPI 조회 ───────────────────────────────────────
@@ -1157,57 +1092,16 @@ public class MailServiceImpl {
         mailDAO.updateActionComplete(param);
     }
 
-    // ─── J. 팔로업 등록 ────────────────────────────────────
+    // ─── J. 회신 불필요 / 필요 처리 ────────────────────────────
 
-    public HashMap<String, Object> registerFollowup(String mailId, String recipientAddr, Date expectedReplyDt) throws Exception {
-        return insertFollowupWithStatus(mailId, recipientAddr, expectedReplyDt, "001");
+    /** REPLY_EXPECTED_YN = 'N' 으로 직접 UPDATE */
+    public void markReplyNotNeeded(String mailId) throws Exception {
+        mailDAO.updateReplyNotNeeded(mailId);
     }
 
-    public HashMap<String, Object> dismissFollowup(String mailId) throws Exception {
-        return insertFollowupWithStatus(mailId, null, null, "003");
-    }
-
-    private HashMap<String, Object> insertFollowupWithStatus(String mailId, String recipientAddr,
-            Date expectedReplyDt, String statusCd) throws Exception {
-        MailVO.MailMsgVO msg = mailDAO.selectMailMsgById(mailId);
-        if (msg == null) throw new IllegalArgumentException("MAIL_NOT_FOUND");
-
-        String followupId = keyGenerate.generateTableKey("FU", "TB_MAIL_FOLLOWUP", "FOLLOWUP_ID");
-        MailVO.MailFollowupVO vo = new MailVO.MailFollowupVO();
-        vo.setFollowupId(followupId);
-        vo.setSentMailId(mailId);
-        vo.setRecipientAddr(!isBlank(recipientAddr) ? recipientAddr : msg.getFromAddr());
-        vo.setExpectedReplyDt(expectedReplyDt);
-        vo.setStatusCd(statusCd);
-        mailDAO.insertMailFollowup(vo);
-
-        HashMap<String, Object> result = new HashMap<>();
-        result.put("followupId", followupId);
-        return result;
-    }
-
-    // ─── K. 팔로업 목록 조회 ───────────────────────────────
-
-    public HashMap<String, Object> getFollowupList(String accountId) throws Exception {
-        List<MailVO.MailFollowupVO> list = mailDAO.selectMailFollowupList(accountId);
-        HashMap<String, Object> result = new HashMap<>();
-        result.put("list", list);
-        return result;
-    }
-
-    // ─── L. 팔로업 상태 변경 ───────────────────────────────
-
-    public void updateFollowupStatus(String followupId, String statusCd) throws Exception {
-        Map<String, Object> param = new HashMap<>();
-        param.put("followupId", followupId);
-        param.put("statusCd",   statusCd);
-        mailDAO.updateMailFollowupStatus(param);
-    }
-
-    // ─── L-2. 팔로업 취소(삭제) ────────────────────────────
-
-    public void cancelFollowup(String followupId) throws Exception {
-        mailDAO.deleteMailFollowup(followupId);
+    /** REPLY_EXPECTED_YN = 'Y' 로 복원 */
+    public void markReplyNeeded(String mailId) throws Exception {
+        mailDAO.updateReplyNeeded(mailId);
     }
 
     // ─── M. 보낸메일함 분류 목록 조회 (LLM 기반) ───────────────

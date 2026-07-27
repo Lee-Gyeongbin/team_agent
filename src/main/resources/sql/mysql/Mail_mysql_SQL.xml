@@ -147,14 +147,14 @@
             SUBJECT, FROM_ADDR, FROM_NAME,
             TO_ADDR_JSON, CC_ADDR_JSON,
             MAIL_DT, BODY_TEXT,
-            HAS_ATTACH_YN, DELETED_YN, CREATE_DT
+            DELETED_YN, CREATE_DT
         ) VALUES (
             #{mailId}, #{accountId}, #{folderCd}, #{imapUid},
             #{msgIdHeader}, #{inReplyTo},
             #{subject}, #{fromAddr}, #{fromName},
             #{toAddrJson}, #{ccAddrJson},
             #{mailDt}, #{bodyText},
-            #{hasAttachYn}, 'N', NOW()
+            'N', NOW()
         )
         ON DUPLICATE KEY UPDATE
             MSG_ID_HEADER = VALUES(MSG_ID_HEADER),
@@ -177,7 +177,6 @@
             , M.CC_ADDR_JSON
             , M.MAIL_DT
             , M.BODY_TEXT
-            , M.HAS_ATTACH_YN
             , M.DELETED_YN
             , M.CREATE_DT
         FROM TB_MAIL_MSG M
@@ -204,7 +203,6 @@
             , EXPECTED_REPLY_DUE_DT
             , ACTION_COMPLETE_YN
             , ACTION_COMPLETE_DT
-            , PROMPT_ID
             , ANALYZED_DT
         FROM TB_MAIL_AI_ANALYSIS
         WHERE MAIL_ID = #{mailId}
@@ -421,6 +419,22 @@
         WHERE MAIL_ID = #{mailId}
     </update>
 
+    <update id="updateReplyNotNeeded" parameterType="string">
+        /* 회신 불필요 처리 (REPLY_EXPECTED_YN = N) mail.updateReplyNotNeeded */
+        UPDATE TB_MAIL_AI_ANALYSIS
+        SET REPLY_EXPECTED_YN = 'N'
+          , ANALYZED_DT       = NOW()
+        WHERE MAIL_ID = #{mailId}
+    </update>
+
+    <update id="updateReplyNeeded" parameterType="string">
+        /* 회신 필요 복원 (REPLY_EXPECTED_YN = Y) mail.updateReplyNeeded */
+        UPDATE TB_MAIL_AI_ANALYSIS
+        SET REPLY_EXPECTED_YN = 'Y'
+          , ANALYZED_DT       = NOW()
+        WHERE MAIL_ID = #{mailId}
+    </update>
+
     <!-- ============================================================ -->
     <!-- TB_MAIL_REPLY_DRAFT                                          -->
     <!-- ============================================================ -->
@@ -444,90 +458,6 @@
         LIMIT 1
     </select>
 
-    <!-- ============================================================ -->
-    <!-- TB_MAIL_FOLLOWUP                                             -->
-    <!-- ============================================================ -->
-
-    <insert id="insertMailFollowup" parameterType="kr.teamagent.mail.service.MailVO$MailFollowupVO">
-        /* TB_MAIL_FOLLOWUP INSERT mail.insertMailFollowup */
-        INSERT INTO TB_MAIL_FOLLOWUP (
-            FOLLOWUP_ID, SENT_MAIL_ID, RECIPIENT_ADDR,
-            EXPECTED_REPLY_DT, STATUS_CD, CREATE_DT
-        ) VALUES (
-            #{followupId}, #{sentMailId}, #{recipientAddr},
-            #{expectedReplyDt}, #{statusCd}, NOW()
-        )
-    </insert>
-
-    <select id="selectMailFollowupList" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailFollowupVO">
-        /* TB_MAIL_FOLLOWUP 목록 mail.selectMailFollowupList */
-        SELECT
-            F.FOLLOWUP_ID
-            , F.SENT_MAIL_ID
-            , F.RECIPIENT_ADDR
-            , F.EXPECTED_REPLY_DT
-            , F.STATUS_CD
-            , CS.CODE_NM       AS statusNm
-            , F.REPLIED_MAIL_ID
-            , F.CREATE_DT
-            , F.UPDATE_DT
-            , M.SUBJECT
-            , M.FROM_NAME
-            , M.MAIL_DT
-        FROM TB_MAIL_FOLLOWUP F
-            JOIN TB_MAIL_MSG M ON F.SENT_MAIL_ID = M.MAIL_ID
-            LEFT JOIN TB_CODE CS ON F.STATUS_CD = CS.CODE_ID AND CS.CODE_GRP_ID = 'ML000005'
-        WHERE M.ACCOUNT_ID = #{accountId}
-        ORDER BY F.CREATE_DT DESC
-    </select>
-
-    <update id="updateMailFollowupStatus" parameterType="map">
-        /* TB_MAIL_FOLLOWUP 상태 변경 mail.updateMailFollowupStatus */
-        UPDATE TB_MAIL_FOLLOWUP
-        SET
-            STATUS_CD  = #{statusCd}
-            , UPDATE_DT = NOW()
-        WHERE FOLLOWUP_ID = #{followupId}
-    </update>
-
-    <update id="updateFollowupMatched" parameterType="map">
-        /* TB_MAIL_FOLLOWUP 자동 매칭 mail.updateFollowupMatched */
-        UPDATE TB_MAIL_FOLLOWUP
-        SET
-            REPLIED_MAIL_ID = #{repliedMailId}
-            , STATUS_CD     = '002'
-            , UPDATE_DT     = NOW()
-        WHERE FOLLOWUP_ID = #{followupId}
-          AND STATUS_CD   = '001'
-    </update>
-
-    <select id="selectWaitingFollowupList" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailFollowupVO">
-        /* 팔로업 대기 목록(자동매칭용) mail.selectWaitingFollowupList */
-        SELECT
-            F.FOLLOWUP_ID
-            , F.SENT_MAIL_ID
-            , F.RECIPIENT_ADDR
-            , M.MSG_ID_HEADER  AS msgIdHeader
-        FROM TB_MAIL_FOLLOWUP F
-            JOIN TB_MAIL_MSG M ON F.SENT_MAIL_ID = M.MAIL_ID
-        WHERE M.ACCOUNT_ID = #{accountId}
-          AND F.STATUS_CD  = '001'
-    </select>
-
-    <select id="selectInboxMsgWithInReplyTo" parameterType="string" resultType="kr.teamagent.mail.service.MailVO$MailMsgVO">
-        /* IN_REPLY_TO 있는 INBOX 메일 mail.selectInboxMsgWithInReplyTo */
-        SELECT
-            MAIL_ID
-            , IN_REPLY_TO
-            , FROM_ADDR
-        FROM TB_MAIL_MSG
-        WHERE ACCOUNT_ID  = #{accountId}
-          AND FOLDER_CD   = '001'
-          AND IN_REPLY_TO IS NOT NULL
-          AND IN_REPLY_TO != ''
-          AND DELETED_YN  = 'N'
-        ORDER BY MAIL_DT DESC
-    </select>
 
     <!-- ============================================================ -->
     <!-- 업무영역 코드 목록 (ML000008, AI 프롬프트용)                -->
@@ -548,37 +478,18 @@
     <!-- 보낸메일함 분류 목록 (LLM 기반 회신기대/스레드 매칭)        -->
     <!-- ============================================================ -->
 
-    <!--
-        ▣ row 곱연산 방지 설계
-        ─ TB_MAIL_MSG R(답장): JOIN 제거
-            · boolean  → EXISTS / NOT EXISTS 서브쿼리
-            · 날짜값   → 스칼라 서브쿼리 MIN(MAIL_DT) [첫 번째 답장 기준]
-        ─ TB_MAIL_FOLLOWUP F(팔로업): 상관 서브쿼리 LIMIT 1 JOIN
-            · FOLLOWUP_ID = (SELECT ... ORDER BY CREATE_DT DESC LIMIT 1)
-            · 팔로업이 여러 건이더라도 M당 정확히 1행 보장
-        ─ TB_MAIL_AI_ANALYSIS A: MAIL_ID 1:1 → JOIN 안전
-    -->
-
-    <!-- 공통 JOIN fragment (R 제외 — 답장은 EXISTS/스칼라 서브쿼리로 처리) -->
+    <!-- 공통 JOIN fragment -->
     <sql id="sentClassifiedJoin">
         FROM TB_MAIL_MSG M
         LEFT JOIN TB_MAIL_AI_ANALYSIS A ON A.MAIL_ID = M.MAIL_ID
-        LEFT JOIN TB_MAIL_FOLLOWUP F
-            ON F.FOLLOWUP_ID = (
-                SELECT FOLLOWUP_ID FROM TB_MAIL_FOLLOWUP
-                WHERE SENT_MAIL_ID = M.MAIL_ID
-                ORDER BY CREATE_DT DESC
-                LIMIT 1
-            )
         LEFT JOIN TB_MAIL_SYNC_STATE S
             ON S.ACCOUNT_ID = M.ACCOUNT_ID
            AND S.FOLDER_CD  = '002'
     </sql>
 
     <!--
-        repliedYn = 'Y'  IF EXISTS(IN_REPLY_TO 매칭) OR F.STATUS_CD = '002'
-        pending   = repliedYn='N' AND (FOLLOWUP 001 OR (no FOLLOWUP AND AI Y))
-        done      = repliedYn='Y' AND (AI Y OR FOLLOWUP 존재)
+        pending = REPLY_EXPECTED_YN='Y' AND 회신 미수신
+        done    = REPLY_EXPECTED_YN='Y' AND 회신 수신
     -->
     <sql id="sentClassifiedWhere">
         WHERE M.ACCOUNT_ID = #{accountId}
@@ -591,6 +502,7 @@
           AND DATE(M.MAIL_DT) &lt;= #{endDate}
         </if>
         <if test="tabType == 'pending'">
+          AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y'
           AND NOT EXISTS (
               SELECT 1 FROM TB_MAIL_MSG R
               WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
@@ -598,24 +510,16 @@
                 AND R.FOLDER_CD   = '001'
                 AND R.DELETED_YN  = 'N'
           )
-          AND COALESCE(F.STATUS_CD, '') != '002'
-          AND (
-              F.STATUS_CD = '001'
-              OR (F.FOLLOWUP_ID IS NULL AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y')
-          )
         </if>
         <if test="tabType == 'done'">
-          AND (
-              EXISTS (
-                  SELECT 1 FROM TB_MAIL_MSG R
-                  WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
-                    AND R.ACCOUNT_ID  = M.ACCOUNT_ID
-                    AND R.FOLDER_CD   = '001'
-                    AND R.DELETED_YN  = 'N'
-              )
-              OR F.STATUS_CD = '002'
+          AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y'
+          AND EXISTS (
+              SELECT 1 FROM TB_MAIL_MSG R
+              WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
+                AND R.ACCOUNT_ID  = M.ACCOUNT_ID
+                AND R.FOLDER_CD   = '001'
+                AND R.DELETED_YN  = 'N'
           )
-          AND (COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
         </if>
     </sql>
 
@@ -640,14 +544,14 @@
             , JSON_UNQUOTE(JSON_EXTRACT(M.TO_ADDR_JSON, '$[0]')) AS toAddrRaw
             , M.MAIL_DT
             , COALESCE(A.REPLY_EXPECTED_YN, 'N') AS replyExpectedYn
-            /* repliedYn: EXISTS(첫 답장) 또는 FOLLOWUP 수동 완료(002) */
+            /* repliedYn: IN_REPLY_TO 헤더 기반 회신 수신 여부 */
             , CASE WHEN EXISTS (
                   SELECT 1 FROM TB_MAIL_MSG R
                   WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
                     AND R.ACCOUNT_ID  = M.ACCOUNT_ID
                     AND R.FOLDER_CD   = '001'
                     AND R.DELETED_YN  = 'N'
-              ) OR F.STATUS_CD = '002' THEN 'Y' ELSE 'N' END AS repliedYn
+              ) THEN 'Y' ELSE 'N' END AS repliedYn
             /* elapsedDays: 첫 답장 날짜 기준, 없으면 오늘까지 */
             , CASE WHEN EXISTS (
                   SELECT 1 FROM TB_MAIL_MSG R
@@ -673,26 +577,6 @@
                  AND R.ACCOUNT_ID  = M.ACCOUNT_ID
                  AND R.FOLDER_CD   = '001'
                  AND R.DELETED_YN  = 'N') AS replyElapsedHours
-            /* 팔로업 통합 필드 (F: LIMIT 1 상관 서브쿼리 JOIN) */
-            , F.FOLLOWUP_ID       AS followupId
-            , F.STATUS_CD         AS followupStatusCd
-            , F.EXPECTED_REPLY_DT AS expectedReplyDt
-            , F.RECIPIENT_ADDR    AS followupRecipientAddr
-            /* trackSource: USER(팔로업 대기) > DISMISSED(AI 무시) > AI(AI 회신기대) > NONE */
-            , CASE
-                WHEN F.FOLLOWUP_ID IS NOT NULL AND F.STATUS_CD = '001' THEN 'USER'
-                WHEN F.FOLLOWUP_ID IS NOT NULL AND F.STATUS_CD = '003' THEN 'DISMISSED'
-                WHEN F.FOLLOWUP_ID IS NULL
-                     AND COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y'
-                     AND NOT EXISTS (
-                         SELECT 1 FROM TB_MAIL_MSG R
-                         WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
-                           AND R.ACCOUNT_ID  = M.ACCOUNT_ID
-                           AND R.FOLDER_CD   = '001'
-                           AND R.DELETED_YN  = 'N'
-                     ) THEN 'AI'
-                ELSE 'NONE'
-              END AS trackSource
         <include refid="sentClassifiedJoin"/>
         <include refid="sentClassifiedWhere"/>
         ORDER BY M.MAIL_DT DESC
@@ -706,12 +590,6 @@
         SELECT 'all' AS tabType, COUNT(*) AS cnt
         FROM TB_MAIL_MSG M
         LEFT JOIN TB_MAIL_AI_ANALYSIS A ON A.MAIL_ID = M.MAIL_ID
-        LEFT JOIN TB_MAIL_FOLLOWUP F
-            ON F.FOLLOWUP_ID = (
-                SELECT FOLLOWUP_ID FROM TB_MAIL_FOLLOWUP
-                WHERE SENT_MAIL_ID = M.MAIL_ID
-                ORDER BY CREATE_DT DESC LIMIT 1
-            )
         WHERE M.ACCOUNT_ID = #{accountId}
           AND M.FOLDER_CD  = '002'
           AND M.DELETED_YN = 'N'
@@ -721,17 +599,12 @@
         SELECT 'pending' AS tabType, COUNT(*) AS cnt
         FROM TB_MAIL_MSG M
         LEFT JOIN TB_MAIL_AI_ANALYSIS A ON A.MAIL_ID = M.MAIL_ID
-        LEFT JOIN TB_MAIL_FOLLOWUP F
-            ON F.FOLLOWUP_ID = (
-                SELECT FOLLOWUP_ID FROM TB_MAIL_FOLLOWUP
-                WHERE SENT_MAIL_ID = M.MAIL_ID
-                ORDER BY CREATE_DT DESC LIMIT 1
-            )
         WHERE M.ACCOUNT_ID = #{accountId}
           AND M.FOLDER_CD  = '002'
           AND M.DELETED_YN = 'N'
           AND DATE(M.MAIL_DT) &gt;= #{startDate}
           AND DATE(M.MAIL_DT) &lt;= #{endDate}
+          AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y'
           AND NOT EXISTS (
               SELECT 1 FROM TB_MAIL_MSG R
               WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
@@ -739,40 +612,26 @@
                 AND R.FOLDER_CD   = '001'
                 AND R.DELETED_YN  = 'N'
           )
-          AND COALESCE(F.STATUS_CD, '') != '002'
-          AND (
-              F.STATUS_CD = '001'
-              OR (F.FOLLOWUP_ID IS NULL AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y')
-          )
         UNION ALL
         SELECT 'done' AS tabType, COUNT(*) AS cnt
         FROM TB_MAIL_MSG M
         LEFT JOIN TB_MAIL_AI_ANALYSIS A ON A.MAIL_ID = M.MAIL_ID
-        LEFT JOIN TB_MAIL_FOLLOWUP F
-            ON F.FOLLOWUP_ID = (
-                SELECT FOLLOWUP_ID FROM TB_MAIL_FOLLOWUP
-                WHERE SENT_MAIL_ID = M.MAIL_ID
-                ORDER BY CREATE_DT DESC LIMIT 1
-            )
         WHERE M.ACCOUNT_ID = #{accountId}
           AND M.FOLDER_CD  = '002'
           AND M.DELETED_YN = 'N'
           AND DATE(M.MAIL_DT) &gt;= #{startDate}
           AND DATE(M.MAIL_DT) &lt;= #{endDate}
-          AND (
-              EXISTS (
-                  SELECT 1 FROM TB_MAIL_MSG R
-                  WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
-                    AND R.ACCOUNT_ID  = M.ACCOUNT_ID
-                    AND R.FOLDER_CD   = '001'
-                    AND R.DELETED_YN  = 'N'
-              )
-              OR F.STATUS_CD = '002'
+          AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y'
+          AND EXISTS (
+              SELECT 1 FROM TB_MAIL_MSG R
+              WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
+                AND R.ACCOUNT_ID  = M.ACCOUNT_ID
+                AND R.FOLDER_CD   = '001'
+                AND R.DELETED_YN  = 'N'
           )
-          AND (COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
     </select>
 
-    <!-- 답장 대기 많은 상대 (조회 기간 기준, AI + FOLLOWUP 통합) -->
+    <!-- 답장 대기 많은 상대 -->
     <select id="selectTopPendingRecipients"
             parameterType="kr.teamagent.mail.service.MailVO$SentListParamVO"
             resultType="kr.teamagent.mail.service.MailVO$TopPendingRecipientVO">
@@ -782,28 +641,18 @@
             , COUNT(*) AS pendingCount
         FROM TB_MAIL_MSG M
         LEFT JOIN TB_MAIL_AI_ANALYSIS A ON A.MAIL_ID = M.MAIL_ID
-        LEFT JOIN TB_MAIL_FOLLOWUP F
-            ON F.FOLLOWUP_ID = (
-                SELECT FOLLOWUP_ID FROM TB_MAIL_FOLLOWUP
-                WHERE SENT_MAIL_ID = M.MAIL_ID
-                ORDER BY CREATE_DT DESC LIMIT 1
-            )
         WHERE M.ACCOUNT_ID = #{accountId}
           AND M.FOLDER_CD  = '002'
           AND M.DELETED_YN = 'N'
           AND DATE(M.MAIL_DT) &gt;= #{startDate}
           AND DATE(M.MAIL_DT) &lt;= #{endDate}
+          AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y'
           AND NOT EXISTS (
               SELECT 1 FROM TB_MAIL_MSG R
               WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
                 AND R.ACCOUNT_ID  = M.ACCOUNT_ID
                 AND R.FOLDER_CD   = '001'
                 AND R.DELETED_YN  = 'N'
-          )
-          AND COALESCE(F.STATUS_CD, '') != '002'
-          AND (
-              F.STATUS_CD = '001'
-              OR (F.FOLLOWUP_ID IS NULL AND COALESCE(A.REPLY_EXPECTED_YN, 'N') = 'Y')
           )
         GROUP BY JSON_UNQUOTE(JSON_EXTRACT(M.TO_ADDR_JSON, '$[0]'))
         ORDER BY pendingCount DESC
@@ -816,23 +665,23 @@
             resultType="map">
         /* 이번 주 / 전주 회신 통계 mail.selectSentWeeklyStats */
         SELECT
-            /* 이번 주 — 트래킹 대상: AI Y OR 사용자 FOLLOWUP 존재 */
+            /* 이번 주 — 트래킹 대상: REPLY_EXPECTED_YN = 'Y' */
             SUM(CASE WHEN M.MAIL_DT &gt;= DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())-2) DAY
-                      AND (COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
-                      AND (EXISTS (
+                      AND COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y'
+                      AND EXISTS (
                                SELECT 1 FROM TB_MAIL_MSG R
                                WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
                                  AND R.ACCOUNT_ID  = M.ACCOUNT_ID
                                  AND R.FOLDER_CD   = '001'
                                  AND R.DELETED_YN  = 'N'
-                           ) OR F.STATUS_CD = '002')
+                           )
                 THEN 1 ELSE 0 END) AS thisWeekDone
             , SUM(CASE WHEN M.MAIL_DT &gt;= DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())-2) DAY
-                        AND (COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
+                        AND COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y'
                 THEN 1 ELSE 0 END) AS thisWeekExpected
-            /* avgDays: 첫 번째 답장까지 일수 평균 (FOLLOWUP 수동 완료는 제외, R 매칭 기준) */
+            /* avgDays: 첫 번째 답장까지 일수 평균 (IN_REPLY_TO 매칭 기준) */
             , AVG(CASE WHEN M.MAIL_DT &gt;= DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())-2) DAY
-                        AND (COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
+                        AND COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y'
                         AND EXISTS (
                                SELECT 1 FROM TB_MAIL_MSG R
                                WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
@@ -850,22 +699,22 @@
             /* 전주 */
             , SUM(CASE WHEN M.MAIL_DT &gt;= DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())+5) DAY
                         AND M.MAIL_DT  &lt; DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())-2) DAY
-                        AND (COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
-                        AND (EXISTS (
+                        AND COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y'
+                        AND EXISTS (
                                  SELECT 1 FROM TB_MAIL_MSG R
                                  WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
                                    AND R.ACCOUNT_ID  = M.ACCOUNT_ID
                                    AND R.FOLDER_CD   = '001'
                                    AND R.DELETED_YN  = 'N'
-                             ) OR F.STATUS_CD = '002')
+                             )
                 THEN 1 ELSE 0 END) AS prevWeekDone
             , SUM(CASE WHEN M.MAIL_DT &gt;= DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())+5) DAY
                         AND M.MAIL_DT  &lt; DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())-2) DAY
-                        AND (COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
+                        AND COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y'
                 THEN 1 ELSE 0 END) AS prevWeekExpected
             , AVG(CASE WHEN M.MAIL_DT &gt;= DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())+5) DAY
                         AND M.MAIL_DT  &lt; DATE_FORMAT(NOW(),'%Y-%m-%d 00:00:00') - INTERVAL (DAYOFWEEK(NOW())-2) DAY
-                        AND (COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y' OR F.FOLLOWUP_ID IS NOT NULL)
+                        AND COALESCE(A.REPLY_EXPECTED_YN,'N') = 'Y'
                         AND EXISTS (
                                SELECT 1 FROM TB_MAIL_MSG R
                                WHERE R.IN_REPLY_TO = M.MSG_ID_HEADER
@@ -882,20 +731,9 @@
                        ELSE NULL END) AS prevWeekAvgDays
         FROM TB_MAIL_MSG M
         LEFT JOIN TB_MAIL_AI_ANALYSIS A ON A.MAIL_ID = M.MAIL_ID
-        LEFT JOIN TB_MAIL_FOLLOWUP F
-            ON F.FOLLOWUP_ID = (
-                SELECT FOLLOWUP_ID FROM TB_MAIL_FOLLOWUP
-                WHERE SENT_MAIL_ID = M.MAIL_ID
-                ORDER BY CREATE_DT DESC LIMIT 1
-            )
         WHERE M.ACCOUNT_ID = #{accountId}
           AND M.FOLDER_CD  = '002'
           AND M.DELETED_YN = 'N'
     </select>
-
-    <delete id="deleteMailFollowup" parameterType="string">
-        /* 팔로업 취소(삭제) mail.deleteMailFollowup */
-        DELETE FROM TB_MAIL_FOLLOWUP WHERE FOLLOWUP_ID = #{followupId}
-    </delete>
 
 </mapper>
