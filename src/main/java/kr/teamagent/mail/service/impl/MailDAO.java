@@ -144,42 +144,17 @@ public class MailDAO extends EgovComAbstractDAO {
     }
 
     // ────────────────────────────────────────────────────────────────────
-    // TB_MAIL_FOLLOWUP
+    // TB_MAIL_AI_ANALYSIS — 회신 불필요 처리
     // ────────────────────────────────────────────────────────────────────
 
-    /** 팔로업 INSERT */
-    public void insertMailFollowup(MailVO.MailFollowupVO vo) throws Exception {
-        insert("mail.insertMailFollowup", vo);
+    /** 회신 불필요 처리: REPLY_EXPECTED_YN = 'N' */
+    public void updateReplyNotNeeded(String mailId) throws Exception {
+        update("mail.updateReplyNotNeeded", mailId);
     }
 
-    /** 팔로업 목록 조회 (accountId 기준) */
-    public List<MailVO.MailFollowupVO> selectMailFollowupList(String accountId) throws Exception {
-        return selectList("mail.selectMailFollowupList", accountId);
-    }
-
-    /** 팔로업 상태 변경 */
-    public void updateMailFollowupStatus(Map<String, Object> param) throws Exception {
-        update("mail.updateMailFollowupStatus", param);
-    }
-
-    /** 팔로업 자동 매칭 (REPLIED_MAIL_ID + STATUS_CD 업데이트) */
-    public void updateFollowupMatched(Map<String, Object> param) throws Exception {
-        update("mail.updateFollowupMatched", param);
-    }
-
-    /** 팔로업 대기 목록 조회 (WAITING 상태, 자동 매칭용) */
-    public List<MailVO.MailFollowupVO> selectWaitingFollowupList(String accountId) throws Exception {
-        return selectList("mail.selectWaitingFollowupList", accountId);
-    }
-
-    /** 팔로업 취소(삭제) */
-    public void deleteMailFollowup(String followupId) throws Exception {
-        delete("mail.deleteMailFollowup", followupId);
-    }
-
-    /** IN_REPLY_TO 헤더가 있는 INBOX 메일 조회 (자동 매칭용) */
-    public List<MailVO.MailMsgVO> selectInboxMsgWithInReplyTo(String accountId) throws Exception {
-        return selectList("mail.selectInboxMsgWithInReplyTo", accountId);
+    /** 회신 필요 복원: REPLY_EXPECTED_YN = 'Y' */
+    public void updateReplyNeeded(String mailId) throws Exception {
+        update("mail.updateReplyNeeded", mailId);
     }
 
     // ────────────────────────────────────────────────────────────────────

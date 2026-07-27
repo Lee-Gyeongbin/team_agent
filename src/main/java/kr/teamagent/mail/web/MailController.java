@@ -393,7 +393,7 @@ public class MailController extends BaseController<Object> {
 
     /**
      * POST /mail/sync.do
-     * IMAP → TB_MAIL_MSG 증분 동기화 → AI 분류 → 팔로업 자동 매칭
+     * IMAP → TB_MAIL_MSG 증분 동기화 → AI 분류
      */
     @RequestMapping(value = "/sync.do", method = RequestMethod.POST)
     @ResponseBody
@@ -424,9 +424,6 @@ public class MailController extends BaseController<Object> {
             if (!newSentIds.isEmpty()) {
                 mailService.classifyMails(newSentIds);
             }
-
-            // 회신메일 자동 매칭 팔로업
-            mailService.matchFollowupReplies(accountId);
 
             HashMap<String, Object> result = new HashMap<>();
             result.put("newInboxCount", newInboxIds.size());
@@ -732,15 +729,16 @@ public class MailController extends BaseController<Object> {
         }
     }
 
-    // ─── 15. 팔로업 등록 ─────────────────────────────────────────
+    // ─── 15. 회신 불필요 처리 ────────────────────────────────────
 
     /**
-     * POST /mail/followup-register.do
-     * Body: { mailId, recipientAddr?, expectedReplyDt? }
+     * POST /mail/reply-not-needed.do
+     * Body: { mailId }
+     * REPLY_EXPECTED_YN = 'N' 으로 직접 UPDATE → pending 탭에서 제외
      */
-    @RequestMapping(value = "/followup-register.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/reply-not-needed.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView followupRegister(@RequestBody Map<String, String> body,
+    public ModelAndView replyNotNeeded(@RequestBody Map<String, String> body,
             HttpServletRequest request, HttpServletResponse response) {
         try {
             String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
@@ -748,55 +746,48 @@ public class MailController extends BaseController<Object> {
                 return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
                     "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
             }
-            String mailId          = body.get("mailId");
-            String recipientAddr   = body.get("recipientAddr");
-            String expectedDateStr = body.get("expectedReplyDt");
-
+            String mailId = body.get("mailId");
             if (isBlank(mailId)) {
                 return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
-                    "mailId는 필수입니다.", "MAIL_FOLLOWUP_REGISTER_INVALID");
+                    "mailId는 필수입니다.", "MAIL_REPLY_NOT_NEEDED_INVALID");
             }
-
-            java.util.Date expectedDate = null;
-            if (!isBlank(expectedDateStr)) {
-                try {
-                    expectedDate = new java.text.SimpleDateFormat("yyyy-MM-dd").parse(expectedDateStr);
-                } catch (Exception ignored) {}
-            }
-
-            HashMap<String, Object> result = mailService.registerFollowup(mailId, recipientAddr, expectedDate);
-            return makeSuccessJsonData(result);
-
-        } catch (IllegalArgumentException e) {
-            return failResponse(response, HttpServletResponse.SC_NOT_FOUND,
-                "메일을 찾을 수 없습니다.", "MAIL_NOT_FOUND");
+            mailService.markReplyNotNeeded(mailId);
+            return makeSuccessJsonData();
         } catch (Exception e) {
-            log.error("팔로업 등록 실패: {}", e.getMessage(), e);
+            log.error("회신 불필요 처리 실패: {}", e.getMessage(), e);
             return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                "팔로업 등록 중 오류가 발생했습니다.", "MAIL_FOLLOWUP_REGISTER_FAILED");
+                "처리 중 오류가 발생했습니다.", "MAIL_REPLY_NOT_NEEDED_FAILED");
         }
     }
 
-    // ─── 16. 팔로업 목록 조회 ───────────────────────────────────
+    // ─── 15-1. 회신 필요 복원 ────────────────────────────────────
 
     /**
-     * GET /mail/followup-list.do
+     * POST /mail/reply-needed.do
+     * Body: { mailId }
+     * REPLY_EXPECTED_YN = 'Y' 로 복원 → pending 탭에 다시 표시
      */
-    @RequestMapping(value = "/followup-list.do", method = RequestMethod.GET)
+    @RequestMapping(value = "/reply-needed.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView followupList(HttpServletRequest request, HttpServletResponse response) {
+    public ModelAndView replyNeeded(@RequestBody Map<String, String> body,
+            HttpServletRequest request, HttpServletResponse response) {
         try {
             String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
             if (accountId == null) {
                 return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
                     "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
             }
-            HashMap<String, Object> result = mailService.getFollowupList(accountId);
-            return makeSuccessJsonData(result);
+            String mailId = body.get("mailId");
+            if (isBlank(mailId)) {
+                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
+                    "mailId는 필수입니다.", "MAIL_REPLY_NEEDED_INVALID");
+            }
+            mailService.markReplyNeeded(mailId);
+            return makeSuccessJsonData();
         } catch (Exception e) {
-            log.error("팔로업 목록 조회 실패: {}", e.getMessage(), e);
+            log.error("회신 필요 복원 실패: {}", e.getMessage(), e);
             return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                "팔로업 목록 조회 중 오류가 발생했습니다.", "MAIL_FOLLOWUP_LIST_FAILED");
+                "처리 중 오류가 발생했습니다.", "MAIL_REPLY_NEEDED_FAILED");
         }
     }
 
@@ -901,104 +892,6 @@ public class MailController extends BaseController<Object> {
             log.error("회신 통계 조회 실패: {}", e.getMessage(), e);
             return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
                 "통계 조회 중 오류가 발생했습니다.", "MAIL_WEEKLY_STATS_FAILED");
-        }
-    }
-
-    // ─── 15-1. AI 회신기대 무시 ──────────────────────────────────
-
-    /**
-     * POST /mail/followup-dismiss.do
-     * Body: { mailId }
-     * AI가 회신기대(Y)로 판단한 메일을 사용자가 "회신 불필요"로 무시.
-     * TB_MAIL_FOLLOWUP에 STATUS_CD='003'(취소) 으로 INSERT → pending 탭에서 제외.
-     * 무시 해제는 followup-cancel.do(DELETE) 재사용.
-     */
-    @RequestMapping(value = "/followup-dismiss.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView followupDismiss(@RequestBody Map<String, String> body,
-            HttpServletRequest request, HttpServletResponse response) {
-        try {
-            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
-            if (accountId == null) {
-                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
-                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
-            }
-            String mailId = body.get("mailId");
-            if (isBlank(mailId)) {
-                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
-                    "mailId는 필수입니다.", "MAIL_FOLLOWUP_DISMISS_INVALID");
-            }
-            HashMap<String, Object> result = mailService.dismissFollowup(mailId);
-            return makeSuccessJsonData(result);
-        } catch (IllegalArgumentException e) {
-            return failResponse(response, HttpServletResponse.SC_NOT_FOUND,
-                "메일을 찾을 수 없습니다.", "MAIL_NOT_FOUND");
-        } catch (Exception e) {
-            log.error("AI 무시 등록 실패: {}", e.getMessage(), e);
-            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                "처리 중 오류가 발생했습니다.", "MAIL_FOLLOWUP_DISMISS_FAILED");
-        }
-    }
-
-    // ─── 15-2. 팔로업 취소(삭제) ─────────────────────────────────
-
-    /**
-     * POST /mail/followup-cancel.do
-     * Body: { followupId }
-     * 사용자가 직접 등록한 팔로업을 해제(삭제)한다.
-     */
-    @RequestMapping(value = "/followup-cancel.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView followupCancel(@RequestBody Map<String, String> body,
-            HttpServletRequest request, HttpServletResponse response) {
-        try {
-            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
-            if (accountId == null) {
-                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
-                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
-            }
-            String followupId = body.get("followupId");
-            if (isBlank(followupId)) {
-                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
-                    "followupId는 필수입니다.", "MAIL_FOLLOWUP_CANCEL_INVALID");
-            }
-            mailService.cancelFollowup(followupId);
-            return makeSuccessJsonData();
-        } catch (Exception e) {
-            log.error("팔로업 취소 실패: {}", e.getMessage(), e);
-            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                "팔로업 취소 중 오류가 발생했습니다.", "MAIL_FOLLOWUP_CANCEL_FAILED");
-        }
-    }
-
-    // ─── 17. 팔로업 상태 변경 ───────────────────────────────────
-
-    /**
-     * POST /mail/followup-status-update.do
-     * Body: { followupId, statusCd }
-     */
-    @RequestMapping(value = "/followup-status-update.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView followupStatusUpdate(@RequestBody Map<String, String> body,
-            HttpServletRequest request, HttpServletResponse response) {
-        try {
-            String accountId = getMailSession(request, SESSION_KEY_ACCOUNT_ID);
-            if (accountId == null) {
-                return failResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
-                    "계정 정보가 없습니다.", "MAIL_AUTH_REQUIRED");
-            }
-            String followupId = body.get("followupId");
-            String statusCd   = body.get("statusCd");
-            if (isBlank(followupId) || isBlank(statusCd)) {
-                return failResponse(response, HttpServletResponse.SC_BAD_REQUEST,
-                    "followupId, statusCd는 필수입니다.", "MAIL_FOLLOWUP_STATUS_INVALID");
-            }
-            mailService.updateFollowupStatus(followupId, statusCd);
-            return makeSuccessJsonData();
-        } catch (Exception e) {
-            log.error("팔로업 상태 변경 실패: {}", e.getMessage(), e);
-            return failResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                "팔로업 상태 변경 중 오류가 발생했습니다.", "MAIL_FOLLOWUP_STATUS_FAILED");
         }
     }
 
