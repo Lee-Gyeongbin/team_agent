@@ -89,6 +89,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * PT 프로젝트 최대 단계 번호 업데이트 (GREATEST로 역행 방지)
+     * @param vo ptProjectId, maxStepNo
+     */
+    public void updateMaxStepNo(ProposalVO.ProjectVO vo) {
+        update("proposal.updateMaxStepNo", vo);
+    }
+
+    /**
      * 프로젝트의 요구사항 전체 삭제
      * @param ptProjectId 프로젝트 ID
      */
@@ -394,6 +402,15 @@ public class ProposalDAO extends EgovComAbstractDAO {
         delete("proposal.deleteSlidesByToc", tocId);
     }
 
+    /**
+     * 슬라이드 단건 조회
+     * @param vo SlideVO (slideId)
+     * @return SlideVO
+     */
+    public ProposalVO.SlideVO selectSlideById(ProposalVO.SlideVO vo) {
+        return (ProposalVO.SlideVO) selectOne("proposal.selectSlideById", vo);
+    }
+
     // ── Step E: 검토 ──────────────────────────────────────────────────────────
 
     /**
@@ -463,15 +480,15 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 프로젝트+포맷 기준 최근 완료 출력 빌드 조회 (캐시 재사용 판단용)
-     * @param ptProjectId 프로젝트 ID
-     * @param formatCd    포맷 코드 ('pdf' | 'pptx')
+     * 프로젝트+내보내기형식 기준 최근 완료(004) 출력 빌드 조회 (캐시 재사용 판단용)
+     * @param ptProjectId  프로젝트 ID
+     * @param exportTypeCd 내보내기 형식 코드 (PT_EXPORT_TYPE: '001'=PPTX, '002'=PDF)
      * @return 최근 완료 ExportVO (없으면 null)
      */
-    public ProposalVO.ExportVO selectLatestCompletedExport(String ptProjectId, String formatCd) {
+    public ProposalVO.ExportVO selectLatestCompletedExport(String ptProjectId, String exportTypeCd) {
         java.util.Map<String, Object> params = new java.util.HashMap<>();
         params.put("ptProjectId", ptProjectId);
-        params.put("formatCd", formatCd);
+        params.put("exportTypeCd", exportTypeCd);
         return (ProposalVO.ExportVO) selectOne("proposal.selectLatestCompletedExport", params);
     }
 

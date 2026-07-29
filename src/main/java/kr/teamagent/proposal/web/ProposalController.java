@@ -5,17 +5,17 @@ import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.springframework.web.multipart.MultipartFile;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -205,6 +205,22 @@ public class ProposalController extends BaseController {
             resultMap.put("msg", e.getMessage());
         } catch (Exception e) {
             logger.error("[PT StepC] updateProjectTargetType 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 최대 단계 번호 업데이트 (Step B·E의 다음 버튼처럼 별도 저장 API 없는 단계용) */
+    @RequestMapping(value = "/ai/proposal/updateMaxStepNo.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateMaxStepNo(@RequestBody ProposalVO.ProjectVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.updateMaxStepNo(vo.getPtProjectId(), vo.getMaxStepNo() != null ? vo.getMaxStepNo() : 0);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT] updateMaxStepNo 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
             resultMap.put("result", "FAIL");
             resultMap.put("msg", e.getMessage());
         }
@@ -461,6 +477,23 @@ public class ProposalController extends BaseController {
 
     // ── Step D: 본문 생성 ─────────────────────────────────────────────────────
 
+    /** Step E — 프로젝트 전체 슬라이드 목록 조회 (소목차별 그룹화·렌더 상태 확인용) */
+    @RequestMapping(value = "/ai/proposal/selectAllProjectSlides.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectAllProjectSlides(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            java.util.List<ProposalVO.SlideVO> list = proposalService.selectAllProjectSlides(ptProjectId);
+            resultMap.put("result", "OK");
+            resultMap.put("list", list);
+        } catch (Exception e) {
+            logger.error("[PT StepE] selectAllProjectSlides 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
     /** D-0 — Stage2 전략분석 SSE (최초 진입 시) */
     @RequestMapping(value = "/ai/proposal/streamAnalyzeStage2.do",
             produces = "text/event-stream;charset=UTF-8")
@@ -527,6 +560,18 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /** D-5 — 소목차 이미지 렌더링 SSE (confirmSection 완료 후 프론트엔드 구독) */
+    @RequestMapping(value = "/ai/proposal/streamRenderSectionImages.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamRenderSectionImages(
+            @RequestParam String ptProjectId,
+            @RequestParam String tocId,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamRenderSectionImages(ptProjectId, tocId);
+    }
+
     /** D-4 — 소목차 확인 → 다음 진행 */
     @RequestMapping(value = "/ai/proposal/confirmSection.do", method = RequestMethod.POST)
     @ResponseBody
@@ -546,6 +591,31 @@ public class ProposalController extends BaseController {
             resultMap.put("msg", e.getMessage());
         }
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping("/ai/proposal/viewSlideImage.do")
+    public @ResponseBody Map<String, Object> viewSlideImage(@RequestBody ProposalVO.SlideVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "INVALID");
+                return resultMap;
+            }
+            if (dataVO.getSlideId() == null) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "MISSING_SLIDE_ID");
+                return resultMap;
+            }
+            resultMap = proposalService.viewSlideImage(dataVO);
+        } catch (Exception e) {
+            logger.error("viewSlideImage failed", e);
+            resultMap.put("viewType", "DOWNLOAD");
+            resultMap.put("reason", "ERROR");
+        }
+
+        return resultMap;
     }
 
     // ── Step E: 검토 ──────────────────────────────────────────────────────────
@@ -633,8 +703,9 @@ public class ProposalController extends BaseController {
 
     /**
      * F — 출력 시작 (PPTX / PDF)
-     * - 캐시 재사용 판단 후 신규 빌드 또는 캐시된 파일 즉시 반환
-     * - body: { ptProjectId, format: "pdf"|"pptx", agentId }
+     * - 내보내기 형식은 PROJECT_CONFIG_JSON.template.docSize 기반 자동 결정 (a4→PDF, 그 외→PPTX)
+     * - 캐시 재사용: 최근 완료(004) 빌드의 COMPLETE_DT가 슬라이드 MODIFY_DT 이후면 재빌드 생략
+     * - body: { ptProjectId, agentId }
      */
     @RequestMapping(value = "/ai/proposal/startExport.do", method = RequestMethod.POST)
     @ResponseBody

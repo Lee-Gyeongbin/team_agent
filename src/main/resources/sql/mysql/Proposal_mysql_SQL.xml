@@ -101,6 +101,7 @@
             , STATUS_CD                AS STATUS_CD
             , CAST(WRITING_GUIDELINE_JSON AS CHAR) AS WRITING_GUIDELINE_JSON
             , CAST(PROJECT_CONFIG_JSON AS CHAR) AS PROJECT_CONFIG_JSON
+            , MAX_STEP_NO              AS MAX_STEP_NO
             , CREATE_USER_ID           AS CREATE_USER_ID
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
             , MODIFY_USER_ID           AS MODIFY_USER_ID
@@ -108,6 +109,15 @@
         FROM TB_PT_PROJECT
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </select>
+
+    <update id="updateMaxStepNo" parameterType="kr.teamagent.proposal.service.ProposalVO$ProjectVO">
+        /* PT 프로젝트 최대 단계 번호 업데이트 proposal.updateMaxStepNo */
+        UPDATE TB_PT_PROJECT
+        SET
+            MAX_STEP_NO = GREATEST(COALESCE(MAX_STEP_NO, 0), #{maxStepNo})
+            , MODIFY_DT = NOW()
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
 
     <update id="updateProjectStatus" parameterType="kr.teamagent.proposal.service.ProposalVO$ProjectVO">
         /* PT 프로젝트 상태 업데이트 proposal.updateProjectStatus */
@@ -560,6 +570,7 @@
             SECTION_NO              AS SECTION_NO,
             SECTION_NM              AS SECTION_NM,
             LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
+            COVERED_REQ_IDS_JSON    AS COVERED_REQ_IDS_JSON,
             PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             SORT_ORD                AS SORT_ORD,
             CREATE_USER_ID          AS CREATE_USER_ID,
@@ -632,14 +643,20 @@
     <insert id="insertSlide" parameterType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 슬라이드 등록 proposal.insertSlide */
         INSERT INTO TB_PT_SLIDE (
-            SLIDE_ID, PT_PROJECT_ID, TOC_ID, SLIDE_NO, COLOR_INDEX,
-            LAYOUT_TYPE, SLIDE_JSON, IMAGE_GEN_HINT, RENDERED_IMAGE_PATH,
-            RENDER_STATUS_CD, CREATE_USER_ID, CREATE_DT
+            SLIDE_ID, PT_PROJECT_ID, TOC_ID, SLIDE_NO,
+            LAYOUT_TYPE_CD, REQ_IDS_JSON, EYEBROW_TXT, TITLE_TXT, SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT, COMPONENTS_JSON, STEP_FLOW_BAR_JSON, CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX, IMAGE_GEN_HINT, RENDER_STATUS_CD, RENDERED_IMAGE_PATH,
+            SORT_ORD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
-            #{slideId}, #{ptProjectId}, #{tocId}, #{slideNo}, #{colorIndex},
-            #{layoutType}, #{slideJson, jdbcType=VARCHAR},
-            #{imageGenHint, jdbcType=VARCHAR}, #{renderedImagePath, jdbcType=VARCHAR},
-            COALESCE(#{renderStatusCd}, '001'), #{createUserId}, NOW()
+            #{slideId}, #{ptProjectId}, #{tocId}, #{slideNo},
+            #{layoutType}, #{reqIdsJson, jdbcType=VARCHAR}, #{eyebrowTxt, jdbcType=VARCHAR},
+            #{titleTxt}, #{subtitleTxt, jdbcType=VARCHAR},
+            #{highlightBannerTxt, jdbcType=VARCHAR}, #{componentsJson, jdbcType=VARCHAR},
+            #{stepFlowBarJson, jdbcType=VARCHAR}, #{conclusionRibbonTxt, jdbcType=VARCHAR},
+            #{colorIndex}, #{imageGenHint, jdbcType=VARCHAR},
+            COALESCE(#{renderStatusCd}, '001'), #{renderedImagePath, jdbcType=VARCHAR},
+            COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
         )
     </insert>
 
@@ -647,22 +664,59 @@
             resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 소목차 슬라이드 목록 조회 proposal.selectSlidesByToc */
         SELECT
-            SLIDE_ID                                         AS SLIDE_ID,
-            PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            TOC_ID                                           AS TOC_ID,
-            SLIDE_NO                                         AS SLIDE_NO,
-            COLOR_INDEX                                      AS COLOR_INDEX,
-            LAYOUT_TYPE                                      AS LAYOUT_TYPE,
-            CAST(SLIDE_JSON AS CHAR)                         AS SLIDE_JSON,
-            IMAGE_GEN_HINT                                   AS IMAGE_GEN_HINT,
-            RENDERED_IMAGE_PATH                              AS RENDERED_IMAGE_PATH,
-            RENDER_STATUS_CD                                 AS RENDER_STATUS_CD,
-            CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            SLIDE_ID                                      AS SLIDE_ID,
+            PT_PROJECT_ID                                 AS PT_PROJECT_ID,
+            TOC_ID                                        AS TOC_ID,
+            SLIDE_NO                                      AS SLIDE_NO,
+            LAYOUT_TYPE_CD                                AS LAYOUT_TYPE,
+            CAST(REQ_IDS_JSON AS CHAR)                    AS REQ_IDS_JSON,
+            EYEBROW_TXT                                   AS EYEBROW_TXT,
+            TITLE_TXT                                     AS TITLE_TXT,
+            SUBTITLE_TXT                                  AS SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT                          AS HIGHLIGHT_BANNER_TXT,
+            CAST(COMPONENTS_JSON AS CHAR)                 AS COMPONENTS_JSON,
+            CAST(STEP_FLOW_BAR_JSON AS CHAR)              AS STEP_FLOW_BAR_JSON,
+            CONCLUSION_RIBBON_TXT                         AS CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX                                   AS COLOR_INDEX,
+            IMAGE_GEN_HINT                                AS IMAGE_GEN_HINT,
+            RENDERED_IMAGE_PATH                           AS RENDERED_IMAGE_PATH,
+            RENDER_STATUS_CD                              AS RENDER_STATUS_CD,
+            SORT_ORD                                      AS SORT_ORD,
+            CREATE_USER_ID                                AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
         FROM TB_PT_SLIDE
         WHERE TOC_ID = #{tocId}
         ORDER BY SLIDE_NO
+    </select>
+
+    <select id="selectSlideById" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
+        /* 슬라이드 단건 조회 proposal.selectSlideById */
+        SELECT
+            SLIDE_ID                                      AS SLIDE_ID,
+            PT_PROJECT_ID                                 AS PT_PROJECT_ID,
+            TOC_ID                                        AS TOC_ID,
+            SLIDE_NO                                      AS SLIDE_NO,
+            LAYOUT_TYPE_CD                                AS LAYOUT_TYPE,
+            CAST(REQ_IDS_JSON AS CHAR)                    AS REQ_IDS_JSON,
+            EYEBROW_TXT                                   AS EYEBROW_TXT,
+            TITLE_TXT                                     AS TITLE_TXT,
+            SUBTITLE_TXT                                  AS SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT                          AS HIGHLIGHT_BANNER_TXT,
+            CAST(COMPONENTS_JSON AS CHAR)                 AS COMPONENTS_JSON,
+            CAST(STEP_FLOW_BAR_JSON AS CHAR)              AS STEP_FLOW_BAR_JSON,
+            CONCLUSION_RIBBON_TXT                         AS CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX                                   AS COLOR_INDEX,
+            IMAGE_GEN_HINT                                AS IMAGE_GEN_HINT,
+            RENDERED_IMAGE_PATH                           AS RENDERED_IMAGE_PATH,
+            RENDER_STATUS_CD                              AS RENDER_STATUS_CD,
+            SORT_ORD                                      AS SORT_ORD,
+            CREATE_USER_ID                                AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
+        FROM TB_PT_SLIDE
+        WHERE SLIDE_ID = #{slideId}
     </select>
 
     <select id="selectMaxSlideNo" parameterType="String" resultType="Integer">
@@ -676,8 +730,15 @@
         /* 슬라이드 수정 proposal.updateSlide */
         UPDATE TB_PT_SLIDE
         <set>
-            <if test="layoutType != null">LAYOUT_TYPE = #{layoutType},</if>
-            <if test="slideJson != null">SLIDE_JSON = #{slideJson},</if>
+            <if test="layoutType != null">LAYOUT_TYPE_CD = #{layoutType},</if>
+            <if test="reqIdsJson != null">REQ_IDS_JSON = #{reqIdsJson},</if>
+            <if test="eyebrowTxt != null">EYEBROW_TXT = #{eyebrowTxt},</if>
+            <if test="titleTxt != null">TITLE_TXT = #{titleTxt},</if>
+            <if test="subtitleTxt != null">SUBTITLE_TXT = #{subtitleTxt},</if>
+            <if test="highlightBannerTxt != null">HIGHLIGHT_BANNER_TXT = #{highlightBannerTxt},</if>
+            <if test="componentsJson != null">COMPONENTS_JSON = #{componentsJson},</if>
+            <if test="stepFlowBarJson != null">STEP_FLOW_BAR_JSON = #{stepFlowBarJson},</if>
+            <if test="conclusionRibbonTxt != null">CONCLUSION_RIBBON_TXT = #{conclusionRibbonTxt},</if>
             <if test="imageGenHint != null">IMAGE_GEN_HINT = #{imageGenHint},</if>
             <if test="renderedImagePath != null">RENDERED_IMAGE_PATH = #{renderedImagePath},</if>
             <if test="renderStatusCd != null">RENDER_STATUS_CD = #{renderStatusCd},</if>
@@ -695,19 +756,27 @@
             resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 프로젝트 전체 슬라이드 목록 조회 (SLIDE_NO 순) proposal.selectAllSlidesByProject */
         SELECT
-            SLIDE_ID                                         AS SLIDE_ID,
-            PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            TOC_ID                                           AS TOC_ID,
-            SLIDE_NO                                         AS SLIDE_NO,
-            COLOR_INDEX                                      AS COLOR_INDEX,
-            LAYOUT_TYPE                                      AS LAYOUT_TYPE,
-            CAST(SLIDE_JSON AS CHAR)                         AS SLIDE_JSON,
-            IMAGE_GEN_HINT                                   AS IMAGE_GEN_HINT,
-            RENDERED_IMAGE_PATH                              AS RENDERED_IMAGE_PATH,
-            RENDER_STATUS_CD                                 AS RENDER_STATUS_CD,
-            CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            SLIDE_ID                                      AS SLIDE_ID,
+            PT_PROJECT_ID                                 AS PT_PROJECT_ID,
+            TOC_ID                                        AS TOC_ID,
+            SLIDE_NO                                      AS SLIDE_NO,
+            LAYOUT_TYPE_CD                                AS LAYOUT_TYPE,
+            CAST(REQ_IDS_JSON AS CHAR)                    AS REQ_IDS_JSON,
+            EYEBROW_TXT                                   AS EYEBROW_TXT,
+            TITLE_TXT                                     AS TITLE_TXT,
+            SUBTITLE_TXT                                  AS SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT                          AS HIGHLIGHT_BANNER_TXT,
+            CAST(COMPONENTS_JSON AS CHAR)                 AS COMPONENTS_JSON,
+            CAST(STEP_FLOW_BAR_JSON AS CHAR)              AS STEP_FLOW_BAR_JSON,
+            CONCLUSION_RIBBON_TXT                         AS CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX                                   AS COLOR_INDEX,
+            IMAGE_GEN_HINT                                AS IMAGE_GEN_HINT,
+            RENDERED_IMAGE_PATH                           AS RENDERED_IMAGE_PATH,
+            RENDER_STATUS_CD                              AS RENDER_STATUS_CD,
+            SORT_ORD                                      AS SORT_ORD,
+            CREATE_USER_ID                                AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
         FROM TB_PT_SLIDE
         WHERE PT_PROJECT_ID = #{ptProjectId}
         ORDER BY SLIDE_NO
@@ -788,31 +857,31 @@
     <!-- Step F: TB_PT_EXPORT                                                 -->
     <!-- DDL:                                                                 -->
     <!-- CREATE TABLE TB_PT_EXPORT (                                          -->
-    <!--   EXPORT_ID         VARCHAR(20)  NOT NULL PRIMARY KEY,               -->
-    <!--   PT_PROJECT_ID     VARCHAR(20)  NOT NULL,                           -->
-    <!--   FORMAT_CD         VARCHAR(10)  NOT NULL,                           -->
-    <!--   BUILD_STATUS_CD   VARCHAR(3)   NOT NULL DEFAULT '001',             -->
-    <!--   FILE_PATH         VARCHAR(500) NULL,                               -->
-    <!--   FILE_SIZE         BIGINT       NULL,                               -->
-    <!--   DOWNLOAD_URL      VARCHAR(2000) NULL,                              -->
-    <!--   ERROR_MSG         TEXT         NULL,                               -->
-    <!--   COMPLETE_DT       DATETIME     NULL,                               -->
-    <!--   CREATE_USER_ID    VARCHAR(50)  NULL,                               -->
-    <!--   CREATE_DT         DATETIME     NULL,                               -->
-    <!--   MODIFY_DT         DATETIME     NULL,                               -->
-    <!--   INDEX idx_pt_export_project (PT_PROJECT_ID)                       -->
+    <!--   EXPORT_ID          VARCHAR(20)   NOT NULL PRIMARY KEY,             -->
+    <!--   PT_PROJECT_ID      VARCHAR(20)   NOT NULL,                         -->
+    <!--   BUILD_STATUS_CD    VARCHAR(10)   NOT NULL DEFAULT '001',           -->
+    <!--   TOTAL_SLIDE_CNT    INT           NOT NULL DEFAULT 0,               -->
+    <!--   RENDERED_SLIDE_CNT INT           NOT NULL DEFAULT 0,               -->
+    <!--   FILE_NM            VARCHAR(200)  NULL,                             -->
+    <!--   FILE_PATH          VARCHAR(500)  NULL,                             -->
+    <!--   FILE_SIZE          BIGINT        NULL,                             -->
+    <!--   EXPORT_TYPE_CD     CHAR(3)       NOT NULL DEFAULT '001',           -->
+    <!--   ERROR_MSG          VARCHAR(1000) NULL,                             -->
+    <!--   COMPLETE_DT        DATETIME      NULL,                             -->
+    <!--   CREATE_DT          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP-->
+    <!--   CREATE_USER_ID     VARCHAR(20)   NOT NULL,                         -->
     <!-- );                                                                   -->
-    <!-- BUILD_STATUS_CD: 001=대기, 002=빌드중, 003=캐시재사용, 004=완료, 005=실패 -->
+    <!-- BUILD_STATUS_CD(PT000010): 001=대기 002=이미지생성중 003=PPT조립중 004=완료 005=실패 -->
+    <!-- EXPORT_TYPE_CD(PT_EXPORT_TYPE): 001=PPTX 002=PDF                    -->
     <!-- ================================================================== -->
 
     <insert id="insertExport" parameterType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
         /* PT 출력 빌드 등록 proposal.insertExport */
         INSERT INTO TB_PT_EXPORT (
-            EXPORT_ID, PT_PROJECT_ID, FORMAT_CD, BUILD_STATUS_CD,
+            EXPORT_ID, PT_PROJECT_ID, EXPORT_TYPE_CD, BUILD_STATUS_CD, TOTAL_SLIDE_CNT,
             CREATE_USER_ID, CREATE_DT
         ) VALUES (
-            #{exportId}, #{ptProjectId}, #{formatCd},
-            COALESCE(#{buildStatusCd}, '001'),
+            #{exportId}, #{ptProjectId}, #{exportTypeCd}, '001', #{totalSlideCnt},
             #{createUserId, jdbcType=VARCHAR}, NOW()
         )
     </insert>
@@ -822,12 +891,12 @@
         UPDATE TB_PT_EXPORT
         <set>
             <if test="buildStatusCd != null">BUILD_STATUS_CD = #{buildStatusCd},</if>
+            <if test="renderedSlideCnt != null">RENDERED_SLIDE_CNT = #{renderedSlideCnt},</if>
+            <if test="fileNm != null">FILE_NM = #{fileNm},</if>
             <if test="filePath != null">FILE_PATH = #{filePath},</if>
             <if test="fileSize != null">FILE_SIZE = #{fileSize},</if>
-            <if test="downloadUrl != null">DOWNLOAD_URL = #{downloadUrl},</if>
             <if test="errorMsg != null">ERROR_MSG = #{errorMsg},</if>
             <if test="completeDt != null">COMPLETE_DT = #{completeDt},</if>
-            MODIFY_DT = NOW()
         </set>
         WHERE EXPORT_ID = #{exportId}
     </update>
@@ -838,39 +907,41 @@
         SELECT
             EXPORT_ID                                        AS EXPORT_ID,
             PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            FORMAT_CD                                        AS FORMAT_CD,
+            EXPORT_TYPE_CD                                   AS EXPORT_TYPE_CD,
             BUILD_STATUS_CD                                  AS BUILD_STATUS_CD,
+            TOTAL_SLIDE_CNT                                  AS TOTAL_SLIDE_CNT,
+            RENDERED_SLIDE_CNT                               AS RENDERED_SLIDE_CNT,
+            FILE_NM                                          AS FILE_NM,
             FILE_PATH                                        AS FILE_PATH,
             FILE_SIZE                                        AS FILE_SIZE,
-            DOWNLOAD_URL                                     AS DOWNLOAD_URL,
             ERROR_MSG                                        AS ERROR_MSG,
             DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS COMPLETE_DT,
             CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT
         FROM TB_PT_EXPORT
         WHERE EXPORT_ID = #{exportId}
     </select>
 
     <select id="selectLatestCompletedExport" resultType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
-        /* 프로젝트+포맷 기준 최근 완료 출력 빌드 조회 proposal.selectLatestCompletedExport */
+        /* 프로젝트+내보내기형식 기준 최근 완료 출력 빌드 조회 (캐시 재사용 판단용) proposal.selectLatestCompletedExport */
         SELECT
             EXPORT_ID                                        AS EXPORT_ID,
             PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            FORMAT_CD                                        AS FORMAT_CD,
+            EXPORT_TYPE_CD                                   AS EXPORT_TYPE_CD,
             BUILD_STATUS_CD                                  AS BUILD_STATUS_CD,
+            TOTAL_SLIDE_CNT                                  AS TOTAL_SLIDE_CNT,
+            RENDERED_SLIDE_CNT                               AS RENDERED_SLIDE_CNT,
+            FILE_NM                                          AS FILE_NM,
             FILE_PATH                                        AS FILE_PATH,
             FILE_SIZE                                        AS FILE_SIZE,
-            DOWNLOAD_URL                                     AS DOWNLOAD_URL,
             ERROR_MSG                                        AS ERROR_MSG,
             DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS COMPLETE_DT,
             CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT
         FROM TB_PT_EXPORT
         WHERE PT_PROJECT_ID = #{ptProjectId}
-          AND FORMAT_CD = #{formatCd}
-          AND BUILD_STATUS_CD IN ('003', '004')
+          AND EXPORT_TYPE_CD = #{exportTypeCd}
+          AND BUILD_STATUS_CD = '004'
         ORDER BY COMPLETE_DT DESC
         LIMIT 1
     </select>

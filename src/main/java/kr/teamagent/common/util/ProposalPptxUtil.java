@@ -74,6 +74,42 @@ public class ProposalPptxUtil {
     private ProposalPptxUtil() {}
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // 이미지 기반 제안서 빌드 — PageInfo DTO
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 렌더링 이미지 기반 빌드용 페이지 단위 입력 데이터.
+     * 헤더·푸터 구성에 필요한 메타데이터를 함께 담는다.
+     */
+    public static class PageInfo {
+        /** NCP에서 다운로드한 슬라이드 렌더링 이미지 bytes (null 허용 → 플레이스홀더 표시) */
+        public final byte[] imageBytes;
+        /** 챕터 로마숫자 ("Ⅱ" 등) */
+        public final String chapterRoman;
+        /** 소목차 제목 */
+        public final String sectionTitle;
+        /** 페이지 라벨 ("Ⅱ-1" 등) */
+        public final String pageLabel;
+        /** 사업명 (헤더 우측) */
+        public final String projectNm;
+        /** 발주기관명 (푸터 좌측) */
+        public final String orgNm;
+        /** 제안사명 (푸터 우측) */
+        public final String submitterNm;
+
+        public PageInfo(byte[] imageBytes, String chapterRoman, String sectionTitle,
+                        String pageLabel, String projectNm, String orgNm, String submitterNm) {
+            this.imageBytes   = imageBytes;
+            this.chapterRoman = chapterRoman != null ? chapterRoman : "Ⅰ";
+            this.sectionTitle = sectionTitle != null ? sectionTitle : "";
+            this.pageLabel    = pageLabel    != null ? pageLabel    : "";
+            this.projectNm    = projectNm   != null ? projectNm    : "";
+            this.orgNm        = orgNm       != null ? orgNm        : "";
+            this.submitterNm  = submitterNm != null ? submitterNm  : "";
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // 공개 API
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -183,6 +219,141 @@ public class ProposalPptxUtil {
             pptx.write(out);
             return out.toByteArray();
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 이미지 기반 제안서 빌드 (Step F 출력용)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 렌더링 이미지 기반 제안서 PPTX 생성.
+     *
+     * <p>페이지 구조:
+     * <pre>
+     * ┌─────────────────────────────────────────┐ y=0
+     * │ 헤더 행1 (HDR_LINE_H): Chapter Ⅱ │ 사업명  │  작은 텍스트 행
+     * │ 헤더 행2 (BAR_H):  ██ 소목차 제목 ████  │  baseColor 바
+     * ├─────────────────────────────────────────┤ y=HEADER_H
+     * │                                         │
+     * │     RENDERED_IMAGE (letterbox)          │  본문
+     * │                                         │
+     * ├─────────────────────────────────────────┤ y=slideH-FOOTER_H
+     * │ 발주기관   │     Ⅱ-1     │    제안사명  │  푸터
+     * └─────────────────────────────────────────┘ y=slideH
+     * </pre>
+     *
+     * @param pages       슬라이드별 PageInfo 목록
+     * @param docSize     "a4" (595×842pt) | "43" (720×540pt) | "169" (720×405pt)
+     * @param bgColor     배경색 hex
+     * @param baseColor   기본색 hex (헤더 바·챕터 배지)
+     * @param accentColor 강조색 hex
+     */
+    public static byte[] buildProposalDocWithImages(
+            List<PageInfo> pages,
+            String docSize,
+            String bgColor, String baseColor, String accentColor) throws IOException {
+
+        // ── 페이지 크기 결정 ─────────────────────────────────────────────────
+        final int slideW, slideH;
+        if ("a4".equalsIgnoreCase(docSize)) {
+            slideW = 595; slideH = 842;   // A4 portrait
+        } else if ("43".equals(docSize)) {
+            slideW = 720; slideH = 540;   // 4:3
+        } else {
+            slideW = 720; slideH = 405;   // 16:9 (기본)
+        }
+
+        // ── 색상 파싱 ────────────────────────────────────────────────────────
+        Color cBg     = parseHex(bgColor,     new Color(0xFF, 0xFF, 0xFF));
+        Color cBase   = parseHex(baseColor,   new Color(0x5B, 0x4F, 0xE9));
+        Color cAccent = parseHex(accentColor, new Color(0xE0, 0x8A, 0x2C));
+        Color cFooter = tint(cBase, 0.88f);
+
+        // ── 레이아웃 상수 (A4 842pt 기준, 비율 스케일 적용) ─────────────────
+        double scale     = slideH / 842.0;
+        int HDR_LINE_H   = Math.max(18, (int) (22 * scale));  // 챕터·사업명 행
+        int BAR_H        = Math.max(30, (int) (46 * scale));  // 소목차 타이틀 바
+        int HEADER_H     = HDR_LINE_H + BAR_H;
+        int FOOTER_H     = Math.max(20, (int) (28 * scale));  // 푸터 높이
+        int IMAGE_Y      = HEADER_H;
+        int IMAGE_H      = slideH - HEADER_H - FOOTER_H;
+        int FOOTER_Y     = slideH - FOOTER_H;
+        int MARGIN       = 30;
+        int CONT_W       = slideW - MARGIN * 2;
+
+        double fsChapterLabel = 6.5 * scale + 3;   // "Chapter" 소문자
+        double fsBadge        = 9.5 * scale + 3;   // 로마숫자 배지
+        double fsProjectNm    = 6.5 * scale + 3;   // 사업명
+        double fsBarTitle     = 14.0 * scale + 4;  // 소목차 타이틀
+        double fsFooter       = 6.5 * scale + 3;   // 푸터 텍스트
+
+        try (XMLSlideShow pptx = new XMLSlideShow();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+            pptx.setPageSize(new Dimension(slideW, slideH));
+
+            for (PageInfo page : pages) {
+                XSLFSlide slide = pptx.createSlide();
+
+                // ── 배경 전체 채움 ──────────────────────────────────────────
+                addRect(slide, 0, 0, slideW, slideH, cBg);
+
+                // ── 헤더 행1: Chapter 라벨 + 로마숫자 배지 + 사업명 ──────────
+                // "Chapter" 소문자 레이블
+                text(slide, "Chapter", MARGIN, 3, 44, HDR_LINE_H - 3,
+                        fsChapterLabel, false, false, GRAY_TEXT, null);
+                // 로마숫자 배지 (baseColor 사각형)
+                int BADGE_W = Math.max(20, (int)(26 * scale));
+                addRect(slide, MARGIN + 46, 2, BADGE_W, HDR_LINE_H - 3, cBase);
+                text(slide, page.chapterRoman, MARGIN + 46, 2, BADGE_W, HDR_LINE_H - 3,
+                        fsBadge, true, false, WHITE, TextParagraph.TextAlign.CENTER);
+                // 사업명 (우측)
+                text(slide, page.projectNm, MARGIN + 46 + BADGE_W + 6, 3,
+                        CONT_W - 46 - BADGE_W - 6, HDR_LINE_H - 3,
+                        fsProjectNm, false, false, GRAY_TEXT, TextParagraph.TextAlign.RIGHT);
+
+                // ── 헤더 행2: 소목차 타이틀 바 (baseColor 풀폭) ──────────────
+                addRect(slide, 0, HDR_LINE_H, slideW, BAR_H, cBase);
+                text(slide, page.sectionTitle, MARGIN, HDR_LINE_H + 4,
+                        CONT_W, BAR_H - 8, fsBarTitle, true, false, WHITE, null);
+
+                // ── 본문: 렌더링 이미지 ────────────────────────────────────
+                if (page.imageBytes != null && page.imageBytes.length > 0) {
+                    addImgLetterbox(pptx, slide, page.imageBytes, 0, IMAGE_Y, slideW, IMAGE_H, cBg);
+                } else {
+                    // 이미지 없음 → 회색 플레이스홀더 + 안내 텍스트
+                    addRect(slide, 0, IMAGE_Y, slideW, IMAGE_H, tint(cBg, 0.25f));
+                    text(slide, "이미지를 불러올 수 없습니다.",
+                            MARGIN, IMAGE_Y + IMAGE_H / 2 - 10, CONT_W, 24,
+                            10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
+                }
+
+                // ── 푸터: 연한 baseColor 바 ──────────────────────────────
+                addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, cFooter);
+                // 발주기관 (좌)
+                text(slide, page.orgNm, MARGIN, FOOTER_Y + 3,
+                        CONT_W / 3, FOOTER_H - 6, fsFooter, false, false, DARK_TEXT, null);
+                // 페이지 번호 (중앙)
+                text(slide, page.pageLabel, 0, FOOTER_Y + 3,
+                        slideW, FOOTER_H - 6, fsFooter, true, false, DARK_TEXT,
+                        TextParagraph.TextAlign.CENTER);
+                // 제안사명 (우)
+                text(slide, page.submitterNm, MARGIN, FOOTER_Y + 3,
+                        CONT_W, FOOTER_H - 6, fsFooter, false, false, DARK_TEXT,
+                        TextParagraph.TextAlign.RIGHT);
+            }
+
+            pptx.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * 로마숫자 변환 (1~12 → Unicode 로마숫자 Ⅰ~Ⅻ, 초과 시 숫자 반환).
+     */
+    public static String toRomanNumeral(int n) {
+        String[] ROMAN = { "", "Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ", "Ⅴ", "Ⅵ", "Ⅶ", "Ⅷ", "Ⅸ", "Ⅹ", "Ⅺ", "Ⅻ" };
+        return (n >= 1 && n <= 12) ? ROMAN[n] : String.valueOf(n);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

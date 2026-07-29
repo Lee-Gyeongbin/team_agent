@@ -50,6 +50,8 @@ public class ProposalVO {
         private Integer offset;
         /** Stage1 완료 여부 (Y/N) — selectPtProjectList 에서만 반환 */
         private String stage1DoneYn;
+        /** 사용자가 도달한 최대 단계 번호 (0=A, 1=B, 2=C, 3=D, 4=E, 5=F) */
+        private Integer maxStepNo;
     }
 
     /**
@@ -181,7 +183,9 @@ public class ProposalVO {
      */
     @Data
     public static class RequirementLiteVO {
-        /** 요구사항 식별번호 */
+        /** REQUIREMENT_ID (PK) — TOC 매핑 시 LLM이 이 값을 coveredReqIds로 반환 */
+        private String requirementId;
+        /** 요구사항 식별번호 (001 타입만 존재, 002 전략적해석은 null) */
         private String reqNo;
         /** 요구사항 분류 코드 */
         private String reqCategoryCd;
@@ -189,6 +193,77 @@ public class ProposalVO {
         private String reqContent;
         /** 필수 여부 (Y/N) */
         private String mandatoryYn;
+    }
+
+    /**
+     * Stage3 프롬프트 전용 경량 요구사항 VO
+     * - 슬라이드 생성에 실제 필요한 필드만 포함 (불필요 필드 제거로 토큰 절감)
+     * - requirementId/ptProjectId/sortOrd/감사 필드 제외
+     */
+    @Data
+    public static class RequirementStage3VO {
+        /** 요구사항 식별번호 (RFP 원문 그대로, 예: SFR-010) */
+        private String reqNo;
+        /** 요구사항 분류 코드 */
+        private String reqCategoryCd;
+        /** 요구사항 원문 내용 */
+        private String reqContent;
+        /** 필수 여부 (Y/N) */
+        private String mandatoryYn;
+        /** 출처 유형 코드 (001=사실, 002=전략적해석, 003=확인필요) */
+        private String sourceTypeCd;
+        /** 근거 페이지 */
+        private String rfpPageRef;
+        /** 평가 영향도 (관련 평가항목) */
+        private String evalImpact;
+        /** 제안서 대응방향 */
+        private String responseDirection;
+        /** 대응 증빙자료 유형 (evidence 기반 슬라이드 작성에 활용) */
+        private String requiredEvidence;
+    }
+
+    /**
+     * Stage3 프롬프트 전용 경량 Win Theme VO
+     * - winThemeId/ptProjectId/sortOrd/감사 필드 제외
+     */
+    @Data
+    public static class WinThemeStage3VO {
+        /** 핵심 메시지 */
+        private String coreMessage;
+        /** 고객 문제 */
+        private String customerProblem;
+        /** 제안 전략 */
+        private String proposalStrategy;
+        /** 근거/증빙 */
+        private String evidence;
+        /** 기대 효과 */
+        private String expectedEffect;
+        /** 차별화 포인트 */
+        private String differentiation;
+    }
+
+    /**
+     * Stage3 프롬프트 전용 경량 문제정의 VO
+     * - problemId/ptProjectId/sortOrd/감사 필드 제외
+     */
+    @Data
+    public static class ProblemDefinitionStage3VO {
+        /** 문제 유형 코드 */
+        private String problemTypeCd;
+        /** 현재 문제 */
+        private String currentProblem;
+        /** 근본 원인 */
+        private String rootCause;
+        /** 방치 시 위험 */
+        private String riskIfIgnored;
+        /** 목표 */
+        private String goal;
+        /** 필요 역량 */
+        private String requiredCapability;
+        /** 전략 요약 */
+        private String strategySummary;
+        /** KPI */
+        private String kpi;
     }
 
     /**
@@ -312,8 +387,8 @@ public class ProposalVO {
         // ── 파싱/계층 구조용 (DB 컬럼 아님, transient) ──
         /** LLM 응답에서 받은 평가항목명 */
         private String linkedEvalCriteriaNm;
-        /** LLM이 지정한 커버 요구사항 목록 */
-        private java.util.List<String> coveredReqNos;
+        /** LLM이 지정한 커버 요구사항 REQUIREMENT_ID 목록 (transient, DB 비저장) */
+        private java.util.List<String> coveredReqIds;
         /** 계층 레벨 (1=대분류, 2=소분류) */
         private int level;
         /** 부모 no (level 2용) */
@@ -344,6 +419,8 @@ public class ProposalVO {
         private List<String> baseColors;
         /** 강조색조 2순위 (hex 코드) */
         private List<String> accentColors;
+        /** 제안사명 (출력물 푸터 우측) */
+        private String submitterNm;
     }
 
     /**
@@ -367,6 +444,8 @@ public class ProposalVO {
         private List<String> baseColors;
         /** 강조색조 hex 코드 2개 */
         private List<String> accentColors;
+        /** 제안사명 (출력물 푸터 우측) */
+        private String submitterNm;
     }
 
     /**
@@ -445,12 +524,28 @@ public class ProposalVO {
         private int slideNo;
         /** COLOR_INDEX = slideNo % 3 */
         private int colorIndex;
-        /** 레이아웃 타입 (cover/section_divider/infographic) */
+        /** 레이아웃 타입 (LAYOUT_TYPE_CD) */
         private String layoutType;
-        /** 슬라이드 JSON 골격 (raw JSON string) */
-        private String slideJson;
+        /** 커버 요구사항 ID 목록 JSON (REQ_IDS_JSON) */
+        private String reqIdsJson;
+        /** 아이브로우 텍스트 (EYEBROW_TXT) */
+        private String eyebrowTxt;
+        /** 슬라이드 제목 (TITLE_TXT, NOT NULL) */
+        private String titleTxt;
+        /** 부제목 (SUBTITLE_TXT) */
+        private String subtitleTxt;
+        /** 하이라이트 배너 텍스트 (HIGHLIGHT_BANNER_TXT) */
+        private String highlightBannerTxt;
+        /** 컴포넌트 JSON (COMPONENTS_JSON) */
+        private String componentsJson;
+        /** 스텝 플로우 바 JSON (STEP_FLOW_BAR_JSON) */
+        private String stepFlowBarJson;
+        /** 결론 리본 텍스트 (CONCLUSION_RIBBON_TXT) */
+        private String conclusionRibbonTxt;
         /** 이미지 생성 힌트 (Stage3.5 조립 결과) */
         private String imageGenHint;
+        /** 정렬 순서 (SORT_ORD) */
+        private Integer sortOrd;
         /** 렌더링된 이미지 NCP 경로 */
         private String renderedImagePath;
         /** 렌더 상태 코드 (001=대기, 002=생성중, 003=완료, 004=실패) */
@@ -612,38 +707,42 @@ public class ProposalVO {
      *
      * DDL:
      *   CREATE TABLE TB_PT_EXPORT (
-     *     EXPORT_ID         VARCHAR(20)  NOT NULL PRIMARY KEY,
-     *     PT_PROJECT_ID     VARCHAR(20)  NOT NULL,
-     *     FORMAT_CD         VARCHAR(10)  NOT NULL,   -- 'pdf' | 'pptx'
-     *     BUILD_STATUS_CD   VARCHAR(3)   NOT NULL DEFAULT '001',
-     *                                               -- 001=대기 002=빌드중 003=캐시재사용 004=완료 005=실패
-     *     FILE_PATH         VARCHAR(500) NULL,       -- NCP 파일 경로
-     *     FILE_SIZE         BIGINT       NULL,
-     *     DOWNLOAD_URL      VARCHAR(2000) NULL,      -- 최근 발급된 presigned 다운로드 URL
-     *     ERROR_MSG         TEXT         NULL,
-     *     COMPLETE_DT       DATETIME     NULL,
-     *     CREATE_USER_ID    VARCHAR(50)  NULL,
-     *     CREATE_DT         DATETIME     NULL,
-     *     MODIFY_DT         DATETIME     NULL,
-     *     INDEX idx_pt_export_project (PT_PROJECT_ID)
+     *     EXPORT_ID          VARCHAR(20)   NOT NULL PRIMARY KEY,  -- PTX- prefix
+     *     PT_PROJECT_ID      VARCHAR(20)   NOT NULL,
+     *     BUILD_STATUS_CD    VARCHAR(10)   NOT NULL DEFAULT '001',
+     *                        -- 코드 PT000010: 001=대기 002=이미지생성중 003=PPT조립중 004=완료 005=실패
+     *     TOTAL_SLIDE_CNT    INT           NOT NULL DEFAULT 0,
+     *     RENDERED_SLIDE_CNT INT           NOT NULL DEFAULT 0,     -- 진행률 표시용
+     *     FILE_NM            VARCHAR(200)  NULL,                   -- 완성된 파일명
+     *     FILE_PATH          VARCHAR(500)  NULL,                   -- NCP 오브젝트 경로
+     *     FILE_SIZE          BIGINT        NULL,
+     *     EXPORT_TYPE_CD     CHAR(3)       NOT NULL DEFAULT '001', -- PT_EXPORT_TYPE: 001=PPTX 002=PDF
+     *     ERROR_MSG          VARCHAR(1000) NULL,
+     *     COMPLETE_DT        DATETIME      NULL,
+     *     CREATE_DT          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     *     CREATE_USER_ID     VARCHAR(20)   NOT NULL
      *   );
      */
     @Data
     public static class ExportVO {
-        /** EXPORT_ID (PK, VARCHAR 20, prefix PTE-) */
+        /** EXPORT_ID (PK, VARCHAR 20, prefix PTX-) */
         private String exportId;
         /** PT 프로젝트 ID */
         private String ptProjectId;
-        /** 포맷 코드 ('pdf' | 'pptx') */
-        private String formatCd;
-        /** 빌드 상태 (001=대기, 002=빌드중, 003=캐시재사용, 004=완료, 005=실패) */
+        /** 내보내기 형식 코드 (PT_EXPORT_TYPE: 001=PPTX, 002=PDF) */
+        private String exportTypeCd;
+        /** 빌드 상태 코드 (PT000010: 001=대기, 002=이미지생성중, 003=PPT조립중, 004=완료, 005=실패) */
         private String buildStatusCd;
-        /** NCP 파일 경로 (스토리지 키) */
+        /** 전체 슬라이드 수 */
+        private Integer totalSlideCnt;
+        /** 이미지 생성 완료 슬라이드 수 (진행률 표시용) */
+        private Integer renderedSlideCnt;
+        /** 완성된 파일명 */
+        private String fileNm;
+        /** NCP 오브젝트 경로 */
         private String filePath;
         /** 파일 크기 (bytes) */
         private Long fileSize;
-        /** 최근 발급된 presigned 다운로드 URL */
-        private String downloadUrl;
         /** 오류 메시지 (실패 시) */
         private String errorMsg;
         /** 완료 일시 */
@@ -652,19 +751,21 @@ public class ProposalVO {
         private String createUserId;
         /** 생성일시 */
         private String createDt;
-        /** 수정일시 */
-        private String modifyDt;
+
+        // ── DB에 저장되지 않는 런타임 필드 ──────────────────────────────────
+        /** presigned 다운로드 URL — DB 미저장, 완료 시 동적 발급 */
+        private String downloadUrl;
     }
 
     /**
      * F — 출력 요청 VO
+     * 내보내기 형식은 PROJECT_CONFIG_JSON.template.docSize 기반으로 서버에서 자동 결정:
+     * docSize "a4" → PDF, 그 외(169, 43) → PPTX
      */
     @Data
     public static class ExportRequestVO {
         /** PT 프로젝트 ID */
         private String ptProjectId;
-        /** 포맷 ('pdf' | 'pptx') */
-        private String format;
         /** 에이전트 ID (로그용) */
         private String agentId;
     }
