@@ -50,7 +50,7 @@ public class ProposalVO {
         private Integer offset;
         /** Stage1 완료 여부 (Y/N) — selectPtProjectList 에서만 반환 */
         private String stage1DoneYn;
-        /** 사용자가 도달한 최대 단계 번호 (0=A, 1=B, 2=C, 3=D, 4=E, 5=F) */
+        /** 사용자가 도달한 최대 단계 번호 (0=A:템플릿, 1=B:목차, 2=C:설정, 3=E:템플릿생성, 4=D:본문생성, 5=F:출력) */
         private Integer maxStepNo;
     }
 
@@ -768,5 +768,45 @@ public class ProposalVO {
         private String ptProjectId;
         /** 에이전트 ID (로그용) */
         private String agentId;
+    }
+
+    /**
+     * TB_PT_TEMPLATE - PT 슬라이드 헤더/푸터 템플릿
+     */
+    @Data
+    public static class PtTemplateVO {
+        /** TEMPLATE_ID (PK, VARCHAR 20, prefix PTM) */
+        private String templateId;
+        /** 프로젝트 ID (UNIQUE) */
+        private String ptProjectId;
+        /** 헤더 컴포넌트 레이아웃 JSON (LLM 생성) */
+        private String headerComponentsJson;
+        /** 푸터 컴포넌트 레이아웃 JSON (LLM 생성) */
+        private String footerComponentsJson;
+        /** 컬러 JSON */
+        private String colorJson;
+        /** 생성 상태 코드 (001=대기, 002=생성중, 003=완료, 004=실패) */
+        private String genStatusCd;
+        /** 오류 메시지 */
+        private String errorMsg;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+        /** 수정자 ID */
+        private String modifyUserId;
+        /** 수정일시 */
+        private String modifyDt;
+    }
+
+    /**
+     * 템플릿 재생성 요청 VO (보완요청 포함)
+     */
+    @Data
+    public static class PtTemplateRegenerateVO {
+        /** 프로젝트 ID */
+        private String ptProjectId;
+        /** 보완 지시 텍스트 (null이면 전체 재생성) */
+        private String refineInstruction;
     }
 }

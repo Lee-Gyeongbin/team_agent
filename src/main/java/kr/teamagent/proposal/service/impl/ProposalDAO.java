@@ -500,4 +500,27 @@ public class ProposalDAO extends EgovComAbstractDAO {
     public String selectMaxSlideModifyDt(String ptProjectId) {
         return (String) selectOne("proposal.selectMaxSlideModifyDt", ptProjectId);
     }
+
+    // ── TB_PT_TEMPLATE ──────────────────────────────────────────────────────────
+
+    /**
+     * PT 템플릿 단건 조회 (PT_PROJECT_ID 기준)
+     */
+    public ProposalVO.PtTemplateVO selectPtTemplate(String ptProjectId) {
+        return (ProposalVO.PtTemplateVO) selectOne("proposal.selectPtTemplate", ptProjectId);
+    }
+
+    /**
+     * PT 템플릿 신규 등록
+     */
+    public void insertPtTemplate(ProposalVO.PtTemplateVO vo) {
+        insert("proposal.insertPtTemplate", vo);
+    }
+
+    /**
+     * PT 템플릿 업데이트 (PT_PROJECT_ID 기준)
+     */
+    public void updatePtTemplate(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updatePtTemplate", vo);
+    }
 }

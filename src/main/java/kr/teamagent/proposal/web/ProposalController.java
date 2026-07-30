@@ -752,4 +752,71 @@ public class ProposalController extends BaseController {
         }
         return new ModelAndView("jsonView", resultMap);
     }
+
+    // ── Step E: 템플릿 생성 ──────────────────────────────────────────────────────
+
+    /** E — 템플릿 단건 조회 */
+    @RequestMapping(value = "/ai/proposal/selectPtTemplate.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectPtTemplate(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.selectPtTemplate(ptProjectId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (Exception e) {
+            logger.error("[PT E] selectPtTemplate 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — 템플릿 생성 (최초 / 전체 재생성) */
+    @RequestMapping(value = "/ai/proposal/generatePtTemplate.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView generatePtTemplate(
+            @RequestParam String ptProjectId,
+            @RequestParam String modelId,
+            @RequestParam String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.generateTemplate(ptProjectId, modelId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] generatePtTemplate 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] generatePtTemplate 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — 템플릿 재생성 (보완요청 반영) */
+    @RequestMapping(value = "/ai/proposal/regeneratePtTemplate.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView regeneratePtTemplate(@RequestBody ProposalVO.PtTemplateRegenerateVO vo,
+                                              @RequestParam String modelId,
+                                              @RequestParam String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.regenerateTemplate(
+                    vo.getPtProjectId(), vo.getRefineInstruction(), modelId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] regeneratePtTemplate 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] regeneratePtTemplate 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
 }

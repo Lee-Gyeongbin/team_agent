@@ -4431,7 +4431,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * PROJECT_CONFIG_JSON의 template.docSize를 읽어 내보내기 형식 코드를 반환한다.
-     * docSize "a4" → "002"(PDF), 그 외(169, 43 등) → "001"(PPTX)
+     * docSize "a4"/"43" → "002"(PDF), 그 외(169 등) → "001"(PPTX)
      */
     private String resolveExportTypeCd(String ptProjectId) {
         try {
@@ -4442,7 +4442,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     JsonObject tmpl = cfgRoot.getAsJsonObject("template");
                     if (tmpl.has("docSize") && !tmpl.get("docSize").isJsonNull()) {
                         String docSize = tmpl.get("docSize").getAsString();
-                        return "a4".equalsIgnoreCase(docSize) ? "002" : "001";
+                        return ("a4".equalsIgnoreCase(docSize) || "43".equals(docSize)) ? "002" : "001";
                     }
                 }
             }
@@ -4563,7 +4563,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             byte[] pptxBytes;
 
             if (hasRendered) {
-                // ── 이미지 기반 빌드 (헤더·푸터 템플릿 포함) ─────────────────
+                // ── 이미지 기반 빌드 ─────────────────────────────────────────
+                // TB_PT_TEMPLATE 조회 (Step E에서 생성한 헤더/푸터 JSON 레이아웃)
+                ProposalVO.PtTemplateVO ptTemplate = proposalDAO.selectPtTemplate(ptProjectId);
+                if (ptTemplate == null) {
+                    throw new RuntimeException("헤더/푸터 템플릿이 없습니다. Step E(템플릿 생성)를 먼저 완료해 주세요. (ptProjectId=" + ptProjectId + ")");
+                }
+                String headerComponentsJson = ptTemplate.getHeaderComponentsJson();
+                String footerComponentsJson = ptTemplate.getFooterComponentsJson();
+
                 List<kr.teamagent.common.util.ProposalPptxUtil.PageInfo> pages =
                         new java.util.ArrayList<>();
                 Map<String, Integer> chapterSlideCount = new HashMap<>();
@@ -4587,12 +4595,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     }
 
                     pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
-                            imageBytes, roman, secTitle, pageLabel, projectNm, orgNm, submitterNm));
+                            imageBytes, roman, secTitle, pageLabel, projectNm, orgNm, submitterNm,
+                            s.getLayoutType()));   // layoutTypeCd 추가 — cover(001)/divider(002) 제외 처리용
                 }
 
                 pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildProposalDocWithImages(
-                        pages, docSize, bgColor, baseColor, accentColor);
-                logger.info("[PT F] 이미지 기반 빌드 완료 (exportId={}, pages={})", exportId, pages.size());
+                        pages, docSize, bgColor, baseColor, accentColor,
+                        headerComponentsJson, footerComponentsJson);
+                logger.info("[PT F] 이미지 기반 빌드 완료 (templateId={}, exportId={}, pages={})",
+                        ptTemplate.getTemplateId(), exportId, pages.size());
 
             } else {
                 // ── 텍스트 기반 폴백 빌드 ────────────────────────────────────
@@ -4668,4 +4679,258 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
         }
     }
+
+    // ── Step E: 템플릿 생성 ──────────────────────────────────────────────────────
+
+    /**
+     * PT 템플릿 단건 조회 (PT_PROJECT_ID 기준)
+     */
+    public ProposalVO.PtTemplateVO selectPtTemplate(String ptProjectId) {
+        return proposalDAO.selectPtTemplate(ptProjectId);
+    }
+
+    /**
+     * PT 템플릿 생성 (LLM 호출 → upsert)
+     * - Step3 확정 컬러/스타일 + 프로젝트 정보 + 최상위 TOC 목록을 조합해 프롬프트 구성
+     * - 내부 FastAPI(9000) 또는 Claude LLM 호출
+     * - 응답을 HEADER_COMPONENTS_JSON / FOOTER_COMPONENTS_JSON으로 파싱 → upsert
+     *
+     * 프롬프트는 TB_PROMPT에서 agentId + stageCd 'S3_TEMPLATE'으로 조회.
+     * (프롬프트 미등록 시 RuntimeException 발생)
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ProposalVO.PtTemplateVO generateTemplate(String ptProjectId, String modelId, String agentId) throws Exception {
+        String userId = SessionUtil.getUserId();
+
+        // 기존 템플릿 조회 (upsert 분기용)
+        ProposalVO.PtTemplateVO existing = proposalDAO.selectPtTemplate(ptProjectId);
+
+        // 상태를 생성중(002)으로 설정
+        ProposalVO.PtTemplateVO statusVO = new ProposalVO.PtTemplateVO();
+        statusVO.setPtProjectId(ptProjectId);
+        statusVO.setGenStatusCd("002");
+        statusVO.setHeaderComponentsJson(null);
+        statusVO.setFooterComponentsJson(null);
+        statusVO.setColorJson(null);
+        statusVO.setErrorMsg(null);
+        statusVO.setModifyUserId(userId);
+
+        if (existing == null) {
+            String templateId = keyGenerate.generateTableKey("PTM", "TB_PT_TEMPLATE", "TEMPLATE_ID");
+            statusVO.setTemplateId(templateId);
+            statusVO.setCreateUserId(userId);
+            proposalDAO.insertPtTemplate(statusVO);
+        } else {
+            proposalDAO.updatePtTemplate(statusVO);
+        }
+
+        try {
+            // 프로젝트 정보 조회
+            ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+            if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다: " + ptProjectId);
+
+            String projectNm = CommonUtil.nullToBlank(project.getProjectNm());
+            String orgNm     = CommonUtil.nullToBlank(project.getOrgNm());
+
+            // 설정(컬러) 조회
+            String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+            String baseColor   = "#5B4FE9";
+            String accentColor = "#E08A2C";
+            String submitterNm = "";
+
+            if (CommonUtil.isNotEmpty(configJson)) {
+                try {
+                    JsonObject cfgRoot = JsonParser.parseString(configJson).getAsJsonObject();
+                    if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
+                        JsonObject settings = cfgRoot.getAsJsonObject("settings");
+                        if (settings.has("colors") && !settings.get("colors").isJsonNull()) {
+                            JsonObject colors = settings.getAsJsonObject("colors");
+                            List<String> bases   = colors.has("base") && !colors.get("base").isJsonNull() ? jsonArrayToList(colors.getAsJsonArray("base")) : java.util.Collections.emptyList();
+                            List<String> accents = colors.has("accent") && !colors.get("accent").isJsonNull() ? jsonArrayToList(colors.getAsJsonArray("accent")) : java.util.Collections.emptyList();
+                            if (!bases.isEmpty()) baseColor = bases.get(0);
+                            if (!accents.isEmpty()) accentColor = accents.get(0);
+                        }
+                        String sn = getStrOrNull(settings, "submitterNm");
+                        if (CommonUtil.isNotEmpty(sn)) submitterNm = sn;
+                    }
+                } catch (Exception e) {
+                    logger.warn("[PT Template] configJson 파싱 실패: {}", e.getMessage());
+                }
+            }
+
+            // TOC 최상위 목록 조회
+            List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
+            StringBuilder tocSb = new StringBuilder();
+            for (ProposalVO.TocVO toc : tocList) {
+                if (CommonUtil.isEmpty(toc.getParentTocId())) {
+                    tocSb.append(toc.getSectionNo()).append(". ").append(toc.getSectionNm()).append("\n");
+                }
+            }
+
+            // 프롬프트 조회 (agentId + stageCd 'S3_TEMPLATE')
+            String promptTemplate = null;
+            try {
+                promptTemplate = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_TEMPLATE");
+            } catch (Exception e) {
+                logger.warn("[PT Template] TB_PROMPT 'S3_TEMPLATE' 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+            }
+            if (CommonUtil.isEmpty(promptTemplate)) {
+                throw new RuntimeException("템플릿 생성 프롬프트가 등록되지 않았습니다. TB_PROMPT에 STAGE_CD='S3_TEMPLATE'인 프롬프트를 등록해 주세요.");
+            }
+
+            // 변수 치환
+            String prompt = promptTemplate
+                    .replace("{project_nm}", projectNm)
+                    .replace("{org_nm}", orgNm)
+                    .replace("{submitter_nm}", submitterNm)
+                    .replace("{base_color}", baseColor)
+                    .replace("{accent_color}", accentColor)
+                    .replace("{toc_list}", tocSb.toString().trim());
+
+            // LLM 호출
+            String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(prompt, modelId, "", agentId);
+            if (CommonUtil.isEmpty(aiResponse)) {
+                throw new RuntimeException("LLM 응답이 비어 있습니다.");
+            }
+
+            // JSON 파싱
+            String headerJson = extractJsonBlock(aiResponse, "header");
+            String footerJson = extractJsonBlock(aiResponse, "footer");
+
+            if (CommonUtil.isEmpty(headerJson) || CommonUtil.isEmpty(footerJson)) {
+                throw new RuntimeException("LLM 응답에서 header/footer JSON을 추출할 수 없습니다.");
+            }
+
+            // 컬러 JSON 구성
+            JsonObject colorObj = new JsonObject();
+            colorObj.addProperty("baseColor", baseColor);
+            colorObj.addProperty("accentColor", accentColor);
+
+            // upsert (완료 상태로)
+            ProposalVO.PtTemplateVO result = new ProposalVO.PtTemplateVO();
+            result.setPtProjectId(ptProjectId);
+            result.setHeaderComponentsJson(headerJson);
+            result.setFooterComponentsJson(footerJson);
+            result.setColorJson(GSON.toJson(colorObj));
+            result.setGenStatusCd("003");
+            result.setErrorMsg(null);
+            result.setModifyUserId(userId);
+            proposalDAO.updatePtTemplate(result);
+
+            result.setTemplateId(proposalDAO.selectPtTemplate(ptProjectId).getTemplateId());
+            return result;
+
+        } catch (Exception e) {
+            logger.error("[PT Template] generateTemplate 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            ProposalVO.PtTemplateVO failVO = new ProposalVO.PtTemplateVO();
+            failVO.setPtProjectId(ptProjectId);
+            failVO.setGenStatusCd("004");
+            failVO.setErrorMsg(e.getMessage() != null ? e.getMessage().substring(0, Math.min(e.getMessage().length(), 900)) : "알 수 없는 오류");
+            failVO.setModifyUserId(userId);
+            proposalDAO.updatePtTemplate(failVO);
+            throw e;
+        }
+    }
+
+    /**
+     * PT 템플릿 재생성 (보완요청 포함)
+     * - refineInstruction이 있으면 기존 header/footer JSON + 보완 지시를 함께 LLM에 전달
+     * - 없으면 전체 재생성 (generateTemplate과 동일)
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ProposalVO.PtTemplateVO regenerateTemplate(String ptProjectId, String refineInstruction,
+                                                       String modelId, String agentId) throws Exception {
+        if (CommonUtil.isEmpty(refineInstruction)) {
+            return generateTemplate(ptProjectId, modelId, agentId);
+        }
+
+        String userId = SessionUtil.getUserId();
+        ProposalVO.PtTemplateVO existing = proposalDAO.selectPtTemplate(ptProjectId);
+        if (existing == null) {
+            return generateTemplate(ptProjectId, modelId, agentId);
+        }
+
+        // 상태를 생성중(002)으로
+        ProposalVO.PtTemplateVO statusVO = new ProposalVO.PtTemplateVO();
+        statusVO.setPtProjectId(ptProjectId);
+        statusVO.setGenStatusCd("002");
+        statusVO.setModifyUserId(userId);
+        proposalDAO.updatePtTemplate(statusVO);
+
+        try {
+            // TB_PROMPT에서 S3_TEMPLATE_REFINE 프롬프트 조회
+            String refinePromptTemplate = null;
+            try {
+                refinePromptTemplate = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_TEMPLATE_REFINE");
+            } catch (Exception e) {
+                logger.warn("[PT Template] TB_PROMPT 'S3_TEMPLATE_REFINE' 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+            }
+            if (CommonUtil.isEmpty(refinePromptTemplate)) {
+                throw new RuntimeException("템플릿 보완 프롬프트가 등록되지 않았습니다. TB_PROMPT에 STAGE_CD='S3_TEMPLATE_REFINE'인 프롬프트를 등록해 주세요.");
+            }
+
+            // 변수 치환
+            String refinePrompt = refinePromptTemplate
+                    .replace("{existing_header_json}", existing.getHeaderComponentsJson())
+                    .replace("{existing_footer_json}", existing.getFooterComponentsJson())
+                    .replace("{refine_instruction}", refineInstruction);
+
+            String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(refinePrompt, modelId, "", agentId);
+            if (CommonUtil.isEmpty(aiResponse)) {
+                throw new RuntimeException("LLM 응답이 비어 있습니다.");
+            }
+
+            String headerJson = extractJsonBlock(aiResponse, "header");
+            String footerJson = extractJsonBlock(aiResponse, "footer");
+
+            if (CommonUtil.isEmpty(headerJson)) headerJson = existing.getHeaderComponentsJson();
+            if (CommonUtil.isEmpty(footerJson)) footerJson = existing.getFooterComponentsJson();
+
+            ProposalVO.PtTemplateVO result = new ProposalVO.PtTemplateVO();
+            result.setPtProjectId(ptProjectId);
+            result.setHeaderComponentsJson(headerJson);
+            result.setFooterComponentsJson(footerJson);
+            result.setColorJson(existing.getColorJson());
+            result.setGenStatusCd("003");
+            result.setErrorMsg(null);
+            result.setModifyUserId(userId);
+            proposalDAO.updatePtTemplate(result);
+
+            result.setTemplateId(existing.getTemplateId());
+            return result;
+
+        } catch (Exception e) {
+            logger.error("[PT Template] regenerateTemplate 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            ProposalVO.PtTemplateVO failVO = new ProposalVO.PtTemplateVO();
+            failVO.setPtProjectId(ptProjectId);
+            failVO.setGenStatusCd("004");
+            failVO.setErrorMsg(e.getMessage() != null ? e.getMessage().substring(0, Math.min(e.getMessage().length(), 900)) : "알 수 없는 오류");
+            failVO.setModifyUserId(userId);
+            proposalDAO.updatePtTemplate(failVO);
+            throw e;
+        }
+    }
+
+    /** LLM 응답에서 코드블록 태그로 감싼 JSON 추출 */
+    private String extractJsonBlock(String response, String tag) {
+        if (CommonUtil.isEmpty(response) || CommonUtil.isEmpty(tag)) return null;
+        // ```header {...} ``` 패턴
+        String startTag = "```" + tag;
+        int start = response.indexOf(startTag);
+        if (start < 0) {
+            // 대소문자 무시
+            start = response.toLowerCase().indexOf(startTag.toLowerCase());
+        }
+        if (start < 0) return null;
+        int jsonStart = response.indexOf("{", start + startTag.length());
+        if (jsonStart < 0) return null;
+        int end = response.indexOf("```", jsonStart);
+        if (end < 0) end = response.length();
+        String candidate = response.substring(jsonStart, end).trim();
+        // 마지막 } 찾아서 자르기
+        int lastBrace = candidate.lastIndexOf("}");
+        if (lastBrace < 0) return null;
+        return candidate.substring(0, lastBrace + 1);
+    }
+
 }
