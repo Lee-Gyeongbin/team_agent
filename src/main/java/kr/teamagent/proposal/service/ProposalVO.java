@@ -542,12 +542,14 @@ public class ProposalVO {
         private String stepFlowBarJson;
         /** 결론 리본 텍스트 (CONCLUSION_RIBBON_TXT) */
         private String conclusionRibbonTxt;
-        /** 이미지 생성 힌트 (Stage3.5 조립 결과) */
+        /** 이미지 생성 힌트 (IMAGE_GEN_HINT) — components_json 기반으로 doStyleAssembly에서 조립 */
         private String imageGenHint;
         /** 정렬 순서 (SORT_ORD) */
         private Integer sortOrd;
-        /** 렌더링된 이미지 NCP 경로 */
+        /** 렌더링된 이미지 NCP 경로 (PPTX 내보내기용 원본) */
         private String renderedImagePath;
+        /** 템플릿 프레임 합성 이미지 NCP 경로 (Step D 미리보기용) */
+        private String compositeImagePath;
         /** 렌더 상태 코드 (001=대기, 002=생성중, 003=완료, 004=실패) */
         private String renderStatusCd;
         /** 생성자 ID */
@@ -603,99 +605,6 @@ public class ProposalVO {
         private java.util.List<SlideVO> updatedSlides;
         /** AI 응답 요약 메시지 */
         private String aiMessage;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Step E: 검토 — 전역 보완 채팅 + Stage4 평가 시뮬레이션
-    // ══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * TB_PT_REVIEW — Stage4 평가 시뮬레이션 결과 한 건
-     *
-     * DDL:
-     *   CREATE TABLE TB_PT_REVIEW (
-     *     REVIEW_ID          VARCHAR(20)  NOT NULL PRIMARY KEY,
-     *     PT_PROJECT_ID      VARCHAR(20)  NOT NULL,
-     *     SLIDE_ID           VARCHAR(20)  NULL,          -- NULL = 전체 단위 지적
-     *     EVAL_CRITERIA_ID   VARCHAR(20)  NULL,
-     *     SEVERITY_CD        VARCHAR(3)   NULL,          -- PT000008: 001=치명적 002=중요 003=보완권고
-     *     EVAL_CRITERIA_NM   VARCHAR(255) NULL,          -- LLM 반환값 원문 (매칭 실패 시 참조용)
-     *     CURRENT_ISSUE      TEXT         NULL,
-     *     SCORE_IMPACT       TEXT         NULL,
-     *     FIX_DIRECTION      TEXT         NULL,
-     *     FIX_SUGGESTION_TXT TEXT         NULL,
-     *     EXPECTED_SCORE     DECIMAL(5,2) NULL,
-     *     CREATE_USER_ID     VARCHAR(50)  NULL,
-     *     CREATE_DT          DATETIME     NULL,
-     *     INDEX idx_pt_review_project (PT_PROJECT_ID),
-     *     INDEX idx_pt_review_slide   (SLIDE_ID)
-     *   );
-     */
-    @Data
-    public static class ReviewVO {
-        /** REVIEW_ID (PK, VARCHAR 20, prefix PTR-) */
-        private String reviewId;
-        /** PT 프로젝트 ID */
-        private String ptProjectId;
-        /** 대상 슬라이드 ID (NULL = 전체 단위 지적) */
-        private String slideId;
-        /** 연결된 평가기준 ID (NULL 허용) */
-        private String evalCriteriaId;
-        /** 심각도 코드 (001=치명적, 002=중요, 003=보완권고) */
-        private String severityCd;
-        /** LLM이 반환한 evalCriteriaNm 원문 */
-        private String evalCriteriaNm;
-        /** 현재 문제 내용 */
-        private String currentIssue;
-        /** 점수 영향 */
-        private String scoreImpact;
-        /** 수정 방향 */
-        private String fixDirection;
-        /** 수정 제안 내용 */
-        private String fixSuggestionTxt;
-        /** 예상 점수 */
-        private Double expectedScore;
-        /** 생성자 ID */
-        private String createUserId;
-        /** 생성일시 */
-        private String createDt;
-    }
-
-    /**
-     * E — 전역 보완 채팅 요청 VO
-     */
-    @Data
-    public static class ReviewChatVO {
-        /** PT 프로젝트 ID */
-        private String ptProjectId;
-        /** 사용자 보완 요청 메시지 */
-        private String message;
-        /** LLM 모델 ID */
-        private String modelId;
-        /** 에이전트 ID */
-        private String agentId;
-    }
-
-    /**
-     * E — 전역 보완 채팅 응답 VO
-     */
-    @Data
-    public static class ReviewChatResultVO {
-        /** 재생성된 슬라이드 목록 */
-        private java.util.List<SlideVO> updatedSlides;
-        /** AI 응답 요약 메시지 */
-        private String aiMessage;
-    }
-
-    /**
-     * E — Stage4 평가 시뮬레이션 실행 응답 VO
-     */
-    @Data
-    public static class EvalSimulationResultVO {
-        /** 저장된 리뷰 건수 */
-        private int savedCount;
-        /** 심각도순 정렬된 리뷰 목록 */
-        private java.util.List<ReviewVO> reviews;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -797,16 +706,49 @@ public class ProposalVO {
         private String modifyUserId;
         /** 수정일시 */
         private String modifyDt;
+        /** 템플릿 프레임 이미지 NCP 경로 (Step E 확정 후 비동기 생성) */
+        private String frameImagePath;
     }
 
     /**
-     * 템플릿 재생성 요청 VO (보완요청 포함)
+     * 템플릿 재생성 요청 VO
      */
     @Data
     public static class PtTemplateRegenerateVO {
         /** 프로젝트 ID */
         private String ptProjectId;
-        /** 보완 지시 텍스트 (null이면 전체 재생성) */
-        private String refineInstruction;
+    }
+
+    /**
+     * Stage4 평가 시뮬레이션 결과 VO (TB_PT_REVIEW)
+     */
+    @Data
+    public static class ReviewVO {
+        /** 리뷰 ID */
+        private String reviewId;
+        /** 프로젝트 ID */
+        private String ptProjectId;
+        /** 슬라이드 ID */
+        private String slideId;
+        /** 평가기준 ID */
+        private String evalCriteriaId;
+        /** 심각도 코드 (001=높음, 002=중간, 003=낮음) */
+        private String severityCd;
+        /** 평가항목명 */
+        private String evalCriteriaNm;
+        /** 현재 문제 */
+        private String currentIssue;
+        /** 점수 영향 */
+        private String scoreImpact;
+        /** 수정 방향 */
+        private String fixDirection;
+        /** 수정 제안 내용 */
+        private String fixSuggestionTxt;
+        /** 예상 점수 */
+        private java.math.BigDecimal expectedScore;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
     }
 }

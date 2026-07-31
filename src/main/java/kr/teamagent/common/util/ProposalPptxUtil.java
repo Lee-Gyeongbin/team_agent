@@ -1,6 +1,9 @@
 package kr.teamagent.common.util;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.apache.poi.sl.usermodel.TextParagraph;
 import org.apache.poi.util.Units;
 import org.apache.poi.xslf.usermodel.*;
@@ -373,12 +376,14 @@ public class ProposalPptxUtil {
      * @param accentColor          강조색 hex
      * @param headerComponentsJson HEADER_COMPONENTS_JSON (TB_PT_TEMPLATE)
      * @param footerComponentsJson FOOTER_COMPONENTS_JSON (TB_PT_TEMPLATE)
+     * @param frameImageBytes      LLM이 생성한 프레임 이미지 bytes (null이면 슬롯 코드 렌더링 폴백)
      */
     public static byte[] buildProposalDocWithImages(
             List<PageInfo> pages,
             String docSize,
             String bgColor, String baseColor, String accentColor,
-            String headerComponentsJson, String footerComponentsJson) throws IOException {
+            String headerComponentsJson, String footerComponentsJson,
+            byte[] frameImageBytes) throws IOException {
 
         // ── 페이지 크기 결정 ─────────────────────────────────────────────────
         final int slideW, slideH;
@@ -410,6 +415,9 @@ public class ProposalPptxUtil {
         int IMAGE_H  = slideH - HEADER_H - FOOTER_H;
         int FOOTER_Y = slideH - FOOTER_H;
 
+        // 프레임 이미지 사용 여부 (LLM이 생성한 헤더/푸터 프레임 이미지)
+        final boolean useFrameImage = (frameImageBytes != null && frameImageBytes.length > 0);
+
         try (XMLSlideShow pptx = new XMLSlideShow();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
 
@@ -418,82 +426,82 @@ public class ProposalPptxUtil {
             for (PageInfo page : pages) {
                 XSLFSlide slide = pptx.createSlide();
 
-                // 배경
-                addRect(slide, 0, 0, slideW, slideH, cBg);
-
                 boolean skipHeaderFooter = "001".equals(page.layoutTypeCd)
                         || "002".equals(page.layoutTypeCd);
 
-                if (!skipHeaderFooter) {
-                    // ── 헤더 렌더링 ─────────────────────────────────────────
-                    addRect(slide, 0, 0, slideW, HEADER_H, new Color(0xFF, 0xFF, 0xFF));
-                    if (headerLayout != null && headerLayout.slots != null) {
-                        for (TemplateSlot slot : headerLayout.slots) {
-                            if (slot == null) continue;
-                            String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
-                            int sx = scalePt(slot.x, scale);
-                            int sy = scalePt(slot.y, scale);
-                            int sw = slot.width  > 0 ? scalePt(slot.width,  scale) : 100;
-                            int sh = slot.height > 0 ? scalePt(slot.height, scale) : 20;
-
-                            if ("divider".equals(slot.key)) {
-                                Color divColor = slot.bgColor != null ? parseHex(slot.bgColor, cAccent) : cAccent;
-                                addRect(slide, sx, sy, sw, Math.max(1, sh), divColor);
-                            } else if (resolvedText != null && !resolvedText.isEmpty()) {
-                                Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
-                                Color bgSlot    = slot.bgColor != null ? parseHex(slot.bgColor, null) : null;
-                                if (bgSlot != null) {
-                                    addRect(slide, sx, sy, sw, sh, bgSlot);
-                                }
-                                double fs = slot.fontSize > 0 ? slot.fontSize * scale : 9 * scale;
-                                boolean bold = "bold".equalsIgnoreCase(slot.fontWeight);
-                                TextParagraph.TextAlign align = parseAlign(slot.align);
-                                text(slide, resolvedText, sx, sy, sw, sh, fs, bold, false, textColor, align);
-                            }
-                        }
-                    }
-
-                    // ── 푸터 렌더링 ─────────────────────────────────────────
-                    addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, tint(cBase, 0.88f));
-                    if (footerLayout != null && footerLayout.slots != null) {
-                        for (TemplateSlot slot : footerLayout.slots) {
-                            if (slot == null) continue;
-                            String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
-                            int sx = scalePt(slot.x, scale);
-                            int sy = FOOTER_Y + scalePt(slot.y, scale);
-                            int sw = slot.width  > 0 ? scalePt(slot.width,  scale) : 100;
-                            int sh = slot.height > 0 ? scalePt(slot.height, scale) : FOOTER_H - 4;
-
-                            if (resolvedText != null && !resolvedText.isEmpty()) {
-                                Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
-                                double fs = slot.fontSize > 0 ? slot.fontSize * scale : 8 * scale;
-                                boolean bold = "bold".equalsIgnoreCase(slot.fontWeight);
-                                TextParagraph.TextAlign align = parseAlign(slot.align);
-                                text(slide, resolvedText, sx, sy, sw, sh, fs, bold, false, textColor, align);
-                            }
-                        }
-                    }
-                }
-
-                // ── 본문 이미지 ──────────────────────────────────────────────
-                if (!skipHeaderFooter) {
+                if (useFrameImage && !skipHeaderFooter) {
+                    // ── 이미지+이미지 방식 ────────────────────────────────────
+                    // 1) 프레임 이미지(헤더/본문영역/푸터)를 슬라이드 전체 배경으로
+                    addImgLetterbox(pptx, slide, frameImageBytes, 0, 0, slideW, slideH, cBg);
+                    // 2) 인포그래픽을 본문 영역(헤더 아래 ~ 푸터 위)에 오버레이
                     if (page.imageBytes != null && page.imageBytes.length > 0) {
-                        addImgLetterbox(pptx, slide, page.imageBytes, 0, IMAGE_Y, slideW, IMAGE_H, cBg);
-                    } else {
-                        addRect(slide, 0, IMAGE_Y, slideW, IMAGE_H, tint(cBg, 0.25f));
-                        text(slide, "이미지를 불러올 수 없습니다.",
-                                30, IMAGE_Y + IMAGE_H / 2 - 10, slideW - 60, 24,
-                                10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
+                        addImgLetterbox(pptx, slide, page.imageBytes, 0, IMAGE_Y, slideW, IMAGE_H, null);
                     }
                 } else {
-                    // cover/section_divider: 이미지 전체 슬라이드 채움
-                    if (page.imageBytes != null && page.imageBytes.length > 0) {
-                        addImgLetterbox(pptx, slide, page.imageBytes, 0, 0, slideW, slideH, cBg);
+                    // ── 코드 기반 방식 (프레임 없거나 cover/divider 슬라이드) ──
+                    addRect(slide, 0, 0, slideW, slideH, cBg);
+
+                    if (!skipHeaderFooter) {
+                        // 헤더
+                        addRect(slide, 0, 0, slideW, HEADER_H, new Color(0xFF, 0xFF, 0xFF));
+                        if (headerLayout != null && headerLayout.slots != null) {
+                            for (TemplateSlot slot : headerLayout.slots) {
+                                if (slot == null) continue;
+                                String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
+                                int sx = (int)(slot.x      * slideW   / 100.0);
+                                int sy = (int)(slot.y      * HEADER_H / 100.0);
+                                int sw = slot.width  > 0 ? (int)(slot.width  * slideW   / 100.0) : slideW / 4;
+                                int sh = slot.height > 0 ? (int)(slot.height * HEADER_H / 100.0) : HEADER_H;
+                                if ("divider".equals(slot.key) || "divider".equals(slot.type)) {
+                                    addRect(slide, sx, sy, sw, Math.max(1, sh),
+                                            slot.bgColor != null ? parseHex(slot.bgColor, cAccent) : cAccent);
+                                } else if (resolvedText != null && !resolvedText.isEmpty()) {
+                                    Color textColor = slot.color  != null ? parseHex(slot.color,   DARK_TEXT) : DARK_TEXT;
+                                    Color bgSlot    = slot.bgColor != null ? parseHex(slot.bgColor, null)     : null;
+                                    if (bgSlot != null) addRect(slide, sx, sy, sw, sh, bgSlot);
+                                    double fs = slot.fontSize > 0 ? slot.fontSize * scale : 9 * scale;
+                                    text(slide, resolvedText, sx, sy, sw, sh, fs,
+                                            "bold".equalsIgnoreCase(slot.fontWeight), false, textColor, parseAlign(slot.align));
+                                }
+                            }
+                        }
+                        // 푸터
+                        addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, tint(cBase, 0.88f));
+                        if (footerLayout != null && footerLayout.slots != null) {
+                            for (TemplateSlot slot : footerLayout.slots) {
+                                if (slot == null) continue;
+                                String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
+                                int sx = (int)(slot.x * slideW   / 100.0);
+                                int sy = FOOTER_Y + (int)(slot.y * FOOTER_H / 100.0);
+                                int sw = slot.width  > 0 ? (int)(slot.width  * slideW   / 100.0) : slideW / 4;
+                                int sh = slot.height > 0 ? (int)(slot.height * FOOTER_H / 100.0) : FOOTER_H - 4;
+                                if (resolvedText != null && !resolvedText.isEmpty()) {
+                                    Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
+                                    double fs = slot.fontSize > 0 ? slot.fontSize * scale : 8 * scale;
+                                    text(slide, resolvedText, sx, sy, sw, sh, fs,
+                                            "bold".equalsIgnoreCase(slot.fontWeight), false, textColor, parseAlign(slot.align));
+                                }
+                            }
+                        }
+                        // 본문 이미지
+                        if (page.imageBytes != null && page.imageBytes.length > 0) {
+                            addImgLetterbox(pptx, slide, page.imageBytes, 0, IMAGE_Y, slideW, IMAGE_H, cBg);
+                        } else {
+                            addRect(slide, 0, IMAGE_Y, slideW, IMAGE_H, tint(cBg, 0.25f));
+                            text(slide, "이미지를 불러올 수 없습니다.",
+                                    30, IMAGE_Y + IMAGE_H / 2 - 10, slideW - 60, 24,
+                                    10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
+                        }
                     } else {
-                        addRect(slide, 0, 0, slideW, slideH, tint(cBg, 0.25f));
-                        text(slide, "이미지를 불러올 수 없습니다.",
-                                30, slideH / 2 - 10, slideW - 60, 24,
-                                10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
+                        // cover/section_divider: 이미지 전체 슬라이드 채움
+                        if (page.imageBytes != null && page.imageBytes.length > 0) {
+                            addImgLetterbox(pptx, slide, page.imageBytes, 0, 0, slideW, slideH, cBg);
+                        } else {
+                            addRect(slide, 0, 0, slideW, slideH, tint(cBg, 0.25f));
+                            text(slide, "이미지를 불러올 수 없습니다.",
+                                    30, slideH / 2 - 10, slideW - 60, 24,
+                                    10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
+                        }
                     }
                 }
             }
@@ -552,10 +560,49 @@ public class ProposalPptxUtil {
         int borderRadius;
     }
 
+    /**
+     * HEADER_COMPONENTS_JSON / FOOTER_COMPONENTS_JSON 파싱.
+     * 실제 JSON 구조: {"body": {"componentKey": {"x":%, "y":%, "text":"...", "type":"...", "style":{...}}}}
+     * x/y/width/height 값은 모두 0-100 범위의 퍼센트 값.
+     */
     private static TemplateLayout parseTemplateLayout(String json, Gson gson) {
         if (json == null || json.trim().isEmpty()) return null;
         try {
-            return gson.fromJson(json, TemplateLayout.class);
+            JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+            if (!root.has("body")) return null;
+            JsonObject body = root.getAsJsonObject("body");
+
+            TemplateLayout layout = new TemplateLayout();
+            layout.slots = new ArrayList<>();
+            layout.height = 0; // 기본값 사용 (header=64, footer=28)
+
+            for (Map.Entry<String, JsonElement> entry : body.entrySet()) {
+                if (!entry.getValue().isJsonObject()) continue;
+                JsonObject comp = entry.getValue().getAsJsonObject();
+
+                TemplateSlot slot = new TemplateSlot();
+                slot.key         = entry.getKey();
+                slot.type        = comp.has("type")  ? comp.get("type").getAsString()  : null;
+                slot.placeholder = comp.has("text")  ? comp.get("text").getAsString()  : null;
+                slot.x           = comp.has("x")     ? comp.get("x").getAsInt()        : 0;
+                slot.y           = comp.has("y")     ? comp.get("y").getAsInt()        : 0;
+
+                if (comp.has("style") && comp.get("style").isJsonObject()) {
+                    JsonObject style = comp.getAsJsonObject("style");
+                    slot.width        = style.has("width")        ? style.get("width").getAsInt()        : 0;
+                    slot.height       = style.has("height")       ? style.get("height").getAsInt()       : 0;
+                    slot.fontSize     = style.has("fontSize")     ? style.get("fontSize").getAsDouble()  : 0;
+                    slot.fontWeight   = style.has("fontWeight")   ? style.get("fontWeight").getAsString(): null;
+                    slot.color        = style.has("color")        ? style.get("color").getAsString()     : null;
+                    slot.bgColor      = style.has("bgColor")      ? style.get("bgColor").getAsString()   : null;
+                    slot.align        = style.has("align")        ? style.get("align").getAsString()     : null;
+                    slot.borderRadius = style.has("borderRadius") ? style.get("borderRadius").getAsInt() : 0;
+                }
+
+                layout.slots.add(slot);
+            }
+
+            return layout.slots.isEmpty() ? null : layout;
         } catch (Exception e) {
             return null;
         }
@@ -1054,8 +1101,8 @@ public class ProposalPptxUtil {
      */
     private static void addImgLetterbox(XMLSlideShow pptx, XSLFSlide slide,
             byte[] imgBytes, int zoneX, int zoneY, int zoneW, int zoneH, Color bgColor) {
-        // 구역 배경 먼저 채움 (letterbox 여백 색)
-        addRect(slide, zoneX, zoneY, zoneW, zoneH, bgColor);
+        // 구역 배경 먼저 채움 (bgColor=null 이면 스킵 — 이미지+이미지 오버레이 시)
+        if (bgColor != null) addRect(slide, zoneX, zoneY, zoneW, zoneH, bgColor);
 
         try {
             // 이미지 실제 픽셀 크기 읽기

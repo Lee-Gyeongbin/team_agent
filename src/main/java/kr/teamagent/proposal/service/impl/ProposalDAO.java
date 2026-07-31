@@ -411,8 +411,6 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return (ProposalVO.SlideVO) selectOne("proposal.selectSlideById", vo);
     }
 
-    // ── Step E: 검토 ──────────────────────────────────────────────────────────
-
     /**
      * 프로젝트 전체 슬라이드 목록 조회 (SLIDE_NO 순)
      * @param ptProjectId 프로젝트 ID
@@ -420,36 +418,6 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public List<ProposalVO.SlideVO> selectAllSlidesByProject(String ptProjectId) {
         return selectList("proposal.selectAllSlidesByProject", ptProjectId);
-    }
-
-    /**
-     * Stage4 평가 시뮬레이션 결과 단건 등록
-     * @param vo ReviewVO
-     */
-    public void insertReview(ProposalVO.ReviewVO vo) {
-        insert("proposal.insertReview", vo);
-    }
-
-    /**
-     * 최근 Stage4 실행 시각(분 단위) 조회 — 재실행 이력 분리용
-     * @param ptProjectId 프로젝트 ID
-     * @return "yyyy-MM-dd HH:mm" 문자열, 없으면 null
-     */
-    public String selectLatestReviewRunDt(String ptProjectId) {
-        return (String) selectOne("proposal.selectLatestReviewRunDt", ptProjectId);
-    }
-
-    /**
-     * 특정 실행 시각의 Stage4 결과 조회 (심각도순)
-     * @param ptProjectId 프로젝트 ID
-     * @param runDt "yyyy-MM-dd HH:mm" 형식
-     * @return List<ReviewVO>
-     */
-    public List<ProposalVO.ReviewVO> selectReviewsByRunDt(String ptProjectId, String runDt) {
-        java.util.Map<String, Object> params = new java.util.HashMap<>();
-        params.put("ptProjectId", ptProjectId);
-        params.put("runDt", runDt);
-        return selectList("proposal.selectReviewsByRunDt", params);
     }
 
     // ── Step F: 출력 ──────────────────────────────────────────────────────────
@@ -523,4 +491,12 @@ public class ProposalDAO extends EgovComAbstractDAO {
     public void updatePtTemplate(ProposalVO.PtTemplateVO vo) {
         update("proposal.updatePtTemplate", vo);
     }
+
+    /**
+     * PT 템플릿 프레임 이미지 경로만 업데이트
+     */
+    public void updateTemplateFramePath(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateFramePath", vo);
+    }
+
 }

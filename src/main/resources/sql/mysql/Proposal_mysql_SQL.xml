@@ -680,6 +680,7 @@
             COLOR_INDEX                                   AS COLOR_INDEX,
             IMAGE_GEN_HINT                                AS IMAGE_GEN_HINT,
             RENDERED_IMAGE_PATH                           AS RENDERED_IMAGE_PATH,
+            COMPOSITE_IMAGE_PATH                          AS COMPOSITE_IMAGE_PATH,
             RENDER_STATUS_CD                              AS RENDER_STATUS_CD,
             SORT_ORD                                      AS SORT_ORD,
             CREATE_USER_ID                                AS CREATE_USER_ID,
@@ -741,6 +742,7 @@
             <if test="conclusionRibbonTxt != null">CONCLUSION_RIBBON_TXT = #{conclusionRibbonTxt},</if>
             <if test="imageGenHint != null">IMAGE_GEN_HINT = #{imageGenHint},</if>
             <if test="renderedImagePath != null">RENDERED_IMAGE_PATH = #{renderedImagePath},</if>
+            <if test="compositeImagePath != null">COMPOSITE_IMAGE_PATH = #{compositeImagePath},</if>
             <if test="renderStatusCd != null">RENDER_STATUS_CD = #{renderStatusCd},</if>
             MODIFY_DT = NOW()
         </set>
@@ -968,6 +970,7 @@
             , CAST(COLOR_JSON AS CHAR)              AS COLOR_JSON
             , GEN_STATUS_CD                         AS GEN_STATUS_CD
             , ERROR_MSG                             AS ERROR_MSG
+            , FRAME_IMAGE_PATH                      AS FRAME_IMAGE_PATH
             , CREATE_USER_ID                        AS CREATE_USER_ID
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
             , MODIFY_USER_ID                        AS MODIFY_USER_ID
@@ -1011,6 +1014,15 @@
             , GEN_STATUS_CD          = #{genStatusCd}
             , ERROR_MSG              = #{errorMsg}
             , MODIFY_USER_ID         = #{modifyUserId}
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <update id="updateTemplateFramePath" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 프레임 이미지 경로 업데이트 proposal.updateTemplateFramePath */
+        UPDATE TB_PT_TEMPLATE
+        SET
+            FRAME_IMAGE_PATH = #{frameImagePath}
+            , MODIFY_DT      = NOW()
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
