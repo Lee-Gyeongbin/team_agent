@@ -212,14 +212,12 @@ public class ProposalVO {
         private String mandatoryYn;
         /** 출처 유형 코드 (001=사실, 002=전략적해석, 003=확인필요) */
         private String sourceTypeCd;
-        /** 근거 페이지 */
-        private String rfpPageRef;
-        /** 평가 영향도 (관련 평가항목) */
-        private String evalImpact;
         /** 제안서 대응방향 */
         private String responseDirection;
         /** 대응 증빙자료 유형 (evidence 기반 슬라이드 작성에 활용) */
         private String requiredEvidence;
+        // rfpPageRef: 슬라이드 생성에 불필요 — 제거
+        // evalImpact: linkedEc(연결 평가기준)로 대체 — 제거
     }
 
     /**
@@ -252,18 +250,13 @@ public class ProposalVO {
         private String problemTypeCd;
         /** 현재 문제 */
         private String currentProblem;
-        /** 근본 원인 */
-        private String rootCause;
-        /** 방치 시 위험 */
-        private String riskIfIgnored;
         /** 목표 */
         private String goal;
-        /** 필요 역량 */
-        private String requiredCapability;
         /** 전략 요약 */
         private String strategySummary;
         /** KPI */
         private String kpi;
+        // rootCause, riskIfIgnored, requiredCapability: 전략 분석용, 슬라이드 생성에 불필요 — 제거
     }
 
     /**
@@ -397,6 +390,8 @@ public class ProposalVO {
         private String parentNo;
         /** 섹션 번호 원문 (level-1 구조 파악용) */
         private String no;
+        /** RFP 세부 작성 지침 (항목별 작성 방법, DB 컬럼 GUIDE_CONTENT) */
+        private String guideContent;
         /** 조회 응답용 계층 구조 */
         private java.util.List<TocVO> children;
     }

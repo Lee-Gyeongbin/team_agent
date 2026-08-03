@@ -293,6 +293,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * S2D: TOC 항목 세부 작성 지침(GUIDE_CONTENT) 업데이트 (단건)
+     * @param vo tocId, guideContent
+     */
+    public void updateTocGuideContent(ProposalVO.TocVO vo) {
+        update("proposal.updateTocGuideContent", vo);
+    }
+
+    /**
      * TOC 항목 삭제 (tocId + 자식 소목차 연쇄 삭제)
      * @param tocId TOC_ID
      */

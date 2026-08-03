@@ -236,12 +236,7 @@
             , REQ_CONTENT
             , MANDATORY_YN
             , SOURCE_TYPE_CD
-            , RFP_PAGE_REF
-            , EVAL_IMPACT
-            , RESPONSE_DIRECTION
-            , REQUIRED_EVIDENCE
             , CONFIRM_NEEDED_YN
-            , CONFIRM_NEEDED_NOTE
             , SORT_ORD
             , CREATE_USER_ID
             , CREATE_DT
@@ -253,12 +248,7 @@
             , #{reqContent}
             , COALESCE(#{mandatoryYn}, 'Y')
             , COALESCE(#{sourceTypeCd}, '001')
-            , #{rfpPageRef}
-            , #{evalImpact}
-            , #{responseDirection}
-            , #{requiredEvidence}
             , COALESCE(#{confirmNeededYn}, 'N')
-            , #{confirmNeededNote}
             , COALESCE(#{sortOrd}, 0)
             , #{createUserId}
             , NOW()
@@ -276,12 +266,7 @@
             , REQ_CONTENT           AS REQ_CONTENT
             , MANDATORY_YN          AS MANDATORY_YN
             , SOURCE_TYPE_CD        AS SOURCE_TYPE_CD
-            , RFP_PAGE_REF          AS RFP_PAGE_REF
-            , EVAL_IMPACT           AS EVAL_IMPACT
-            , RESPONSE_DIRECTION    AS RESPONSE_DIRECTION
-            , REQUIRED_EVIDENCE     AS REQUIRED_EVIDENCE
             , CONFIRM_NEEDED_YN     AS CONFIRM_NEEDED_YN
-            , CONFIRM_NEEDED_NOTE   AS CONFIRM_NEEDED_NOTE
             , SORT_ORD              AS SORT_ORD
             , CREATE_USER_ID        AS CREATE_USER_ID
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
@@ -299,12 +284,7 @@
             <if test="reqContent != null">REQ_CONTENT = #{reqContent},</if>
             <if test="mandatoryYn != null">MANDATORY_YN = #{mandatoryYn},</if>
             <if test="sourceTypeCd != null">SOURCE_TYPE_CD = #{sourceTypeCd},</if>
-            <if test="rfpPageRef != null">RFP_PAGE_REF = #{rfpPageRef},</if>
-            <if test="evalImpact != null">EVAL_IMPACT = #{evalImpact},</if>
-            <if test="responseDirection != null">RESPONSE_DIRECTION = #{responseDirection},</if>
-            <if test="requiredEvidence != null">REQUIRED_EVIDENCE = #{requiredEvidence},</if>
             <if test="confirmNeededYn != null">CONFIRM_NEEDED_YN = #{confirmNeededYn},</if>
-            <if test="confirmNeededNote != null">CONFIRM_NEEDED_NOTE = #{confirmNeededNote},</if>
             MODIFY_DT = NOW()
         </set>
         WHERE REQUIREMENT_ID = #{requirementId}
@@ -479,11 +459,11 @@
     <insert id="insertToc" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
         INSERT INTO TB_PT_TOC (
             TOC_ID, PT_PROJECT_ID, PARENT_TOC_ID, SECTION_NO, SECTION_NM,
-            LINKED_EVAL_CRITERIA_ID, PLANNED_SLIDE_CNT, SORT_ORD, CREATE_USER_ID, CREATE_DT
+            LINKED_EVAL_CRITERIA_ID, PLANNED_SLIDE_CNT, SORT_ORD, GUIDE_CONTENT, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{tocId}, #{ptProjectId}, #{parentTocId, jdbcType=VARCHAR}, #{sectionNo}, #{sectionNm},
             #{linkedEvalCriteriaId, jdbcType=VARCHAR}, #{plannedSlideCnt},
-            COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
+            COALESCE(#{sortOrd}, 0), #{guideContent, jdbcType=VARCHAR}, #{createUserId}, NOW()
         )
     </insert>
 
@@ -500,6 +480,13 @@
         /* TOC 항목 제목 수정 proposal.updateTocItem */
         UPDATE TB_PT_TOC
         SET SECTION_NM = #{sectionNm}
+        WHERE TOC_ID = #{tocId}
+    </update>
+
+    <update id="updateTocGuideContent" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* S2D: 세부 작성 지침 업데이트 proposal.updateTocGuideContent */
+        UPDATE TB_PT_TOC
+        SET GUIDE_CONTENT = #{guideContent, jdbcType=VARCHAR}
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -529,6 +516,7 @@
             t.LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
             t.PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             t.SORT_ORD                AS SORT_ORD,
+            t.GUIDE_CONTENT           AS GUIDE_CONTENT,
             t.CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
         FROM TB_PT_TOC t
@@ -574,6 +562,7 @@
             COVERED_REQ_IDS_JSON    AS COVERED_REQ_IDS_JSON,
             PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             SORT_ORD                AS SORT_ORD,
+            GUIDE_CONTENT           AS GUIDE_CONTENT,
             CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
         FROM TB_PT_TOC
@@ -591,7 +580,8 @@
             SECTION_NM              AS SECTION_NM,
             LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
             PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
-            SORT_ORD                AS SORT_ORD
+            SORT_ORD                AS SORT_ORD,
+            GUIDE_CONTENT           AS GUIDE_CONTENT
         FROM TB_PT_TOC
         WHERE PT_PROJECT_ID = #{ptProjectId}
           AND PARENT_TOC_ID IS NOT NULL

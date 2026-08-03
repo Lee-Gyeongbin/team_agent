@@ -1071,12 +1071,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
             req.setMandatoryYn(getStrOrNull(obj, "mandatoryYn"));
             req.setSourceTypeCd(getStrOrNull(obj, "sourceTypeCd"));
-            req.setRfpPageRef(getStrOrNull(obj, "rfpPageRef"));
-            req.setEvalImpact(getStrOrNull(obj, "evalImpact"));
-            req.setResponseDirection(getStrOrNull(obj, "responseDirection"));
-            req.setRequiredEvidence(getStrOrNull(obj, "requiredEvidence"));
             req.setConfirmNeededYn(getStrOrNull(obj, "confirmNeededYn"));
-            req.setConfirmNeededNote(getStrOrNull(obj, "confirmNeededNote"));
             if (obj.has("sortOrd") && !obj.get("sortOrd").isJsonNull()) {
                 req.setSortOrd(obj.get("sortOrd").getAsInt());
             }
@@ -1767,6 +1762,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         // 17. 트랜잭션 저장
         saveStage2Result(ptProjectId, parsed, evalCriteria, requirements);
+
+        // 18. S2D: 소목차별 세부 작성 지침 추출 (mandatedToc 경로 + 프롬프트 등록 시에만 실행, 비치명적)
+        if (hasMandatedToc) {
+            try {
+                executeStage2dGuideContent(ptProjectId, modelId, agentId, progressCallback);
+            } catch (Exception e) {
+                logger.warn("[PT Stage2-D] guideContent 추출 실패 (비치명적, 건너뜀): {} (ptProjectId={})", e.getMessage(), ptProjectId);
+            }
+        }
 
         parsed.setPtProjectId(ptProjectId);
         return parsed;
@@ -2532,6 +2536,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 toc.setSectionNo(no);
                 toc.setSectionNm(getStrOrNull(obj, "title"));
                 if (level == 2) toc.setParentNo(getStrOrNull(obj, "parentNo"));
+                toc.setGuideContent(getStrOrNull(obj, "guideContent"));
                 toc.setPlannedSlideCnt(1);
                 toc.setSortOrd(sortOrd++);
                 toc.setCoveredReqIds(new java.util.ArrayList<>());
@@ -2659,6 +2664,123 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             logger.info("[PT Stage2-C] 배정 완료 — {}개 소목차 처리 (ptProjectId={})", applied, ptProjectId);
         } catch (Exception e) {
             logger.warn("[PT Stage2-C] S2C 응답 파싱 실패, 배정 생략 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+    }
+
+    // ── S2D: 세부 작성 지침(guideContent) 추출 ──────────────────────────────────
+
+    /**
+     * S2D: 소목차별 세부 작성 지침 추출 — 비치명적 (실패 시 guideContent = null 유지)
+     */
+    private void executeStage2dGuideContent(String ptProjectId, String modelId, String agentId,
+            java.util.function.Consumer<String> progressCallback) throws Exception {
+
+        String s2dPromptContent = null;
+        try { s2dPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2D_GUIDE_CONTENT"); }
+        catch (Exception e) { logger.warn("[PT Stage2-D] 프롬프트 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage()); }
+        if (CommonUtil.isEmpty(s2dPromptContent)) {
+            logger.warn("[PT Stage2-D] S2D_GUIDE_CONTENT 프롬프트 없음, 건너뜀 (ptProjectId={})", ptProjectId);
+            return;
+        }
+
+        List<ProposalVO.TocVO> leafTocList = proposalDAO.selectLeafTocList(ptProjectId);
+        if (leafTocList == null || leafTocList.isEmpty()) {
+            logger.warn("[PT Stage2-D] 소목차 없음, 건너뜀 (ptProjectId={})", ptProjectId);
+            return;
+        }
+
+        String rfpText = extractPtFileText(resolvePtFileId(ptProjectId, "001"));
+        if (CommonUtil.isEmpty(rfpText)) {
+            logger.warn("[PT Stage2-D] RFP 텍스트 없음, 건너뜀 (ptProjectId={})", ptProjectId);
+            return;
+        }
+        String guidelineSection = extractWritingGuidelineSection(rfpText);
+
+        if (progressCallback != null) progressCallback.accept("Call 3 진행중 (세부 작성 지침 추출)");
+        String s2dPrompt = buildStage2dGuideContentPrompt(s2dPromptContent, leafTocList, guidelineSection);
+        logger.info("[PT Stage2-D] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2dPrompt.length(), ptProjectId);
+
+        String s2dResponse = riskDiagnosisAgentService.callLlmQuerySync(s2dPrompt, modelId, "", agentId);
+        if (CommonUtil.isEmpty(s2dResponse)) {
+            logger.warn("[PT Stage2-D] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
+            s2dResponse = riskDiagnosisAgentService.callLlmQuerySync(s2dPrompt, modelId, "", agentId);
+        }
+        if (CommonUtil.isEmpty(s2dResponse)) {
+            logger.warn("[PT Stage2-D] LLM 응답 없음, guideContent 추출 생략 (ptProjectId={})", ptProjectId);
+            return;
+        }
+
+        parseAndApplyStage2dResponse(s2dResponse, leafTocList, ptProjectId);
+        logger.info("[PT Stage2-D] guideContent 업데이트 완료 (ptProjectId={})", ptProjectId);
+    }
+
+    /**
+     * RFP 텍스트에서 "세부 작성 지침" 섹션 추출.
+     * 키워드 위치 기준으로 최대 20,000자 윈도우를 반환한다.
+     * 키워드를 찾지 못하면 앞부분 20,000자를 반환한다.
+     */
+    private String extractWritingGuidelineSection(String rfpText) {
+        final int MAX_CHARS = 20000;
+        String[] keywords = {"세부 작성 지침", "세부작성지침", "작성지침", "제안서 작성", "목차별 작성"};
+        for (String kw : keywords) {
+            int idx = rfpText.indexOf(kw);
+            if (idx >= 0) {
+                int start = Math.max(0, idx - 500);
+                int end   = Math.min(rfpText.length(), start + MAX_CHARS);
+                return rfpText.substring(start, end);
+            }
+        }
+        return rfpText.substring(0, Math.min(rfpText.length(), MAX_CHARS));
+    }
+
+    /**
+     * S2D 프롬프트 조합 — 소목차 목록 + 작성지침 원문 섹션
+     */
+    private String buildStage2dGuideContentPrompt(String promptContent,
+            List<ProposalVO.TocVO> leafTocList, String guidelineSection) {
+        StringBuilder sb = new StringBuilder(promptContent);
+        sb.append("\n\n## 소목차 목록\n");
+        for (ProposalVO.TocVO toc : leafTocList) {
+            sb.append("- ").append(toc.getSectionNm()).append("\n");
+        }
+        sb.append("\n## RFP 세부 작성 지침 원문\n").append(guidelineSection);
+        return sb.toString();
+    }
+
+    /**
+     * S2D 응답 파싱 후 TB_PT_TOC.GUIDE_CONTENT 업데이트.
+     * 응답 형식: [{"title": "소목차명", "guideContent": "..."}]
+     * title로 TocVO를 매칭하므로 파싱 실패해도 non-fatal.
+     */
+    private void parseAndApplyStage2dResponse(String response,
+            List<ProposalVO.TocVO> leafTocList, String ptProjectId) {
+        java.util.Map<String, ProposalVO.TocVO> tocByNm = new java.util.LinkedHashMap<>();
+        for (ProposalVO.TocVO t : leafTocList) {
+            if (CommonUtil.isNotEmpty(t.getSectionNm())) tocByNm.put(t.getSectionNm().trim(), t);
+        }
+        try {
+            String json = stripJsonCodeBlock(response);
+            JsonArray arr = JsonParser.parseString(json).getAsJsonArray();
+            int updated = 0;
+            for (JsonElement el : arr) {
+                JsonObject obj = el.getAsJsonObject();
+                String title       = getStrOrNull(obj, "title");
+                String guideContent = getStrOrNull(obj, "guideContent");
+                if (CommonUtil.isEmpty(title)) continue;
+                ProposalVO.TocVO matched = tocByNm.get(title.trim());
+                if (matched == null) {
+                    logger.warn("[PT Stage2-D] title 매칭 실패 — 건너뜀 (title={}, ptProjectId={})", title, ptProjectId);
+                    continue;
+                }
+                ProposalVO.TocVO updToc = new ProposalVO.TocVO();
+                updToc.setTocId(matched.getTocId());
+                updToc.setGuideContent(guideContent);
+                proposalDAO.updateTocGuideContent(updToc);
+                updated++;
+            }
+            logger.info("[PT Stage2-D] guideContent DB 반영: {}건 (ptProjectId={})", updated, ptProjectId);
+        } catch (Exception e) {
+            logger.warn("[PT Stage2-D] 응답 파싱 실패, guideContent 업데이트 생략 (ptProjectId={}): {}", ptProjectId, e.getMessage());
         }
     }
 
@@ -3107,6 +3229,42 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 이미지 생성 API에 전달할 시각 스타일 앵커 문자열을 반환한다.
+     * <p>
+     * 동일 프로젝트의 모든 슬라이드에 이 prefix를 동일하게 붙임으로써,
+     * 소목차별 독립 호출에서도 AI 이미지 생성기가 일관된 시각 언어를 유지하도록 한다.
+     * hex 코드 단독 전달보다 구체적인 시각 설명(flat vector, outline icon 등)이
+     * 이미지 생성 모델의 스타일 일관성에 더 강하게 작용한다.
+     *
+     * @param baseColor    기본색 hex (e.g. "#5B4FE9")
+     * @param accentColor  강조색 hex (e.g. "#E08A2C")
+     * @param docSize      문서 크기 코드 ("a4" / "169" / "43")
+     * @param writingStyle 문체 코드 ("formal" / "plain" / "persuasive")
+     * @return "[STYLE: ...]" 형식의 스타일 앵커 문자열
+     */
+    private String buildStyleManifest(String baseColor, String accentColor, String docSize, String writingStyle) {
+        String docSizeDesc;
+        if ("169".equals(docSize))      docSizeDesc = "16:9 widescreen landscape";
+        else if ("43".equals(docSize))  docSizeDesc = "4:3 standard landscape";
+        else                            docSizeDesc = "A4 portrait";
+
+        String toneDesc;
+        if ("persuasive".equals(writingStyle))  toneDesc = "bold and impactful";
+        else if ("plain".equals(writingStyle))  toneDesc = "clear and concise";
+        else                                    toneDesc = "professional and formal";
+
+        return String.format(
+                "[STYLE: flat vector infographic illustration, minimalist clean corporate design, " +
+                "white or very light background, outline icons with 2px stroke and rounded corners, " +
+                "primary color %s for main headers and panel borders, " +
+                "accent color %s for highlights callouts and emphasis, " +
+                "dark navy text #1A1A2E, no photographic elements, no gradients, " +
+                "consistent icon family throughout, clean sans-serif typography, " +
+                "Korean corporate presentation, %s layout, %s tone]",
+                baseColor, accentColor, docSizeDesc, toneDesc);
+    }
+
+    /**
      * components_json + 슬라이드 제목에서 이미지 생성 쿼리 문자열을 추출한다.
      * - 슬라이드 제목 + 컴포넌트 유형 + 핵심 텍스트 키워드 (최대 6개) + "minimal infographic, clean ui" 고정 접미어
      */
@@ -3236,12 +3394,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String baseColor = baseColors.get(ci);
         String accentColor = accentColors.isEmpty() ? "#E08A2C" : accentColors.get(0);
 
-        // 3. IMAGE_GEN_HINT 조립 — components_json 실제 콘텐츠 기반
+        // 3. IMAGE_GEN_HINT 조립 — 스타일 앵커 prefix + components_json 실제 콘텐츠
+        // 모든 슬라이드에 동일한 styleManifest를 prefix로 붙여 AI 이미지 생성기의
+        // 시각 스타일 일관성을 유지한다 (소목차별 독립 호출 간 스타일 편차 방지).
+        String styleManifest = buildStyleManifest(baseColor, accentColor, docSize, writingStyle);
         String styleParams = String.format(
                 "docSize=%s baseColor=%s accentColor=%s writingStyle=%s colorIndex=%d",
                 docSize, baseColor, accentColor, writingStyle, slide.getColorIndex());
 
-        String imageGenHint = buildImageQueryFromSlide(slide) + " | " + styleParams;
+        String imageGenHint = styleManifest + " " + buildImageQueryFromSlide(slide) + " | " + styleParams;
 
         // 4. DB 업데이트
         ProposalVO.SlideVO updateVO = new ProposalVO.SlideVO();
@@ -4185,6 +4346,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         sb.append("\n- 섹션 번호: ").append(CommonUtil.nullToBlank(tocVO.getSectionNo()));
         sb.append("\n- 섹션명: ").append(CommonUtil.nullToBlank(tocVO.getSectionNm()));
         sb.append("\n- 목표 슬라이드 수: ").append(tocVO.getPlannedSlideCnt()).append("장");
+        if (CommonUtil.isNotEmpty(tocVO.getGuideContent())) {
+            sb.append("\n- RFP 세부 작성 지침: ").append(tocVO.getGuideContent());
+        }
 
         if (linkedEc != null) {
             sb.append("\n\n## 연결된 평가기준");
@@ -4291,8 +4455,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             v.setReqContent(r.getReqContent());
             v.setMandatoryYn(r.getMandatoryYn());
             v.setSourceTypeCd(r.getSourceTypeCd());
-            v.setRfpPageRef(r.getRfpPageRef());
-            v.setEvalImpact(r.getEvalImpact());
             v.setResponseDirection(r.getResponseDirection());
             v.setRequiredEvidence(r.getRequiredEvidence());
             result.add(v);
@@ -4323,10 +4485,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             ProposalVO.ProblemDefinitionStage3VO v = new ProposalVO.ProblemDefinitionStage3VO();
             v.setProblemTypeCd(p.getProblemTypeCd());
             v.setCurrentProblem(p.getCurrentProblem());
-            v.setRootCause(p.getRootCause());
-            v.setRiskIfIgnored(p.getRiskIfIgnored());
             v.setGoal(p.getGoal());
-            v.setRequiredCapability(p.getRequiredCapability());
             v.setStrategySummary(p.getStrategySummary());
             v.setKpi(p.getKpi());
             result.add(v);
@@ -4734,9 +4893,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
             // 설정(컬러) 조회
             String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
-            String baseColor   = "#5B4FE9";
-            String accentColor = "#E08A2C";
-            String submitterNm = "";
+            String baseColor    = "#5B4FE9";
+            String accentColor  = "#E08A2C";
+            String docSize      = "a4";
+            String writingStyle = "formal";
 
             if (CommonUtil.isNotEmpty(configJson)) {
                 try {
@@ -4750,8 +4910,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                             if (!bases.isEmpty()) baseColor = bases.get(0);
                             if (!accents.isEmpty()) accentColor = accents.get(0);
                         }
-                        String sn = getStrOrNull(settings, "submitterNm");
-                        if (CommonUtil.isNotEmpty(sn)) submitterNm = sn;
+                        String ws = getStrOrNull(settings, "writingStyle");
+                        if (CommonUtil.isNotEmpty(ws)) writingStyle = ws;
+                    }
+                    if (cfgRoot.has("template") && !cfgRoot.get("template").isJsonNull()) {
+                        JsonObject tmpl = cfgRoot.getAsJsonObject("template");
+                        String ds = getStrOrNull(tmpl, "docSize");
+                        if (CommonUtil.isNotEmpty(ds)) docSize = ds;
                     }
                 } catch (Exception e) {
                     logger.warn("[PT Template] configJson 파싱 실패: {}", e.getMessage());
@@ -4778,14 +4943,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 throw new RuntimeException("템플릿 생성 프롬프트가 등록되지 않았습니다. TB_PROMPT에 STAGE_CD='S3_TEMPLATE'인 프롬프트를 등록해 주세요.");
             }
 
-            // 변수 치환
+            // 변수 치환 — 프롬프트 빌드타임 변수: {{camelCase}} (PPTX 런타임 변수 {snake_case}와 구분)
             String prompt = promptTemplate
-                    .replace("{project_nm}", projectNm)
-                    .replace("{org_nm}", orgNm)
-                    .replace("{submitter_nm}", submitterNm)
-                    .replace("{base_color}", baseColor)
-                    .replace("{accent_color}", accentColor)
-                    .replace("{toc_list}", tocSb.toString().trim());
+                    .replace("{{projectNm}}", projectNm)
+                    .replace("{{orgNm}}", orgNm)
+                    .replace("{{docSize}}", docSize)
+                    .replace("{{baseColor}}", baseColor)
+                    .replace("{{accentColor}}", accentColor)
+                    .replace("{{writingStyle}}", writingStyle)
+                    .replace("{{topLevelTocList}}", tocSb.toString().trim());
 
             // LLM 호출
             String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(prompt, modelId, "", agentId);
