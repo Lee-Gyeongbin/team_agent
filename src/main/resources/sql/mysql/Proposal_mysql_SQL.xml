@@ -488,10 +488,11 @@
     </insert>
 
     <update id="updateTocEvalLinkAndReqIds" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
-        /* Stage2 TOC 매핑 업데이트 — LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON 갱신 proposal.updateTocEvalLinkAndReqIds */
+        /* Stage2 TOC 매핑 업데이트 — LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON, PLANNED_SLIDE_CNT 갱신 proposal.updateTocEvalLinkAndReqIds */
         UPDATE TB_PT_TOC
         SET LINKED_EVAL_CRITERIA_ID = #{linkedEvalCriteriaId, jdbcType=VARCHAR},
-            COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR}
+            COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
+            PLANNED_SLIDE_CNT       = #{plannedSlideCnt}
         WHERE TOC_ID = #{tocId}
     </update>
 

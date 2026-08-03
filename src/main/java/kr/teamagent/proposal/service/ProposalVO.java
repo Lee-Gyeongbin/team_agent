@@ -272,6 +272,8 @@ public class ProposalVO {
      */
     @Data
     public static class EvalCriteriaLiteVO {
+        /** 평가기준 ID */
+        private String evalCriteriaId;
         /** 평가항목명 */
         private String evalItemNm;
         /** 배점 */

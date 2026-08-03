@@ -1650,7 +1650,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 : buildStage2aPrompt(s2aPromptContent, project, requirements, evalCriteria, totalSlideBudget);
 
         // 5. Call 1 LLM 호출 (1회 재시도)
-        if (progressCallback != null) progressCallback.accept("Call 1 진행중 (문제정의" + (hasMandatedToc ? "" : " + 목차") + ")");
+        if (progressCallback != null) progressCallback.accept("Call 1 진행중 (문제정의)");
         long s2aStart = System.currentTimeMillis();
         logger.info("[PT Stage2-A] 호출 시작 - 프롬프트 길이: {}자, mandatedToc경로:{} (ptProjectId={})", s2aPrompt.length(), hasMandatedToc, ptProjectId);
         String s2aResponse = riskDiagnosisAgentService.callLlmQuerySync(s2aPrompt, modelId, "", agentId);
@@ -1658,7 +1658,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             logger.warn("[PT Stage2-A] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
             s2aResponse = riskDiagnosisAgentService.callLlmQuerySync(s2aPrompt, modelId, "", agentId);
         }
-        if (CommonUtil.isEmpty(s2aResponse)) throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 2-A(문제정의+목차) 분석을 완료할 수 없습니다.");
+        if (CommonUtil.isEmpty(s2aResponse)) throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 2-A(문제정의) 분석을 완료할 수 없습니다.");
         logger.info("[PT Stage2-A] 완료 - 프롬프트 길이: {}자, 소요시간: {}ms (ptProjectId={})",
                 s2aPrompt.length(), System.currentTimeMillis() - s2aStart, ptProjectId);
 
@@ -1681,10 +1681,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             if (progressCallback != null) progressCallback.accept("Call 1B 진행중 (요구사항-목차 매핑)");
             String s2cPromptContent = null;
             try { s2cPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2C_COVEREDREQNOS"); }
-            catch (Exception e) { logger.warn("[PT Stage2-C] 프롬프트 조회 실패, 기본 프롬프트 사용: {}", e.getMessage()); }
-            if (CommonUtil.isEmpty(s2cPromptContent)) s2cPromptContent = buildDefaultStage2cPrompt();
+            catch (Exception e) { logger.warn("[PT Stage2-C] 프롬프트 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage()); }
+            if (CommonUtil.isEmpty(s2cPromptContent))
+                throw new RuntimeException("Stage2 프롬프트가 DB에 등록되어 있지 않습니다. STAGE_CD=S2C_COVEREDREQNOS 확인 필요");
 
-            String s2cPrompt = buildStage2cCoveredReqIdsPrompt(s2cPromptContent, parsed.getToc(), requirements);
+            String s2cPrompt = buildStage2cCoveredReqIdsPrompt(s2cPromptContent, parsed.getToc(), requirements, evalCriteria);
             long s2cStart = System.currentTimeMillis();
             logger.info("[PT Stage2-C] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2cPrompt.length(), ptProjectId);
             String s2cResponse = riskDiagnosisAgentService.callLlmQuerySync(s2cPrompt, modelId, "", agentId);
@@ -1693,7 +1694,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 s2cResponse = riskDiagnosisAgentService.callLlmQuerySync(s2cPrompt, modelId, "", agentId);
             }
             if (CommonUtil.isNotEmpty(s2cResponse)) {
-                parseAndApplyStage2cResponse(parsed.getToc(), s2cResponse, ptProjectId);
+                java.util.Set<String> validEvalCriteriaIds = new java.util.HashSet<>();
+                if (evalCriteria != null) for (ProposalVO.EvalCriteriaVO ec : evalCriteria) if (CommonUtil.isNotEmpty(ec.getEvalCriteriaId())) validEvalCriteriaIds.add(ec.getEvalCriteriaId());
+                parseAndApplyStage2cResponse(parsed.getToc(), s2cResponse, ptProjectId, validEvalCriteriaIds);
                 logger.info("[PT Stage2-C] 완료 - 소요시간: {}ms (ptProjectId={})", System.currentTimeMillis() - s2cStart, ptProjectId);
             } else {
                 logger.warn("[PT Stage2-C] LLM 응답 없음, coveredReqNos 배정 생략 (ptProjectId={})", ptProjectId);
@@ -1712,8 +1715,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             applyMandatedTocIfNeeded(project.getWritingGuidelineJson(), parsed);
         }
 
-        // 9. 미커버 요구사항 경고
-        warnUncoveredRequirements(parsed.getToc(), validReqIds, ptProjectId);
+        // 9. 미커버 요구사항 경고 (toc가 있을 때만 의미 있음)
+        if (parsed.getToc() != null && !parsed.getToc().isEmpty()) {
+            warnUncoveredRequirements(parsed.getToc(), validReqIds, ptProjectId);
+        }
 
         // ── 자사/경쟁사/기타 파일 텍스트 추출 (Call 2 에서만 사용) ────────────────
         String ownContext = extractMultiFileText(companyFileIds);
@@ -1805,7 +1810,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
 
         // ── TOC 매핑 업데이트 (DELETE/INSERT 없음 — Step B 확정 목차 보존)
-        // LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON만 갱신
+        // LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON, PLANNED_SLIDE_CNT 갱신
         List<ProposalVO.TocVO> existingTocList = proposalDAO.selectTocList(ptProjectId);
         logger.info("[PT Stage2] 기존 TOC 레코드 조회: {}건 (ptProjectId={})", existingTocList.size(), ptProjectId);
 
@@ -1819,11 +1824,19 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 dbBySectionNm.putIfAbsent(dbToc.getSectionNm().trim(), dbToc);
         }
 
-        // evalItemNm → evalCriteriaId 맵
+        // evalItemNm → evalCriteriaId 맵 (S2A 일반경로 호환용, mandatedToc 경로에서는 미사용)
         java.util.Map<String, String> evalNmToId = new java.util.HashMap<>();
         if (evalCriteriaFromDb != null) {
             for (ProposalVO.EvalCriteriaVO ec : evalCriteriaFromDb) {
                 if (CommonUtil.isNotEmpty(ec.getEvalItemNm())) evalNmToId.put(ec.getEvalItemNm(), ec.getEvalCriteriaId());
+            }
+        }
+
+        // 유효한 evalCriteriaId Set
+        java.util.Set<String> validEvalIds = new java.util.HashSet<>();
+        if (evalCriteriaFromDb != null) {
+            for (ProposalVO.EvalCriteriaVO ec : evalCriteriaFromDb) {
+                if (CommonUtil.isNotEmpty(ec.getEvalCriteriaId())) validEvalIds.add(ec.getEvalCriteriaId());
             }
         }
 
@@ -1854,13 +1867,22 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                // 2) linkedEvalCriteriaNm → evalCriteriaId
+                // 2) evalCriteriaId 결정:
+                //    S2C 경로(mandatedToc): TocVO에 linkedEvalCriteriaId가 직접 세팅됨 → 우선 사용
+                //    S2A 경로(일반): linkedEvalCriteriaNm으로 이름 lookup
                 String evalCriteriaId = null;
-                String linkedNm = llmToc.getLinkedEvalCriteriaNm();
-                if (CommonUtil.isNotEmpty(linkedNm)) {
-                    evalCriteriaId = evalNmToId.get(linkedNm);
+                if (CommonUtil.isNotEmpty(llmToc.getLinkedEvalCriteriaId())) {
+                    evalCriteriaId = validEvalIds.contains(llmToc.getLinkedEvalCriteriaId())
+                            ? llmToc.getLinkedEvalCriteriaId() : null;
                     if (evalCriteriaId == null)
-                        logger.warn("[PT Stage2] evalCriteria 매칭 실패: linkedEvalCriteriaNm={}, ptProjectId={}", linkedNm, ptProjectId);
+                        logger.warn("[PT Stage2] evalCriteriaId 유효하지 않음: id={}, ptProjectId={}", llmToc.getLinkedEvalCriteriaId(), ptProjectId);
+                } else {
+                    String linkedNm = llmToc.getLinkedEvalCriteriaNm();
+                    if (CommonUtil.isNotEmpty(linkedNm)) {
+                        evalCriteriaId = evalNmToId.get(linkedNm);
+                        if (evalCriteriaId == null)
+                            logger.warn("[PT Stage2] evalCriteria 매칭 실패: linkedEvalCriteriaNm={}, ptProjectId={}", linkedNm, ptProjectId);
+                    }
                 }
 
                 // 3) coveredReqIds(requirementId[]) → 유효성 검증 후 JSON 저장
@@ -1882,6 +1904,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 updToc.setTocId(dbToc.getTocId());
                 updToc.setLinkedEvalCriteriaId(evalCriteriaId);
                 updToc.setCoveredReqIdsJson(coveredReqIdsJson);
+                updToc.setPlannedSlideCnt(llmToc.getPlannedSlideCnt() > 0 ? llmToc.getPlannedSlideCnt() : 1);
                 proposalDAO.updateTocEvalLinkAndReqIds(updToc);
                 tocMatchedCount++;
 
@@ -2163,13 +2186,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         final int MIN_SLIDES = 2;
 
-        // evalItemNm → score 맵
+        // evalItemNm → score 맵 (S2A 일반경로 호환용)
         java.util.Map<String, Double> evalNmToScore = new java.util.HashMap<>();
+        // evalCriteriaId → score 맵 (S2C mandatedToc 경로)
+        java.util.Map<String, Double> evalIdToScore = new java.util.HashMap<>();
         if (evalCriteria != null) {
             for (ProposalVO.EvalCriteriaVO ec : evalCriteria) {
-                if (CommonUtil.isNotEmpty(ec.getEvalItemNm())) {
-                    evalNmToScore.put(ec.getEvalItemNm(), ec.getScore());
-                }
+                if (CommonUtil.isNotEmpty(ec.getEvalItemNm())) evalNmToScore.put(ec.getEvalItemNm(), ec.getScore());
+                if (CommonUtil.isNotEmpty(ec.getEvalCriteriaId())) evalIdToScore.put(ec.getEvalCriteriaId(), ec.getScore());
             }
         }
 
@@ -2187,10 +2211,12 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         if (leaves.isEmpty()) return;
 
         // 연결 없는 leaf에 MIN_SLIDES 배분
+        // evalCriteriaId 우선, 없으면 evalItemNm으로 score 조회
         int reservedBudget = 0;
         List<ProposalVO.TocVO> linkedLeaves = new java.util.ArrayList<>();
         for (ProposalVO.TocVO leaf : leaves) {
-            if (CommonUtil.isEmpty(leaf.getLinkedEvalCriteriaNm()) || !evalNmToScore.containsKey(leaf.getLinkedEvalCriteriaNm())) {
+            double score = resolveEvalScore(leaf, evalIdToScore, evalNmToScore);
+            if (score <= 0) {
                 leaf.setPlannedSlideCnt(MIN_SLIDES);
                 reservedBudget += MIN_SLIDES;
             } else {
@@ -2202,10 +2228,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         if (remainBudget < linkedLeaves.size()) remainBudget = linkedLeaves.size(); // 최소 1장 보장
 
         if (!linkedLeaves.isEmpty()) {
-            // 배점 합계
+            // 배점 합계 (evalCriteriaId 우선, 없으면 evalItemNm)
             double totalScore = 0;
             for (ProposalVO.TocVO leaf : linkedLeaves) {
-                totalScore += evalNmToScore.getOrDefault(leaf.getLinkedEvalCriteriaNm(), 0.0);
+                totalScore += resolveEvalScore(leaf, evalIdToScore, evalNmToScore);
             }
             if (totalScore <= 0) totalScore = linkedLeaves.size(); // 0 나눗셈 방지
 
@@ -2213,7 +2239,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             int allocated = 0;
             for (int i = 0; i < linkedLeaves.size() - 1; i++) {
                 ProposalVO.TocVO leaf = linkedLeaves.get(i);
-                double score = evalNmToScore.getOrDefault(leaf.getLinkedEvalCriteriaNm(), 1.0);
+                double score = resolveEvalScore(leaf, evalIdToScore, evalNmToScore);
                 int cnt = Math.max(1, (int) Math.round((score / totalScore) * remainBudget));
                 leaf.setPlannedSlideCnt(cnt);
                 allocated += cnt;
@@ -2237,6 +2263,25 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 if (sum != null) toc.setPlannedSlideCnt(sum);
             }
         }
+    }
+
+    /**
+     * TocVO에 연결된 평가기준 배점을 반환.
+     * linkedEvalCriteriaId(S2C 경로) 우선, 없으면 linkedEvalCriteriaNm(S2A 경로) 사용.
+     * 매칭되는 항목이 없으면 0 반환.
+     */
+    private double resolveEvalScore(ProposalVO.TocVO leaf,
+            java.util.Map<String, Double> evalIdToScore,
+            java.util.Map<String, Double> evalNmToScore) {
+        if (CommonUtil.isNotEmpty(leaf.getLinkedEvalCriteriaId())) {
+            Double score = evalIdToScore.get(leaf.getLinkedEvalCriteriaId());
+            if (score != null) return score;
+        }
+        if (CommonUtil.isNotEmpty(leaf.getLinkedEvalCriteriaNm())) {
+            Double score = evalNmToScore.get(leaf.getLinkedEvalCriteriaNm());
+            if (score != null) return score;
+        }
+        return 0.0;
     }
 
     /**
@@ -2383,24 +2428,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     reqLite.size(), requirementsForProblemDef.size(),
                     codedCategoryCount, CODED_CATEGORY_SAMPLE_LIMIT,
                     nullSampleCount, NULL_CATEGORY_SAMPLE_LIMIT);
-            // ── 목차매핑용 초경량 압축 (reqContent 80자 제한) ─────────────────────
-            List<ProposalVO.RequirementLiteVO> reqUltraLite = requirements.stream()
-                    .map(this::toRequirementUltraLite)
-                    .collect(java.util.stream.Collectors.toList());
-            String reqUltraLiteJson = GSON.toJson(reqUltraLite);
-            int tocPct = reqLiteJson.length() > 0
-                    ? (int) Math.round((1.0 - (double) reqUltraLiteJson.length() / reqLiteJson.length()) * 100)
-                    : 0;
-            logger.info("[PT Stage2-A] 목차매핑용 요구사항: {}건 (샘플링 없음, 전체 유지) → reqContent 80자 제한 적용, JSON 길이: {}자 (기존 400자 기준 대비 {}% 절감)",
-                    reqUltraLite.size(), reqUltraLiteJson.length(), tocPct);
-
             sb.append("\n\n## 문제정의용 요구사항 샘플(카테고리별 대표) (JSON)");
             sb.append("\n※ 이 목록은 발주기관 문제 유형 파악(problemDefinitions)에만 사용하세요. 카테고리별 대표 샘플만 포함합니다.\n");
             sb.append(GSON.toJson(requirementsForProblemDef));
-
-            sb.append("\n\n## 목차 매핑용 요구사항 전체 목록 (JSON)");
-            sb.append("\n※ 이 목록은 toc.coveredReqIds 매핑 전용입니다. requirementId 값을 그대로 배정하세요. reqNo가 null인 항목(전략적해석)도 포함되어 있으며 동일하게 배정 대상입니다.\n");
-            sb.append(reqUltraLiteJson);
         }
 
         if (evalCriteria != null && !evalCriteria.isEmpty()) {
@@ -2424,8 +2454,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * Call 1(S2A) 프롬프트 조합 — slim 버전 (mandatedToc 있을 때 사용)
-     * - reqUltraLite(목차 매핑용 요구사항 전체) 제외 → 프롬프트 크기 절감
-     * - toc 생성을 LLM에 요청하지 않음 (Java에서 mandatedToc 직접 변환 후 S2C로 coveredReqNos만 매핑)
+     * - S2A는 problemDefinitions만 반환 (toc는 autoExtractToc에서 INSERT, coveredReqIds는 S2C에서 UPDATE)
      */
     private String buildStage2aPromptSlim(String promptContent,
             ProposalVO.ProjectVO project,
@@ -2460,13 +2489,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     .collect(java.util.stream.Collectors.toList());
             sb.append("\n\n## 평가기준 목록 (JSON)\n").append(GSON.toJson(evalLite));
         }
-
-        // toc는 S2C에서 별도 처리하므로 빈 배열 출력 지시
-        sb.append("\n\n※ 이 사업은 RFP에 목차가 이미 지정되어 있습니다.")
-          .append(" 출력 JSON 형식은 {\"problemDefinitions\":[...],\"toc\":[]} 를 반드시 그대로 유지하고,")
-          .append(" toc는 빈 배열([])로만 출력하세요. problemDefinitions 배열만 내용을 채우면 됩니다.");
-
-        logger.info("[PT Stage2-A slim] 프롬프트 구성 완료 — 합계: {}자 (reqUltraLite 제외)", sb.length());
+        logger.info("[PT Stage2-A slim] 프롬프트 구성 완료 — 합계: {}자", sb.length());
         return sb.toString();
     }
 
@@ -2521,14 +2544,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * Call 1B(S2C) 프롬프트 조합 — coveredReqNos 매핑 전용
-     * - 입력: mandatedToc 기반 리프 목록 + reqUltraLite 전체 요구사항
+     * Call 1B(S2C) 프롬프트 조합 — coveredReqIds + linkedEvalCriteriaId 매핑
+     * - 입력: mandatedToc 기반 리프 목록 + reqUltraLite 전체 요구사항 + 평가기준 목록
      * - 리프 = 자신의 no가 다른 항목의 parentNo로 사용되지 않는 노드
      * - LLM에 title 기반으로 응답하도록 요청 (파싱 시 title로 매칭)
      */
     private String buildStage2cCoveredReqIdsPrompt(String promptContent,
             List<ProposalVO.TocVO> tocList,
-            List<ProposalVO.RequirementVO> requirements) {
+            List<ProposalVO.RequirementVO> requirements,
+            List<ProposalVO.EvalCriteriaVO> evalCriteria) {
 
         // 리프 노드 탐색: parentNo로 참조되는 no 집합 구성
         java.util.Set<String> parentNos = new java.util.HashSet<>();
@@ -2555,16 +2579,25 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 .map(this::toRequirementUltraLite)
                 .collect(java.util.stream.Collectors.toList());
 
+        List<ProposalVO.EvalCriteriaLiteVO> evalLite =
+                (evalCriteria != null ? evalCriteria : java.util.Collections.<ProposalVO.EvalCriteriaVO>emptyList())
+                .stream()
+                .map(this::toEvalCriteriaLite)
+                .collect(java.util.stream.Collectors.toList());
+
         StringBuilder sb = new StringBuilder();
         sb.append(promptContent);
         sb.append("\n\n## 목차 소분류 목록 (JSON)\n");
         sb.append(GSON.toJson(leafList));
+        sb.append("\n\n## 평가기준 목록 (JSON)");
+        sb.append("\n※ linkedEvalCriteriaId에는 아래 목록의 evalCriteriaId 값을 그대로 사용하세요. 없으면 null로 두세요.\n");
+        sb.append(GSON.toJson(evalLite));
         sb.append("\n\n## 요구사항 전체 목록 (JSON)");
         sb.append("\n※ requirementId 값을 coveredReqIds에 그대로 사용하세요. reqNo가 null인 항목(전략적해석)도 포함되며 동일하게 배정 대상입니다.\n");
         sb.append(GSON.toJson(reqUltraLite));
 
-        logger.info("[PT Stage2-C] 프롬프트 구성 완료 — 리프목차: {}개, 요구사항: {}건, 합계: {}자",
-                leafList.size(), reqUltraLite.size(), sb.length());
+        logger.info("[PT Stage2-C] 프롬프트 구성 완료 — 리프목차: {}개, 평가기준: {}건, 요구사항: {}건, 합계: {}자",
+                leafList.size(), evalLite.size(), reqUltraLite.size(), sb.length());
         return sb.toString();
     }
 
@@ -2573,7 +2606,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * 응답 형식: [{"title":"소분류제목","coveredReqIds":["PTQ000001",...]}, ...]
      * title로 TocVO를 매칭하므로 파싱 실패해도 non-fatal (경고 로그만).
      */
-    private void parseAndApplyStage2cResponse(List<ProposalVO.TocVO> tocList, String s2cResponse, String ptProjectId) {
+    /**
+     * Call 1B(S2C) 응답 JSON 파싱 후 tocList의 coveredReqIds + linkedEvalCriteriaId에 적용.
+     * 응답 형식: [{"title":"소분류제목","coveredReqIds":["PTQ000001",...],"linkedEvalCriteriaId":"PTE000001"}, ...]
+     * title로 TocVO를 매칭하므로 파싱 실패해도 non-fatal (경고 로그만).
+     */
+    private void parseAndApplyStage2cResponse(List<ProposalVO.TocVO> tocList, String s2cResponse,
+            String ptProjectId, java.util.Set<String> validEvalCriteriaIds) {
         String json = stripJsonCodeBlock(s2cResponse);
         try {
             JsonArray arr = JsonParser.parseString(json).getAsJsonArray();
@@ -2595,6 +2634,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     logger.warn("[PT Stage2-C] S2C 응답에 알 수 없는 title='{}', 무시 (ptProjectId={})", title, ptProjectId);
                     continue;
                 }
+                // coveredReqIds
                 List<String> reqIds = new java.util.ArrayList<>();
                 if (obj.has("coveredReqIds") && obj.get("coveredReqIds").isJsonArray()) {
                     for (JsonElement rn : obj.getAsJsonArray("coveredReqIds")) {
@@ -2604,35 +2644,22 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     }
                 }
                 toc.setCoveredReqIds(reqIds);
+                // linkedEvalCriteriaId — 할루시네이션 방어: validEvalCriteriaIds에 없으면 null
+                String evalCriteriaId = getStrOrNull(obj, "linkedEvalCriteriaId");
+                if (CommonUtil.isNotEmpty(evalCriteriaId)) {
+                    if (validEvalCriteriaIds != null && !validEvalCriteriaIds.contains(evalCriteriaId)) {
+                        logger.warn("[PT Stage2-C] 할루시네이션 — 존재하지 않는 evalCriteriaId 제거: evalCriteriaId={}, title={}, ptProjectId={}",
+                                evalCriteriaId, title, ptProjectId);
+                        evalCriteriaId = null;
+                    }
+                }
+                toc.setLinkedEvalCriteriaId(evalCriteriaId);
                 applied++;
             }
-            logger.info("[PT Stage2-C] coveredReqIds 배정 완료 — {}개 소목차 처리 (ptProjectId={})", applied, ptProjectId);
+            logger.info("[PT Stage2-C] 배정 완료 — {}개 소목차 처리 (ptProjectId={})", applied, ptProjectId);
         } catch (Exception e) {
-            logger.warn("[PT Stage2-C] S2C 응답 파싱 실패, coveredReqIds 배정 생략 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+            logger.warn("[PT Stage2-C] S2C 응답 파싱 실패, 배정 생략 (ptProjectId={}): {}", ptProjectId, e.getMessage());
         }
-    }
-
-    /**
-     * S2C_COVEREDREQNOS 프롬프트 DB 미등록 시 사용할 기본 프롬프트
-     */
-    private String buildDefaultStage2cPrompt() {
-        return "당신은 공공정보화 제안서 구조화 전문가입니다.\n"
-                + "RFP 요구사항을 이미 확정된 제안서 목차의 각 소분류에 배정하세요.\n"
-                + "목차 구조 변경이나 제목 수정은 하지 않습니다. 배정만 수행합니다.\n\n"
-                + "## 원칙\n"
-                + "1. 제공된 소분류 목록의 title을 그대로 사용하세요. 항목을 추가하거나 제거하지 마세요.\n"
-                + "2. 요구사항 목록에 있는 requirementId 값을 그대로 coveredReqIds에 사용하세요. "
-                + "requirementId를 새로 만들거나 변형하지 마세요. reqNo가 null인 항목(전략적해석)도 동일하게 배정 대상입니다.\n"
-                + "3. 하나의 requirementId는 가장 관련성이 높은 소분류 1~2개에만 배정하세요. 중복 배정은 최소화하세요.\n"
-                + "4. 소분류와 관련 요구사항이 없으면 coveredReqIds를 빈 배열([])로 두세요.\n"
-                + "5. 배정 근거는 reqCategoryCd와 reqContent 키워드 기반으로 판단하세요.\n\n"
-                + "## 출력 형식\n"
-                + "다른 설명 없이 아래 형태의 JSON 배열만 출력하세요. 코드블록(```)은 포함하지 마세요.\n\n"
-                + "[\n"
-                + "  {\"title\": \"소분류 제목\", \"coveredReqIds\": [\"PTQ000001\", \"PTQ000005\"]},\n"
-                + "  ...\n"
-                + "]\n\n"
-                + "목차 소분류 목록에 있는 모든 항목이 결과 배열에 포함되어야 합니다.";
     }
 
     /**
@@ -2784,6 +2811,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      */
     private ProposalVO.EvalCriteriaLiteVO toEvalCriteriaLite(ProposalVO.EvalCriteriaVO src) {
         ProposalVO.EvalCriteriaLiteVO lite = new ProposalVO.EvalCriteriaLiteVO();
+        lite.setEvalCriteriaId(src.getEvalCriteriaId());
         lite.setEvalItemNm(src.getEvalItemNm());
         lite.setScore(src.getScore());
         return lite;
