@@ -280,12 +280,14 @@ public class ProposalVO {
     public static class Stage1ResultVO {
         /** 프로젝트 ID */
         private String ptProjectId;
-        /** 제안서 작성지침 JSON (raw JSON string) */
+        /** 제안서 작성지침 JSON (raw JSON string) — pageLimit, formatRules만 포함 */
         private String writingGuidelineJson;
         /** 요구사항 목록 */
         private List<RequirementVO> requirements;
         /** 평가기준 목록 */
         private List<EvalCriteriaVO> evalCriteria;
+        /** 제안서 목차 목록 (toc) — Stage1에서 직접 TB_PT_TOC에 insert */
+        private List<TocVO> tocList;
     }
 
     /**

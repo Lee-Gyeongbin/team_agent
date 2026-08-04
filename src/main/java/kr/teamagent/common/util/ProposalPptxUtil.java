@@ -8,6 +8,9 @@ import org.apache.poi.sl.usermodel.TextParagraph;
 import org.apache.poi.util.Units;
 import org.apache.poi.xslf.usermodel.*;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -54,6 +57,8 @@ import java.util.List;
  * </pre>
  */
 public class ProposalPptxUtil {
+
+    private static final Logger logger = LoggerFactory.getLogger(ProposalPptxUtil.class);
 
     // ─── 슬라이드 크기 (16:9 와이드스크린, pt 단위) ────────────────────────────────
     private static final int SLIDE_W = 9144000 / Units.EMU_PER_POINT;  // 720pt
@@ -448,16 +453,22 @@ public class ProposalPptxUtil {
                             for (TemplateSlot slot : headerLayout.slots) {
                                 if (slot == null) continue;
                                 String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
-                                int sx = (int)(slot.x      * slideW   / 100.0);
-                                int sy = (int)(slot.y      * HEADER_H / 100.0);
-                                int sw = slot.width  > 0 ? (int)(slot.width  * slideW   / 100.0) : slideW / 4;
-                                int sh = slot.height > 0 ? (int)(slot.height * HEADER_H / 100.0) : HEADER_H;
+                                int sx = (int)(slot.x * slideW   / 100.0);
+                                int sy = (int)(slot.y * HEADER_H / 100.0);
+                                int sh = Math.max(1, (int)(slotEffectiveHeight(slot) * HEADER_H / 100.0));
+                                // chapterBadge: 정사각형 배지 (높이로 너비 결정)
+                                int sw = ("chapterBadge".equals(slot.key) && slot.width == 0)
+                                        ? sh
+                                        : Math.max(1, (int)(slotEffectiveWidth(slot) * slideW / 100.0));
                                 if ("divider".equals(slot.key) || "divider".equals(slot.type)) {
-                                    addRect(slide, sx, sy, sw, Math.max(1, sh),
+                                    addRect(slide, sx, sy, sw, sh,
                                             slot.bgColor != null ? parseHex(slot.bgColor, cAccent) : cAccent);
                                 } else if (resolvedText != null && !resolvedText.isEmpty()) {
-                                    Color textColor = slot.color  != null ? parseHex(slot.color,   DARK_TEXT) : DARK_TEXT;
-                                    Color bgSlot    = slot.bgColor != null ? parseHex(slot.bgColor, null)     : null;
+                                    Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
+                                    // chapterBadge: bgColor 기본값 = baseColor (흰색 텍스트가 보이도록)
+                                    Color bgSlot = slot.bgColor != null ? parseHex(slot.bgColor, null)
+                                                 : "chapterBadge".equals(slot.key) ? cBase
+                                                 : null;
                                     if (bgSlot != null) addRect(slide, sx, sy, sw, sh, bgSlot);
                                     double fs = slot.fontSize > 0 ? slot.fontSize * scale : 9 * scale;
                                     text(slide, resolvedText, sx, sy, sw, sh, fs,
@@ -473,8 +484,8 @@ public class ProposalPptxUtil {
                                 String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
                                 int sx = (int)(slot.x * slideW   / 100.0);
                                 int sy = FOOTER_Y + (int)(slot.y * FOOTER_H / 100.0);
-                                int sw = slot.width  > 0 ? (int)(slot.width  * slideW   / 100.0) : slideW / 4;
-                                int sh = slot.height > 0 ? (int)(slot.height * FOOTER_H / 100.0) : FOOTER_H - 4;
+                                int sw = Math.max(1, (int)(slotEffectiveWidth(slot)  * slideW   / 100.0));
+                                int sh = Math.max(1, (int)(slotEffectiveHeight(slot) * FOOTER_H / 100.0));
                                 if (resolvedText != null && !resolvedText.isEmpty()) {
                                     Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
                                     double fs = slot.fontSize > 0 ? slot.fontSize * scale : 8 * scale;
@@ -537,14 +548,56 @@ public class ProposalPptxUtil {
         return null;
     }
 
+    /**
+     * 슬롯의 유효 width (%, 컨테이너 너비 기준).
+     * LLM이 width를 생략한 경우 known-key 기본값 → x 기반 나머지 공간 순으로 적용.
+     */
+    private static int slotEffectiveWidth(TemplateSlot slot) {
+        if (slot.width > 0) return slot.width;
+        switch (slot.key != null ? slot.key : "") {
+            case "divider": return 100;          // 구분선 → 전체 폭
+            case "left":    return 30;           // 푸터 3분할
+            case "center":  return 20;
+            case "right":   return 30;
+            default:        return Math.max(10, 100 - slot.x); // x 이후 나머지 공간
+        }
+    }
+
+    /**
+     * 슬롯의 유효 height (%, 컨테이너 높이 기준).
+     * LLM이 height를 생략한 경우 known-key 기본값 → y 기반 나머지 공간 순으로 적용.
+     */
+    private static int slotEffectiveHeight(TemplateSlot slot) {
+        if (slot.height > 0) return slot.height;
+        switch (slot.key != null ? slot.key : "") {
+            case "divider": return 3;            // 구분선 → 얇게 (3%)
+            default:        return Math.max(15, 100 - slot.y); // y 이후 나머지 공간
+        }
+    }
+
     private static int scalePt(int val, double scale) {
         return (int)(val * scale);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 템플릿 레이아웃 검증 — 공개 결과 DTO
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** 템플릿 JSON 검증 결과. ProposalServiceImpl 등 외부에서 사용. */
+    public static class TemplateValidationResult {
+        public final boolean hasInvalidSlot;
+        public final String msg;
+        TemplateValidationResult(boolean hasInvalidSlot, String msg) {
+            this.hasInvalidSlot = hasInvalidSlot;
+            this.msg = msg;
+        }
     }
 
     /** 템플릿 JSON 파싱용 내부 DTO */
     private static class TemplateLayout {
         List<TemplateSlot> slots;
         int height;
+        boolean hasInvalidSlot;
     }
 
     private static class TemplateSlot {
@@ -594,9 +647,22 @@ public class ProposalPptxUtil {
                     slot.fontSize     = style.has("fontSize")     ? style.get("fontSize").getAsDouble()  : 0;
                     slot.fontWeight   = style.has("fontWeight")   ? style.get("fontWeight").getAsString(): null;
                     slot.color        = style.has("color")        ? style.get("color").getAsString()     : null;
-                    slot.bgColor      = style.has("bgColor")      ? style.get("bgColor").getAsString()   : null;
+                    // bgColor fallback: bgColor 없으면 bg 값 사용 (하위 호환)
+                    slot.bgColor      = style.has("bgColor") ? style.get("bgColor").getAsString()
+                                      : style.has("bg")      ? style.get("bg").getAsString()
+                                      : null;
                     slot.align        = style.has("align")        ? style.get("align").getAsString()     : null;
                     slot.borderRadius = style.has("borderRadius") ? style.get("borderRadius").getAsInt() : 0;
+
+                    // divider 컴포넌트: color → bgColor, thickness → height fallback
+                    if ("divider".equals(slot.key) || "divider".equals(slot.type)) {
+                        if (slot.bgColor == null && style.has("color")) {
+                            slot.bgColor = style.get("color").getAsString();
+                        }
+                        if (slot.height == 0 && style.has("thickness")) {
+                            slot.height = style.get("thickness").getAsInt();
+                        }
+                    }
                 }
 
                 layout.slots.add(slot);
@@ -606,6 +672,82 @@ public class ProposalPptxUtil {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 헤더/푸터 JSON 레이아웃을 파싱하고 슬롯 유효성을 검증한다.
+     * - width/height == 0인 텍스트 슬롯 감지
+     * - pairwise 사각형 겹침 감지
+     *
+     * @param json         HEADER_COMPONENTS_JSON 또는 FOOTER_COMPONENTS_JSON
+     * @param ptProjectId  로그용 프로젝트 ID
+     * @return 검증 결과 (hasInvalidSlot=true이면 문제 있음)
+     */
+    public static TemplateValidationResult validateTemplateJson(String json, String ptProjectId) {
+        Gson localGson = new Gson();
+        TemplateLayout layout = parseTemplateLayout(json, localGson);
+        if (layout == null) {
+            return new TemplateValidationResult(false, null);
+        }
+        List<String> errors = new ArrayList<>();
+        // 퍼센트 기반 좌표이므로 100×100 정규화 공간 사용
+        validateLayout(layout, 100, 100, ptProjectId, errors);
+        return new TemplateValidationResult(layout.hasInvalidSlot,
+                errors.isEmpty() ? null : String.join(", ", errors));
+    }
+
+    /** 파싱된 레이아웃의 슬롯 유효성을 검사하고 문제가 있으면 errors 리스트에 추가한다. */
+    private static void validateLayout(TemplateLayout layout, int containerW, int containerH,
+                                        String ptProjectId, List<String> errors) {
+        if (layout == null || layout.slots == null) return;
+
+        List<TemplateSlot> validSizeSlots = new ArrayList<>();
+
+        for (TemplateSlot slot : layout.slots) {
+            if (slot == null) continue;
+            boolean isDivider = "divider".equals(slot.key) || "divider".equals(slot.type);
+
+            // divider가 아닌 텍스트 슬롯의 width/height 누락 검증
+            if (!isDivider && (slot.placeholder != null || slot.type != null)) {
+                if (slot.width == 0 || slot.height == 0) {
+                    logger.warn("[PT Layout] 슬롯 width/height 누락 (slot={}, ptProjectId={})", slot.key, ptProjectId);
+                    errors.add(slot.key + " 슬롯 width/height 누락");
+                    layout.hasInvalidSlot = true;
+                }
+            }
+
+            // 겹침 검사 대상: width/height가 정의된 슬롯만 (divider 제외 — 경계선이므로 의도적으로 겹침)
+            if (slot.width > 0 && slot.height > 0 && !isDivider) {
+                validSizeSlots.add(slot);
+            }
+        }
+
+        // pairwise 겹침 검사
+        for (int i = 0; i < validSizeSlots.size(); i++) {
+            for (int j = i + 1; j < validSizeSlots.size(); j++) {
+                TemplateSlot a = validSizeSlots.get(i);
+                TemplateSlot b = validSizeSlots.get(j);
+                int ax = (int)(a.x * containerW / 100.0);
+                int ay = (int)(a.y * containerH / 100.0);
+                int aw = (int)(a.width  * containerW / 100.0);
+                int ah = (int)(a.height * containerH / 100.0);
+                int bx = (int)(b.x * containerW / 100.0);
+                int by = (int)(b.y * containerH / 100.0);
+                int bw = (int)(b.width  * containerW / 100.0);
+                int bh = (int)(b.height * containerH / 100.0);
+                if (rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh)) {
+                    logger.warn("[PT Layout] 슬롯 겹침 감지 (slot1={}, slot2={}, ptProjectId={})", a.key, b.key, ptProjectId);
+                    errors.add(a.key + "과 " + b.key + " 슬롯 겹침");
+                    layout.hasInvalidSlot = true;
+                }
+            }
+        }
+    }
+
+    /** 두 사각형의 교차 여부 반환. */
+    private static boolean rectsOverlap(int ax, int ay, int aw, int ah,
+                                         int bx, int by, int bw, int bh) {
+        return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
     }
 
     /**
