@@ -195,6 +195,33 @@ public class ProposalDAO extends EgovComAbstractDAO {
         update("proposal.updateEvalCriteria", vo);
     }
 
+    // ── Stage 1: RFP 현황/문제점/개선방향 ──────────────────────────────
+
+    /**
+     * 프로젝트의 RFP 이슈 전체 삭제
+     * @param ptProjectId 프로젝트 ID
+     */
+    public void deleteRfpIssuesByProject(String ptProjectId) {
+        delete("proposal.deleteRfpIssuesByProject", ptProjectId);
+    }
+
+    /**
+     * RFP 이슈 단건 등록
+     * @param vo RfpIssueVO
+     */
+    public void insertRfpIssue(ProposalVO.RfpIssueVO vo) {
+        insert("proposal.insertRfpIssue", vo);
+    }
+
+    /**
+     * 프로젝트의 RFP 이슈 목록 조회 (SORT_ORD 기준)
+     * @param ptProjectId 프로젝트 ID
+     * @return List<RfpIssueVO>
+     */
+    public List<ProposalVO.RfpIssueVO> selectRfpIssues(String ptProjectId) {
+        return selectList("proposal.selectRfpIssues", ptProjectId);
+    }
+
     // ── Stage 2: 문제 정의 ──────────────────────────────────────────────
 
     /**

@@ -274,6 +274,33 @@ public class ProposalVO {
     }
 
     /**
+     * TB_PT_RFP_ISSUE - RFP 현황/문제점/개선방향 원문 추출
+     */
+    @Data
+    public static class RfpIssueVO {
+        /** ISSUE_ID (PK, VARCHAR 20, prefix PTI) */
+        private String issueId;
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 이슈 유형 코드 (001=문제점, 002=개선방향, 003=추진배경/필요성) */
+        private String issueTypeCd;
+        /** RFP 원문 그대로 (요약/재해석 금지) */
+        private String issueContent;
+        /** RFP상 소제목 (예: "협력자원 관리 미흡") — 없으면 null, LLM 생성 금지 */
+        private String issueLabel;
+        /** 원문 챕터 경로 (예: "Ⅱ.3.가") */
+        private String sourceSection;
+        /** 원문 페이지 번호 */
+        private Integer sourcePage;
+        /** 정렬 순서 */
+        private int sortOrd;
+        /** 생성자 ID */
+        private String createUserId;
+        /** 생성일시 */
+        private String createDt;
+    }
+
+    /**
      * Stage 1 분석 결과 (LLM 파싱 결과 + DB 조회 결과 조합)
      */
     @Data
@@ -288,6 +315,8 @@ public class ProposalVO {
         private List<EvalCriteriaVO> evalCriteria;
         /** 제안서 목차 목록 (toc) — Stage1에서 직접 TB_PT_TOC에 insert */
         private List<TocVO> tocList;
+        /** RFP 현황/문제점/개선방향 원문 추출 목록 (없으면 빈 리스트) */
+        private List<RfpIssueVO> rfpIssues = new java.util.ArrayList<>();
     }
 
     /**
@@ -315,8 +344,12 @@ public class ProposalVO {
         private String strategySummary;
         /** KPI */
         private String kpi;
-        /** 출처 유형 코드 (default '002') */
+        /** 출처 유형 코드 (001=rfpIssues 근거, 002=요구사항 추론, LLM 판단 반환) */
         private String sourceTypeCd;
+        /** 근거로 사용한 ISSUE_ID(PTI000001 등) 배열 JSON — 컬럼명: SOURCE_ISSUE_IDS_JSON */
+        private String sourceIssueIdsJson;
+        /** 근거로 사용한 REQUIREMENT_ID(PTQ000001 등) 배열 JSON — 컬럼명: SOURCE_REQ_IDS_JSON */
+        private String sourceRequirementIdsJson;
         /** 정렬 순서 */
         private Integer sortOrd;
         /** 생성자 ID */

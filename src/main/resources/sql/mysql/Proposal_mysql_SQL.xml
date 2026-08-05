@@ -368,6 +368,62 @@
     </update>
 
     <!-- ================================================================== -->
+    <!-- TB_PT_RFP_ISSUE                                                      -->
+    <!-- ================================================================== -->
+
+    <delete id="deleteRfpIssuesByProject" parameterType="String">
+        /* RFP 이슈 전체 삭제 proposal.deleteRfpIssuesByProject */
+        DELETE FROM tb_pt_rfp_issue
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </delete>
+
+    <insert id="insertRfpIssue" parameterType="kr.teamagent.proposal.service.ProposalVO$RfpIssueVO">
+        /* RFP 이슈 등록 proposal.insertRfpIssue */
+        INSERT INTO tb_pt_rfp_issue (
+            ISSUE_ID
+            , PT_PROJECT_ID
+            , ISSUE_TYPE_CD
+            , ISSUE_CONTENT
+            , ISSUE_LABEL
+            , SOURCE_SECTION
+            , SOURCE_PAGE
+            , SORT_ORD
+            , CREATE_USER_ID
+            , CREATE_DT
+        ) VALUES (
+            #{issueId}
+            , #{ptProjectId}
+            , #{issueTypeCd}
+            , #{issueContent}
+            , #{issueLabel}
+            , #{sourceSection}
+            , #{sourcePage}
+            , COALESCE(#{sortOrd}, 0)
+            , #{createUserId}
+            , NOW()
+        )
+    </insert>
+
+    <select id="selectRfpIssues" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$RfpIssueVO">
+        /* RFP 이슈 목록 조회 proposal.selectRfpIssues */
+        SELECT
+            ISSUE_ID            AS ISSUE_ID
+            , PT_PROJECT_ID     AS PT_PROJECT_ID
+            , ISSUE_TYPE_CD     AS ISSUE_TYPE_CD
+            , ISSUE_CONTENT     AS ISSUE_CONTENT
+            , ISSUE_LABEL       AS ISSUE_LABEL
+            , SOURCE_SECTION    AS SOURCE_SECTION
+            , SOURCE_PAGE       AS SOURCE_PAGE
+            , SORT_ORD          AS SORT_ORD
+            , CREATE_USER_ID    AS CREATE_USER_ID
+            , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM tb_pt_rfp_issue
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+        ORDER BY SORT_ORD, ISSUE_ID
+    </select>
+
+    <!-- ================================================================== -->
     <!-- TB_PT_PROBLEM_DEFINITION                                             -->
     <!-- ================================================================== -->
 
@@ -379,30 +435,36 @@
         INSERT INTO TB_PT_PROBLEM_DEFINITION (
             PROBLEM_ID, PT_PROJECT_ID, PROBLEM_TYPE_CD, CURRENT_PROBLEM, ROOT_CAUSE,
             RISK_IF_IGNORED, GOAL, REQUIRED_CAPABILITY, STRATEGY_SUMMARY, KPI,
-            SOURCE_TYPE_CD, SORT_ORD, CREATE_USER_ID, CREATE_DT
+            SOURCE_TYPE_CD, SOURCE_ISSUE_IDS_JSON, SOURCE_REQ_IDS_JSON,
+            SORT_ORD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{problemId}, #{ptProjectId}, #{problemTypeCd}, #{currentProblem}, #{rootCause},
             #{riskIfIgnored}, #{goal}, #{requiredCapability}, #{strategySummary}, #{kpi},
-            COALESCE(#{sourceTypeCd}, '002'), COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
+            COALESCE(#{sourceTypeCd}, '002'),
+            #{sourceIssueIdsJson, jdbcType=VARCHAR},
+            #{sourceRequirementIdsJson, jdbcType=VARCHAR},
+            COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
         )
     </insert>
 
     <select id="selectProblemDefinitions" parameterType="String"
             resultType="kr.teamagent.proposal.service.ProposalVO$ProblemDefinitionVO">
         SELECT
-            PROBLEM_ID          AS PROBLEM_ID,
-            PT_PROJECT_ID       AS PT_PROJECT_ID,
-            PROBLEM_TYPE_CD     AS PROBLEM_TYPE_CD,
-            CURRENT_PROBLEM     AS CURRENT_PROBLEM,
-            ROOT_CAUSE          AS ROOT_CAUSE,
-            RISK_IF_IGNORED     AS RISK_IF_IGNORED,
-            GOAL                AS GOAL,
-            REQUIRED_CAPABILITY AS REQUIRED_CAPABILITY,
-            STRATEGY_SUMMARY    AS STRATEGY_SUMMARY,
-            KPI                 AS KPI,
-            SOURCE_TYPE_CD      AS SOURCE_TYPE_CD,
-            SORT_ORD            AS SORT_ORD,
-            CREATE_USER_ID      AS CREATE_USER_ID,
+            PROBLEM_ID              AS PROBLEM_ID,
+            PT_PROJECT_ID           AS PT_PROJECT_ID,
+            PROBLEM_TYPE_CD         AS PROBLEM_TYPE_CD,
+            CURRENT_PROBLEM         AS CURRENT_PROBLEM,
+            ROOT_CAUSE              AS ROOT_CAUSE,
+            RISK_IF_IGNORED         AS RISK_IF_IGNORED,
+            GOAL                    AS GOAL,
+            REQUIRED_CAPABILITY     AS REQUIRED_CAPABILITY,
+            STRATEGY_SUMMARY        AS STRATEGY_SUMMARY,
+            KPI                     AS KPI,
+            SOURCE_TYPE_CD          AS SOURCE_TYPE_CD,
+            SOURCE_ISSUE_IDS_JSON   AS SOURCE_ISSUE_IDS_JSON,
+            SOURCE_REQ_IDS_JSON     AS SOURCE_REQUIREMENT_IDS_JSON,
+            SORT_ORD                AS SORT_ORD,
+            CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
         FROM TB_PT_PROBLEM_DEFINITION
         WHERE PT_PROJECT_ID = #{ptProjectId}
