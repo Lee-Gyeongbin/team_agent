@@ -52,6 +52,11 @@ public class ProposalVO {
         private String stage1DoneYn;
         /** 사용자가 도달한 최대 단계 번호 (0=A:템플릿, 1=B:목차, 2=C:설정, 3=E:템플릿생성, 4=D:본문생성, 5=F:출력) */
         private Integer maxStepNo;
+        /**
+         * Stage2 진행 상태 코드 (PT000013:
+         * 001=미시작, 002=문제정의 저장 완료(S2C/S2B 진행·재개 대상), 003=완료, 004=실패)
+         */
+        private String stage2StatusCd;
     }
 
     /**
@@ -356,6 +361,10 @@ public class ProposalVO {
         private String createUserId;
         /** 생성일시 */
         private String createDt;
+        /** 사용자 직접 편집 시각 — Win Theme stale 판정에 사용 */
+        private String modifyDt;
+        /** 수정자 ID */
+        private String modifyUserId;
     }
 
     /**
@@ -379,12 +388,18 @@ public class ProposalVO {
         private String expectedEffect;
         /** 차별화 포인트 */
         private String differentiation;
+        /** 겨냥한 PROBLEM_ID(PTP000001 등) 배열 JSON — 컬럼명: SOURCE_PROBLEM_IDS_JSON */
+        private String sourceProblemIdsJson;
         /** 정렬 순서 */
         private Integer sortOrd;
         /** 생성자 ID */
         private String createUserId;
         /** 생성일시 */
         private String createDt;
+        /** 사용자 직접 편집 시각 (필드 수정 시 갱신, 재생성 시엔 CREATE_DT 갱신) */
+        private String modifyDt;
+        /** 수정자 ID */
+        private String modifyUserId;
     }
 
     /**
@@ -414,6 +429,11 @@ public class ProposalVO {
         private String createUserId;
         /** 생성일시 */
         private String createDt;
+        /**
+         * 매핑 컬럼(COVERED_REQ_IDS_JSON / LINKED_EVAL_CRITERIA_ID / PLANNED_SLIDE_CNT) 변경 시각.
+         * Step6 stale 판별: TOC.MODIFY_DT vs SLIDE.CREATE_DT
+         */
+        private String modifyDt;
         // ── 파싱/계층 구조용 (DB 컬럼 아님, transient) ──
         /** LLM 응답에서 받은 평가항목명 */
         private String linkedEvalCriteriaNm;
@@ -782,5 +802,156 @@ public class ProposalVO {
         private String createUserId;
         /** 생성일시 */
         private String createDt;
+    }
+
+    /**
+     * Stage2 전략검토 요약 (Step5 상태패널 + 폴링용)
+     */
+    @Data
+    public static class Stage2SummaryVO {
+        private String stage2StatusCd;
+        private int problemDefinitionCount;
+        private int winThemeCount;
+        private int winThemeStaleCount;
+        private int uncoveredRequirementCount;
+        private String problemDefinitionsGeneratedDt;
+        private String winThemesGeneratedDt;
+    }
+
+    /**
+     * Win Theme 조회 응답 (stale 정보 포함)
+     */
+    @Data
+    public static class WinThemeStaleDetailVO {
+        private String problemId;
+        /** MODIFIED 또는 DELETED */
+        private String reason;
+        private String problemModifyDt;
+    }
+
+    @Data
+    public static class WinThemeResponseVO {
+        private String winThemeId;
+        private String ptProjectId;
+        private String coreMessage;
+        private String customerProblem;
+        private String proposalStrategy;
+        private String evidence;
+        private String expectedEffect;
+        private String differentiation;
+        /** 파싱된 배열 (DB의 SOURCE_PROBLEM_IDS_JSON) */
+        private List<String> sourceProblemDefinitionIds;
+        private String generatedDt;
+        private String modifyDt;
+        private boolean stale;
+        private List<WinThemeStaleDetailVO> staleDetails;
+    }
+
+    /**
+     * 문제정의 조회 응답 (파싱된 배열 포함)
+     */
+    @Data
+    public static class ProblemDefinitionResponseVO {
+        private String problemId;
+        private String ptProjectId;
+        private String problemTypeCd;
+        private String currentProblem;
+        private String rootCause;
+        private String riskIfIgnored;
+        private String goal;
+        private String requiredCapability;
+        private String strategySummary;
+        private String kpi;
+        private String sourceTypeCd;
+        private List<String> sourceIssueIds;
+        private List<String> sourceRequirementIds;
+        private String generatedDt;
+        private String modifyDt;
+        private String manualYn;
+    }
+
+    /**
+     * TOC 매핑 조회 응답
+     */
+    @Data
+    public static class TocMappingNodeVO {
+        private String tocId;
+        private String title;
+        private String parentTocId;
+        private List<String> coveredReqIds;
+        private String linkedEvalCriteriaId;
+        private int sortOrd;
+    }
+
+    @Data
+    public static class EvalCriteriaOptionVO {
+        private String evalCriteriaId;
+        private String evalItemNm;
+        private double score;
+    }
+
+    @Data
+    public static class TocMappingResponseVO {
+        private List<TocMappingNodeVO> tocNodes;
+        private List<String> unassignedRequirementIds;
+        private List<EvalCriteriaOptionVO> evalCriteriaOptions;
+    }
+
+    /**
+     * 문제정의 수동 수정/추가 요청 VO
+     */
+    @Data
+    public static class ProblemDefinitionUpdateVO {
+        private String ptProjectId;
+        private String problemId;
+        private String problemTypeCd;
+        private String currentProblem;
+        private String rootCause;
+        private String riskIfIgnored;
+        private String goal;
+        private String requiredCapability;
+        private String strategySummary;
+        private String kpi;
+        private String modifyUserId;
+    }
+
+    /**
+     * Win Theme 수동 수정/추가 요청 VO
+     */
+    @Data
+    public static class WinThemeUpdateVO {
+        private String ptProjectId;
+        private String winThemeId;
+        private String coreMessage;
+        private String customerProblem;
+        private String proposalStrategy;
+        private String evidence;
+        private String expectedEffect;
+        private String differentiation;
+        private List<String> sourceProblemDefinitionIds;
+        private String modifyUserId;
+    }
+
+    /**
+     * TOC 매핑 단건 수정 요청
+     */
+    @Data
+    public static class TocMappingUpdateVO {
+        private String tocId;
+        private List<String> coveredReqIds;
+        private String linkedEvalCriteriaId;
+        private String modifyUserId;
+    }
+
+    /**
+     * Stage2 개별 재실행 요청
+     */
+    @Data
+    public static class Stage2RegenerateVO {
+        private String ptProjectId;
+        private String modelId;
+        private String agentId;
+        private String userFeedback;
+        private int totalSlideBudget;
     }
 }

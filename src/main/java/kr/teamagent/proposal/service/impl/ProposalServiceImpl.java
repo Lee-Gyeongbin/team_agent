@@ -28,6 +28,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -86,6 +87,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     /** Stage2-A 문제정의용 샘플링 — null(미분류) 카테고리 최대 건수 */
     private static final int NULL_CATEGORY_SAMPLE_LIMIT = 20;
 
+    /** Stage2 진행 상태 — 미시작 */
+    private static final String STAGE2_STATUS_NOT_STARTED = "001";
+    /** Stage2 진행 상태 — 문제정의 저장 완료(S2C/S2B 진행·재개 대상) */
+    private static final String STAGE2_STATUS_PROBLEM_SAVED = "002";
+    /** Stage2 진행 상태 — 완료(Win Theme까지 저장) */
+    private static final String STAGE2_STATUS_DONE = "003";
+    /** Stage2 진행 상태 — 실패 */
+    private static final String STAGE2_STATUS_FAILED = "004";
+
     /** RFP 청크 병렬 요약 전용 스레드 풀 */
     private static final ExecutorService PT_SUMMARIZE_EXECUTOR =
             Executors.newFixedThreadPool(4, r -> {
@@ -134,6 +144,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private ApiCallLogServiceImpl apiCallLogService;
+
+    /** Stage2 조기/후반 저장의 독립 커밋용 (self-invocation @Transactional 우회) */
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
 
     // ── 프로젝트 조회 ───────────────────────────────────────────────────────────
@@ -191,7 +205,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         STAGE1_EXECUTOR.execute(() -> {
             try {
                 // Step 1: 파일 텍스트 추출
-                sendSseEvent(emitter, "progress", "{\"step\":\"extract\",\"message\":\"RFP 파일 텍스트 추출 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"extract\"}");
                 ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
                 if (project == null) {
                     sendSseEvent(emitter, "error", "{\"message\":\"프로젝트를 찾을 수 없습니다.\"}");
@@ -219,7 +233,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // Step 2: 프롬프트 조합
-                sendSseEvent(emitter, "progress", "{\"step\":\"prompt\",\"message\":\"프롬프트 준비 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"prompt\"}");
                 String promptContent = null;
                 try {
                     promptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S1_EXTRACT");
@@ -231,12 +245,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // Step 3: LLM 호출 — 대용량 분기
-                sendSseEvent(emitter, "progress", "{\"step\":\"llm\",\"message\":\"AI 분석 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"llm\"}");
                 ProposalVO.Stage1ResultVO parsed;
                 if (rfpText.length() > PT_RFP_TEXT_MAX_CHARS) {
                     // ── 대용량 경로: 청크 완전 추출 + Java 병합 (LLM 재호출 없음) ────────
-                    sendSseEvent(emitter, "progress",
-                            "{\"step\":\"chunk_extract\",\"message\":\"대용량 RFP 청크 추출 시작\"}");
+                    sendSseEvent(emitter, "progress", "{\"step\":\"chunk_extract\"}");
                     parsed = extractStage1FromLargeRfp(rfpText, promptContent, modelId, emitter, agentId);
 
                     // evalText 별도 처리
@@ -280,7 +293,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     }
 
                     // Step 4: JSON 파싱 (실패 시 1회 재시도)
-                    sendSseEvent(emitter, "progress", "{\"step\":\"parse\",\"message\":\"분석 결과 검증 중\"}");
+                    sendSseEvent(emitter, "progress", "{\"step\":\"parse\"}");
                     try {
                         parsed = parseStage1Response(aiResponse);
                     } catch (RuntimeException e) {
@@ -317,7 +330,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // Step 5: DB 저장
-                sendSseEvent(emitter, "progress", "{\"step\":\"save\",\"message\":\"결과 저장 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"save\"}");
                 saveStage1Result(ptProjectId, parsed, userId);
 
                 // Step 6: API 호출 로그 기록 (PT 제안은 채팅이 아니므로 apiCallLogService 사용)
@@ -610,8 +623,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     int done = completedCount.incrementAndGet();
                     if (emitter != null) {
                         sendSseEvent(emitter, "progress",
-                                String.format("{\"step\":\"chunk\",\"message\":\"청크 %d/%d 처리 중\",\"current\":%d,\"total\":%d}",
-                                        done, chunkCount, done, chunkCount));
+                                String.format("{\"step\":\"chunk\",\"current\":%d,\"total\":%d}",
+                                        done, chunkCount));
                     }
                     logger.info("[PT Stage1] 청크 추출 완료 - {}/{} (요구사항:{}건, {}ms)",
                             chunkNo, chunkCount,
@@ -1621,21 +1634,217 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * Stage 2 실행 (진행상황 콜백 지원 오버로드)
-     * @param progressCallback Call 1/Call 2 진행 메시지 콜백 (null 허용)
+     * Stage 2 실행 (진행상황 콜백 지원 오버로드) — 오케스트레이터.
+     * S2A → S2C → S2B를 순차 호출하며, 각 단계는 {@link #runS2a}/{@link #runS2c}/{@link #runS2b}를 재사용한다.
+     * @param progressCallback Stage1과 동일하게 step 코드 콜백 (null 허용).
+     *                         step: load | prompt | problem_def | parse | req_mapping | extract_ref | win_theme | save
+     * STAGE2_STATUS_CD: 001미시작 | 002문제정의저장(S2C부터 재개) | 003완료(skip) | 004실패(처음부터)
      */
     public ProposalVO.Stage2ResultVO executeStage2(String ptProjectId, int totalSlideBudget, String modelId, String agentId,
             java.util.function.Consumer<String> progressCallback) throws Exception {
 
-        // 1. Stage 1 결과 로드
+        if (progressCallback != null) progressCallback.accept("load");
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+        if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
+
+        String stage2StatusCd = CommonUtil.isNotEmpty(project.getStage2StatusCd())
+                ? project.getStage2StatusCd() : STAGE2_STATUS_NOT_STARTED;
+        if (STAGE2_STATUS_DONE.equals(stage2StatusCd)) {
+            logger.info("[PT Stage2] 이미 완료(STAGE2_STATUS_CD=003), 저장 결과 반환 (ptProjectId={})", ptProjectId);
+            return selectStage2Result(ptProjectId);
+        }
+        boolean resumeFromS2c = STAGE2_STATUS_PROBLEM_SAVED.equals(stage2StatusCd);
+
+        try {
+            if (resumeFromS2c) {
+                logger.info("[PT Stage2] STAGE2_STATUS_CD=002 — S2C부터 재개 (ptProjectId={})", ptProjectId);
+                if (progressCallback != null) progressCallback.accept("parse");
+                List<ProposalVO.ProblemDefinitionVO> existing =
+                        proposalDAO.selectProblemDefinitions(ptProjectId);
+                if (existing == null || existing.isEmpty()) {
+                    logger.warn("[PT Stage2] STATUS=002 이나 문제정의 없음 — S2A부터 재실행 (ptProjectId={})", ptProjectId);
+                    resumeFromS2c = false;
+                }
+            }
+
+            if (!resumeFromS2c) {
+                runS2a(ptProjectId, totalSlideBudget, modelId, agentId, progressCallback);
+            }
+            runS2c(ptProjectId, totalSlideBudget, modelId, agentId, progressCallback);
+            runS2b(ptProjectId, null, modelId, agentId, progressCallback);
+
+            ProposalVO.Stage2ResultVO result = new ProposalVO.Stage2ResultVO();
+            result.setPtProjectId(ptProjectId);
+            result.setProblemDefinitions(proposalDAO.selectProblemDefinitions(ptProjectId));
+            result.setWinThemes(proposalDAO.selectWinThemes(ptProjectId));
+            result.setToc(proposalDAO.selectTocList(ptProjectId));
+            return result;
+        } catch (Exception e) {
+            // 002(문제정의 저장됨)면 재개 가능하므로 유지, 그 외(001/null 등)는 004
+            try {
+                ProposalVO.ProjectVO cur = proposalDAO.selectProject(ptProjectId);
+                String curStatus = cur != null ? cur.getStage2StatusCd() : null;
+                if (!STAGE2_STATUS_PROBLEM_SAVED.equals(curStatus) && !STAGE2_STATUS_DONE.equals(curStatus)) {
+                    updateStage2StatusCd(ptProjectId, STAGE2_STATUS_FAILED);
+                }
+            } catch (Exception statusEx) {
+                logger.warn("[PT Stage2] STAGE2_STATUS_CD=004 갱신 실패 (ptProjectId={}): {}", ptProjectId, statusEx.getMessage());
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Stage2-A: 문제정의 LLM 생성 + 조기 저장(STAGE2_STATUS_CD=002).
+     * 개별 엔드포인트·오케스트레이터 공용.
+     */
+    public List<ProposalVO.ProblemDefinitionVO> runS2a(String ptProjectId, int totalSlideBudget,
+            String modelId, String agentId) throws Exception {
+        return runS2a(ptProjectId, totalSlideBudget, modelId, agentId, null);
+    }
+
+    public List<ProposalVO.ProblemDefinitionVO> runS2a(String ptProjectId, int totalSlideBudget,
+            String modelId, String agentId, java.util.function.Consumer<String> progressCallback) throws Exception {
+
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+        if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
+
+        List<ProposalVO.RequirementVO> requirements = proposalDAO.selectRequirements(ptProjectId);
+        List<ProposalVO.RfpIssueVO> rfpIssues = proposalDAO.selectRfpIssues(ptProjectId);
+        List<ProposalVO.TocVO> existingTocInDb = proposalDAO.selectTocList(ptProjectId);
+
+        if (progressCallback != null) progressCallback.accept("prompt");
+        String s2aPromptContent = null;
+        try { s2aPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2A_PROBLEM_TOC"); }
+        catch (Exception e) { logger.warn("[PT Stage2-A] 프롬프트 조회 실패: {}", e.getMessage()); }
+        if (CommonUtil.isEmpty(s2aPromptContent))
+            throw new RuntimeException("Stage2 프롬프트가 DB에 등록되어 있지 않습니다. STAGE_CD=S2A_PROBLEM_TOC 확인 필요");
+
+        Stage2aPromptContext s2aPromptCtx = buildStage2aPromptSlim(
+                s2aPromptContent, project, requirements, rfpIssues, totalSlideBudget);
+        String s2aPrompt = s2aPromptCtx.getPromptText();
+        List<ProposalVO.RequirementLiteVO> shownReqs = s2aPromptCtx.getSampledReqs();
+
+        if (progressCallback != null) progressCallback.accept("problem_def");
+        long s2aStart = System.currentTimeMillis();
+        logger.info("[PT Stage2-A] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2aPrompt.length(), ptProjectId);
+        String s2aResponse = riskDiagnosisAgentService.callLlmQuerySync(s2aPrompt, modelId, "", agentId);
+        if (CommonUtil.isEmpty(s2aResponse)) {
+            logger.warn("[PT Stage2-A] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
+            s2aResponse = riskDiagnosisAgentService.callLlmQuerySync(s2aPrompt, modelId, "", agentId);
+        }
+        if (CommonUtil.isEmpty(s2aResponse))
+            throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 2-A(문제정의) 분석을 완료할 수 없습니다.");
+        logger.info("[PT Stage2-A] 완료 - 프롬프트 길이: {}자, 소요시간: {}ms (ptProjectId={})",
+                s2aPrompt.length(), System.currentTimeMillis() - s2aStart, ptProjectId);
+
+        if (progressCallback != null) progressCallback.accept("parse");
+        ProposalVO.Stage2ResultVO parsed = parseStage2aResponse(s2aResponse);
+
+        java.util.Set<String> validIssueIds = new java.util.HashSet<>();
+        if (rfpIssues != null)
+            for (ProposalVO.RfpIssueVO i : rfpIssues)
+                if (CommonUtil.isNotEmpty(i.getIssueId())) validIssueIds.add(i.getIssueId());
+        java.util.Set<String> validProblemSourceReqIds = new java.util.HashSet<>();
+        if (shownReqs != null)
+            for (ProposalVO.RequirementLiteVO r : shownReqs)
+                if (CommonUtil.isNotEmpty(r.getRequirementId())) validProblemSourceReqIds.add(r.getRequirementId());
+        if (parsed.getProblemDefinitions() != null) {
+            for (ProposalVO.ProblemDefinitionVO pd : parsed.getProblemDefinitions()) {
+                pd.setSourceIssueIdsJson(filterValidIds(pd.getSourceIssueIdsJson(), validIssueIds));
+                pd.setSourceRequirementIdsJson(filterValidIds(pd.getSourceRequirementIdsJson(), validProblemSourceReqIds));
+            }
+        }
+
+        saveStage2ProblemDefinitions(ptProjectId, parsed.getProblemDefinitions());
+        logger.info("[PT Stage2-A] TB_PT_TOC 목차 사용 (tocCount={}, ptProjectId={})",
+                existingTocInDb.size(), ptProjectId);
+        return parsed.getProblemDefinitions();
+    }
+
+    /**
+     * Stage2-C: coveredReqIds/linkedEvalCriteriaId 매핑 + 슬라이드 배분 + TOC 저장.
+     * 개별 엔드포인트·오케스트레이터 공용. 전제: 문제정의·TOC가 DB에 있어야 한다.
+     */
+    public List<ProposalVO.TocVO> runS2c(String ptProjectId, int totalSlideBudget,
+            String modelId, String agentId) throws Exception {
+        return runS2c(ptProjectId, totalSlideBudget, modelId, agentId, null);
+    }
+
+    public List<ProposalVO.TocVO> runS2c(String ptProjectId, int totalSlideBudget,
+            String modelId, String agentId, java.util.function.Consumer<String> progressCallback) throws Exception {
+
         ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
         if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
 
         List<ProposalVO.RequirementVO> requirements = proposalDAO.selectRequirements(ptProjectId);
         List<ProposalVO.EvalCriteriaVO> evalCriteria = proposalDAO.selectEvalCriteria(ptProjectId);
-        List<ProposalVO.RfpIssueVO> rfpIssues = proposalDAO.selectRfpIssues(ptProjectId);
+        List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
+        if (tocList == null || tocList.isEmpty())
+            throw new RuntimeException("목차가 없습니다. Stage1 완료 후 다시 시도하세요. ptProjectId=" + ptProjectId);
 
-        // 2. PROJECT_CONFIG_JSON.settings에서 파일 ID 목록 읽기
+        java.util.Set<String> validReqIds = new java.util.HashSet<>();
+        if (requirements != null)
+            for (ProposalVO.RequirementVO r : requirements)
+                if (CommonUtil.isNotEmpty(r.getRequirementId())) validReqIds.add(r.getRequirementId());
+
+        if (progressCallback != null) progressCallback.accept("req_mapping");
+        String s2cPromptContent = null;
+        try { s2cPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2C_COVEREDREQNOS"); }
+        catch (Exception e) { logger.warn("[PT Stage2-C] 프롬프트 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage()); }
+        if (CommonUtil.isEmpty(s2cPromptContent))
+            throw new RuntimeException("Stage2 프롬프트가 DB에 등록되어 있지 않습니다. STAGE_CD=S2C_COVEREDREQNOS 확인 필요");
+
+        String s2cPrompt = buildStage2cCoveredReqIdsPrompt(s2cPromptContent, tocList, requirements, evalCriteria);
+        long s2cStart = System.currentTimeMillis();
+        logger.info("[PT Stage2-C] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2cPrompt.length(), ptProjectId);
+        String s2cResponse = riskDiagnosisAgentService.callLlmQuerySync(s2cPrompt, modelId, "", agentId);
+        if (CommonUtil.isEmpty(s2cResponse)) {
+            logger.warn("[PT Stage2-C] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
+            s2cResponse = riskDiagnosisAgentService.callLlmQuerySync(s2cPrompt, modelId, "", agentId);
+        }
+        if (CommonUtil.isNotEmpty(s2cResponse)) {
+            java.util.Set<String> validEvalCriteriaIds = new java.util.HashSet<>();
+            if (evalCriteria != null)
+                for (ProposalVO.EvalCriteriaVO ec : evalCriteria)
+                    if (CommonUtil.isNotEmpty(ec.getEvalCriteriaId())) validEvalCriteriaIds.add(ec.getEvalCriteriaId());
+            parseAndApplyStage2cResponse(tocList, s2cResponse, ptProjectId, validEvalCriteriaIds);
+            logger.info("[PT Stage2-C] 완료 - 소요시간: {}ms (ptProjectId={})",
+                    System.currentTimeMillis() - s2cStart, ptProjectId);
+        } else {
+            logger.warn("[PT Stage2-C] LLM 응답 없음, coveredReqNos 배정 생략 (ptProjectId={})", ptProjectId);
+        }
+
+        validateAndCleanTocReqIds(tocList, validReqIds, ptProjectId);
+        if (!tocList.isEmpty()) {
+            warnUncoveredRequirements(tocList, validReqIds, ptProjectId);
+        }
+
+        calculateSlideCounts(tocList, evalCriteria, totalSlideBudget);
+        saveStage2TocMapping(ptProjectId, tocList, evalCriteria, requirements);
+        return tocList;
+    }
+
+    /**
+     * Stage2-B: Win Theme LLM 생성 + 저장(STAGE2_STATUS_CD=003).
+     * 개별 엔드포인트·오케스트레이터 공용. feedback이 있으면 보완 요청으로 프롬프트에 포함한다.
+     */
+    public List<ProposalVO.WinThemeVO> runS2b(String ptProjectId, String feedback,
+            String modelId, String agentId) throws Exception {
+        return runS2b(ptProjectId, feedback, modelId, agentId, null);
+    }
+
+    public List<ProposalVO.WinThemeVO> runS2b(String ptProjectId, String feedback,
+            String modelId, String agentId, java.util.function.Consumer<String> progressCallback) throws Exception {
+
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+        if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
+
+        List<ProposalVO.ProblemDefinitionVO> problemDefinitions =
+                proposalDAO.selectProblemDefinitions(ptProjectId);
+        if (problemDefinitions == null || problemDefinitions.isEmpty())
+            throw new RuntimeException("문제정의가 없습니다. Stage2-A 완료 후 다시 시도하세요. ptProjectId=" + ptProjectId);
+
         List<String> companyFileIds   = java.util.Collections.emptyList();
         List<String> competitorFileIds = java.util.Collections.emptyList();
         List<String> etcRefFileIds    = java.util.Collections.emptyList();
@@ -1654,98 +1863,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
         } catch (Exception e) {
-            logger.warn("[PT Stage2] 설정 파일 ID 파싱 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+            logger.warn("[PT Stage2-B] 설정 파일 ID 파싱 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
         }
 
-        // ── Call 1: S2A (problemDefinitions) — Stage1이 TB_PT_TOC에 목차를 삽입하므로 항상 slim 경로 ──
-        List<ProposalVO.TocVO> existingTocInDb = proposalDAO.selectTocList(ptProjectId);
-
-        // 3. S2A 프롬프트 로드 (자사/경쟁사 정보 불필요)
-        String s2aPromptContent = null;
-        try { s2aPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2A_PROBLEM_TOC"); }
-        catch (Exception e) { logger.warn("[PT Stage2-A] 프롬프트 조회 실패: {}", e.getMessage()); }
-        if (CommonUtil.isEmpty(s2aPromptContent))
-            throw new RuntimeException("Stage2 프롬프트가 DB에 등록되어 있지 않습니다. STAGE_CD=S2A_PROBLEM_TOC 확인 필요");
-
-        // 4. Call 1 프롬프트 조합 (problemDefinitions만 생성, toc는 Stage1 산출물 사용)
-        //    sampledReqs: 실제로 프롬프트에 포함된 요구사항 subset — 이후 sourceRequirementIds 검증에 사용
-        Stage2aPromptContext s2aPromptCtx = buildStage2aPromptSlim(s2aPromptContent, project, requirements, rfpIssues, totalSlideBudget);
-        String s2aPrompt = s2aPromptCtx.getPromptText();
-        List<ProposalVO.RequirementLiteVO> shownReqs = s2aPromptCtx.getSampledReqs();
-
-        // 5. Call 1 LLM 호출 (1회 재시도)
-        if (progressCallback != null) progressCallback.accept("Call 1 진행중 (문제정의)");
-        long s2aStart = System.currentTimeMillis();
-        logger.info("[PT Stage2-A] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2aPrompt.length(), ptProjectId);
-        String s2aResponse = riskDiagnosisAgentService.callLlmQuerySync(s2aPrompt, modelId, "", agentId);
-        if (CommonUtil.isEmpty(s2aResponse)) {
-            logger.warn("[PT Stage2-A] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
-            s2aResponse = riskDiagnosisAgentService.callLlmQuerySync(s2aPrompt, modelId, "", agentId);
-        }
-        if (CommonUtil.isEmpty(s2aResponse)) throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 2-A(문제정의) 분석을 완료할 수 없습니다.");
-        logger.info("[PT Stage2-A] 완료 - 프롬프트 길이: {}자, 소요시간: {}ms (ptProjectId={})",
-                s2aPrompt.length(), System.currentTimeMillis() - s2aStart, ptProjectId);
-
-        // 6. Call 1 파싱 → problemDefinitions, (toc: mandatedToc 경로면 빈 배열)
-        ProposalVO.Stage2ResultVO parsed = parseStage2aResponse(s2aResponse);
-
-        // 6-A. problemDefinitions.sourceIssueIds/sourceRequirementIds 할루시네이션 방어
-        //      - 이슈는 항상 전체 노출 → 전체 rfpIssues 기준
-        //      - 요구사항은 프롬프트에 실제로 보여준 shownReqs(샘플 subset) 기준 (전체 우주 기준으로 검증하면
-        //        LLM이 샘플에 없는 다른 PK를 우연히 맞혀도 통과해버리는 구멍이 생김)
-        java.util.Set<String> validIssueIds = new java.util.HashSet<>();
-        if (rfpIssues != null) for (ProposalVO.RfpIssueVO i : rfpIssues) if (CommonUtil.isNotEmpty(i.getIssueId())) validIssueIds.add(i.getIssueId());
-        java.util.Set<String> validProblemSourceReqIds = new java.util.HashSet<>();
-        if (shownReqs != null) for (ProposalVO.RequirementLiteVO r : shownReqs) if (CommonUtil.isNotEmpty(r.getRequirementId())) validProblemSourceReqIds.add(r.getRequirementId());
-        if (parsed.getProblemDefinitions() != null) {
-            for (ProposalVO.ProblemDefinitionVO pd : parsed.getProblemDefinitions()) {
-                pd.setSourceIssueIdsJson(filterValidIds(pd.getSourceIssueIdsJson(), validIssueIds));
-                pd.setSourceRequirementIdsJson(filterValidIds(pd.getSourceRequirementIdsJson(), validProblemSourceReqIds));
-            }
-        }
-
-        // 7. validReqIds 구성 (requirementId 기반 — 001/002 타입 구분 없이 전체 포함)
-        java.util.Set<String> validReqIds = new java.util.HashSet<>();
-        if (requirements != null) for (ProposalVO.RequirementVO r : requirements) if (CommonUtil.isNotEmpty(r.getRequirementId())) validReqIds.add(r.getRequirementId());
-
-        // 7-A. Stage1이 삽입한 TB_PT_TOC 목차 로드
-        parsed.setToc(existingTocInDb);
-        logger.info("[PT Stage2-A] TB_PT_TOC 목차 사용 (tocCount={}, ptProjectId={})", existingTocInDb.size(), ptProjectId);
-
-        // 7-B. Call 1B — S2C: coveredReqNos 매핑 전용 LLM 호출
-        if (progressCallback != null) progressCallback.accept("Call 1B 진행중 (요구사항-목차 매핑)");
-        String s2cPromptContent = null;
-        try { s2cPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2C_COVEREDREQNOS"); }
-        catch (Exception e) { logger.warn("[PT Stage2-C] 프롬프트 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage()); }
-        if (CommonUtil.isEmpty(s2cPromptContent))
-            throw new RuntimeException("Stage2 프롬프트가 DB에 등록되어 있지 않습니다. STAGE_CD=S2C_COVEREDREQNOS 확인 필요");
-
-        String s2cPrompt = buildStage2cCoveredReqIdsPrompt(s2cPromptContent, parsed.getToc(), requirements, evalCriteria);
-        long s2cStart = System.currentTimeMillis();
-        logger.info("[PT Stage2-C] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2cPrompt.length(), ptProjectId);
-        String s2cResponse = riskDiagnosisAgentService.callLlmQuerySync(s2cPrompt, modelId, "", agentId);
-        if (CommonUtil.isEmpty(s2cResponse)) {
-            logger.warn("[PT Stage2-C] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
-            s2cResponse = riskDiagnosisAgentService.callLlmQuerySync(s2cPrompt, modelId, "", agentId);
-        }
-        if (CommonUtil.isNotEmpty(s2cResponse)) {
-            java.util.Set<String> validEvalCriteriaIds = new java.util.HashSet<>();
-            if (evalCriteria != null) for (ProposalVO.EvalCriteriaVO ec : evalCriteria) if (CommonUtil.isNotEmpty(ec.getEvalCriteriaId())) validEvalCriteriaIds.add(ec.getEvalCriteriaId());
-            parseAndApplyStage2cResponse(parsed.getToc(), s2cResponse, ptProjectId, validEvalCriteriaIds);
-            logger.info("[PT Stage2-C] 완료 - 소요시간: {}ms (ptProjectId={})", System.currentTimeMillis() - s2cStart, ptProjectId);
-        } else {
-            logger.warn("[PT Stage2-C] LLM 응답 없음, coveredReqNos 배정 생략 (ptProjectId={})", ptProjectId);
-        }
-
-        // 7-C. coveredReqNos 검증
-        validateAndCleanTocReqIds(parsed.getToc(), validReqIds, ptProjectId);
-
-        // 9. 미커버 요구사항 경고 (toc가 있을 때만 의미 있음)
-        if (parsed.getToc() != null && !parsed.getToc().isEmpty()) {
-            warnUncoveredRequirements(parsed.getToc(), validReqIds, ptProjectId);
-        }
-
-        // ── 자사/경쟁사/기타 파일 텍스트 추출 (Call 2 에서만 사용) ────────────────
+        if (progressCallback != null) progressCallback.accept("extract_ref");
         String ownContext = extractMultiFileText(companyFileIds);
         if (CommonUtil.isEmpty(ownContext)) ownContext = "(자사 자료 없음)";
         String competitorContext = extractMultiFileText(competitorFileIds);
@@ -1753,19 +1874,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String etcRefContext = extractMultiFileText(etcRefFileIds);
         if (CommonUtil.isEmpty(etcRefContext)) etcRefContext = "(기타 참고자료 없음)";
 
-        // ── Call 2: S2B (winThemes) ────────────────────────────────────────────
-        // 10. S2B 프롬프트 로드 (자사/경쟁사 정보 + Call 1 problemDefinitions 사용)
         String s2bPromptContent = null;
         try { s2bPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2B_WINTHEME"); }
         catch (Exception e) { logger.warn("[PT Stage2-B] 프롬프트 조회 실패: {}", e.getMessage()); }
         if (CommonUtil.isEmpty(s2bPromptContent))
             throw new RuntimeException("Stage2 프롬프트가 DB에 등록되어 있지 않습니다. STAGE_CD=S2B_WINTHEME 확인 필요");
 
-        // 11. Call 2 프롬프트 조합 (problemDefinitions + 자사/경쟁사/기타)
-        String s2bPrompt = buildStage2bWinThemePrompt(s2bPromptContent, project, parsed.getProblemDefinitions(), ownContext, competitorContext, etcRefContext);
+        String s2bPrompt = buildStage2bWinThemePrompt(
+                s2bPromptContent, project, problemDefinitions, ownContext, competitorContext, etcRefContext, feedback);
 
-        // 12. Call 2 LLM 호출 (1회 재시도)
-        if (progressCallback != null) progressCallback.accept("Call 2 진행중 (Win Theme)");
+        if (progressCallback != null) progressCallback.accept("win_theme");
         long s2bStart = System.currentTimeMillis();
         logger.info("[PT Stage2-B] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2bPrompt.length(), ptProjectId);
         String s2bResponse = riskDiagnosisAgentService.callLlmQuerySync(s2bPrompt, modelId, "", agentId);
@@ -1773,75 +1891,104 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             logger.warn("[PT Stage2-B] LLM 응답 없음, 1회 재시도 (ptProjectId={})", ptProjectId);
             s2bResponse = riskDiagnosisAgentService.callLlmQuerySync(s2bPrompt, modelId, "", agentId);
         }
-        if (CommonUtil.isEmpty(s2bResponse)) throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 2-B(Win Theme) 분석을 완료할 수 없습니다.");
+        if (CommonUtil.isEmpty(s2bResponse))
+            throw new RuntimeException("LLM 응답이 비어 있습니다. Stage 2-B(Win Theme) 분석을 완료할 수 없습니다.");
         logger.info("[PT Stage2-B] 완료 - 프롬프트 길이: {}자, 소요시간: {}ms (ptProjectId={})",
                 s2bPrompt.length(), System.currentTimeMillis() - s2bStart, ptProjectId);
 
-        // 13. Call 2 파싱 → winThemes
         List<ProposalVO.WinThemeVO> winThemes = parseStage2bResponse(s2bResponse);
 
-        // 14. evidence 품질 경고
+        java.util.Set<String> validProblemIds = new java.util.HashSet<>();
+        for (ProposalVO.ProblemDefinitionVO pd : problemDefinitions) {
+            if (CommonUtil.isNotEmpty(pd.getProblemId())) validProblemIds.add(pd.getProblemId());
+        }
+        if (winThemes != null) {
+            for (ProposalVO.WinThemeVO wt : winThemes) {
+                wt.setSourceProblemIdsJson(filterValidIds(wt.getSourceProblemIdsJson(), validProblemIds));
+                if (CommonUtil.isEmpty(wt.getSourceProblemIdsJson())) {
+                    logger.warn("[PT Stage2-B] sourceProblemDefinitionIds 비어 있음 — Win Theme stale 추적 불가 (coreMessage={})",
+                            wt.getCoreMessage());
+                }
+            }
+        }
+
         validateStage2Evidence(winThemes, ptProjectId);
 
-        // ── 병합 및 저장 ────────────────────────────────────────────────────────
-        // 15. Call 1(problemDefinitions + toc) + Call 2(winThemes) 병합
-        parsed.setWinThemes(winThemes);
-
-        // 16. 슬라이드 수 Java 계산 (Call 1 toc + evalCriteria 기준)
-        calculateSlideCounts(parsed.getToc(), evalCriteria, totalSlideBudget);
-
-        // 17. 트랜잭션 저장
-        saveStage2Result(ptProjectId, parsed, evalCriteria, requirements);
-
-        // S2D 제거: guideContent는 Stage1에서 RFP 최초 읽기 시 TB_PT_TOC에 직접 삽입됨
-
-        parsed.setPtProjectId(ptProjectId);
-        return parsed;
+        if (progressCallback != null) progressCallback.accept("save");
+        saveStage2WinThemes(ptProjectId, winThemes);
+        return winThemes;
     }
 
     /**
-     * Stage 2 결과 DB 쓰기 — 트랜잭션 분리
+     * Stage2-A 직후 문제정의만 조기 저장 (TransactionTemplate 독립 커밋).
+     * 커밋 후 STAGE2_STATUS_CD=002 — 동시 Stage2의 SELECT MAX가 이 키를 볼 수 있다.
      */
-    @Transactional(rollbackFor = Exception.class)
-    public void saveStage2Result(String ptProjectId, ProposalVO.Stage2ResultVO parsed,
+    public void saveStage2ProblemDefinitions(String ptProjectId,
+            List<ProposalVO.ProblemDefinitionVO> problemDefinitions) {
+        String userId = SessionUtil.getUserId();
+        logger.info("[PT Stage2] 문제정의 조기 저장 시작 (ptProjectId={}, count={})",
+                ptProjectId, problemDefinitions != null ? problemDefinitions.size() : 0);
+
+        transactionTemplate.execute(status -> {
+            try {
+                proposalDAO.deleteProblemDefinitionsByProject(ptProjectId);
+                if (problemDefinitions != null) {
+                    int ord = 0;
+                    for (ProposalVO.ProblemDefinitionVO pd : problemDefinitions) {
+                        pd.setProblemId(keyGenerate.generateTableKey("PTP", "TB_PT_PROBLEM_DEFINITION", "PROBLEM_ID", 6));
+                        pd.setPtProjectId(ptProjectId);
+                        pd.setCreateUserId(userId != null ? userId : "hj249");
+                        if (pd.getSortOrd() == null) pd.setSortOrd(ord++);
+                        if (CommonUtil.isEmpty(pd.getSourceTypeCd())) pd.setSourceTypeCd("002");
+                        proposalDAO.insertProblemDefinition(pd);
+                    }
+                }
+                ProposalVO.ProjectVO statusVO = new ProposalVO.ProjectVO();
+                statusVO.setPtProjectId(ptProjectId);
+                statusVO.setStage2StatusCd(STAGE2_STATUS_PROBLEM_SAVED);
+                proposalDAO.updateStage2StatusCd(statusVO);
+                return null;
+            } catch (RuntimeException re) {
+                throw re;
+            } catch (Exception e) {
+                throw new RuntimeException("[PT Stage2] 문제정의 조기 저장 실패: " + e.getMessage(), e);
+            }
+        });
+        logger.info("[PT Stage2] 문제정의 조기 저장 완료 (STAGE2_STATUS_CD=002, ptProjectId={})", ptProjectId);
+    }
+
+    /**
+     * Stage2-C 직후 TOC 매핑만 저장 (TransactionTemplate 독립 커밋).
+     * LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON, PLANNED_SLIDE_CNT + 평가기준 SLIDE_REFLECT_POSITION.
+     * 기존 값과 동일한 노드는 UPDATE를 건너뛰어 MODIFY_DT를 보존한다 (Step6 stale 오염 방지).
+     * STAGE2_STATUS_CD는 변경하지 않는다 (003은 {@link #saveStage2WinThemes}에서 설정).
+     */
+    public void saveStage2TocMapping(String ptProjectId, List<ProposalVO.TocVO> tocList,
+            List<ProposalVO.EvalCriteriaVO> evalCriteriaFromDb,
+            List<ProposalVO.RequirementVO> requirementsFromDb) {
+        logger.info("[PT Stage2-C] TOC 매핑 저장 시작 (ptProjectId={}, tocCount={})",
+                ptProjectId, tocList != null ? tocList.size() : 0);
+        transactionTemplate.execute(status -> {
+            try {
+                saveStage2TocMappingInternal(ptProjectId, tocList, evalCriteriaFromDb, requirementsFromDb);
+                return null;
+            } catch (RuntimeException re) {
+                throw re;
+            } catch (Exception e) {
+                throw new RuntimeException("[PT Stage2] TOC 매핑 저장 실패: " + e.getMessage(), e);
+            }
+        });
+        logger.info("[PT Stage2-C] TOC 매핑 저장 완료 (ptProjectId={})", ptProjectId);
+    }
+
+    /** {@link #saveStage2TocMapping} TransactionTemplate 콜백 본문 */
+    private void saveStage2TocMappingInternal(String ptProjectId, List<ProposalVO.TocVO> tocList,
             List<ProposalVO.EvalCriteriaVO> evalCriteriaFromDb,
             List<ProposalVO.RequirementVO> requirementsFromDb) throws Exception {
-        String userId = SessionUtil.getUserId();
 
-        logger.info("saveStage2Result userId: {}", userId);
-        // 문제 정의 초기화 + 재등록
-        proposalDAO.deleteProblemDefinitionsByProject(ptProjectId);
-        if (parsed.getProblemDefinitions() != null) {
-            int ord = 0;
-            for (ProposalVO.ProblemDefinitionVO pd : parsed.getProblemDefinitions()) {
-                pd.setProblemId(keyGenerate.generateTableKey("PTP", "TB_PT_PROBLEM_DEFINITION", "PROBLEM_ID", 6));
-                pd.setPtProjectId(ptProjectId);
-                pd.setCreateUserId(userId != null ? userId : "hj249");
-                if (pd.getSortOrd() == null) pd.setSortOrd(ord++);
-                if (CommonUtil.isEmpty(pd.getSourceTypeCd())) pd.setSourceTypeCd("002");
-                proposalDAO.insertProblemDefinition(pd);
-            }
-        }
-
-        // Win Theme 초기화 + 재등록
-        proposalDAO.deleteWinThemesByProject(ptProjectId);
-        if (parsed.getWinThemes() != null) {
-            int ord = 0;
-            for (ProposalVO.WinThemeVO wt : parsed.getWinThemes()) {
-                wt.setWinThemeId(keyGenerate.generateTableKey("PTW", "TB_PT_WIN_THEME", "WIN_THEME_ID", 6));
-                wt.setPtProjectId(ptProjectId);
-                wt.setCreateUserId(userId != null ? userId : "hj249");
-                if (wt.getSortOrd() == null) wt.setSortOrd(ord++);
-                proposalDAO.insertWinTheme(wt);
-            }
-        }
-
-        // ── TOC 매핑 업데이트 (DELETE/INSERT 없음 — Step B 확정 목차 보존)
-        // LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON, PLANNED_SLIDE_CNT 갱신
         List<ProposalVO.TocVO> existingTocList = proposalDAO.selectTocList(ptProjectId);
         logger.info("[PT Stage2] 기존 TOC 레코드 조회: {}건 (ptProjectId={})", existingTocList.size(), ptProjectId);
 
-        // 기존 toc lookup 맵: sectionNo 우선, sectionNm 대체
         java.util.Map<String, ProposalVO.TocVO> dbBySectionNo = new java.util.LinkedHashMap<>();
         java.util.Map<String, ProposalVO.TocVO> dbBySectionNm = new java.util.LinkedHashMap<>();
         for (ProposalVO.TocVO dbToc : existingTocList) {
@@ -1851,7 +1998,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 dbBySectionNm.putIfAbsent(dbToc.getSectionNm().trim(), dbToc);
         }
 
-        // evalItemNm → evalCriteriaId 맵 (S2A 일반경로 호환용, mandatedToc 경로에서는 미사용)
         java.util.Map<String, String> evalNmToId = new java.util.HashMap<>();
         if (evalCriteriaFromDb != null) {
             for (ProposalVO.EvalCriteriaVO ec : evalCriteriaFromDb) {
@@ -1859,7 +2005,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        // 유효한 evalCriteriaId Set
         java.util.Set<String> validEvalIds = new java.util.HashSet<>();
         if (evalCriteriaFromDb != null) {
             for (ProposalVO.EvalCriteriaVO ec : evalCriteriaFromDb) {
@@ -1867,7 +2012,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        // 유효한 requirementId Set (LLM 할루시네이션 검증용, 001/002 타입 모두 포함)
         java.util.Set<String> validReqIds = new java.util.HashSet<>();
         if (requirementsFromDb != null) {
             for (ProposalVO.RequirementVO req : requirementsFromDb) {
@@ -1875,13 +2019,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        // LLM 응답 toc 항목별 매칭 + UPDATE
-        int tocMatchedCount = 0, tocUnmatchedCount = 0;
+        int tocMatchedCount = 0, tocUpdatedCount = 0, tocSkippedCount = 0, tocUnmatchedCount = 0;
         java.util.Map<String, String> evalIdToPosition = new java.util.HashMap<>();
 
-        if (parsed.getToc() != null) {
-            for (ProposalVO.TocVO llmToc : parsed.getToc()) {
-                // 1) DB toc 매칭: sectionNo 우선, sectionNm 대체
+        if (tocList != null) {
+            for (ProposalVO.TocVO llmToc : tocList) {
                 ProposalVO.TocVO dbToc = null;
                 String llmNo = llmToc.getSectionNo();
                 String llmNm = llmToc.getSectionNm();
@@ -1893,10 +2035,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     tocUnmatchedCount++;
                     continue;
                 }
+                tocMatchedCount++;
 
-                // 2) evalCriteriaId 결정:
-                //    S2C 경로(mandatedToc): TocVO에 linkedEvalCriteriaId가 직접 세팅됨 → 우선 사용
-                //    S2A 경로(일반): linkedEvalCriteriaNm으로 이름 lookup
+                // evalCriteriaId: S2C linkedEvalCriteriaId 우선, 없으면 linkedEvalCriteriaNm lookup
                 String evalCriteriaId = null;
                 if (CommonUtil.isNotEmpty(llmToc.getLinkedEvalCriteriaId())) {
                     evalCriteriaId = validEvalIds.contains(llmToc.getLinkedEvalCriteriaId())
@@ -1912,7 +2053,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     }
                 }
 
-                // 3) coveredReqIds(requirementId[]) → 유효성 검증 후 JSON 저장
                 String coveredReqIdsJson = null;
                 if (llmToc.getCoveredReqIds() != null) {
                     java.util.List<String> validatedIds = new java.util.ArrayList<>();
@@ -1923,19 +2063,27 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                             logger.warn("[PT Stage2] LLM 할루시네이션 — 존재하지 않는 requirementId 제거: reqId={}, ptProjectId={}", reqId, ptProjectId);
                         }
                     }
-                    coveredReqIdsJson = GSON.toJson(validatedIds); // 0건이면 "[]"
+                    // 순서 무관 비교·재커밋 안정성을 위해 정렬 후 직렬화
+                    java.util.Collections.sort(validatedIds);
+                    coveredReqIdsJson = validatedIds.isEmpty() ? null : GSON.toJson(validatedIds);
+                }
+                int plannedSlideCnt = llmToc.getPlannedSlideCnt() > 0 ? llmToc.getPlannedSlideCnt() : 1;
+
+                // write-before-compare: 값이 동일하면 UPDATE 생략 → MODIFY_DT 오염 방지 (Step6 stale)
+                if (java.util.Objects.equals(dbToc.getLinkedEvalCriteriaId(), evalCriteriaId)
+                        && sameCoveredReqIdsJson(dbToc.getCoveredReqIdsJson(), coveredReqIdsJson)
+                        && dbToc.getPlannedSlideCnt() == plannedSlideCnt) {
+                    tocSkippedCount++;
+                } else {
+                    ProposalVO.TocVO updToc = new ProposalVO.TocVO();
+                    updToc.setTocId(dbToc.getTocId());
+                    updToc.setLinkedEvalCriteriaId(evalCriteriaId);
+                    updToc.setCoveredReqIdsJson(coveredReqIdsJson);
+                    updToc.setPlannedSlideCnt(plannedSlideCnt);
+                    proposalDAO.updateTocEvalLinkAndReqIds(updToc);
+                    tocUpdatedCount++;
                 }
 
-                // 4) UPDATE (TOC_ID 유지, 매핑 컬럼만 갱신)
-                ProposalVO.TocVO updToc = new ProposalVO.TocVO();
-                updToc.setTocId(dbToc.getTocId());
-                updToc.setLinkedEvalCriteriaId(evalCriteriaId);
-                updToc.setCoveredReqIdsJson(coveredReqIdsJson);
-                updToc.setPlannedSlideCnt(llmToc.getPlannedSlideCnt() > 0 ? llmToc.getPlannedSlideCnt() : 1);
-                proposalDAO.updateTocEvalLinkAndReqIds(updToc);
-                tocMatchedCount++;
-
-                // 5) SLIDE_REFLECT_POSITION 구성 — DB 기준 sectionNo/sectionNm 사용
                 if (evalCriteriaId != null) {
                     String pos = (dbToc.getSectionNo() != null ? dbToc.getSectionNo() : "")
                             + " " + (dbToc.getSectionNm() != null ? dbToc.getSectionNm() : "");
@@ -1943,29 +2091,70 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
         }
-        logger.info("[PT Stage2] TOC 매핑 업데이트 완료: 매칭 {}건, 미매칭(건너뜀) {}건 (ptProjectId={})",
-                tocMatchedCount, tocUnmatchedCount, ptProjectId);
+        logger.info("[PT Stage2] TOC 매핑 업데이트 완료: 매칭 {}건, 변경UPDATE {}건, 동일스킵 {}건, 미매칭 {}건 (ptProjectId={})",
+                tocMatchedCount, tocUpdatedCount, tocSkippedCount, tocUnmatchedCount, ptProjectId);
 
-        // 평가기준 SLIDE_REFLECT_POSITION 업데이트
         for (java.util.Map.Entry<String, String> e : evalIdToPosition.entrySet()) {
             ProposalVO.EvalCriteriaVO upd = new ProposalVO.EvalCriteriaVO();
             upd.setEvalCriteriaId(e.getKey());
             upd.setSlideReflectPosition(e.getValue());
             proposalDAO.updateEvalCriteriaSlideReflectPosition(upd);
         }
-        // 매칭 안 된 evalCriteria 경고
         if (evalCriteriaFromDb != null) {
             for (ProposalVO.EvalCriteriaVO ec : evalCriteriaFromDb) {
                 if (!evalIdToPosition.containsKey(ec.getEvalCriteriaId()))
                     logger.warn("[PT Stage2] 평가항목 SLIDE_REFLECT_POSITION 미매칭: evalItemNm={}, ptProjectId={}", ec.getEvalItemNm(), ptProjectId);
             }
         }
+    }
 
-        // 프로젝트 상태 업데이트
-        ProposalVO.ProjectVO statusVO = new ProposalVO.ProjectVO();
-        statusVO.setPtProjectId(ptProjectId);
-        statusVO.setStatusCd("003"); // 003=완료(Stage 2까지)
-        proposalDAO.updateProjectStatus(statusVO);
+    /**
+     * Stage2-B 직후 Win Theme 저장 (TransactionTemplate 독립 커밋).
+     * 커밋 시 STAGE2_STATUS_CD=003 + 프로젝트 statusCd=003.
+     */
+    public void saveStage2WinThemes(String ptProjectId, List<ProposalVO.WinThemeVO> winThemes) {
+        String userId = SessionUtil.getUserId();
+        logger.info("[PT Stage2-B] Win Theme 저장 시작 (ptProjectId={}, count={})",
+                ptProjectId, winThemes != null ? winThemes.size() : 0);
+
+        transactionTemplate.execute(status -> {
+            try {
+                proposalDAO.deleteWinThemesByProject(ptProjectId);
+                if (winThemes != null) {
+                    int ord = 0;
+                    for (ProposalVO.WinThemeVO wt : winThemes) {
+                        wt.setWinThemeId(keyGenerate.generateTableKey("PTW", "TB_PT_WIN_THEME", "WIN_THEME_ID", 6));
+                        wt.setPtProjectId(ptProjectId);
+                        wt.setCreateUserId(userId != null ? userId : "hj249");
+                        if (wt.getSortOrd() == null) wt.setSortOrd(ord++);
+                        proposalDAO.insertWinTheme(wt);
+                    }
+                }
+                ProposalVO.ProjectVO statusVO = new ProposalVO.ProjectVO();
+                statusVO.setPtProjectId(ptProjectId);
+                statusVO.setStatusCd("003"); // 003=완료(Stage 2까지)
+                proposalDAO.updateProjectStatus(statusVO);
+                statusVO.setStage2StatusCd(STAGE2_STATUS_DONE);
+                proposalDAO.updateStage2StatusCd(statusVO);
+                return null;
+            } catch (RuntimeException re) {
+                throw re;
+            } catch (Exception e) {
+                throw new RuntimeException("[PT Stage2] Win Theme 저장 실패: " + e.getMessage(), e);
+            }
+        });
+        logger.info("[PT Stage2-B] Win Theme 저장 완료 (STAGE2_STATUS_CD=003, ptProjectId={})", ptProjectId);
+    }
+
+    /** Stage2 진행 상태만 독립 커밋으로 갱신 (실패 마킹 등) */
+    private void updateStage2StatusCd(String ptProjectId, String stage2StatusCd) {
+        transactionTemplate.execute(status -> {
+            ProposalVO.ProjectVO vo = new ProposalVO.ProjectVO();
+            vo.setPtProjectId(ptProjectId);
+            vo.setStage2StatusCd(stage2StatusCd);
+            proposalDAO.updateStage2StatusCd(vo);
+            return null;
+        });
     }
 
     /**
@@ -2190,19 +2379,45 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 if (validSet.contains(id)) {
                     filtered.add(id);
                 } else {
-                    logger.warn("[PT Stage2-A] 할루시네이션 — 존재하지 않거나 미노출된 ID 제거: {}", id);
+                    logger.warn("[PT Stage2] 할루시네이션 — 존재하지 않거나 미노출된 ID 제거: {}", id);
                 }
             }
             return filtered.isEmpty() ? null : GSON.toJson(filtered);
         } catch (Exception e) {
-            logger.warn("[PT Stage2-A] sourceIssueIds/sourceRequirementIds 파싱 실패, null 처리: {}", e.getMessage());
+            logger.warn("[PT Stage2] source*Ids JSON 파싱 실패, null 처리: {}", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * COVERED_REQ_IDS_JSON 동일성 — null/빈배열 동치, 원소 순서 무시.
+     * 002 재개 시 LLM이 같은 ID를 다른 순서로 내도 MODIFY_DT를 건드리지 않기 위함.
+     */
+    private boolean sameCoveredReqIdsJson(String a, String b) {
+        return java.util.Objects.equals(canonicalCoveredReqIdSet(a), canonicalCoveredReqIdSet(b));
+    }
+
+    private java.util.Set<String> canonicalCoveredReqIdSet(String json) {
+        if (CommonUtil.isEmpty(json)) return java.util.Collections.emptySet();
+        try {
+            JsonArray arr = JsonParser.parseString(json).getAsJsonArray();
+            java.util.Set<String> set = new java.util.TreeSet<>();
+            for (JsonElement el : arr) {
+                if (el.isJsonNull()) continue;
+                String id = el.getAsString();
+                if (CommonUtil.isNotEmpty(id)) set.add(id);
+            }
+            return set;
+        } catch (Exception e) {
+            // 파싱 실패 시 원문 기준으로라도 비교되도록 싱글톤 세트에 담음
+            return java.util.Collections.singleton(json);
         }
     }
 
     /**
      * Call 2(S2B) 응답 JSON 파싱 → winThemes 목록
      * - winThemes: coreMessage 필수
+     * - sourceProblemDefinitionIds → sourceProblemIdsJson (유효성 검증은 호출부에서 수행)
      */
     private List<ProposalVO.WinThemeVO> parseStage2bResponse(String aiResponse) {
         String json = stripJsonCodeBlock(aiResponse);
@@ -2229,6 +2444,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 wt.setEvidence(getStrOrNull(obj, "evidence"));
                 wt.setExpectedEffect(getStrOrNull(obj, "expectedEffect"));
                 wt.setDifferentiation(getStrOrNull(obj, "differentiation"));
+                // sourceProblemDefinitionIds — JSON 배열 그대로 문자열 직렬화 (유효성 검증은 호출부에서 수행)
+                if (obj.has("sourceProblemDefinitionIds") && obj.get("sourceProblemDefinitionIds").isJsonArray()
+                        && obj.getAsJsonArray("sourceProblemDefinitionIds").size() > 0) {
+                    wt.setSourceProblemIdsJson(obj.getAsJsonArray("sourceProblemDefinitionIds").toString());
+                }
                 if (obj.has("sortOrd") && !obj.get("sortOrd").isJsonNull()) {
                     wt.setSortOrd(obj.get("sortOrd").getAsInt());
                 }
@@ -2629,7 +2849,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * Call 2(S2B) 프롬프트 조합 — winThemes 생성용
-     * - 입력: Call 1 problemDefinitions(GSON 원본) + 자사/경쟁사/기타 참고자료 원문
+     * - 입력: Call 1 problemDefinitions(problemId 선채번 완료) + 자사/경쟁사/기타 참고자료 원문
      * - requirements/evalCriteria 원문은 포함하지 않음 (문제 정의는 problemDefinitions 로 요약 전달됨)
      */
     private String buildStage2bWinThemePrompt(String promptContent,
@@ -2637,7 +2857,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             List<ProposalVO.ProblemDefinitionVO> problemDefinitions,
             String ownContext,
             String competitorContext,
-            String etcRefContext) {
+            String etcRefContext,
+            String feedback) {
 
         StringBuilder sb = new StringBuilder();
         sb.append(promptContent);
@@ -2645,14 +2866,44 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         sb.append("\n- 사업명: ").append(CommonUtil.nullToBlank(project.getProjectNm()));
 
         sb.append("\n\n## 발주기관 문제 정의 목록 (Call 1 결과, JSON)");
-        sb.append("\n각 Win Theme 은 아래 problemDefinitions 항목(problemTypeCd 또는 배열 인덱스)과 연결지어 도출하세요.\n");
-        sb.append(GSON.toJson(problemDefinitions != null ? problemDefinitions : new java.util.ArrayList<>()));
+        sb.append("\n각 항목의 problemId(PTP…)는 문제를 식별하는 고유값입니다.");
+        sb.append("\nWin Theme의 sourceProblemDefinitionIds에는 아래 problemId를 그대로 사용하세요");
+        sb.append(" — 새로 만들거나 변형하지 마세요.\n");
+        sb.append(GSON.toJson(toStage2bProblemDefVOs(problemDefinitions)));
 
         sb.append("\n\n## 자사 정보\n").append(ownContext);
         sb.append("\n\n## 경쟁사 정보\n").append(competitorContext);
         sb.append("\n\n## 기타 참고자료\n").append(etcRefContext);
 
+        if (CommonUtil.isNotEmpty(feedback)) {
+            sb.append("\n\n## 사용자 보완 요청\n");
+            sb.append("아래 요청을 반영해 Win Theme를 재작성하세요.\n");
+            sb.append(feedback);
+        }
+
         return sb.toString();
+    }
+
+    /**
+     * Stage2-B 프롬프트 전용 경량 문제정의 목록.
+     * LLM이 sourceProblemDefinitionIds에 참조할 problemId를 명확히 노출하고 토큰을 절감한다.
+     */
+    private List<java.util.Map<String, Object>> toStage2bProblemDefVOs(List<ProposalVO.ProblemDefinitionVO> src) {
+        List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+        if (src == null) return result;
+        for (ProposalVO.ProblemDefinitionVO p : src) {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("problemId", p.getProblemId());
+            m.put("problemTypeCd", p.getProblemTypeCd());
+            m.put("currentProblem", p.getCurrentProblem());
+            m.put("rootCause", p.getRootCause());
+            m.put("goal", p.getGoal());
+            m.put("requiredCapability", p.getRequiredCapability());
+            m.put("strategySummary", p.getStrategySummary());
+            m.put("kpi", p.getKpi());
+            result.add(m);
+        }
+        return result;
     }
 
     /**
@@ -2814,8 +3065,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * D-0: Stage2 전략 분석 SSE 스트림
-     * - TB_PT_PROBLEM_DEFINITION 존재 시 skip하고 done 이벤트 즉시 전송
-     * - 없으면 executeStage2() 비동기 실행 후 진행상황 SSE 전달
+     * - STAGE2_STATUS_CD=003(완료)이면 skip하고 done 이벤트 즉시 전송
+     * - 002면 S2C부터 재개, 001/004면 처음부터 — executeStage2()가 분기
+     * - progress step: load | prompt | problem_def | parse | req_mapping | extract_ref | win_theme | save
      *
      * @param ptProjectId      프로젝트 ID
      * @param totalSlideBudget 목표 슬라이드 수 (기본 20)
@@ -2837,20 +3089,21 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         STAGE_D_EXECUTOR.execute(() -> {
             try {
-                // Stage2 이미 실행됐는지 확인
-                int pdCount = proposalDAO.countProblemDefinitions(ptProjectId);
-                if (pdCount > 0) {
-                    logger.info("[PT D-0] Stage2 이미 실행됨, skip (ptProjectId={}, problemDefCount={})", ptProjectId, pdCount);
+                // Stage2 완료 여부 — 문제정의 건수가 아니라 STAGE2_STATUS_CD=003 기준
+                ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+                String stage2StatusCd = (project != null && CommonUtil.isNotEmpty(project.getStage2StatusCd()))
+                        ? project.getStage2StatusCd() : STAGE2_STATUS_NOT_STARTED;
+                if (STAGE2_STATUS_DONE.equals(stage2StatusCd)) {
+                    logger.info("[PT D-0] Stage2 이미 완료, skip (ptProjectId={}, STAGE2_STATUS_CD=003)", ptProjectId);
                     sendSseEvent(emitter, "done", "{\"ptProjectId\":\"" + ptProjectId + "\",\"skipped\":true}");
                     emitter.complete();
                     return;
                 }
 
-                sendSseEvent(emitter, "progress", "{\"step\":\"analyze\",\"message\":\"전략 분석 시작\"}");
-
                 // Stage2 실행 (동기 호출, 별도 스레드에서 실행 중이므로 OK)
+                // progressCallback step 코드를 그대로 SSE progress 이벤트로 전달 (Stage1 패턴과 동일)
                 ProposalVO.Stage2ResultVO result = executeStage2(ptProjectId, totalSlideBudget, modelId, agentId,
-                        msg -> sendSseEvent(emitter, "progress", "{\"step\":\"analyze\",\"message\":\"" + msg.replace("\"", "'") + "\"}"));
+                        step -> sendSseEvent(emitter, "progress", "{\"step\":\"" + step + "\"}"));
 
                 int tocCount = result.getToc() != null ? result.getToc().size() : 0;
                 int wtCount  = result.getWinThemes() != null ? result.getWinThemes().size() : 0;
@@ -2912,7 +3165,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     return;
                 }
 
-                sendSseEvent(emitter, "progress", "{\"step\":\"load\",\"message\":\"섹션 데이터 로드 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"load\"}");
 
                 // 2. 연결 평가기준 조회
                 ProposalVO.EvalCriteriaVO linkedEc = null;
@@ -2960,7 +3213,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
 
                 // 5. Stage3 프롬프트 조합 + LLM 호출
-                sendSseEvent(emitter, "progress", "{\"step\":\"llm\",\"message\":\"슬라이드 내용 생성 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"llm\"}");
                 String promptContent = null;
                 try {
                     promptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_SLIDE");
@@ -2986,7 +3239,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // 6. Stage3 응답 파싱 → slides 배열
-                sendSseEvent(emitter, "progress", "{\"step\":\"parse\",\"message\":\"슬라이드 구조 파싱 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"parse\"}");
                 List<JsonObject> slideJsonObjects;
                 try {
                     slideJsonObjects = parseStage3Response(aiResponse);
@@ -3004,7 +3257,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // 7. 기존 슬라이드 삭제 + SLIDE_NO 계산
-                sendSseEvent(emitter, "progress", "{\"step\":\"save\",\"message\":\"슬라이드 저장 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"save\"}");
                 proposalDAO.deleteSlidesByToc(tocId);
 
                 // 기존 최대 SLIDE_NO 이후로 시작 (다른 소목차 슬라이드 포함 누적)
@@ -3052,7 +3305,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // 9. Stage3.5: 스타일 조립 + 이미지 생성 (슬라이드별 개별 처리)
-                sendSseEvent(emitter, "progress", "{\"step\":\"render\",\"message\":\"슬라이드 스타일 조립 중\"}");
+                sendSseEvent(emitter, "progress", "{\"step\":\"render\"}");
                 int successCount = 0;
                 for (ProposalVO.SlideVO slide : insertedSlides) {
                     try {
@@ -3676,7 +3929,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     /**
      * D-5: 소목차 이미지 렌더링 SSE 스트림
      * confirmSection 완료 후 프론트엔드가 구독 → 슬라이드별 이미지 생성 진행 상황을 실시간 전송.
-     * 슬라이드별 progress 이벤트(slideId, renderStatusCd, renderedImagePath) 후 done 이벤트로 완료.
+     * progress step: load | render
+     * 슬라이드별 완료 progress(slideId, renderStatusCd, renderedImagePath, current, total) 후 done 이벤트.
      *
      * @param ptProjectId 프로젝트 ID
      * @param tocId       확인된 소목차 TOC_ID
@@ -3697,8 +3951,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         emitter.onError(e -> logger.warn("[PT Image SSE] error - tocId={}, msg={}", tocId, e.getMessage()));
         emitter.onCompletion(() -> logger.info("[PT Image SSE] complete - tocId={}", tocId));
 
+        // 연결 확정 (Stage1 패턴과 동일)
+        sendSseEvent(emitter, "connected",
+                "{\"ptProjectId\":\"" + ptProjectId + "\",\"tocId\":\"" + tocId + "\"}");
+
         EXPORT_EXECUTOR.submit(() -> {
             try {
+                // Step 1: 슬라이드 목록 로드
+                sendSseEvent(emitter, "progress", "{\"step\":\"load\"}");
                 List<ProposalVO.SlideVO> slides = proposalDAO.selectSlidesByToc(tocId);
 
                 if (slides == null || slides.isEmpty()) {
@@ -3707,8 +3967,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     return;
                 }
 
+                // Step 2: 슬라이드별 이미지 생성
+                sendSseEvent(emitter, "progress", "{\"step\":\"render\"}");
+                int total = slides.size();
                 int successCount = 0;
+                int current = 0;
                 for (ProposalVO.SlideVO slide : slides) {
+                    current++;
                     // 이미 완료된 슬라이드는 건너뜀
                     if ("003".equals(slide.getRenderStatusCd()) && CommonUtil.isNotEmpty(slide.getRenderedImagePath())) {
                         successCount++;
@@ -3718,7 +3983,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         String renderedPath = doImageRender(slide);
 
                         Map<String, Object> progressData = new HashMap<>();
+                        progressData.put("step", "render");
                         progressData.put("slideId", slide.getSlideId());
+                        progressData.put("current", current);
+                        progressData.put("total", total);
                         if (renderedPath != null) {
                             progressData.put("renderStatusCd", "003");
                             progressData.put("renderedImagePath", renderedPath);
@@ -3730,8 +3998,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     } catch (Exception e) {
                         logger.error("[PT Image SSE] 슬라이드 이미지 생성 오류 (slideId={}): {}", slide.getSlideId(), e.getMessage());
                         Map<String, Object> failData = new HashMap<>();
+                        failData.put("step", "render");
                         failData.put("slideId", slide.getSlideId());
                         failData.put("renderStatusCd", "004");
+                        failData.put("current", current);
+                        failData.put("total", total);
                         sendSseEvent(emitter, "progress", GSON.toJson(failData));
                     }
                 }

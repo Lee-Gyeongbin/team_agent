@@ -56,6 +56,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * PT 프로젝트 Stage2 진행 상태 업데이트
+     * @param vo ptProjectId, stage2StatusCd (PT000013: 001미시작/002문제정의저장/003완료/004실패)
+     */
+    public void updateStage2StatusCd(ProposalVO.ProjectVO vo) {
+        update("proposal.updateStage2StatusCd", vo);
+    }
+
+    /**
      * PT 프로젝트 작성지침 JSON 업데이트
      * @param vo ptProjectId, writingGuidelineJson
      */

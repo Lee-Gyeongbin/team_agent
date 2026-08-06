@@ -102,6 +102,7 @@
             , CAST(WRITING_GUIDELINE_JSON AS CHAR) AS WRITING_GUIDELINE_JSON
             , CAST(PROJECT_CONFIG_JSON AS CHAR) AS PROJECT_CONFIG_JSON
             , MAX_STEP_NO              AS MAX_STEP_NO
+            , STAGE2_STATUS_CD         AS STAGE2_STATUS_CD
             , CREATE_USER_ID           AS CREATE_USER_ID
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
             , MODIFY_USER_ID           AS MODIFY_USER_ID
@@ -109,6 +110,15 @@
         FROM TB_PT_PROJECT
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </select>
+
+    <update id="updateStage2StatusCd" parameterType="kr.teamagent.proposal.service.ProposalVO$ProjectVO">
+        /* PT 프로젝트 Stage2 진행 상태 업데이트 proposal.updateStage2StatusCd */
+        UPDATE TB_PT_PROJECT
+        SET
+            STAGE2_STATUS_CD = #{stage2StatusCd}
+            , MODIFY_DT = NOW()
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
 
     <update id="updateMaxStepNo" parameterType="kr.teamagent.proposal.service.ProposalVO$ProjectVO">
         /* PT 프로젝트 최대 단계 번호 업데이트 proposal.updateMaxStepNo */
@@ -465,7 +475,9 @@
             SOURCE_REQ_IDS_JSON     AS SOURCE_REQUIREMENT_IDS_JSON,
             SORT_ORD                AS SORT_ORD,
             CREATE_USER_ID          AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID          AS MODIFY_USER_ID
         FROM TB_PT_PROBLEM_DEFINITION
         WHERE PT_PROJECT_ID = #{ptProjectId}
         ORDER BY SORT_ORD, PROBLEM_ID
@@ -483,10 +495,12 @@
         INSERT INTO TB_PT_WIN_THEME (
             WIN_THEME_ID, PT_PROJECT_ID, CORE_MESSAGE, CUSTOMER_PROBLEM,
             PROPOSAL_STRATEGY, EVIDENCE, EXPECTED_EFFECT, DIFFERENTIATION,
+            SOURCE_PROBLEM_IDS_JSON,
             SORT_ORD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{winThemeId}, #{ptProjectId}, #{coreMessage}, #{customerProblem},
             #{proposalStrategy}, #{evidence}, #{expectedEffect}, #{differentiation},
+            #{sourceProblemIdsJson, jdbcType=VARCHAR},
             COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
         )
     </insert>
@@ -502,9 +516,12 @@
             EVIDENCE            AS EVIDENCE,
             EXPECTED_EFFECT     AS EXPECTED_EFFECT,
             DIFFERENTIATION     AS DIFFERENTIATION,
+            SOURCE_PROBLEM_IDS_JSON AS SOURCE_PROBLEM_IDS_JSON,
             SORT_ORD            AS SORT_ORD,
             CREATE_USER_ID      AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID      AS MODIFY_USER_ID
         FROM TB_PT_WIN_THEME
         WHERE PT_PROJECT_ID = #{ptProjectId}
         ORDER BY SORT_ORD, WIN_THEME_ID
@@ -530,11 +547,12 @@
     </insert>
 
     <update id="updateTocEvalLinkAndReqIds" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
-        /* Stage2 TOC 매핑 업데이트 — LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON, PLANNED_SLIDE_CNT 갱신 proposal.updateTocEvalLinkAndReqIds */
+        /* Stage2 TOC 매핑 업데이트 — 값 변경 시에만 호출 (MODIFY_DT 갱신 → Step6 stale 판별) proposal.updateTocEvalLinkAndReqIds */
         UPDATE TB_PT_TOC
         SET LINKED_EVAL_CRITERIA_ID = #{linkedEvalCriteriaId, jdbcType=VARCHAR},
             COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
-            PLANNED_SLIDE_CNT       = #{plannedSlideCnt}
+            PLANNED_SLIDE_CNT       = #{plannedSlideCnt},
+            MODIFY_DT               = NOW()
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -576,11 +594,13 @@
             t.SECTION_NO              AS SECTION_NO,
             t.SECTION_NM              AS SECTION_NM,
             t.LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
+            t.COVERED_REQ_IDS_JSON    AS COVERED_REQ_IDS_JSON,
             t.PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             t.SORT_ORD                AS SORT_ORD,
             t.GUIDE_CONTENT           AS GUIDE_CONTENT,
             t.CREATE_USER_ID          AS CREATE_USER_ID,
-            DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(t.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
         FROM TB_PT_TOC t
         LEFT JOIN TB_PT_TOC p ON t.PARENT_TOC_ID = p.TOC_ID
         WHERE t.PT_PROJECT_ID = #{ptProjectId}
@@ -626,7 +646,8 @@
             SORT_ORD                AS SORT_ORD,
             GUIDE_CONTENT           AS GUIDE_CONTENT,
             CREATE_USER_ID          AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
         FROM TB_PT_TOC
         WHERE TOC_ID = #{tocId}
     </select>
