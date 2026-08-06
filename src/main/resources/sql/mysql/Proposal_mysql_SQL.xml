@@ -242,7 +242,7 @@
             REQUIREMENT_ID
             , PT_PROJECT_ID
             , REQ_NO
-            , REQ_CATEGORY_CD
+            , REQ_CATEGORY_TXT
             , REQ_CONTENT
             , MANDATORY_YN
             , SOURCE_TYPE_CD
@@ -254,7 +254,7 @@
             #{requirementId}
             , #{ptProjectId}
             , #{reqNo}
-            , #{reqCategoryCd}
+            , #{reqCategoryTxt}
             , #{reqContent}
             , COALESCE(#{mandatoryYn}, 'Y')
             , COALESCE(#{sourceTypeCd}, '001')
@@ -269,20 +269,20 @@
             resultType="kr.teamagent.proposal.service.ProposalVO$RequirementVO">
         /* PT 요구사항 목록 조회 proposal.selectRequirements */
         SELECT
-            REQUIREMENT_ID          AS REQUIREMENT_ID
-            , PT_PROJECT_ID         AS PT_PROJECT_ID
-            , REQ_NO                AS REQ_NO
-            , REQ_CATEGORY_CD       AS REQ_CATEGORY_CD
-            , REQ_CONTENT           AS REQ_CONTENT
-            , MANDATORY_YN          AS MANDATORY_YN
-            , SOURCE_TYPE_CD        AS SOURCE_TYPE_CD
-            , CONFIRM_NEEDED_YN     AS CONFIRM_NEEDED_YN
-            , SORT_ORD              AS SORT_ORD
-            , CREATE_USER_ID        AS CREATE_USER_ID
-            , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
-        FROM TB_PT_REQUIREMENT
-        WHERE PT_PROJECT_ID = #{ptProjectId}
-        ORDER BY SORT_ORD, REQUIREMENT_ID
+            r.REQUIREMENT_ID          AS REQUIREMENT_ID
+            , r.PT_PROJECT_ID         AS PT_PROJECT_ID
+            , r.REQ_NO                AS REQ_NO
+            , r.REQ_CATEGORY_TXT      AS REQ_CATEGORY_TXT
+            , r.REQ_CONTENT           AS REQ_CONTENT
+            , r.MANDATORY_YN          AS MANDATORY_YN
+            , r.SOURCE_TYPE_CD        AS SOURCE_TYPE_CD
+            , r.CONFIRM_NEEDED_YN     AS CONFIRM_NEEDED_YN
+            , r.SORT_ORD              AS SORT_ORD
+            , r.CREATE_USER_ID        AS CREATE_USER_ID
+            , DATE_FORMAT(r.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM TB_PT_REQUIREMENT r
+        WHERE r.PT_PROJECT_ID = #{ptProjectId}
+        ORDER BY r.SORT_ORD, r.REQUIREMENT_ID
     </select>
 
     <update id="updateRequirement" parameterType="kr.teamagent.proposal.service.ProposalVO$RequirementVO">
@@ -290,7 +290,7 @@
         UPDATE TB_PT_REQUIREMENT
         <set>
             <if test="reqNo != null">REQ_NO = #{reqNo},</if>
-            <if test="reqCategoryCd != null">REQ_CATEGORY_CD = #{reqCategoryCd},</if>
+            <if test="reqCategoryTxt != null">REQ_CATEGORY_TXT = #{reqCategoryTxt},</if>
             <if test="reqContent != null">REQ_CONTENT = #{reqContent},</if>
             <if test="mandatoryYn != null">MANDATORY_YN = #{mandatoryYn},</if>
             <if test="sourceTypeCd != null">SOURCE_TYPE_CD = #{sourceTypeCd},</if>

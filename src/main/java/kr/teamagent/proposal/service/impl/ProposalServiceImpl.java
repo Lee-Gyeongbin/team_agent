@@ -82,10 +82,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private static final int PT_SUMMARY_CHUNK_OVERLAP = 800;
     /** LLM 호출 타임아웃 (초) */
     private static final int PT_QUERY_TIMEOUT_SEC = 300;
-    /** Stage2-A 문제정의용 샘플링 — 코드값 있는 카테고리(001~015)당 최대 건수 */
-    private static final int CODED_CATEGORY_SAMPLE_LIMIT = 5;
-    /** Stage2-A 문제정의용 샘플링 — null(미분류) 카테고리 최대 건수 */
-    private static final int NULL_CATEGORY_SAMPLE_LIMIT = 20;
+    /** Stage2-A 문제정의용 샘플링 — 전체 요구사항 최대 건수 (mandatoryYn='Y' 우선) */
+    private static final int PROBLEM_DEF_REQ_LIMIT = 20;
 
     /** Stage2 진행 상태 — 미시작 */
     private static final String STAGE2_STATUS_NOT_STARTED = "001";
@@ -1189,7 +1187,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             JsonObject obj = el.getAsJsonObject();
             ProposalVO.RequirementVO req = new ProposalVO.RequirementVO();
             req.setReqNo(getStrOrNull(obj, "reqNo"));
-            req.setReqCategoryCd(getStrOrNull(obj, "reqCategoryCd"));
+            req.setReqCategoryTxt(getStrOrNull(obj, "reqCategoryTxt"));
             req.setReqContent(getStrOrNull(obj, "reqContent"));
             if (CommonUtil.isEmpty(req.getReqContent())) {
                 throw new RuntimeException("requirements 항목에 reqContent 필드가 누락되었습니다.");
@@ -1549,18 +1547,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     public ProposalVO.PtFileVO selectPtRfpFile(String ptProjectId, String filePurposeCd) {
         List<ProposalVO.PtFileVO> files = proposalDAO.selectPtFileByPurpose(ptProjectId, filePurposeCd);
         return (files != null && !files.isEmpty()) ? files.get(0) : null;
-    }
-
-    /**
-     * Step B 자동추출: Stage1에서 이미 TB_PT_TOC에 목차가 삽입되므로, 기존 목차를 조회하여 반환.
-     * LLM 호출 없음. Stage1 미실행 등으로 목차가 없으면 빈 리스트 반환.
-     *
-     * @return TB_PT_TOC에 저장된 TocVO 목록.
-     */
-    public List<ProposalVO.TocVO> autoExtractToc(String ptProjectId) throws Exception {
-        List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
-        logger.info("[PT StepB] autoExtractToc — TB_PT_TOC 조회 (ptProjectId={}, count={})", ptProjectId, tocList.size());
-        return tocList;
     }
 
     /**
@@ -3154,11 +3140,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * mandatedToc 강제 적용
-     * - writingGuidelineJson에 tocMandatoryYn=Y + mandatedToc 있으면
-     * - parsed.toc의 sectionNo/sectionNm을 mandatedToc 원본으로 덮어씀
-     */
-    /**
      * coveredReqIds 검증 및 정리 (LLM 할루시네이션 방어)
      * - toc[].coveredReqIds에 validReqIds에 없는 requirementId 제거 + 경고 로그
      */
@@ -3296,13 +3277,12 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             List<ProposalVO.RequirementLiteVO> reqLite = requirements.stream()
                     .map(this::toRequirementLite)
                     .collect(java.util.stream.Collectors.toList());
-            int codedLimit = hasIssues ? 3 : CODED_CATEGORY_SAMPLE_LIMIT;
-            int nullLimit  = hasIssues ? 10 : NULL_CATEGORY_SAMPLE_LIMIT;
-            sampledReqs = sampleRequirementsForProblemDef(reqLite, codedLimit, nullLimit);
+            int totalLimit = hasIssues ? 10 : PROBLEM_DEF_REQ_LIMIT;
+            sampledReqs = sampleRequirementsForProblemDef(reqLite, totalLimit);
             logger.info("[PT Stage2-A] 문제정의용 샘플링: 전체 {}건 → {}건 (hasIssues={})",
                     reqLite.size(), sampledReqs.size(), hasIssues);
-            sb.append("\n\n## 문제정의용 요구사항 샘플(카테고리별 대표) (JSON)");
-            sb.append("\n※ 이 목록은 발주기관 문제 유형 파악(problemDefinitions)에만 사용하세요. 카테고리별 대표 샘플만 포함합니다.\n");
+            sb.append("\n\n## 문제정의용 요구사항 샘플 (JSON)");
+            sb.append("\n※ 이 목록은 발주기관 문제 유형 파악(problemDefinitions)에만 사용하세요. 필수 요구사항 우선 샘플만 포함합니다.\n");
             sb.append(GSON.toJson(sampledReqs));
         }
 
@@ -3498,7 +3478,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ProposalVO.RequirementLiteVO lite = new ProposalVO.RequirementLiteVO();
         lite.setRequirementId(src.getRequirementId()); // LLM이 문제정의 sourceRequirementIds에 그대로 반환
         lite.setReqNo(src.getReqNo());
-        lite.setReqCategoryCd(src.getReqCategoryCd());
+        lite.setReqCategoryTxt(src.getReqCategoryTxt());
         lite.setReqContent(truncateAtSentenceBoundary(src.getReqContent(), 300));
         lite.setMandatoryYn(src.getMandatoryYn());
         return lite;
@@ -3507,13 +3487,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     /**
      * RequirementVO → RequirementLiteVO 변환 (toc 매핑용 초경량 버전)
      * reqContent를 80자로 제한. 문장 경계 우선, 없으면 단어(공백) 경계까지만 절삭.
-     * reqNo·reqCategoryCd는 절삭하지 않음 (toc 매핑 식별자).
+     * reqNo·reqCategoryTxt는 절삭하지 않음 (toc 매핑 식별자).
      */
     private ProposalVO.RequirementLiteVO toRequirementUltraLite(ProposalVO.RequirementVO src) {
         ProposalVO.RequirementLiteVO lite = new ProposalVO.RequirementLiteVO();
         lite.setRequirementId(src.getRequirementId()); // LLM이 coveredReqIds에 그대로 반환
         lite.setReqNo(src.getReqNo());
-        lite.setReqCategoryCd(src.getReqCategoryCd());
+        lite.setReqCategoryTxt(src.getReqCategoryTxt());
         lite.setReqContent(truncateAtWordBoundary(src.getReqContent(), 80));
         lite.setMandatoryYn(src.getMandatoryYn());
         return lite;
@@ -3549,38 +3529,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * Stage2-A 문제정의용 요구사항 샘플링 (reqLite 전체 → 카테고리별 대표 샘플)
-     * - null(미분류) 카테고리: mandatoryYn='Y' 우선 선택, 최대 nullLimit 건
-     * - 코드값 있는 카테고리(001~015 등): 카테고리당 mandatoryYn='Y' 우선, 최대 codedLimit 건
-     * - 카테고리 내 순서는 입력 리스트 순서(sortOrd 기준으로 이미 정렬된 상태) 그대로 유지
+     * Stage2-A 문제정의용 요구사항 샘플링 (reqLite 전체 → mandatoryYn='Y' 우선, 최대 limit 건)
+     * - 카테고리 그룹핑 없이 전체 리스트에서 mandatoryYn='Y' 우선 선택
+     * - 입력 리스트 순서(sortOrd 기준으로 이미 정렬된 상태) 그대로 유지
      * - rfpIssues가 있어 요구사항이 보강 재료로만 쓰일 때는 호출부에서 리밋을 축소해 토큰을 절감한다.
      */
     private List<ProposalVO.RequirementLiteVO> sampleRequirementsForProblemDef(
-            List<ProposalVO.RequirementLiteVO> reqLite, int codedLimit, int nullLimit) {
-
-        // null 카테고리와 코드값 카테고리를 분리
-        List<ProposalVO.RequirementLiteVO> nullGroup = reqLite.stream()
-                .filter(r -> r.getReqCategoryCd() == null)
-                .collect(java.util.stream.Collectors.toList());
-
-        java.util.Map<String, List<ProposalVO.RequirementLiteVO>> codedGroups = reqLite.stream()
-                .filter(r -> r.getReqCategoryCd() != null)
-                .collect(java.util.stream.Collectors.groupingBy(
-                        ProposalVO.RequirementLiteVO::getReqCategoryCd,
-                        java.util.LinkedHashMap::new,
-                        java.util.stream.Collectors.toList()));
-
-        List<ProposalVO.RequirementLiteVO> result = new java.util.ArrayList<>();
-
-        // null 카테고리 샘플링: mandatoryYn='Y' 우선, 최대 nullLimit
-        result.addAll(pickWithMandatoryFirst(nullGroup, nullLimit));
-
-        // 코드값 카테고리 샘플링: 카테고리당 mandatoryYn='Y' 우선, 최대 codedLimit
-        for (List<ProposalVO.RequirementLiteVO> group : codedGroups.values()) {
-            result.addAll(pickWithMandatoryFirst(group, codedLimit));
-        }
-
-        return result;
+            List<ProposalVO.RequirementLiteVO> reqLite, int limit) {
+        return pickWithMandatoryFirst(reqLite, limit);
     }
 
     /**
@@ -5237,7 +5193,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         for (ProposalVO.RequirementVO r : src) {
             ProposalVO.RequirementStage3VO v = new ProposalVO.RequirementStage3VO();
             v.setReqNo(r.getReqNo());
-            v.setReqCategoryCd(r.getReqCategoryCd());
+            v.setReqCategoryTxt(r.getReqCategoryTxt());
             v.setReqContent(r.getReqContent());
             v.setMandatoryYn(r.getMandatoryYn());
             v.setSourceTypeCd(r.getSourceTypeCd());

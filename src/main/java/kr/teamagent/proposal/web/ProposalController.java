@@ -248,30 +248,6 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
-    /** Step B — mandatedToc 기반 목차 자동추출 */
-    @RequestMapping(value = "/ai/proposal/autoExtractToc.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView autoExtractToc(@RequestParam String ptProjectId) {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        try {
-            java.util.List<ProposalVO.TocVO> list = proposalService.autoExtractToc(ptProjectId);
-            resultMap.put("result", "OK");
-            resultMap.put("list", list);
-            if (list.isEmpty()) {
-                resultMap.put("msg", "RFP에 명시된 목차가 없습니다. 직접 입력해주세요.");
-            }
-        } catch (RuntimeException e) {
-            logger.error("[PT StepB] autoExtractToc 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        } catch (Exception e) {
-            logger.error("[PT StepB] autoExtractToc 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        }
-        return new ModelAndView("jsonView", resultMap);
-    }
-
     /** Step B — TOC 목록 조회 */
     @RequestMapping(value = "/ai/proposal/selectTocList.do", method = RequestMethod.GET)
     @ResponseBody

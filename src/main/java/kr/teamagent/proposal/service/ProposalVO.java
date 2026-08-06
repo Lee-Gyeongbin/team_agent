@@ -115,8 +115,8 @@ public class ProposalVO {
         private String ptProjectId;
         /** 요구사항 식별번호 (RFP 원문 그대로, 예: SFR-010) */
         private String reqNo;
-        /** 요구사항 분류 코드 (보조 통계용, 애매하면 null) */
-        private String reqCategoryCd;
+        /** 요구사항 분류 원문 (RFP 표의 구분/유형 컬럼 값, 없으면 null) */
+        private String reqCategoryTxt;
         /** 요구사항 원문 내용 */
         private String reqContent;
         /** 필수 여부 (Y/N) */
@@ -192,8 +192,8 @@ public class ProposalVO {
         private String requirementId;
         /** 요구사항 식별번호 (001 타입만 존재, 002 전략적해석은 null) */
         private String reqNo;
-        /** 요구사항 분류 코드 */
-        private String reqCategoryCd;
+        /** 요구사항 분류 원문 (RFP 표의 구분/유형 컬럼 값, 없으면 null) */
+        private String reqCategoryTxt;
         /** 요구사항 원문 내용 (400자 초과 시 문장 경계에서 절삭) */
         private String reqContent;
         /** 필수 여부 (Y/N) */
@@ -209,8 +209,8 @@ public class ProposalVO {
     public static class RequirementStage3VO {
         /** 요구사항 식별번호 (RFP 원문 그대로, 예: SFR-010) */
         private String reqNo;
-        /** 요구사항 분류 코드 */
-        private String reqCategoryCd;
+        /** 요구사항 분류 원문 (RFP 표의 구분/유형 컬럼 값, 없으면 null) */
+        private String reqCategoryTxt;
         /** 요구사항 원문 내용 */
         private String reqContent;
         /** 필수 여부 (Y/N) */
