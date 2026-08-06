@@ -50,7 +50,7 @@ public class ProposalVO {
         private Integer offset;
         /** Stage1 완료 여부 (Y/N) — selectPtProjectList 에서만 반환 */
         private String stage1DoneYn;
-        /** 사용자가 도달한 최대 단계 번호 (0=A:템플릿, 1=B:목차, 2=C:설정, 3=E:템플릿생성, 4=D:본문생성, 5=F:출력) */
+        /** 사용자가 도달한 최대 단계 번호 (0템플릿 1목차·요구사항 2설정 3템플릿생성 4전략검토 5본문생성 6출력) */
         private Integer maxStepNo;
         /**
          * Stage2 진행 상태 코드 (PT000013:
@@ -953,5 +953,17 @@ public class ProposalVO {
         private String agentId;
         private String userFeedback;
         private int totalSlideBudget;
+    }
+
+    /**
+     * 문제정의 단건 보완(refine) 요청 — 선택 PD의 sourceIssue/Req만 LLM에 전달
+     */
+    @Data
+    public static class ProblemDefinitionRefineVO {
+        private String ptProjectId;
+        private String problemId;
+        private String userFeedback;
+        private String modelId;
+        private String agentId;
     }
 }

@@ -556,12 +556,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         List<ProposalVO.RequirementVO> requirements = proposalDAO.selectRequirements(ptProjectId);
         List<ProposalVO.EvalCriteriaVO> evalCriteria = proposalDAO.selectEvalCriteria(ptProjectId);
+        List<ProposalVO.RfpIssueVO> rfpIssues = proposalDAO.selectRfpIssues(ptProjectId);
 
         ProposalVO.Stage1ResultVO result = new ProposalVO.Stage1ResultVO();
         result.setPtProjectId(ptProjectId);
         result.setWritingGuidelineJson(project.getWritingGuidelineJson());
         result.setRequirements(requirements);
         result.setEvalCriteria(evalCriteria);
+        result.setRfpIssues(rfpIssues != null ? rfpIssues : new java.util.ArrayList<>());
 
         return result;
     }
@@ -1700,11 +1702,17 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      */
     public List<ProposalVO.ProblemDefinitionVO> runS2a(String ptProjectId, int totalSlideBudget,
             String modelId, String agentId) throws Exception {
-        return runS2a(ptProjectId, totalSlideBudget, modelId, agentId, null);
+        return runS2a(ptProjectId, totalSlideBudget, modelId, agentId, null, null);
     }
 
     public List<ProposalVO.ProblemDefinitionVO> runS2a(String ptProjectId, int totalSlideBudget,
             String modelId, String agentId, java.util.function.Consumer<String> progressCallback) throws Exception {
+        return runS2a(ptProjectId, totalSlideBudget, modelId, agentId, progressCallback, null);
+    }
+
+    public List<ProposalVO.ProblemDefinitionVO> runS2a(String ptProjectId, int totalSlideBudget,
+            String modelId, String agentId, java.util.function.Consumer<String> progressCallback,
+            String userFeedback) throws Exception {
 
         ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
         if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
@@ -1723,6 +1731,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         Stage2aPromptContext s2aPromptCtx = buildStage2aPromptSlim(
                 s2aPromptContent, project, requirements, rfpIssues, totalSlideBudget);
         String s2aPrompt = s2aPromptCtx.getPromptText();
+        if (CommonUtil.isNotEmpty(userFeedback)) {
+            s2aPrompt = s2aPrompt + "\n\n## 사용자 보완 요청\n"
+                    + "아래 요청을 반영해 문제정의 전체를 재작성하세요.\n" + userFeedback;
+        }
         List<ProposalVO.RequirementLiteVO> shownReqs = s2aPromptCtx.getSampledReqs();
 
         if (progressCallback != null) progressCallback.accept("problem_def");
@@ -2188,6 +2200,578 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         result.setWinThemes(winThemes);
         result.setToc(rootToc);
         return result;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Stage2 전략검토 — 조회 / CRUD / 재실행 / 단건 refine
+    // ══════════════════════════════════════════════════════════════════════════
+
+    public ProposalVO.Stage2SummaryVO selectStage2Summary(String ptProjectId) throws Exception {
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+        if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
+
+        List<ProposalVO.ProblemDefinitionVO> pds = proposalDAO.selectProblemDefinitions(ptProjectId);
+        List<ProposalVO.WinThemeVO> wts = proposalDAO.selectWinThemes(ptProjectId);
+        List<ProposalVO.WinThemeResponseVO> wtResp = toWinThemeResponses(wts, pds);
+        List<ProposalVO.RequirementVO> reqs = proposalDAO.selectRequirements(ptProjectId);
+        List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
+
+        java.util.Set<String> covered = new java.util.HashSet<>();
+        if (tocList != null) {
+            for (ProposalVO.TocVO t : tocList) {
+                covered.addAll(parseIdList(t.getCoveredReqIdsJson()));
+            }
+        }
+        int uncovered = 0;
+        if (reqs != null) {
+            for (ProposalVO.RequirementVO r : reqs) {
+                if (CommonUtil.isNotEmpty(r.getRequirementId()) && !covered.contains(r.getRequirementId())) {
+                    uncovered++;
+                }
+            }
+        }
+
+        int staleCnt = 0;
+        for (ProposalVO.WinThemeResponseVO w : wtResp) {
+            if (w.isStale()) staleCnt++;
+        }
+
+        String pdGenDt = null;
+        if (pds != null) {
+            for (ProposalVO.ProblemDefinitionVO pd : pds) {
+                if (CommonUtil.isNotEmpty(pd.getCreateDt())) {
+                    if (pdGenDt == null || pd.getCreateDt().compareTo(pdGenDt) > 0) pdGenDt = pd.getCreateDt();
+                }
+            }
+        }
+        String wtGenDt = null;
+        if (wts != null) {
+            for (ProposalVO.WinThemeVO wt : wts) {
+                if (CommonUtil.isNotEmpty(wt.getCreateDt())) {
+                    if (wtGenDt == null || wt.getCreateDt().compareTo(wtGenDt) > 0) wtGenDt = wt.getCreateDt();
+                }
+            }
+        }
+
+        ProposalVO.Stage2SummaryVO summary = new ProposalVO.Stage2SummaryVO();
+        summary.setStage2StatusCd(CommonUtil.isNotEmpty(project.getStage2StatusCd())
+                ? project.getStage2StatusCd() : STAGE2_STATUS_NOT_STARTED);
+        summary.setProblemDefinitionCount(pds != null ? pds.size() : 0);
+        summary.setWinThemeCount(wts != null ? wts.size() : 0);
+        summary.setWinThemeStaleCount(staleCnt);
+        summary.setUncoveredRequirementCount(uncovered);
+        summary.setProblemDefinitionsGeneratedDt(pdGenDt);
+        summary.setWinThemesGeneratedDt(wtGenDt);
+        return summary;
+    }
+
+    public List<ProposalVO.ProblemDefinitionResponseVO> selectStage2ProblemDefinitions(String ptProjectId) {
+        return toProblemDefinitionResponses(proposalDAO.selectProblemDefinitions(ptProjectId));
+    }
+
+    public List<ProposalVO.WinThemeResponseVO> selectStage2WinThemes(String ptProjectId) {
+        List<ProposalVO.ProblemDefinitionVO> pds = proposalDAO.selectProblemDefinitions(ptProjectId);
+        return toWinThemeResponses(proposalDAO.selectWinThemes(ptProjectId), pds);
+    }
+
+    public ProposalVO.TocMappingResponseVO selectStage2TocMapping(String ptProjectId) {
+        List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
+        List<ProposalVO.RequirementVO> reqs = proposalDAO.selectRequirements(ptProjectId);
+        List<ProposalVO.EvalCriteriaVO> ecs = proposalDAO.selectEvalCriteria(ptProjectId);
+
+        List<ProposalVO.TocMappingNodeVO> nodes = new java.util.ArrayList<>();
+        java.util.Set<String> covered = new java.util.HashSet<>();
+        if (tocList != null) {
+            for (ProposalVO.TocVO t : tocList) {
+                ProposalVO.TocMappingNodeVO n = new ProposalVO.TocMappingNodeVO();
+                n.setTocId(t.getTocId());
+                n.setTitle(t.getSectionNm());
+                n.setParentTocId(t.getParentTocId());
+                n.setSortOrd(t.getSortOrd() != null ? t.getSortOrd() : 0);
+                List<String> ids = parseIdList(t.getCoveredReqIdsJson());
+                n.setCoveredReqIds(ids);
+                covered.addAll(ids);
+                n.setLinkedEvalCriteriaId(t.getLinkedEvalCriteriaId());
+                nodes.add(n);
+            }
+        }
+
+        List<String> unassigned = new java.util.ArrayList<>();
+        if (reqs != null) {
+            for (ProposalVO.RequirementVO r : reqs) {
+                if (CommonUtil.isNotEmpty(r.getRequirementId()) && !covered.contains(r.getRequirementId())) {
+                    unassigned.add(r.getRequirementId());
+                }
+            }
+        }
+
+        List<ProposalVO.EvalCriteriaOptionVO> options = new java.util.ArrayList<>();
+        if (ecs != null) {
+            for (ProposalVO.EvalCriteriaVO ec : ecs) {
+                ProposalVO.EvalCriteriaOptionVO o = new ProposalVO.EvalCriteriaOptionVO();
+                o.setEvalCriteriaId(ec.getEvalCriteriaId());
+                o.setEvalItemNm(ec.getEvalItemNm());
+                o.setScore(ec.getScore());
+                options.add(o);
+            }
+        }
+
+        ProposalVO.TocMappingResponseVO resp = new ProposalVO.TocMappingResponseVO();
+        resp.setTocNodes(nodes);
+        resp.setUnassignedRequirementIds(unassigned);
+        resp.setEvalCriteriaOptions(options);
+        return resp;
+    }
+
+    public List<ProposalVO.ProblemDefinitionResponseVO> regenerateStage2ProblemDefinitions(
+            ProposalVO.Stage2RegenerateVO vo) throws Exception {
+        int budget = vo.getTotalSlideBudget() > 0 ? vo.getTotalSlideBudget() : 40;
+        runS2a(vo.getPtProjectId(), budget, vo.getModelId(), vo.getAgentId(), null, vo.getUserFeedback());
+        return selectStage2ProblemDefinitions(vo.getPtProjectId());
+    }
+
+    public List<ProposalVO.WinThemeResponseVO> regenerateStage2WinThemes(
+            ProposalVO.Stage2RegenerateVO vo) throws Exception {
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(vo.getPtProjectId());
+        if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다.");
+        String status = CommonUtil.isNotEmpty(project.getStage2StatusCd())
+                ? project.getStage2StatusCd() : STAGE2_STATUS_NOT_STARTED;
+        if (!STAGE2_STATUS_PROBLEM_SAVED.equals(status) && !STAGE2_STATUS_DONE.equals(status)) {
+            throw new IllegalStateException("PROBLEM_DEFINITION_REQUIRED");
+        }
+        runS2b(vo.getPtProjectId(), vo.getUserFeedback(), vo.getModelId(), vo.getAgentId());
+        return selectStage2WinThemes(vo.getPtProjectId());
+    }
+
+    public ProposalVO.TocMappingResponseVO regenerateStage2Mapping(
+            ProposalVO.Stage2RegenerateVO vo) throws Exception {
+        int budget = vo.getTotalSlideBudget() > 0 ? vo.getTotalSlideBudget() : 40;
+        runS2c(vo.getPtProjectId(), budget, vo.getModelId(), vo.getAgentId());
+        return selectStage2TocMapping(vo.getPtProjectId());
+    }
+
+    /** STAGE2_STATUS_CD를 001로 리셋 후 전체 Stage2 재실행용 */
+    public void resetStage2Status(String ptProjectId) {
+        updateStage2StatusCd(ptProjectId, STAGE2_STATUS_NOT_STARTED);
+    }
+
+    public ProposalVO.ProblemDefinitionResponseVO updateStage2ProblemDefinition(
+            String ptProjectId, String problemId, ProposalVO.ProblemDefinitionUpdateVO vo) {
+        ProposalVO.ProblemDefinitionVO existing = proposalDAO.selectProblemDefinitionById(problemId);
+        if (existing == null || !ptProjectId.equals(existing.getPtProjectId())) {
+            throw new RuntimeException("문제정의를 찾을 수 없습니다. problemId=" + problemId);
+        }
+        ProposalVO.ProblemDefinitionVO upd = new ProposalVO.ProblemDefinitionVO();
+        upd.setProblemId(problemId);
+        upd.setProblemTypeCd(vo.getProblemTypeCd());
+        upd.setCurrentProblem(vo.getCurrentProblem());
+        upd.setRootCause(vo.getRootCause());
+        upd.setRiskIfIgnored(vo.getRiskIfIgnored());
+        upd.setGoal(vo.getGoal());
+        upd.setRequiredCapability(vo.getRequiredCapability());
+        upd.setStrategySummary(vo.getStrategySummary());
+        upd.setKpi(vo.getKpi());
+        upd.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateProblemDefinition(upd);
+        return toProblemDefinitionResponse(proposalDAO.selectProblemDefinitionById(problemId));
+    }
+
+    public ProposalVO.ProblemDefinitionResponseVO insertStage2ProblemDefinition(
+            String ptProjectId, ProposalVO.ProblemDefinitionUpdateVO vo) throws Exception {
+        String userId = SessionUtil.getUserId();
+        List<ProposalVO.ProblemDefinitionVO> existing = proposalDAO.selectProblemDefinitions(ptProjectId);
+        int sortOrd = existing != null ? existing.size() : 0;
+        ProposalVO.ProblemDefinitionVO pd = new ProposalVO.ProblemDefinitionVO();
+        pd.setProblemId(keyGenerate.generateTableKey("PTP", "TB_PT_PROBLEM_DEFINITION", "PROBLEM_ID", 6));
+        pd.setPtProjectId(ptProjectId);
+        pd.setProblemTypeCd(CommonUtil.isNotEmpty(vo.getProblemTypeCd()) ? vo.getProblemTypeCd() : "001");
+        pd.setCurrentProblem(vo.getCurrentProblem());
+        pd.setRootCause(vo.getRootCause());
+        pd.setRiskIfIgnored(vo.getRiskIfIgnored());
+        pd.setGoal(vo.getGoal());
+        pd.setRequiredCapability(vo.getRequiredCapability());
+        pd.setStrategySummary(vo.getStrategySummary());
+        pd.setKpi(vo.getKpi());
+        pd.setSourceTypeCd("999");
+        pd.setSourceIssueIdsJson(null);
+        pd.setSourceRequirementIdsJson(null);
+        pd.setSortOrd(sortOrd);
+        pd.setCreateUserId(userId != null ? userId : "system");
+        proposalDAO.insertProblemDefinition(pd);
+        return toProblemDefinitionResponse(proposalDAO.selectProblemDefinitionById(pd.getProblemId()));
+    }
+
+    public void deleteStage2ProblemDefinition(String ptProjectId, String problemId) {
+        ProposalVO.ProblemDefinitionVO existing = proposalDAO.selectProblemDefinitionById(problemId);
+        if (existing == null || !ptProjectId.equals(existing.getPtProjectId())) {
+            throw new RuntimeException("문제정의를 찾을 수 없습니다. problemId=" + problemId);
+        }
+        proposalDAO.deleteProblemDefinition(problemId);
+    }
+
+    public ProposalVO.WinThemeResponseVO updateStage2WinTheme(
+            String ptProjectId, String winThemeId, ProposalVO.WinThemeUpdateVO vo) {
+        ProposalVO.WinThemeVO existing = proposalDAO.selectWinThemeById(winThemeId);
+        if (existing == null || !ptProjectId.equals(existing.getPtProjectId())) {
+            throw new RuntimeException("Win Theme를 찾을 수 없습니다. winThemeId=" + winThemeId);
+        }
+        ProposalVO.WinThemeVO upd = new ProposalVO.WinThemeVO();
+        upd.setWinThemeId(winThemeId);
+        upd.setCoreMessage(vo.getCoreMessage());
+        upd.setCustomerProblem(vo.getCustomerProblem());
+        upd.setProposalStrategy(vo.getProposalStrategy());
+        upd.setEvidence(vo.getEvidence());
+        upd.setExpectedEffect(vo.getExpectedEffect());
+        upd.setDifferentiation(vo.getDifferentiation());
+        if (vo.getSourceProblemDefinitionIds() != null) {
+            if (vo.getSourceProblemDefinitionIds().isEmpty()) {
+                throw new IllegalArgumentException("sourceProblemDefinitionIds는 비어 있을 수 없습니다.");
+            }
+            upd.setSourceProblemIdsJson(GSON.toJson(vo.getSourceProblemDefinitionIds()));
+        }
+        upd.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateWinTheme(upd);
+        List<ProposalVO.ProblemDefinitionVO> pds = proposalDAO.selectProblemDefinitions(ptProjectId);
+        return toWinThemeResponse(proposalDAO.selectWinThemeById(winThemeId), pds);
+    }
+
+    public ProposalVO.WinThemeResponseVO insertStage2WinTheme(
+            String ptProjectId, ProposalVO.WinThemeUpdateVO vo) throws Exception {
+        if (vo.getSourceProblemDefinitionIds() == null || vo.getSourceProblemDefinitionIds().isEmpty()) {
+            throw new IllegalArgumentException("sourceProblemDefinitionIds는 필수입니다.");
+        }
+        String userId = SessionUtil.getUserId();
+        List<ProposalVO.WinThemeVO> existing = proposalDAO.selectWinThemes(ptProjectId);
+        int sortOrd = existing != null ? existing.size() : 0;
+        ProposalVO.WinThemeVO wt = new ProposalVO.WinThemeVO();
+        wt.setWinThemeId(keyGenerate.generateTableKey("PTW", "TB_PT_WIN_THEME", "WIN_THEME_ID", 6));
+        wt.setPtProjectId(ptProjectId);
+        wt.setCoreMessage(vo.getCoreMessage());
+        wt.setCustomerProblem(vo.getCustomerProblem());
+        wt.setProposalStrategy(vo.getProposalStrategy());
+        wt.setEvidence(vo.getEvidence());
+        wt.setExpectedEffect(vo.getExpectedEffect());
+        wt.setDifferentiation(vo.getDifferentiation());
+        wt.setSourceProblemIdsJson(GSON.toJson(vo.getSourceProblemDefinitionIds()));
+        wt.setSortOrd(sortOrd);
+        wt.setCreateUserId(userId != null ? userId : "system");
+        proposalDAO.insertWinTheme(wt);
+        List<ProposalVO.ProblemDefinitionVO> pds = proposalDAO.selectProblemDefinitions(ptProjectId);
+        return toWinThemeResponse(proposalDAO.selectWinThemeById(wt.getWinThemeId()), pds);
+    }
+
+    public void deleteStage2WinTheme(String ptProjectId, String winThemeId) {
+        ProposalVO.WinThemeVO existing = proposalDAO.selectWinThemeById(winThemeId);
+        if (existing == null || !ptProjectId.equals(existing.getPtProjectId())) {
+            throw new RuntimeException("Win Theme를 찾을 수 없습니다. winThemeId=" + winThemeId);
+        }
+        proposalDAO.deleteWinTheme(winThemeId);
+    }
+
+    public ProposalVO.TocMappingNodeVO updateStage2TocMapping(
+            String ptProjectId, String tocId, ProposalVO.TocMappingUpdateVO vo) {
+        ProposalVO.TocVO dbToc = proposalDAO.selectTocById(tocId);
+        if (dbToc == null || !ptProjectId.equals(dbToc.getPtProjectId())) {
+            throw new RuntimeException("목차를 찾을 수 없습니다. tocId=" + tocId);
+        }
+        List<String> covered = vo.getCoveredReqIds() != null ? new java.util.ArrayList<>(vo.getCoveredReqIds()) : new java.util.ArrayList<>();
+        java.util.Collections.sort(covered);
+        String coveredJson = covered.isEmpty() ? null : GSON.toJson(covered);
+        String evalId = vo.getLinkedEvalCriteriaId();
+
+        if (java.util.Objects.equals(dbToc.getLinkedEvalCriteriaId(), evalId)
+                && sameCoveredReqIdsJson(dbToc.getCoveredReqIdsJson(), coveredJson)) {
+            // no-op
+        } else {
+            ProposalVO.TocVO upd = new ProposalVO.TocVO();
+            upd.setTocId(tocId);
+            upd.setLinkedEvalCriteriaId(evalId);
+            upd.setCoveredReqIdsJson(coveredJson);
+            proposalDAO.updateTocMappingUser(upd);
+            dbToc = proposalDAO.selectTocById(tocId);
+        }
+
+        ProposalVO.TocMappingNodeVO node = new ProposalVO.TocMappingNodeVO();
+        node.setTocId(dbToc.getTocId());
+        node.setTitle(dbToc.getSectionNm());
+        node.setParentTocId(dbToc.getParentTocId());
+        node.setSortOrd(dbToc.getSortOrd() != null ? dbToc.getSortOrd() : 0);
+        node.setCoveredReqIds(parseIdList(dbToc.getCoveredReqIdsJson()));
+        node.setLinkedEvalCriteriaId(dbToc.getLinkedEvalCriteriaId());
+        return node;
+    }
+
+    /**
+     * 문제정의 단건 보완 — 해당 PD의 sourceIssueIds/sourceRequirementIds만 LLM에 전달.
+     * ID 유지 + MODIFY_DT 갱신 (전체 runS2a와 다름).
+     */
+    public ProposalVO.ProblemDefinitionResponseVO refineStage2ProblemDefinition(
+            ProposalVO.ProblemDefinitionRefineVO vo) throws Exception {
+        String ptProjectId = vo.getPtProjectId();
+        String problemId = vo.getProblemId();
+        ProposalVO.ProblemDefinitionVO existing = proposalDAO.selectProblemDefinitionById(problemId);
+        if (existing == null || !ptProjectId.equals(existing.getPtProjectId())) {
+            throw new RuntimeException("문제정의를 찾을 수 없습니다. problemId=" + problemId);
+        }
+        ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+        if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다.");
+
+        List<String> sourceIssueIds = parseIdList(existing.getSourceIssueIdsJson());
+        List<String> sourceReqIds = parseIdList(existing.getSourceRequirementIdsJson());
+
+        List<ProposalVO.RfpIssueVO> allIssues = proposalDAO.selectRfpIssues(ptProjectId);
+        List<ProposalVO.RequirementVO> allReqs = proposalDAO.selectRequirements(ptProjectId);
+        java.util.Set<String> issueSet = new java.util.HashSet<>(sourceIssueIds);
+        java.util.Set<String> reqSet = new java.util.HashSet<>(sourceReqIds);
+
+        List<ProposalVO.RfpIssueVO> filteredIssues = new java.util.ArrayList<>();
+        if (allIssues != null) {
+            for (ProposalVO.RfpIssueVO i : allIssues) {
+                if (issueSet.contains(i.getIssueId())) filteredIssues.add(i);
+            }
+        }
+        List<ProposalVO.RequirementVO> filteredReqs = new java.util.ArrayList<>();
+        if (allReqs != null) {
+            for (ProposalVO.RequirementVO r : allReqs) {
+                if (reqSet.contains(r.getRequirementId())) filteredReqs.add(r);
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("당신은 제안서 전략 분석가입니다. 아래 문제정의 1건을 사용자 보완 요청에 맞게 수정하세요.\n");
+        sb.append("다른 문제정의는 만들지 말고, 반드시 JSON 객체 1개만 반환하세요.\n");
+        sb.append("필드: currentProblem, rootCause, riskIfIgnored, goal, requiredCapability, strategySummary, kpi, problemTypeCd\n");
+        sb.append("\n## 사업 기본 정보\n- 사업명: ").append(CommonUtil.nullToBlank(project.getProjectNm()));
+        sb.append("\n\n## 수정 대상 문제정의 (JSON)\n");
+        java.util.Map<String, Object> pdMap = new java.util.LinkedHashMap<>();
+        pdMap.put("problemId", existing.getProblemId());
+        pdMap.put("problemTypeCd", existing.getProblemTypeCd());
+        pdMap.put("currentProblem", existing.getCurrentProblem());
+        pdMap.put("rootCause", existing.getRootCause());
+        pdMap.put("riskIfIgnored", existing.getRiskIfIgnored());
+        pdMap.put("goal", existing.getGoal());
+        pdMap.put("requiredCapability", existing.getRequiredCapability());
+        pdMap.put("strategySummary", existing.getStrategySummary());
+        pdMap.put("kpi", existing.getKpi());
+        sb.append(GSON.toJson(pdMap));
+
+        if (!filteredIssues.isEmpty()) {
+            sb.append("\n\n## 관련 RFP 이슈 (이 문제정의의 근거만)\n");
+            for (ProposalVO.RfpIssueVO issue : filteredIssues) {
+                sb.append(String.format("- [%s][%s] %s%n",
+                        issue.getIssueId(), issueTypeLabel(issue.getIssueTypeCd()), issue.getIssueContent()));
+            }
+        }
+        if (!filteredReqs.isEmpty()) {
+            sb.append("\n\n## 관련 요구사항 (이 문제정의의 근거만, JSON)\n");
+            sb.append(GSON.toJson(filteredReqs.stream().map(this::toRequirementLite).collect(java.util.stream.Collectors.toList())));
+        }
+        if (CommonUtil.isNotEmpty(vo.getUserFeedback())) {
+            sb.append("\n\n## 사용자 보완 요청\n").append(vo.getUserFeedback());
+        }
+
+        logger.info("[PT Stage2 refine] 시작 problemId={}, issues={}, reqs={}, promptLen={}",
+                problemId, filteredIssues.size(), filteredReqs.size(), sb.length());
+        String aiResp = riskDiagnosisAgentService.callLlmQuerySync(sb.toString(), vo.getModelId(), "", vo.getAgentId());
+        if (CommonUtil.isEmpty(aiResp)) {
+            throw new RuntimeException("LLM 응답이 비어 있습니다. 문제정의 보완을 완료할 수 없습니다.");
+        }
+
+        JsonObject obj = extractFirstJsonObject(aiResp);
+        ProposalVO.ProblemDefinitionUpdateVO upd = new ProposalVO.ProblemDefinitionUpdateVO();
+        if (obj.has("problemTypeCd") && !obj.get("problemTypeCd").isJsonNull())
+            upd.setProblemTypeCd(obj.get("problemTypeCd").getAsString());
+        if (obj.has("currentProblem") && !obj.get("currentProblem").isJsonNull())
+            upd.setCurrentProblem(obj.get("currentProblem").getAsString());
+        if (obj.has("rootCause") && !obj.get("rootCause").isJsonNull())
+            upd.setRootCause(obj.get("rootCause").getAsString());
+        if (obj.has("riskIfIgnored") && !obj.get("riskIfIgnored").isJsonNull())
+            upd.setRiskIfIgnored(obj.get("riskIfIgnored").getAsString());
+        if (obj.has("goal") && !obj.get("goal").isJsonNull())
+            upd.setGoal(obj.get("goal").getAsString());
+        if (obj.has("requiredCapability") && !obj.get("requiredCapability").isJsonNull())
+            upd.setRequiredCapability(obj.get("requiredCapability").getAsString());
+        if (obj.has("strategySummary") && !obj.get("strategySummary").isJsonNull())
+            upd.setStrategySummary(obj.get("strategySummary").getAsString());
+        if (obj.has("kpi") && !obj.get("kpi").isJsonNull())
+            upd.setKpi(obj.get("kpi").getAsString());
+
+        return updateStage2ProblemDefinition(ptProjectId, problemId, upd);
+    }
+
+    // ── Stage1 단건 CRUD ──────────────────────────────────────────────────
+
+    public ProposalVO.RequirementVO insertRequirementManual(ProposalVO.RequirementVO vo) throws Exception {
+        String userId = SessionUtil.getUserId();
+        List<ProposalVO.RequirementVO> existing = proposalDAO.selectRequirements(vo.getPtProjectId());
+        vo.setRequirementId(keyGenerate.generateTableKey("PTQ", "TB_PT_REQUIREMENT", "REQUIREMENT_ID", 6));
+        vo.setSourceTypeCd("999");
+        if (vo.getMandatoryYn() == null) vo.setMandatoryYn("Y");
+        if (vo.getSortOrd() == null) vo.setSortOrd(existing != null ? existing.size() : 0);
+        vo.setCreateUserId(userId != null ? userId : "system");
+        proposalDAO.insertRequirement(vo);
+        return vo;
+    }
+
+    public void deleteRequirement(String requirementId) {
+        proposalDAO.deleteRequirement(requirementId);
+    }
+
+    public ProposalVO.EvalCriteriaVO insertEvalCriteriaManual(ProposalVO.EvalCriteriaVO vo) throws Exception {
+        String userId = SessionUtil.getUserId();
+        List<ProposalVO.EvalCriteriaVO> existing = proposalDAO.selectEvalCriteria(vo.getPtProjectId());
+        vo.setEvalCriteriaId(keyGenerate.generateTableKey("PTE", "TB_PT_EVAL_CRITERIA", "EVAL_CRITERIA_ID", 6));
+        if (vo.getSortOrd() == null) vo.setSortOrd(existing != null ? existing.size() : 0);
+        vo.setCreateUserId(userId != null ? userId : "system");
+        proposalDAO.insertEvalCriteria(vo);
+        return vo;
+    }
+
+    public void deleteEvalCriteria(String evalCriteriaId) {
+        proposalDAO.deleteEvalCriteria(evalCriteriaId);
+    }
+
+    public ProposalVO.RfpIssueVO insertRfpIssueManual(ProposalVO.RfpIssueVO vo) throws Exception {
+        String userId = SessionUtil.getUserId();
+        List<ProposalVO.RfpIssueVO> existing = proposalDAO.selectRfpIssues(vo.getPtProjectId());
+        vo.setIssueId(keyGenerate.generateTableKey("PTI", "tb_pt_rfp_issue", "ISSUE_ID", 6));
+        if (CommonUtil.isEmpty(vo.getIssueTypeCd())) vo.setIssueTypeCd("003");
+        vo.setSortOrd(existing != null ? existing.size() : 0);
+        vo.setCreateUserId(userId != null ? userId : "system");
+        proposalDAO.insertRfpIssue(vo);
+        return vo;
+    }
+
+    public void updateRfpIssue(ProposalVO.RfpIssueVO vo) {
+        proposalDAO.updateRfpIssue(vo);
+    }
+
+    public void deleteRfpIssue(String issueId) {
+        proposalDAO.deleteRfpIssue(issueId);
+    }
+
+    // ── Stage2 전략검토 헬퍼 ──────────────────────────────────────────────
+
+    private List<String> parseIdList(String jsonArrayStr) {
+        if (CommonUtil.isEmpty(jsonArrayStr)) return new java.util.ArrayList<>();
+        try {
+            List<String> ids = new java.util.ArrayList<>();
+            for (JsonElement el : JsonParser.parseString(jsonArrayStr).getAsJsonArray()) {
+                if (!el.isJsonNull() && CommonUtil.isNotEmpty(el.getAsString())) ids.add(el.getAsString());
+            }
+            return ids;
+        } catch (Exception e) {
+            return new java.util.ArrayList<>();
+        }
+    }
+
+    private List<ProposalVO.ProblemDefinitionResponseVO> toProblemDefinitionResponses(
+            List<ProposalVO.ProblemDefinitionVO> list) {
+        List<ProposalVO.ProblemDefinitionResponseVO> result = new java.util.ArrayList<>();
+        if (list == null) return result;
+        for (ProposalVO.ProblemDefinitionVO pd : list) result.add(toProblemDefinitionResponse(pd));
+        return result;
+    }
+
+    private ProposalVO.ProblemDefinitionResponseVO toProblemDefinitionResponse(ProposalVO.ProblemDefinitionVO pd) {
+        ProposalVO.ProblemDefinitionResponseVO r = new ProposalVO.ProblemDefinitionResponseVO();
+        if (pd == null) return r;
+        r.setProblemId(pd.getProblemId());
+        r.setPtProjectId(pd.getPtProjectId());
+        r.setProblemTypeCd(pd.getProblemTypeCd());
+        r.setCurrentProblem(pd.getCurrentProblem());
+        r.setRootCause(pd.getRootCause());
+        r.setRiskIfIgnored(pd.getRiskIfIgnored());
+        r.setGoal(pd.getGoal());
+        r.setRequiredCapability(pd.getRequiredCapability());
+        r.setStrategySummary(pd.getStrategySummary());
+        r.setKpi(pd.getKpi());
+        r.setSourceTypeCd(pd.getSourceTypeCd());
+        r.setSourceIssueIds(parseIdList(pd.getSourceIssueIdsJson()));
+        r.setSourceRequirementIds(parseIdList(pd.getSourceRequirementIdsJson()));
+        r.setGeneratedDt(pd.getCreateDt());
+        r.setModifyDt(pd.getModifyDt());
+        r.setManualYn("999".equals(pd.getSourceTypeCd()) ? "Y" : "N");
+        return r;
+    }
+
+    private List<ProposalVO.WinThemeResponseVO> toWinThemeResponses(
+            List<ProposalVO.WinThemeVO> wts, List<ProposalVO.ProblemDefinitionVO> pds) {
+        List<ProposalVO.WinThemeResponseVO> result = new java.util.ArrayList<>();
+        if (wts == null) return result;
+        for (ProposalVO.WinThemeVO wt : wts) result.add(toWinThemeResponse(wt, pds));
+        return result;
+    }
+
+    private ProposalVO.WinThemeResponseVO toWinThemeResponse(
+            ProposalVO.WinThemeVO wt, List<ProposalVO.ProblemDefinitionVO> pds) {
+        ProposalVO.WinThemeResponseVO r = new ProposalVO.WinThemeResponseVO();
+        if (wt == null) return r;
+        r.setWinThemeId(wt.getWinThemeId());
+        r.setPtProjectId(wt.getPtProjectId());
+        r.setCoreMessage(wt.getCoreMessage());
+        r.setCustomerProblem(wt.getCustomerProblem());
+        r.setProposalStrategy(wt.getProposalStrategy());
+        r.setEvidence(wt.getEvidence());
+        r.setExpectedEffect(wt.getExpectedEffect());
+        r.setDifferentiation(wt.getDifferentiation());
+        List<String> sourceIds = parseIdList(wt.getSourceProblemIdsJson());
+        r.setSourceProblemDefinitionIds(sourceIds);
+        r.setGeneratedDt(wt.getCreateDt());
+        r.setModifyDt(wt.getModifyDt());
+
+        java.util.Map<String, ProposalVO.ProblemDefinitionVO> pdMap = new java.util.HashMap<>();
+        if (pds != null) {
+            for (ProposalVO.ProblemDefinitionVO pd : pds) pdMap.put(pd.getProblemId(), pd);
+        }
+        List<ProposalVO.WinThemeStaleDetailVO> details = new java.util.ArrayList<>();
+        String wtBaseline = CommonUtil.isNotEmpty(wt.getModifyDt()) ? wt.getModifyDt() : wt.getCreateDt();
+        List<ProposalVO.ProblemDefinitionVO> referenced = new java.util.ArrayList<>();
+        for (String pid : sourceIds) {
+            ProposalVO.ProblemDefinitionVO pd = pdMap.get(pid);
+            if (pd == null) {
+                ProposalVO.WinThemeStaleDetailVO d = new ProposalVO.WinThemeStaleDetailVO();
+                d.setProblemId(pid);
+                d.setReason("DELETED");
+                details.add(d);
+            } else {
+                referenced.add(pd);
+                if (CommonUtil.isNotEmpty(pd.getModifyDt())
+                        && (CommonUtil.isEmpty(wtBaseline) || pd.getModifyDt().compareTo(wtBaseline) > 0)) {
+                    ProposalVO.WinThemeStaleDetailVO d = new ProposalVO.WinThemeStaleDetailVO();
+                    d.setProblemId(pid);
+                    d.setReason("MODIFIED");
+                    d.setProblemModifyDt(pd.getModifyDt());
+                    details.add(d);
+                }
+            }
+        }
+        if (referenced.isEmpty()) {
+            r.setStale(true);
+            if (details.isEmpty()) {
+                ProposalVO.WinThemeStaleDetailVO d = new ProposalVO.WinThemeStaleDetailVO();
+                d.setReason("DELETED");
+                details.add(d);
+            }
+        } else {
+            r.setStale(!details.isEmpty());
+        }
+        r.setStaleDetails(details);
+        return r;
+    }
+
+    private JsonObject extractFirstJsonObject(String aiResp) {
+        String json = aiResp.trim();
+        if (json.startsWith("```")) {
+            int firstNewline = json.indexOf('\n');
+            if (firstNewline != -1) json = json.substring(firstNewline + 1);
+            if (json.endsWith("```")) json = json.substring(0, json.lastIndexOf("```"));
+            json = json.trim();
+        }
+        int start = json.indexOf('{');
+        int end = json.lastIndexOf('}');
+        if (start < 0 || end <= start) throw new RuntimeException("문제정의 보완 응답 JSON을 파싱할 수 없습니다.");
+        return JsonParser.parseString(json.substring(start, end + 1)).getAsJsonObject();
     }
 
     // ── Stage 2 private helper 메서드들 ────────────────────────────────────────

@@ -300,6 +300,12 @@
         WHERE REQUIREMENT_ID = #{requirementId}
     </update>
 
+    <delete id="deleteRequirement" parameterType="String">
+        /* PT 요구사항 단건 삭제 proposal.deleteRequirement */
+        DELETE FROM TB_PT_REQUIREMENT
+        WHERE REQUIREMENT_ID = #{requirementId}
+    </delete>
+
     <!-- ================================================================== -->
     <!-- TB_PT_EVAL_CRITERIA                                                  -->
     <!-- ================================================================== -->
@@ -377,6 +383,12 @@
         WHERE EVAL_CRITERIA_ID = #{evalCriteriaId}
     </update>
 
+    <delete id="deleteEvalCriteria" parameterType="String">
+        /* PT 평가기준 단건 삭제 proposal.deleteEvalCriteria */
+        DELETE FROM TB_PT_EVAL_CRITERIA
+        WHERE EVAL_CRITERIA_ID = #{evalCriteriaId}
+    </delete>
+
     <!-- ================================================================== -->
     <!-- TB_PT_RFP_ISSUE                                                      -->
     <!-- ================================================================== -->
@@ -433,6 +445,25 @@
         ORDER BY SORT_ORD, ISSUE_ID
     </select>
 
+    <update id="updateRfpIssue" parameterType="kr.teamagent.proposal.service.ProposalVO$RfpIssueVO">
+        /* RFP 이슈 단건 수정 proposal.updateRfpIssue */
+        UPDATE tb_pt_rfp_issue
+        <set>
+            <if test="issueTypeCd != null">ISSUE_TYPE_CD = #{issueTypeCd},</if>
+            <if test="issueContent != null">ISSUE_CONTENT = #{issueContent},</if>
+            <if test="issueLabel != null">ISSUE_LABEL = #{issueLabel},</if>
+            <if test="sourceSection != null">SOURCE_SECTION = #{sourceSection},</if>
+            <if test="sourcePage != null">SOURCE_PAGE = #{sourcePage},</if>
+        </set>
+        WHERE ISSUE_ID = #{issueId}
+    </update>
+
+    <delete id="deleteRfpIssue" parameterType="String">
+        /* RFP 이슈 단건 삭제 proposal.deleteRfpIssue */
+        DELETE FROM tb_pt_rfp_issue
+        WHERE ISSUE_ID = #{issueId}
+    </delete>
+
     <!-- ================================================================== -->
     <!-- TB_PT_PROBLEM_DEFINITION                                             -->
     <!-- ================================================================== -->
@@ -483,6 +514,57 @@
         ORDER BY SORT_ORD, PROBLEM_ID
     </select>
 
+    <select id="selectProblemDefinitionById" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$ProblemDefinitionVO">
+        SELECT
+            PROBLEM_ID              AS PROBLEM_ID,
+            PT_PROJECT_ID           AS PT_PROJECT_ID,
+            PROBLEM_TYPE_CD         AS PROBLEM_TYPE_CD,
+            CURRENT_PROBLEM         AS CURRENT_PROBLEM,
+            ROOT_CAUSE              AS ROOT_CAUSE,
+            RISK_IF_IGNORED         AS RISK_IF_IGNORED,
+            GOAL                    AS GOAL,
+            REQUIRED_CAPABILITY     AS REQUIRED_CAPABILITY,
+            STRATEGY_SUMMARY        AS STRATEGY_SUMMARY,
+            KPI                     AS KPI,
+            SOURCE_TYPE_CD          AS SOURCE_TYPE_CD,
+            SOURCE_ISSUE_IDS_JSON   AS SOURCE_ISSUE_IDS_JSON,
+            SOURCE_REQ_IDS_JSON     AS SOURCE_REQUIREMENT_IDS_JSON,
+            SORT_ORD                AS SORT_ORD,
+            CREATE_USER_ID          AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID          AS MODIFY_USER_ID
+        FROM TB_PT_PROBLEM_DEFINITION
+        WHERE PROBLEM_ID = #{problemId}
+    </select>
+
+    <update id="updateProblemDefinition" parameterType="kr.teamagent.proposal.service.ProposalVO$ProblemDefinitionVO">
+        /* 문제정의 단건 수정 (사용자 편집/refine) proposal.updateProblemDefinition */
+        UPDATE TB_PT_PROBLEM_DEFINITION
+        <set>
+            <if test="problemTypeCd != null">PROBLEM_TYPE_CD = #{problemTypeCd},</if>
+            <if test="currentProblem != null">CURRENT_PROBLEM = #{currentProblem},</if>
+            <if test="rootCause != null">ROOT_CAUSE = #{rootCause},</if>
+            <if test="riskIfIgnored != null">RISK_IF_IGNORED = #{riskIfIgnored},</if>
+            <if test="goal != null">GOAL = #{goal},</if>
+            <if test="requiredCapability != null">REQUIRED_CAPABILITY = #{requiredCapability},</if>
+            <if test="strategySummary != null">STRATEGY_SUMMARY = #{strategySummary},</if>
+            <if test="kpi != null">KPI = #{kpi},</if>
+            <if test="sourceIssueIdsJson != null">SOURCE_ISSUE_IDS_JSON = #{sourceIssueIdsJson},</if>
+            <if test="sourceRequirementIdsJson != null">SOURCE_REQ_IDS_JSON = #{sourceRequirementIdsJson},</if>
+            MODIFY_DT = NOW(),
+            MODIFY_USER_ID = #{modifyUserId}
+        </set>
+        WHERE PROBLEM_ID = #{problemId}
+    </update>
+
+    <delete id="deleteProblemDefinition" parameterType="String">
+        /* 문제정의 단건 삭제 proposal.deleteProblemDefinition */
+        DELETE FROM TB_PT_PROBLEM_DEFINITION
+        WHERE PROBLEM_ID = #{problemId}
+    </delete>
+
     <!-- ================================================================== -->
     <!-- TB_PT_WIN_THEME                                                       -->
     <!-- ================================================================== -->
@@ -527,6 +609,50 @@
         ORDER BY SORT_ORD, WIN_THEME_ID
     </select>
 
+    <select id="selectWinThemeById" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$WinThemeVO">
+        SELECT
+            WIN_THEME_ID        AS WIN_THEME_ID,
+            PT_PROJECT_ID       AS PT_PROJECT_ID,
+            CORE_MESSAGE        AS CORE_MESSAGE,
+            CUSTOMER_PROBLEM    AS CUSTOMER_PROBLEM,
+            PROPOSAL_STRATEGY   AS PROPOSAL_STRATEGY,
+            EVIDENCE            AS EVIDENCE,
+            EXPECTED_EFFECT     AS EXPECTED_EFFECT,
+            DIFFERENTIATION     AS DIFFERENTIATION,
+            SOURCE_PROBLEM_IDS_JSON AS SOURCE_PROBLEM_IDS_JSON,
+            SORT_ORD            AS SORT_ORD,
+            CREATE_USER_ID      AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID      AS MODIFY_USER_ID
+        FROM TB_PT_WIN_THEME
+        WHERE WIN_THEME_ID = #{winThemeId}
+    </select>
+
+    <update id="updateWinTheme" parameterType="kr.teamagent.proposal.service.ProposalVO$WinThemeVO">
+        /* Win Theme 단건 수정 proposal.updateWinTheme */
+        UPDATE TB_PT_WIN_THEME
+        <set>
+            <if test="coreMessage != null">CORE_MESSAGE = #{coreMessage},</if>
+            <if test="customerProblem != null">CUSTOMER_PROBLEM = #{customerProblem},</if>
+            <if test="proposalStrategy != null">PROPOSAL_STRATEGY = #{proposalStrategy},</if>
+            <if test="evidence != null">EVIDENCE = #{evidence},</if>
+            <if test="expectedEffect != null">EXPECTED_EFFECT = #{expectedEffect},</if>
+            <if test="differentiation != null">DIFFERENTIATION = #{differentiation},</if>
+            <if test="sourceProblemIdsJson != null">SOURCE_PROBLEM_IDS_JSON = #{sourceProblemIdsJson},</if>
+            MODIFY_DT = NOW(),
+            MODIFY_USER_ID = #{modifyUserId}
+        </set>
+        WHERE WIN_THEME_ID = #{winThemeId}
+    </update>
+
+    <delete id="deleteWinTheme" parameterType="String">
+        /* Win Theme 단건 삭제 proposal.deleteWinTheme */
+        DELETE FROM TB_PT_WIN_THEME
+        WHERE WIN_THEME_ID = #{winThemeId}
+    </delete>
+
     <!-- ================================================================== -->
     <!-- TB_PT_TOC                                                             -->
     <!-- ================================================================== -->
@@ -552,6 +678,15 @@
         SET LINKED_EVAL_CRITERIA_ID = #{linkedEvalCriteriaId, jdbcType=VARCHAR},
             COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
             PLANNED_SLIDE_CNT       = #{plannedSlideCnt},
+            MODIFY_DT               = NOW()
+        WHERE TOC_ID = #{tocId}
+    </update>
+
+    <update id="updateTocMappingUser" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* 전략검토 수동 TOC 매핑 — plannedSlideCnt 유지 proposal.updateTocMappingUser */
+        UPDATE TB_PT_TOC
+        SET LINKED_EVAL_CRITERIA_ID = #{linkedEvalCriteriaId, jdbcType=VARCHAR},
+            COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
             MODIFY_DT               = NOW()
         WHERE TOC_ID = #{tocId}
     </update>

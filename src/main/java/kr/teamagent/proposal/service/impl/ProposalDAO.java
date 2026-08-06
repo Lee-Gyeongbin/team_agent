@@ -195,12 +195,22 @@ public class ProposalDAO extends EgovComAbstractDAO {
         update("proposal.updateRequirement", vo);
     }
 
+    /** 요구사항 단건 삭제 */
+    public void deleteRequirement(String requirementId) {
+        delete("proposal.deleteRequirement", requirementId);
+    }
+
     /**
      * 평가기준 단건 수정 (사용자 수동 보정)
      * @param vo EvalCriteriaVO (evalCriteriaId 필수)
      */
     public void updateEvalCriteria(ProposalVO.EvalCriteriaVO vo) {
         update("proposal.updateEvalCriteria", vo);
+    }
+
+    /** 평가기준 단건 삭제 */
+    public void deleteEvalCriteria(String evalCriteriaId) {
+        delete("proposal.deleteEvalCriteria", evalCriteriaId);
     }
 
     // ── Stage 1: RFP 현황/문제점/개선방향 ──────────────────────────────
@@ -230,6 +240,16 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return selectList("proposal.selectRfpIssues", ptProjectId);
     }
 
+    /** RFP 이슈 단건 수정 */
+    public void updateRfpIssue(ProposalVO.RfpIssueVO vo) {
+        update("proposal.updateRfpIssue", vo);
+    }
+
+    /** RFP 이슈 단건 삭제 */
+    public void deleteRfpIssue(String issueId) {
+        delete("proposal.deleteRfpIssue", issueId);
+    }
+
     // ── Stage 2: 문제 정의 ──────────────────────────────────────────────
 
     /**
@@ -257,6 +277,18 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return selectList("proposal.selectProblemDefinitions", ptProjectId);
     }
 
+    public ProposalVO.ProblemDefinitionVO selectProblemDefinitionById(String problemId) {
+        return (ProposalVO.ProblemDefinitionVO) selectOne("proposal.selectProblemDefinitionById", problemId);
+    }
+
+    public void updateProblemDefinition(ProposalVO.ProblemDefinitionVO vo) {
+        update("proposal.updateProblemDefinition", vo);
+    }
+
+    public void deleteProblemDefinition(String problemId) {
+        delete("proposal.deleteProblemDefinition", problemId);
+    }
+
     // ── Stage 2: Win Theme ───────────────────────────────────────────────
 
     /**
@@ -282,6 +314,18 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public List<ProposalVO.WinThemeVO> selectWinThemes(String ptProjectId) {
         return selectList("proposal.selectWinThemes", ptProjectId);
+    }
+
+    public ProposalVO.WinThemeVO selectWinThemeById(String winThemeId) {
+        return (ProposalVO.WinThemeVO) selectOne("proposal.selectWinThemeById", winThemeId);
+    }
+
+    public void updateWinTheme(ProposalVO.WinThemeVO vo) {
+        update("proposal.updateWinTheme", vo);
+    }
+
+    public void deleteWinTheme(String winThemeId) {
+        delete("proposal.deleteWinTheme", winThemeId);
     }
 
     // ── Stage 2: TOC ─────────────────────────────────────────────────────
@@ -317,6 +361,11 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public void updateTocEvalLinkAndReqIds(ProposalVO.TocVO vo) {
         update("proposal.updateTocEvalLinkAndReqIds", vo);
+    }
+
+    /** 전략검토 수동 TOC 매핑 (plannedSlideCnt 유지) */
+    public void updateTocMappingUser(ProposalVO.TocVO vo) {
+        update("proposal.updateTocMappingUser", vo);
     }
 
     /**
