@@ -119,6 +119,8 @@ public class ProposalVO {
         private String reqCategoryTxt;
         /** 요구사항 원문 내용 */
         private String reqContent;
+        /** 요구사항 상세설명 (RFP 상세설명 항목 원문, 없으면 null) */
+        private String reqDetailTxt;
         /** 필수 여부 (Y/N) */
         private String mandatoryYn;
         /** 출처 유형 코드 (PT000004: 001=사실, 002=전략적해석, 003=확인필요) */
@@ -447,6 +449,8 @@ public class ProposalVO {
         private String no;
         /** RFP 세부 작성 지침 (항목별 작성 방법, DB 컬럼 GUIDE_CONTENT) */
         private String guideContent;
+        /** 목차 원본 유형 코드 (001=RFP원본목차, 002=AI생성 세부목차) */
+        private String originTypeCd;
         /** 조회 응답용 계층 구조 */
         private java.util.List<TocVO> children;
     }

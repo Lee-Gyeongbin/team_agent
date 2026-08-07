@@ -244,6 +244,7 @@
             , REQ_NO
             , REQ_CATEGORY_TXT
             , REQ_CONTENT
+            , REQ_DETAIL_TXT
             , MANDATORY_YN
             , SOURCE_TYPE_CD
             , CONFIRM_NEEDED_YN
@@ -256,6 +257,7 @@
             , #{reqNo}
             , #{reqCategoryTxt}
             , #{reqContent}
+            , #{reqDetailTxt}
             , COALESCE(#{mandatoryYn}, 'Y')
             , COALESCE(#{sourceTypeCd}, '001')
             , COALESCE(#{confirmNeededYn}, 'N')
@@ -274,6 +276,7 @@
             , r.REQ_NO                AS REQ_NO
             , r.REQ_CATEGORY_TXT      AS REQ_CATEGORY_TXT
             , r.REQ_CONTENT           AS REQ_CONTENT
+            , r.REQ_DETAIL_TXT        AS REQ_DETAIL_TXT
             , r.MANDATORY_YN          AS MANDATORY_YN
             , r.SOURCE_TYPE_CD        AS SOURCE_TYPE_CD
             , r.CONFIRM_NEEDED_YN     AS CONFIRM_NEEDED_YN
@@ -292,6 +295,7 @@
             <if test="reqNo != null">REQ_NO = #{reqNo},</if>
             <if test="reqCategoryTxt != null">REQ_CATEGORY_TXT = #{reqCategoryTxt},</if>
             <if test="reqContent != null">REQ_CONTENT = #{reqContent},</if>
+            REQ_DETAIL_TXT = #{reqDetailTxt},
             <if test="mandatoryYn != null">MANDATORY_YN = #{mandatoryYn},</if>
             <if test="sourceTypeCd != null">SOURCE_TYPE_CD = #{sourceTypeCd},</if>
             <if test="confirmNeededYn != null">CONFIRM_NEEDED_YN = #{confirmNeededYn},</if>
@@ -661,14 +665,24 @@
         DELETE FROM TB_PT_TOC WHERE PT_PROJECT_ID = #{ptProjectId}
     </delete>
 
+    <delete id="deleteTocByOriginTypeCd" parameterType="map">
+        /* AI 생성 세부목차 초기화 — S2C 재실행 시 ORIGIN_TYPE_CD=002 레코드 삭제 proposal.deleteTocByOriginTypeCd */
+        DELETE FROM TB_PT_TOC
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+          AND ORIGIN_TYPE_CD = #{originTypeCd}
+    </delete>
+
     <insert id="insertToc" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
         INSERT INTO TB_PT_TOC (
             TOC_ID, PT_PROJECT_ID, PARENT_TOC_ID, SECTION_NO, SECTION_NM,
-            LINKED_EVAL_CRITERIA_ID, PLANNED_SLIDE_CNT, SORT_ORD, GUIDE_CONTENT, CREATE_USER_ID, CREATE_DT
+            LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON, PLANNED_SLIDE_CNT,
+            SORT_ORD, GUIDE_CONTENT, ORIGIN_TYPE_CD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{tocId}, #{ptProjectId}, #{parentTocId, jdbcType=VARCHAR}, #{sectionNo}, #{sectionNm},
-            #{linkedEvalCriteriaId, jdbcType=VARCHAR}, #{plannedSlideCnt},
-            COALESCE(#{sortOrd}, 0), #{guideContent, jdbcType=VARCHAR}, #{createUserId}, NOW()
+            #{linkedEvalCriteriaId, jdbcType=VARCHAR}, #{coveredReqIdsJson, jdbcType=VARCHAR},
+            #{plannedSlideCnt},
+            COALESCE(#{sortOrd}, 0), #{guideContent, jdbcType=VARCHAR},
+            #{originTypeCd, jdbcType=VARCHAR}, #{createUserId}, NOW()
         )
     </insert>
 
@@ -733,6 +747,7 @@
             t.PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             t.SORT_ORD                AS SORT_ORD,
             t.GUIDE_CONTENT           AS GUIDE_CONTENT,
+            t.ORIGIN_TYPE_CD          AS ORIGIN_TYPE_CD,
             t.CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
             DATE_FORMAT(t.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT

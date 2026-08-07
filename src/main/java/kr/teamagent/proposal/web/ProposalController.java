@@ -468,6 +468,20 @@ public class ProposalController extends BaseController {
         return proposalService.streamAnalyzeStage2(ptProjectId, totalSlideBudget, modelId, agentId);
     }
 
+    /** D-0T — Stage2 세부목차 생성 SSE */
+    @RequestMapping(value = "/ai/proposal/streamAnalyzeStage2Toc.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamAnalyzeStage2Toc(
+            @RequestParam String ptProjectId,
+            @RequestParam(defaultValue = "20") int totalSlideBudget,
+            @RequestParam String modelId,
+            @RequestParam String agentId,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamAnalyzeStage2Toc(ptProjectId, totalSlideBudget, modelId, agentId);
+    }
+
     /** D-1 — 소목차 슬라이드 생성 SSE */
     @RequestMapping(value = "/ai/proposal/streamGenerateSection.do",
             produces = "text/event-stream;charset=UTF-8")

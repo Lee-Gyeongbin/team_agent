@@ -347,6 +347,18 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 특정 ORIGIN_TYPE_CD의 TOC 삭제 (S2C 재실행 시 AI 생성 세부목차 초기화용)
+     * @param ptProjectId 프로젝트 ID
+     * @param originTypeCd 목차 원본 유형 코드 (002=AI생성 세부목차)
+     */
+    public void deleteTocByOriginTypeCd(String ptProjectId, String originTypeCd) {
+        java.util.Map<String, Object> param = new java.util.HashMap<>();
+        param.put("ptProjectId", ptProjectId);
+        param.put("originTypeCd", originTypeCd);
+        delete("proposal.deleteTocByOriginTypeCd", param);
+    }
+
+    /**
      * 프로젝트의 TOC 목록 조회 (flat list, SORT_ORD 기준)
      * @param ptProjectId 프로젝트 ID
      * @return List<TocVO>
