@@ -5,17 +5,17 @@ import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.springframework.web.multipart.MultipartFile;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -211,6 +211,22 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /** 최대 단계 번호 업데이트 (Step B·E의 다음 버튼처럼 별도 저장 API 없는 단계용) */
+    @RequestMapping(value = "/ai/proposal/updateMaxStepNo.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateMaxStepNo(@RequestBody ProposalVO.ProjectVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.updateMaxStepNo(vo.getPtProjectId(), vo.getMaxStepNo() != null ? vo.getMaxStepNo() : 0);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT] updateMaxStepNo 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
     // ── Step B: TOC(목차) CRUD ────────────────────────────────────────────────
 
     /** 프로젝트 용도별 파일 단건 조회 (없으면 data=null) */
@@ -226,30 +242,6 @@ public class ProposalController extends BaseController {
             resultMap.put("data", data);
         } catch (Exception e) {
             logger.error("[PT StepB] selectPtRfpFile 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        }
-        return new ModelAndView("jsonView", resultMap);
-    }
-
-    /** Step B — mandatedToc 기반 목차 자동추출 */
-    @RequestMapping(value = "/ai/proposal/autoExtractToc.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView autoExtractToc(@RequestParam String ptProjectId) {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        try {
-            java.util.List<ProposalVO.TocVO> list = proposalService.autoExtractToc(ptProjectId);
-            resultMap.put("result", "OK");
-            resultMap.put("list", list);
-            if (list.isEmpty()) {
-                resultMap.put("msg", "RFP에 명시된 목차가 없습니다. 직접 입력해주세요.");
-            }
-        } catch (RuntimeException e) {
-            logger.error("[PT StepB] autoExtractToc 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        } catch (Exception e) {
-            logger.error("[PT StepB] autoExtractToc 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
             resultMap.put("result", "FAIL");
             resultMap.put("msg", e.getMessage());
         }
@@ -461,6 +453,7 @@ public class ProposalController extends BaseController {
 
     // ── Step D: 본문 생성 ─────────────────────────────────────────────────────
 
+
     /** D-0 — Stage2 전략분석 SSE (최초 진입 시) */
     @RequestMapping(value = "/ai/proposal/streamAnalyzeStage2.do",
             produces = "text/event-stream;charset=UTF-8")
@@ -473,6 +466,20 @@ public class ProposalController extends BaseController {
             HttpServletResponse response) {
         response.setCharacterEncoding("UTF-8");
         return proposalService.streamAnalyzeStage2(ptProjectId, totalSlideBudget, modelId, agentId);
+    }
+
+    /** D-0T — Stage2 세부목차 생성 SSE */
+    @RequestMapping(value = "/ai/proposal/streamAnalyzeStage2Toc.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamAnalyzeStage2Toc(
+            @RequestParam String ptProjectId,
+            @RequestParam(defaultValue = "20") int totalSlideBudget,
+            @RequestParam String modelId,
+            @RequestParam String agentId,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamAnalyzeStage2Toc(ptProjectId, totalSlideBudget, modelId, agentId);
     }
 
     /** D-1 — 소목차 슬라이드 생성 SSE */
@@ -527,6 +534,18 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /** D-5 — 소목차 이미지 렌더링 SSE (confirmSection 완료 후 프론트엔드 구독) */
+    @RequestMapping(value = "/ai/proposal/streamRenderSectionImages.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamRenderSectionImages(
+            @RequestParam String ptProjectId,
+            @RequestParam String tocId,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamRenderSectionImages(ptProjectId, tocId);
+    }
+
     /** D-4 — 소목차 확인 → 다음 진행 */
     @RequestMapping(value = "/ai/proposal/confirmSection.do", method = RequestMethod.POST)
     @ResponseBody
@@ -548,93 +567,38 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
-    // ── Step E: 검토 ──────────────────────────────────────────────────────────
+    @RequestMapping("/ai/proposal/viewSlideImage.do")
+    public @ResponseBody Map<String, Object> viewSlideImage(@RequestBody ProposalVO.SlideVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
 
-    /** E — 전체 슬라이드 썸네일 목록 조회 */
-    @RequestMapping(value = "/ai/proposal/selectAllSlides.do", method = RequestMethod.GET)
-    @ResponseBody
-    public ModelAndView selectAllSlides(@RequestParam String ptProjectId) {
-        HashMap<String, Object> resultMap = new HashMap<>();
         try {
-            java.util.List<ProposalVO.SlideVO> list = proposalService.selectAllSlides(ptProjectId);
-            resultMap.put("result", "OK");
-            resultMap.put("list", list);
+            if (bindingResult.hasErrors()) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "INVALID");
+                return resultMap;
+            }
+            if (dataVO.getSlideId() == null) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "MISSING_SLIDE_ID");
+                return resultMap;
+            }
+            resultMap = proposalService.viewSlideImage(dataVO);
         } catch (Exception e) {
-            logger.error("[PT E] selectAllSlides 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
+            logger.error("viewSlideImage failed", e);
+            resultMap.put("viewType", "DOWNLOAD");
+            resultMap.put("reason", "ERROR");
         }
-        return new ModelAndView("jsonView", resultMap);
-    }
 
-    /** E — 전역 보완 채팅 (특정 슬라이드 지정 또는 전체 톤 변경 등 자유 텍스트) */
-    @RequestMapping(value = "/ai/proposal/reviewChat.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView reviewChat(@RequestBody ProposalVO.ReviewChatVO vo) {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        try {
-            ProposalVO.ReviewChatResultVO data = proposalService.reviewChat(vo);
-            resultMap.put("result", "OK");
-            resultMap.put("data", data);
-        } catch (RuntimeException e) {
-            logger.error("[PT E] reviewChat 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        } catch (Exception e) {
-            logger.error("[PT E] reviewChat 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        }
-        return new ModelAndView("jsonView", resultMap);
-    }
-
-    /** E — Stage4 평가 시뮬레이션 실행 */
-    @RequestMapping(value = "/ai/proposal/executeEvalSimulation.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView executeEvalSimulation(
-            @RequestParam String ptProjectId,
-            @RequestParam String modelId,
-            @RequestParam String agentId) {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        try {
-            ProposalVO.EvalSimulationResultVO data = proposalService.executeEvalSimulation(ptProjectId, modelId, agentId);
-            resultMap.put("result", "OK");
-            resultMap.put("data", data);
-        } catch (RuntimeException e) {
-            logger.error("[PT E Stage4] executeEvalSimulation 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        } catch (Exception e) {
-            logger.error("[PT E Stage4] executeEvalSimulation 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        }
-        return new ModelAndView("jsonView", resultMap);
-    }
-
-    /** E — Stage4 평가 시뮬레이션 최근 결과 조회 */
-    @RequestMapping(value = "/ai/proposal/selectEvalSimulation.do", method = RequestMethod.GET)
-    @ResponseBody
-    public ModelAndView selectEvalSimulation(@RequestParam String ptProjectId) {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        try {
-            java.util.List<ProposalVO.ReviewVO> list = proposalService.selectEvalSimulation(ptProjectId);
-            resultMap.put("result", "OK");
-            resultMap.put("list", list);
-        } catch (Exception e) {
-            logger.error("[PT E Stage4] selectEvalSimulation 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
-            resultMap.put("result", "FAIL");
-            resultMap.put("msg", e.getMessage());
-        }
-        return new ModelAndView("jsonView", resultMap);
+        return resultMap;
     }
 
     // ── Step F: 출력 ──────────────────────────────────────────────────────────
 
     /**
      * F — 출력 시작 (PPTX / PDF)
-     * - 캐시 재사용 판단 후 신규 빌드 또는 캐시된 파일 즉시 반환
-     * - body: { ptProjectId, format: "pdf"|"pptx", agentId }
+     * - 내보내기 형식은 PROJECT_CONFIG_JSON.template.docSize 기반 자동 결정 (a4→PDF, 그 외→PPTX)
+     * - 캐시 재사용: 최근 완료(004) 빌드의 COMPLETE_DT가 슬라이드 MODIFY_DT 이후면 재빌드 생략
+     * - body: { ptProjectId, agentId }
      */
     @RequestMapping(value = "/ai/proposal/startExport.do", method = RequestMethod.POST)
     @ResponseBody
@@ -676,6 +640,428 @@ public class ProposalController extends BaseController {
             }
         } catch (Exception e) {
             logger.error("[PT F] selectExportStatus 오류 (exportId={}): {}", exportId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    // ── Step E: 템플릿 생성 ──────────────────────────────────────────────────────
+
+    /** E — 템플릿 단건 조회 */
+    @RequestMapping(value = "/ai/proposal/selectPtTemplate.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectPtTemplate(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.selectPtTemplate(ptProjectId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (Exception e) {
+            logger.error("[PT E] selectPtTemplate 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — 템플릿 생성 (최초 / 전체 재생성) */
+    @RequestMapping(value = "/ai/proposal/generatePtTemplate.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView generatePtTemplate(
+            @RequestParam String ptProjectId,
+            @RequestParam String modelId,
+            @RequestParam String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.generateTemplate(ptProjectId, modelId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] generatePtTemplate 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] generatePtTemplate 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — 템플릿 직접 저장 (드래그 편집 후 확정) */
+    @RequestMapping(value = "/ai/proposal/updatePtTemplate.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updatePtTemplate(@RequestBody ProposalVO.PtTemplateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.updatePtTemplate(vo);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT E] updatePtTemplate 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** E — 템플릿 재생성 */
+    @RequestMapping(value = "/ai/proposal/regeneratePtTemplate.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView regeneratePtTemplate(@RequestBody ProposalVO.PtTemplateRegenerateVO vo,
+                                              @RequestParam String modelId,
+                                              @RequestParam String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.generateTemplate(vo.getPtProjectId(), modelId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] regeneratePtTemplate 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] regeneratePtTemplate 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    // ── Stage2 전략검토 API ───────────────────────────────────────────────────
+
+    @RequestMapping(value = "/ai/proposal/selectStage2Summary.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectStage2Summary(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.selectStage2Summary(ptProjectId));
+        } catch (Exception e) {
+            logger.error("[PT] selectStage2Summary 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/selectStage2ProblemDefinitions.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectStage2ProblemDefinitions(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.selectStage2ProblemDefinitions(ptProjectId));
+        } catch (Exception e) {
+            logger.error("[PT] selectStage2ProblemDefinitions 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/selectStage2WinThemes.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectStage2WinThemes(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.selectStage2WinThemes(ptProjectId));
+        } catch (Exception e) {
+            logger.error("[PT] selectStage2WinThemes 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/selectStage2TocMapping.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectStage2TocMapping(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.selectStage2TocMapping(ptProjectId));
+        } catch (Exception e) {
+            logger.error("[PT] selectStage2TocMapping 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/regenerateStage2ProblemDefinitions.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView regenerateStage2ProblemDefinitions(@RequestBody ProposalVO.Stage2RegenerateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.regenerateStage2ProblemDefinitions(vo));
+        } catch (Exception e) {
+            logger.error("[PT] regenerateStage2ProblemDefinitions 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/refineStage2ProblemDefinition.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView refineStage2ProblemDefinition(@RequestBody ProposalVO.ProblemDefinitionRefineVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.refineStage2ProblemDefinition(vo));
+        } catch (Exception e) {
+            logger.error("[PT] refineStage2ProblemDefinition 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/regenerateStage2WinThemes.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView regenerateStage2WinThemes(@RequestBody ProposalVO.Stage2RegenerateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.regenerateStage2WinThemes(vo));
+        } catch (IllegalStateException e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", "문제정의가 먼저 저장되어야 Win Theme를 생성할 수 있습니다.");
+            resultMap.put("errorCd", "PROBLEM_DEFINITION_REQUIRED");
+        } catch (Exception e) {
+            logger.error("[PT] regenerateStage2WinThemes 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/regenerateStage2Mapping.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView regenerateStage2Mapping(@RequestBody ProposalVO.Stage2RegenerateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.regenerateStage2Mapping(vo));
+        } catch (Exception e) {
+            logger.error("[PT] regenerateStage2Mapping 실패: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/resetStage2Status.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView resetStage2Status(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.resetStage2Status(ptProjectId);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/updateStage2ProblemDefinition.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateStage2ProblemDefinition(@RequestBody ProposalVO.ProblemDefinitionUpdateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.updateStage2ProblemDefinition(
+                    vo.getPtProjectId(), vo.getProblemId(), vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/insertStage2ProblemDefinition.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView insertStage2ProblemDefinition(@RequestBody ProposalVO.ProblemDefinitionUpdateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.insertStage2ProblemDefinition(vo.getPtProjectId(), vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/deleteStage2ProblemDefinition.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteStage2ProblemDefinition(@RequestParam String ptProjectId, @RequestParam String problemId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.deleteStage2ProblemDefinition(ptProjectId, problemId);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/updateStage2WinTheme.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateStage2WinTheme(@RequestBody ProposalVO.WinThemeUpdateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.updateStage2WinTheme(vo.getPtProjectId(), vo.getWinThemeId(), vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/insertStage2WinTheme.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView insertStage2WinTheme(@RequestBody ProposalVO.WinThemeUpdateVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.insertStage2WinTheme(vo.getPtProjectId(), vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/deleteStage2WinTheme.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteStage2WinTheme(@RequestParam String ptProjectId, @RequestParam String winThemeId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.deleteStage2WinTheme(ptProjectId, winThemeId);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/updateStage2TocMapping.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateStage2TocMapping(@RequestBody ProposalVO.TocMappingUpdateVO vo,
+            @RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.updateStage2TocMapping(ptProjectId, vo.getTocId(), vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    // ── Stage1 단건 CRUD ──────────────────────────────────────────────────────
+
+    @RequestMapping(value = "/ai/proposal/insertRequirement.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView insertRequirement(@RequestBody ProposalVO.RequirementVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.insertRequirementManual(vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/deleteRequirement.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteRequirement(@RequestParam String requirementId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.deleteRequirement(requirementId);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/insertEvalCriteria.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView insertEvalCriteria(@RequestBody ProposalVO.EvalCriteriaVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.insertEvalCriteriaManual(vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/deleteEvalCriteria.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteEvalCriteria(@RequestParam String evalCriteriaId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.deleteEvalCriteria(evalCriteriaId);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/insertRfpIssue.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView insertRfpIssue(@RequestBody ProposalVO.RfpIssueVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("data", proposalService.insertRfpIssueManual(vo));
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/updateRfpIssue.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updateRfpIssue(@RequestBody ProposalVO.RfpIssueVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.updateRfpIssue(vo);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    @RequestMapping(value = "/ai/proposal/deleteRfpIssue.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteRfpIssue(@RequestParam String issueId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.deleteRfpIssue(issueId);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
             resultMap.put("result", "FAIL");
             resultMap.put("msg", e.getMessage());
         }

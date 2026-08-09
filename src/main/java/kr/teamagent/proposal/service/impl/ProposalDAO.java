@@ -56,6 +56,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * PT 프로젝트 Stage2 진행 상태 업데이트
+     * @param vo ptProjectId, stage2StatusCd (PT000013: 001미시작/002문제정의저장/003완료/004실패)
+     */
+    public void updateStage2StatusCd(ProposalVO.ProjectVO vo) {
+        update("proposal.updateStage2StatusCd", vo);
+    }
+
+    /**
      * PT 프로젝트 작성지침 JSON 업데이트
      * @param vo ptProjectId, writingGuidelineJson
      */
@@ -86,6 +94,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public void updateProjectConfigJson(ProposalVO.ProjectVO vo) {
         update("proposal.updateProjectConfigJson", vo);
+    }
+
+    /**
+     * PT 프로젝트 최대 단계 번호 업데이트 (GREATEST로 역행 방지)
+     * @param vo ptProjectId, maxStepNo
+     */
+    public void updateMaxStepNo(ProposalVO.ProjectVO vo) {
+        update("proposal.updateMaxStepNo", vo);
     }
 
     /**
@@ -179,12 +195,59 @@ public class ProposalDAO extends EgovComAbstractDAO {
         update("proposal.updateRequirement", vo);
     }
 
+    /** 요구사항 단건 삭제 */
+    public void deleteRequirement(String requirementId) {
+        delete("proposal.deleteRequirement", requirementId);
+    }
+
     /**
      * 평가기준 단건 수정 (사용자 수동 보정)
      * @param vo EvalCriteriaVO (evalCriteriaId 필수)
      */
     public void updateEvalCriteria(ProposalVO.EvalCriteriaVO vo) {
         update("proposal.updateEvalCriteria", vo);
+    }
+
+    /** 평가기준 단건 삭제 */
+    public void deleteEvalCriteria(String evalCriteriaId) {
+        delete("proposal.deleteEvalCriteria", evalCriteriaId);
+    }
+
+    // ── Stage 1: RFP 현황/문제점/개선방향 ──────────────────────────────
+
+    /**
+     * 프로젝트의 RFP 이슈 전체 삭제
+     * @param ptProjectId 프로젝트 ID
+     */
+    public void deleteRfpIssuesByProject(String ptProjectId) {
+        delete("proposal.deleteRfpIssuesByProject", ptProjectId);
+    }
+
+    /**
+     * RFP 이슈 단건 등록
+     * @param vo RfpIssueVO
+     */
+    public void insertRfpIssue(ProposalVO.RfpIssueVO vo) {
+        insert("proposal.insertRfpIssue", vo);
+    }
+
+    /**
+     * 프로젝트의 RFP 이슈 목록 조회 (SORT_ORD 기준)
+     * @param ptProjectId 프로젝트 ID
+     * @return List<RfpIssueVO>
+     */
+    public List<ProposalVO.RfpIssueVO> selectRfpIssues(String ptProjectId) {
+        return selectList("proposal.selectRfpIssues", ptProjectId);
+    }
+
+    /** RFP 이슈 단건 수정 */
+    public void updateRfpIssue(ProposalVO.RfpIssueVO vo) {
+        update("proposal.updateRfpIssue", vo);
+    }
+
+    /** RFP 이슈 단건 삭제 */
+    public void deleteRfpIssue(String issueId) {
+        delete("proposal.deleteRfpIssue", issueId);
     }
 
     // ── Stage 2: 문제 정의 ──────────────────────────────────────────────
@@ -214,6 +277,18 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return selectList("proposal.selectProblemDefinitions", ptProjectId);
     }
 
+    public ProposalVO.ProblemDefinitionVO selectProblemDefinitionById(String problemId) {
+        return (ProposalVO.ProblemDefinitionVO) selectOne("proposal.selectProblemDefinitionById", problemId);
+    }
+
+    public void updateProblemDefinition(ProposalVO.ProblemDefinitionVO vo) {
+        update("proposal.updateProblemDefinition", vo);
+    }
+
+    public void deleteProblemDefinition(String problemId) {
+        delete("proposal.deleteProblemDefinition", problemId);
+    }
+
     // ── Stage 2: Win Theme ───────────────────────────────────────────────
 
     /**
@@ -241,6 +316,18 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return selectList("proposal.selectWinThemes", ptProjectId);
     }
 
+    public ProposalVO.WinThemeVO selectWinThemeById(String winThemeId) {
+        return (ProposalVO.WinThemeVO) selectOne("proposal.selectWinThemeById", winThemeId);
+    }
+
+    public void updateWinTheme(ProposalVO.WinThemeVO vo) {
+        update("proposal.updateWinTheme", vo);
+    }
+
+    public void deleteWinTheme(String winThemeId) {
+        delete("proposal.deleteWinTheme", winThemeId);
+    }
+
     // ── Stage 2: TOC ─────────────────────────────────────────────────────
 
     /**
@@ -260,6 +347,18 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 특정 ORIGIN_TYPE_CD의 TOC 삭제 (S2C 재실행 시 AI 생성 세부목차 초기화용)
+     * @param ptProjectId 프로젝트 ID
+     * @param originTypeCd 목차 원본 유형 코드 (002=AI생성 세부목차)
+     */
+    public void deleteTocByOriginTypeCd(String ptProjectId, String originTypeCd) {
+        java.util.Map<String, Object> param = new java.util.HashMap<>();
+        param.put("ptProjectId", ptProjectId);
+        param.put("originTypeCd", originTypeCd);
+        delete("proposal.deleteTocByOriginTypeCd", param);
+    }
+
+    /**
      * 프로젝트의 TOC 목록 조회 (flat list, SORT_ORD 기준)
      * @param ptProjectId 프로젝트 ID
      * @return List<TocVO>
@@ -276,12 +375,25 @@ public class ProposalDAO extends EgovComAbstractDAO {
         update("proposal.updateTocEvalLinkAndReqIds", vo);
     }
 
+    /** 전략검토 수동 TOC 매핑 (plannedSlideCnt 유지) */
+    public void updateTocMappingUser(ProposalVO.TocVO vo) {
+        update("proposal.updateTocMappingUser", vo);
+    }
+
     /**
      * TOC 항목 제목 수정 (단건)
      * @param vo tocId, sectionNm
      */
     public void updateTocItem(ProposalVO.TocVO vo) {
         update("proposal.updateTocItem", vo);
+    }
+
+    /**
+     * S2D: TOC 항목 세부 작성 지침(GUIDE_CONTENT) 업데이트 (단건)
+     * @param vo tocId, guideContent
+     */
+    public void updateTocGuideContent(ProposalVO.TocVO vo) {
+        update("proposal.updateTocGuideContent", vo);
     }
 
     /**
@@ -394,7 +506,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
         delete("proposal.deleteSlidesByToc", tocId);
     }
 
-    // ── Step E: 검토 ──────────────────────────────────────────────────────────
+    /**
+     * 슬라이드 단건 조회
+     * @param vo SlideVO (slideId)
+     * @return SlideVO
+     */
+    public ProposalVO.SlideVO selectSlideById(ProposalVO.SlideVO vo) {
+        return (ProposalVO.SlideVO) selectOne("proposal.selectSlideById", vo);
+    }
 
     /**
      * 프로젝트 전체 슬라이드 목록 조회 (SLIDE_NO 순)
@@ -403,36 +522,6 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public List<ProposalVO.SlideVO> selectAllSlidesByProject(String ptProjectId) {
         return selectList("proposal.selectAllSlidesByProject", ptProjectId);
-    }
-
-    /**
-     * Stage4 평가 시뮬레이션 결과 단건 등록
-     * @param vo ReviewVO
-     */
-    public void insertReview(ProposalVO.ReviewVO vo) {
-        insert("proposal.insertReview", vo);
-    }
-
-    /**
-     * 최근 Stage4 실행 시각(분 단위) 조회 — 재실행 이력 분리용
-     * @param ptProjectId 프로젝트 ID
-     * @return "yyyy-MM-dd HH:mm" 문자열, 없으면 null
-     */
-    public String selectLatestReviewRunDt(String ptProjectId) {
-        return (String) selectOne("proposal.selectLatestReviewRunDt", ptProjectId);
-    }
-
-    /**
-     * 특정 실행 시각의 Stage4 결과 조회 (심각도순)
-     * @param ptProjectId 프로젝트 ID
-     * @param runDt "yyyy-MM-dd HH:mm" 형식
-     * @return List<ReviewVO>
-     */
-    public List<ProposalVO.ReviewVO> selectReviewsByRunDt(String ptProjectId, String runDt) {
-        java.util.Map<String, Object> params = new java.util.HashMap<>();
-        params.put("ptProjectId", ptProjectId);
-        params.put("runDt", runDt);
-        return selectList("proposal.selectReviewsByRunDt", params);
     }
 
     // ── Step F: 출력 ──────────────────────────────────────────────────────────
@@ -463,15 +552,15 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
-     * 프로젝트+포맷 기준 최근 완료 출력 빌드 조회 (캐시 재사용 판단용)
-     * @param ptProjectId 프로젝트 ID
-     * @param formatCd    포맷 코드 ('pdf' | 'pptx')
+     * 프로젝트+내보내기형식 기준 최근 완료(004) 출력 빌드 조회 (캐시 재사용 판단용)
+     * @param ptProjectId  프로젝트 ID
+     * @param exportTypeCd 내보내기 형식 코드 (PT_EXPORT_TYPE: '001'=PPTX, '002'=PDF)
      * @return 최근 완료 ExportVO (없으면 null)
      */
-    public ProposalVO.ExportVO selectLatestCompletedExport(String ptProjectId, String formatCd) {
+    public ProposalVO.ExportVO selectLatestCompletedExport(String ptProjectId, String exportTypeCd) {
         java.util.Map<String, Object> params = new java.util.HashMap<>();
         params.put("ptProjectId", ptProjectId);
-        params.put("formatCd", formatCd);
+        params.put("exportTypeCd", exportTypeCd);
         return (ProposalVO.ExportVO) selectOne("proposal.selectLatestCompletedExport", params);
     }
 
@@ -483,4 +572,35 @@ public class ProposalDAO extends EgovComAbstractDAO {
     public String selectMaxSlideModifyDt(String ptProjectId) {
         return (String) selectOne("proposal.selectMaxSlideModifyDt", ptProjectId);
     }
+
+    // ── TB_PT_TEMPLATE ──────────────────────────────────────────────────────────
+
+    /**
+     * PT 템플릿 단건 조회 (PT_PROJECT_ID 기준)
+     */
+    public ProposalVO.PtTemplateVO selectPtTemplate(String ptProjectId) {
+        return (ProposalVO.PtTemplateVO) selectOne("proposal.selectPtTemplate", ptProjectId);
+    }
+
+    /**
+     * PT 템플릿 신규 등록
+     */
+    public void insertPtTemplate(ProposalVO.PtTemplateVO vo) {
+        insert("proposal.insertPtTemplate", vo);
+    }
+
+    /**
+     * PT 템플릿 업데이트 (PT_PROJECT_ID 기준)
+     */
+    public void updatePtTemplate(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updatePtTemplate", vo);
+    }
+
+    /**
+     * PT 템플릿 프레임 이미지 경로만 업데이트
+     */
+    public void updateTemplateFramePath(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateFramePath", vo);
+    }
+
 }

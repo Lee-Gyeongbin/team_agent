@@ -101,6 +101,8 @@
             , STATUS_CD                AS STATUS_CD
             , CAST(WRITING_GUIDELINE_JSON AS CHAR) AS WRITING_GUIDELINE_JSON
             , CAST(PROJECT_CONFIG_JSON AS CHAR) AS PROJECT_CONFIG_JSON
+            , MAX_STEP_NO              AS MAX_STEP_NO
+            , STAGE2_STATUS_CD         AS STAGE2_STATUS_CD
             , CREATE_USER_ID           AS CREATE_USER_ID
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
             , MODIFY_USER_ID           AS MODIFY_USER_ID
@@ -108,6 +110,24 @@
         FROM TB_PT_PROJECT
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </select>
+
+    <update id="updateStage2StatusCd" parameterType="kr.teamagent.proposal.service.ProposalVO$ProjectVO">
+        /* PT 프로젝트 Stage2 진행 상태 업데이트 proposal.updateStage2StatusCd */
+        UPDATE TB_PT_PROJECT
+        SET
+            STAGE2_STATUS_CD = #{stage2StatusCd}
+            , MODIFY_DT = NOW()
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <update id="updateMaxStepNo" parameterType="kr.teamagent.proposal.service.ProposalVO$ProjectVO">
+        /* PT 프로젝트 최대 단계 번호 업데이트 proposal.updateMaxStepNo */
+        UPDATE TB_PT_PROJECT
+        SET
+            MAX_STEP_NO = GREATEST(COALESCE(MAX_STEP_NO, 0), #{maxStepNo})
+            , MODIFY_DT = NOW()
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
 
     <update id="updateProjectStatus" parameterType="kr.teamagent.proposal.service.ProposalVO$ProjectVO">
         /* PT 프로젝트 상태 업데이트 proposal.updateProjectStatus */
@@ -222,16 +242,12 @@
             REQUIREMENT_ID
             , PT_PROJECT_ID
             , REQ_NO
-            , REQ_CATEGORY_CD
+            , REQ_CATEGORY_TXT
             , REQ_CONTENT
+            , REQ_DETAIL_TXT
             , MANDATORY_YN
             , SOURCE_TYPE_CD
-            , RFP_PAGE_REF
-            , EVAL_IMPACT
-            , RESPONSE_DIRECTION
-            , REQUIRED_EVIDENCE
             , CONFIRM_NEEDED_YN
-            , CONFIRM_NEEDED_NOTE
             , SORT_ORD
             , CREATE_USER_ID
             , CREATE_DT
@@ -239,16 +255,12 @@
             #{requirementId}
             , #{ptProjectId}
             , #{reqNo}
-            , #{reqCategoryCd}
+            , #{reqCategoryTxt}
             , #{reqContent}
+            , #{reqDetailTxt}
             , COALESCE(#{mandatoryYn}, 'Y')
             , COALESCE(#{sourceTypeCd}, '001')
-            , #{rfpPageRef}
-            , #{evalImpact}
-            , #{responseDirection}
-            , #{requiredEvidence}
             , COALESCE(#{confirmNeededYn}, 'N')
-            , #{confirmNeededNote}
             , COALESCE(#{sortOrd}, 0)
             , #{createUserId}
             , NOW()
@@ -259,25 +271,21 @@
             resultType="kr.teamagent.proposal.service.ProposalVO$RequirementVO">
         /* PT 요구사항 목록 조회 proposal.selectRequirements */
         SELECT
-            REQUIREMENT_ID          AS REQUIREMENT_ID
-            , PT_PROJECT_ID         AS PT_PROJECT_ID
-            , REQ_NO                AS REQ_NO
-            , REQ_CATEGORY_CD       AS REQ_CATEGORY_CD
-            , REQ_CONTENT           AS REQ_CONTENT
-            , MANDATORY_YN          AS MANDATORY_YN
-            , SOURCE_TYPE_CD        AS SOURCE_TYPE_CD
-            , RFP_PAGE_REF          AS RFP_PAGE_REF
-            , EVAL_IMPACT           AS EVAL_IMPACT
-            , RESPONSE_DIRECTION    AS RESPONSE_DIRECTION
-            , REQUIRED_EVIDENCE     AS REQUIRED_EVIDENCE
-            , CONFIRM_NEEDED_YN     AS CONFIRM_NEEDED_YN
-            , CONFIRM_NEEDED_NOTE   AS CONFIRM_NEEDED_NOTE
-            , SORT_ORD              AS SORT_ORD
-            , CREATE_USER_ID        AS CREATE_USER_ID
-            , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
-        FROM TB_PT_REQUIREMENT
-        WHERE PT_PROJECT_ID = #{ptProjectId}
-        ORDER BY SORT_ORD, REQUIREMENT_ID
+            r.REQUIREMENT_ID          AS REQUIREMENT_ID
+            , r.PT_PROJECT_ID         AS PT_PROJECT_ID
+            , r.REQ_NO                AS REQ_NO
+            , r.REQ_CATEGORY_TXT      AS REQ_CATEGORY_TXT
+            , r.REQ_CONTENT           AS REQ_CONTENT
+            , r.REQ_DETAIL_TXT        AS REQ_DETAIL_TXT
+            , r.MANDATORY_YN          AS MANDATORY_YN
+            , r.SOURCE_TYPE_CD        AS SOURCE_TYPE_CD
+            , r.CONFIRM_NEEDED_YN     AS CONFIRM_NEEDED_YN
+            , r.SORT_ORD              AS SORT_ORD
+            , r.CREATE_USER_ID        AS CREATE_USER_ID
+            , DATE_FORMAT(r.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM TB_PT_REQUIREMENT r
+        WHERE r.PT_PROJECT_ID = #{ptProjectId}
+        ORDER BY r.SORT_ORD, r.REQUIREMENT_ID
     </select>
 
     <update id="updateRequirement" parameterType="kr.teamagent.proposal.service.ProposalVO$RequirementVO">
@@ -285,20 +293,22 @@
         UPDATE TB_PT_REQUIREMENT
         <set>
             <if test="reqNo != null">REQ_NO = #{reqNo},</if>
-            <if test="reqCategoryCd != null">REQ_CATEGORY_CD = #{reqCategoryCd},</if>
+            <if test="reqCategoryTxt != null">REQ_CATEGORY_TXT = #{reqCategoryTxt},</if>
             <if test="reqContent != null">REQ_CONTENT = #{reqContent},</if>
+            REQ_DETAIL_TXT = #{reqDetailTxt},
             <if test="mandatoryYn != null">MANDATORY_YN = #{mandatoryYn},</if>
             <if test="sourceTypeCd != null">SOURCE_TYPE_CD = #{sourceTypeCd},</if>
-            <if test="rfpPageRef != null">RFP_PAGE_REF = #{rfpPageRef},</if>
-            <if test="evalImpact != null">EVAL_IMPACT = #{evalImpact},</if>
-            <if test="responseDirection != null">RESPONSE_DIRECTION = #{responseDirection},</if>
-            <if test="requiredEvidence != null">REQUIRED_EVIDENCE = #{requiredEvidence},</if>
             <if test="confirmNeededYn != null">CONFIRM_NEEDED_YN = #{confirmNeededYn},</if>
-            <if test="confirmNeededNote != null">CONFIRM_NEEDED_NOTE = #{confirmNeededNote},</if>
             MODIFY_DT = NOW()
         </set>
         WHERE REQUIREMENT_ID = #{requirementId}
     </update>
+
+    <delete id="deleteRequirement" parameterType="String">
+        /* PT 요구사항 단건 삭제 proposal.deleteRequirement */
+        DELETE FROM TB_PT_REQUIREMENT
+        WHERE REQUIREMENT_ID = #{requirementId}
+    </delete>
 
     <!-- ================================================================== -->
     <!-- TB_PT_EVAL_CRITERIA                                                  -->
@@ -377,6 +387,87 @@
         WHERE EVAL_CRITERIA_ID = #{evalCriteriaId}
     </update>
 
+    <delete id="deleteEvalCriteria" parameterType="String">
+        /* PT 평가기준 단건 삭제 proposal.deleteEvalCriteria */
+        DELETE FROM TB_PT_EVAL_CRITERIA
+        WHERE EVAL_CRITERIA_ID = #{evalCriteriaId}
+    </delete>
+
+    <!-- ================================================================== -->
+    <!-- TB_PT_RFP_ISSUE                                                      -->
+    <!-- ================================================================== -->
+
+    <delete id="deleteRfpIssuesByProject" parameterType="String">
+        /* RFP 이슈 전체 삭제 proposal.deleteRfpIssuesByProject */
+        DELETE FROM tb_pt_rfp_issue
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </delete>
+
+    <insert id="insertRfpIssue" parameterType="kr.teamagent.proposal.service.ProposalVO$RfpIssueVO">
+        /* RFP 이슈 등록 proposal.insertRfpIssue */
+        INSERT INTO tb_pt_rfp_issue (
+            ISSUE_ID
+            , PT_PROJECT_ID
+            , ISSUE_TYPE_CD
+            , ISSUE_CONTENT
+            , ISSUE_LABEL
+            , SOURCE_SECTION
+            , SOURCE_PAGE
+            , SORT_ORD
+            , CREATE_USER_ID
+            , CREATE_DT
+        ) VALUES (
+            #{issueId}
+            , #{ptProjectId}
+            , #{issueTypeCd}
+            , #{issueContent}
+            , #{issueLabel}
+            , #{sourceSection}
+            , #{sourcePage}
+            , COALESCE(#{sortOrd}, 0)
+            , #{createUserId}
+            , NOW()
+        )
+    </insert>
+
+    <select id="selectRfpIssues" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$RfpIssueVO">
+        /* RFP 이슈 목록 조회 proposal.selectRfpIssues */
+        SELECT
+            ISSUE_ID            AS ISSUE_ID
+            , PT_PROJECT_ID     AS PT_PROJECT_ID
+            , ISSUE_TYPE_CD     AS ISSUE_TYPE_CD
+            , ISSUE_CONTENT     AS ISSUE_CONTENT
+            , ISSUE_LABEL       AS ISSUE_LABEL
+            , SOURCE_SECTION    AS SOURCE_SECTION
+            , SOURCE_PAGE       AS SOURCE_PAGE
+            , SORT_ORD          AS SORT_ORD
+            , CREATE_USER_ID    AS CREATE_USER_ID
+            , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM tb_pt_rfp_issue
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+        ORDER BY SORT_ORD, ISSUE_ID
+    </select>
+
+    <update id="updateRfpIssue" parameterType="kr.teamagent.proposal.service.ProposalVO$RfpIssueVO">
+        /* RFP 이슈 단건 수정 proposal.updateRfpIssue */
+        UPDATE tb_pt_rfp_issue
+        <set>
+            <if test="issueTypeCd != null">ISSUE_TYPE_CD = #{issueTypeCd},</if>
+            <if test="issueContent != null">ISSUE_CONTENT = #{issueContent},</if>
+            <if test="issueLabel != null">ISSUE_LABEL = #{issueLabel},</if>
+            <if test="sourceSection != null">SOURCE_SECTION = #{sourceSection},</if>
+            <if test="sourcePage != null">SOURCE_PAGE = #{sourcePage},</if>
+        </set>
+        WHERE ISSUE_ID = #{issueId}
+    </update>
+
+    <delete id="deleteRfpIssue" parameterType="String">
+        /* RFP 이슈 단건 삭제 proposal.deleteRfpIssue */
+        DELETE FROM tb_pt_rfp_issue
+        WHERE ISSUE_ID = #{issueId}
+    </delete>
+
     <!-- ================================================================== -->
     <!-- TB_PT_PROBLEM_DEFINITION                                             -->
     <!-- ================================================================== -->
@@ -389,35 +480,94 @@
         INSERT INTO TB_PT_PROBLEM_DEFINITION (
             PROBLEM_ID, PT_PROJECT_ID, PROBLEM_TYPE_CD, CURRENT_PROBLEM, ROOT_CAUSE,
             RISK_IF_IGNORED, GOAL, REQUIRED_CAPABILITY, STRATEGY_SUMMARY, KPI,
-            SOURCE_TYPE_CD, SORT_ORD, CREATE_USER_ID, CREATE_DT
+            SOURCE_TYPE_CD, SOURCE_ISSUE_IDS_JSON, SOURCE_REQ_IDS_JSON,
+            SORT_ORD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{problemId}, #{ptProjectId}, #{problemTypeCd}, #{currentProblem}, #{rootCause},
             #{riskIfIgnored}, #{goal}, #{requiredCapability}, #{strategySummary}, #{kpi},
-            COALESCE(#{sourceTypeCd}, '002'), COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
+            COALESCE(#{sourceTypeCd}, '002'),
+            #{sourceIssueIdsJson, jdbcType=VARCHAR},
+            #{sourceRequirementIdsJson, jdbcType=VARCHAR},
+            COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
         )
     </insert>
 
     <select id="selectProblemDefinitions" parameterType="String"
             resultType="kr.teamagent.proposal.service.ProposalVO$ProblemDefinitionVO">
         SELECT
-            PROBLEM_ID          AS PROBLEM_ID,
-            PT_PROJECT_ID       AS PT_PROJECT_ID,
-            PROBLEM_TYPE_CD     AS PROBLEM_TYPE_CD,
-            CURRENT_PROBLEM     AS CURRENT_PROBLEM,
-            ROOT_CAUSE          AS ROOT_CAUSE,
-            RISK_IF_IGNORED     AS RISK_IF_IGNORED,
-            GOAL                AS GOAL,
-            REQUIRED_CAPABILITY AS REQUIRED_CAPABILITY,
-            STRATEGY_SUMMARY    AS STRATEGY_SUMMARY,
-            KPI                 AS KPI,
-            SOURCE_TYPE_CD      AS SOURCE_TYPE_CD,
-            SORT_ORD            AS SORT_ORD,
-            CREATE_USER_ID      AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            PROBLEM_ID              AS PROBLEM_ID,
+            PT_PROJECT_ID           AS PT_PROJECT_ID,
+            PROBLEM_TYPE_CD         AS PROBLEM_TYPE_CD,
+            CURRENT_PROBLEM         AS CURRENT_PROBLEM,
+            ROOT_CAUSE              AS ROOT_CAUSE,
+            RISK_IF_IGNORED         AS RISK_IF_IGNORED,
+            GOAL                    AS GOAL,
+            REQUIRED_CAPABILITY     AS REQUIRED_CAPABILITY,
+            STRATEGY_SUMMARY        AS STRATEGY_SUMMARY,
+            KPI                     AS KPI,
+            SOURCE_TYPE_CD          AS SOURCE_TYPE_CD,
+            SOURCE_ISSUE_IDS_JSON   AS SOURCE_ISSUE_IDS_JSON,
+            SOURCE_REQ_IDS_JSON     AS SOURCE_REQUIREMENT_IDS_JSON,
+            SORT_ORD                AS SORT_ORD,
+            CREATE_USER_ID          AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID          AS MODIFY_USER_ID
         FROM TB_PT_PROBLEM_DEFINITION
         WHERE PT_PROJECT_ID = #{ptProjectId}
         ORDER BY SORT_ORD, PROBLEM_ID
     </select>
+
+    <select id="selectProblemDefinitionById" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$ProblemDefinitionVO">
+        SELECT
+            PROBLEM_ID              AS PROBLEM_ID,
+            PT_PROJECT_ID           AS PT_PROJECT_ID,
+            PROBLEM_TYPE_CD         AS PROBLEM_TYPE_CD,
+            CURRENT_PROBLEM         AS CURRENT_PROBLEM,
+            ROOT_CAUSE              AS ROOT_CAUSE,
+            RISK_IF_IGNORED         AS RISK_IF_IGNORED,
+            GOAL                    AS GOAL,
+            REQUIRED_CAPABILITY     AS REQUIRED_CAPABILITY,
+            STRATEGY_SUMMARY        AS STRATEGY_SUMMARY,
+            KPI                     AS KPI,
+            SOURCE_TYPE_CD          AS SOURCE_TYPE_CD,
+            SOURCE_ISSUE_IDS_JSON   AS SOURCE_ISSUE_IDS_JSON,
+            SOURCE_REQ_IDS_JSON     AS SOURCE_REQUIREMENT_IDS_JSON,
+            SORT_ORD                AS SORT_ORD,
+            CREATE_USER_ID          AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID          AS MODIFY_USER_ID
+        FROM TB_PT_PROBLEM_DEFINITION
+        WHERE PROBLEM_ID = #{problemId}
+    </select>
+
+    <update id="updateProblemDefinition" parameterType="kr.teamagent.proposal.service.ProposalVO$ProblemDefinitionVO">
+        /* 문제정의 단건 수정 (사용자 편집/refine) proposal.updateProblemDefinition */
+        UPDATE TB_PT_PROBLEM_DEFINITION
+        <set>
+            <if test="problemTypeCd != null">PROBLEM_TYPE_CD = #{problemTypeCd},</if>
+            <if test="currentProblem != null">CURRENT_PROBLEM = #{currentProblem},</if>
+            <if test="rootCause != null">ROOT_CAUSE = #{rootCause},</if>
+            <if test="riskIfIgnored != null">RISK_IF_IGNORED = #{riskIfIgnored},</if>
+            <if test="goal != null">GOAL = #{goal},</if>
+            <if test="requiredCapability != null">REQUIRED_CAPABILITY = #{requiredCapability},</if>
+            <if test="strategySummary != null">STRATEGY_SUMMARY = #{strategySummary},</if>
+            <if test="kpi != null">KPI = #{kpi},</if>
+            <if test="sourceIssueIdsJson != null">SOURCE_ISSUE_IDS_JSON = #{sourceIssueIdsJson},</if>
+            <if test="sourceRequirementIdsJson != null">SOURCE_REQ_IDS_JSON = #{sourceRequirementIdsJson},</if>
+            MODIFY_DT = NOW(),
+            MODIFY_USER_ID = #{modifyUserId}
+        </set>
+        WHERE PROBLEM_ID = #{problemId}
+    </update>
+
+    <delete id="deleteProblemDefinition" parameterType="String">
+        /* 문제정의 단건 삭제 proposal.deleteProblemDefinition */
+        DELETE FROM TB_PT_PROBLEM_DEFINITION
+        WHERE PROBLEM_ID = #{problemId}
+    </delete>
 
     <!-- ================================================================== -->
     <!-- TB_PT_WIN_THEME                                                       -->
@@ -431,10 +581,12 @@
         INSERT INTO TB_PT_WIN_THEME (
             WIN_THEME_ID, PT_PROJECT_ID, CORE_MESSAGE, CUSTOMER_PROBLEM,
             PROPOSAL_STRATEGY, EVIDENCE, EXPECTED_EFFECT, DIFFERENTIATION,
+            SOURCE_PROBLEM_IDS_JSON,
             SORT_ORD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{winThemeId}, #{ptProjectId}, #{coreMessage}, #{customerProblem},
             #{proposalStrategy}, #{evidence}, #{expectedEffect}, #{differentiation},
+            #{sourceProblemIdsJson, jdbcType=VARCHAR},
             COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
         )
     </insert>
@@ -450,13 +602,60 @@
             EVIDENCE            AS EVIDENCE,
             EXPECTED_EFFECT     AS EXPECTED_EFFECT,
             DIFFERENTIATION     AS DIFFERENTIATION,
+            SOURCE_PROBLEM_IDS_JSON AS SOURCE_PROBLEM_IDS_JSON,
             SORT_ORD            AS SORT_ORD,
             CREATE_USER_ID      AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID      AS MODIFY_USER_ID
         FROM TB_PT_WIN_THEME
         WHERE PT_PROJECT_ID = #{ptProjectId}
         ORDER BY SORT_ORD, WIN_THEME_ID
     </select>
+
+    <select id="selectWinThemeById" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$WinThemeVO">
+        SELECT
+            WIN_THEME_ID        AS WIN_THEME_ID,
+            PT_PROJECT_ID       AS PT_PROJECT_ID,
+            CORE_MESSAGE        AS CORE_MESSAGE,
+            CUSTOMER_PROBLEM    AS CUSTOMER_PROBLEM,
+            PROPOSAL_STRATEGY   AS PROPOSAL_STRATEGY,
+            EVIDENCE            AS EVIDENCE,
+            EXPECTED_EFFECT     AS EXPECTED_EFFECT,
+            DIFFERENTIATION     AS DIFFERENTIATION,
+            SOURCE_PROBLEM_IDS_JSON AS SOURCE_PROBLEM_IDS_JSON,
+            SORT_ORD            AS SORT_ORD,
+            CREATE_USER_ID      AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT,
+            MODIFY_USER_ID      AS MODIFY_USER_ID
+        FROM TB_PT_WIN_THEME
+        WHERE WIN_THEME_ID = #{winThemeId}
+    </select>
+
+    <update id="updateWinTheme" parameterType="kr.teamagent.proposal.service.ProposalVO$WinThemeVO">
+        /* Win Theme 단건 수정 proposal.updateWinTheme */
+        UPDATE TB_PT_WIN_THEME
+        <set>
+            <if test="coreMessage != null">CORE_MESSAGE = #{coreMessage},</if>
+            <if test="customerProblem != null">CUSTOMER_PROBLEM = #{customerProblem},</if>
+            <if test="proposalStrategy != null">PROPOSAL_STRATEGY = #{proposalStrategy},</if>
+            <if test="evidence != null">EVIDENCE = #{evidence},</if>
+            <if test="expectedEffect != null">EXPECTED_EFFECT = #{expectedEffect},</if>
+            <if test="differentiation != null">DIFFERENTIATION = #{differentiation},</if>
+            <if test="sourceProblemIdsJson != null">SOURCE_PROBLEM_IDS_JSON = #{sourceProblemIdsJson},</if>
+            MODIFY_DT = NOW(),
+            MODIFY_USER_ID = #{modifyUserId}
+        </set>
+        WHERE WIN_THEME_ID = #{winThemeId}
+    </update>
+
+    <delete id="deleteWinTheme" parameterType="String">
+        /* Win Theme 단건 삭제 proposal.deleteWinTheme */
+        DELETE FROM TB_PT_WIN_THEME
+        WHERE WIN_THEME_ID = #{winThemeId}
+    </delete>
 
     <!-- ================================================================== -->
     <!-- TB_PT_TOC                                                             -->
@@ -466,22 +665,43 @@
         DELETE FROM TB_PT_TOC WHERE PT_PROJECT_ID = #{ptProjectId}
     </delete>
 
+    <delete id="deleteTocByOriginTypeCd" parameterType="map">
+        /* AI 생성 세부목차 초기화 — S2C 재실행 시 ORIGIN_TYPE_CD=002 레코드 삭제 proposal.deleteTocByOriginTypeCd */
+        DELETE FROM TB_PT_TOC
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+          AND ORIGIN_TYPE_CD = #{originTypeCd}
+    </delete>
+
     <insert id="insertToc" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
         INSERT INTO TB_PT_TOC (
             TOC_ID, PT_PROJECT_ID, PARENT_TOC_ID, SECTION_NO, SECTION_NM,
-            LINKED_EVAL_CRITERIA_ID, PLANNED_SLIDE_CNT, SORT_ORD, CREATE_USER_ID, CREATE_DT
+            LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON, PLANNED_SLIDE_CNT,
+            SORT_ORD, GUIDE_CONTENT, ORIGIN_TYPE_CD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{tocId}, #{ptProjectId}, #{parentTocId, jdbcType=VARCHAR}, #{sectionNo}, #{sectionNm},
-            #{linkedEvalCriteriaId, jdbcType=VARCHAR}, #{plannedSlideCnt},
-            COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
+            #{linkedEvalCriteriaId, jdbcType=VARCHAR}, #{coveredReqIdsJson, jdbcType=VARCHAR},
+            #{plannedSlideCnt},
+            COALESCE(#{sortOrd}, 0), #{guideContent, jdbcType=VARCHAR},
+            #{originTypeCd, jdbcType=VARCHAR}, #{createUserId}, NOW()
         )
     </insert>
 
     <update id="updateTocEvalLinkAndReqIds" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
-        /* Stage2 TOC 매핑 업데이트 — LINKED_EVAL_CRITERIA_ID, COVERED_REQ_IDS_JSON 갱신 proposal.updateTocEvalLinkAndReqIds */
+        /* Stage2 TOC 매핑 업데이트 — 값 변경 시에만 호출 (MODIFY_DT 갱신 → Step6 stale 판별) proposal.updateTocEvalLinkAndReqIds */
         UPDATE TB_PT_TOC
         SET LINKED_EVAL_CRITERIA_ID = #{linkedEvalCriteriaId, jdbcType=VARCHAR},
-            COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR}
+            COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
+            PLANNED_SLIDE_CNT       = #{plannedSlideCnt},
+            MODIFY_DT               = NOW()
+        WHERE TOC_ID = #{tocId}
+    </update>
+
+    <update id="updateTocMappingUser" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* 전략검토 수동 TOC 매핑 — plannedSlideCnt 유지 proposal.updateTocMappingUser */
+        UPDATE TB_PT_TOC
+        SET LINKED_EVAL_CRITERIA_ID = #{linkedEvalCriteriaId, jdbcType=VARCHAR},
+            COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
+            MODIFY_DT               = NOW()
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -489,6 +709,13 @@
         /* TOC 항목 제목 수정 proposal.updateTocItem */
         UPDATE TB_PT_TOC
         SET SECTION_NM = #{sectionNm}
+        WHERE TOC_ID = #{tocId}
+    </update>
+
+    <update id="updateTocGuideContent" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* S2D: 세부 작성 지침 업데이트 proposal.updateTocGuideContent */
+        UPDATE TB_PT_TOC
+        SET GUIDE_CONTENT = #{guideContent, jdbcType=VARCHAR}
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -516,10 +743,14 @@
             t.SECTION_NO              AS SECTION_NO,
             t.SECTION_NM              AS SECTION_NM,
             t.LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
+            t.COVERED_REQ_IDS_JSON    AS COVERED_REQ_IDS_JSON,
             t.PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             t.SORT_ORD                AS SORT_ORD,
+            t.GUIDE_CONTENT           AS GUIDE_CONTENT,
+            t.ORIGIN_TYPE_CD          AS ORIGIN_TYPE_CD,
             t.CREATE_USER_ID          AS CREATE_USER_ID,
-            DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(t.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
         FROM TB_PT_TOC t
         LEFT JOIN TB_PT_TOC p ON t.PARENT_TOC_ID = p.TOC_ID
         WHERE t.PT_PROJECT_ID = #{ptProjectId}
@@ -560,10 +791,13 @@
             SECTION_NO              AS SECTION_NO,
             SECTION_NM              AS SECTION_NM,
             LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
+            COVERED_REQ_IDS_JSON    AS COVERED_REQ_IDS_JSON,
             PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             SORT_ORD                AS SORT_ORD,
+            GUIDE_CONTENT           AS GUIDE_CONTENT,
             CREATE_USER_ID          AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
         FROM TB_PT_TOC
         WHERE TOC_ID = #{tocId}
     </select>
@@ -579,7 +813,8 @@
             SECTION_NM              AS SECTION_NM,
             LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
             PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
-            SORT_ORD                AS SORT_ORD
+            SORT_ORD                AS SORT_ORD,
+            GUIDE_CONTENT           AS GUIDE_CONTENT
         FROM TB_PT_TOC
         WHERE PT_PROJECT_ID = #{ptProjectId}
           AND PARENT_TOC_ID IS NOT NULL
@@ -632,14 +867,20 @@
     <insert id="insertSlide" parameterType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 슬라이드 등록 proposal.insertSlide */
         INSERT INTO TB_PT_SLIDE (
-            SLIDE_ID, PT_PROJECT_ID, TOC_ID, SLIDE_NO, COLOR_INDEX,
-            LAYOUT_TYPE, SLIDE_JSON, IMAGE_GEN_HINT, RENDERED_IMAGE_PATH,
-            RENDER_STATUS_CD, CREATE_USER_ID, CREATE_DT
+            SLIDE_ID, PT_PROJECT_ID, TOC_ID, SLIDE_NO,
+            LAYOUT_TYPE_CD, REQ_IDS_JSON, EYEBROW_TXT, TITLE_TXT, SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT, COMPONENTS_JSON, STEP_FLOW_BAR_JSON, CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX, IMAGE_GEN_HINT, RENDER_STATUS_CD, RENDERED_IMAGE_PATH,
+            SORT_ORD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
-            #{slideId}, #{ptProjectId}, #{tocId}, #{slideNo}, #{colorIndex},
-            #{layoutType}, #{slideJson, jdbcType=VARCHAR},
-            #{imageGenHint, jdbcType=VARCHAR}, #{renderedImagePath, jdbcType=VARCHAR},
-            COALESCE(#{renderStatusCd}, '001'), #{createUserId}, NOW()
+            #{slideId}, #{ptProjectId}, #{tocId}, #{slideNo},
+            #{layoutType}, #{reqIdsJson, jdbcType=VARCHAR}, #{eyebrowTxt, jdbcType=VARCHAR},
+            #{titleTxt}, #{subtitleTxt, jdbcType=VARCHAR},
+            #{highlightBannerTxt, jdbcType=VARCHAR}, #{componentsJson, jdbcType=VARCHAR},
+            #{stepFlowBarJson, jdbcType=VARCHAR}, #{conclusionRibbonTxt, jdbcType=VARCHAR},
+            #{colorIndex}, #{imageGenHint, jdbcType=VARCHAR},
+            COALESCE(#{renderStatusCd}, '001'), #{renderedImagePath, jdbcType=VARCHAR},
+            COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
         )
     </insert>
 
@@ -647,22 +888,60 @@
             resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 소목차 슬라이드 목록 조회 proposal.selectSlidesByToc */
         SELECT
-            SLIDE_ID                                         AS SLIDE_ID,
-            PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            TOC_ID                                           AS TOC_ID,
-            SLIDE_NO                                         AS SLIDE_NO,
-            COLOR_INDEX                                      AS COLOR_INDEX,
-            LAYOUT_TYPE                                      AS LAYOUT_TYPE,
-            CAST(SLIDE_JSON AS CHAR)                         AS SLIDE_JSON,
-            IMAGE_GEN_HINT                                   AS IMAGE_GEN_HINT,
-            RENDERED_IMAGE_PATH                              AS RENDERED_IMAGE_PATH,
-            RENDER_STATUS_CD                                 AS RENDER_STATUS_CD,
-            CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            SLIDE_ID                                      AS SLIDE_ID,
+            PT_PROJECT_ID                                 AS PT_PROJECT_ID,
+            TOC_ID                                        AS TOC_ID,
+            SLIDE_NO                                      AS SLIDE_NO,
+            LAYOUT_TYPE_CD                                AS LAYOUT_TYPE,
+            CAST(REQ_IDS_JSON AS CHAR)                    AS REQ_IDS_JSON,
+            EYEBROW_TXT                                   AS EYEBROW_TXT,
+            TITLE_TXT                                     AS TITLE_TXT,
+            SUBTITLE_TXT                                  AS SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT                          AS HIGHLIGHT_BANNER_TXT,
+            CAST(COMPONENTS_JSON AS CHAR)                 AS COMPONENTS_JSON,
+            CAST(STEP_FLOW_BAR_JSON AS CHAR)              AS STEP_FLOW_BAR_JSON,
+            CONCLUSION_RIBBON_TXT                         AS CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX                                   AS COLOR_INDEX,
+            IMAGE_GEN_HINT                                AS IMAGE_GEN_HINT,
+            RENDERED_IMAGE_PATH                           AS RENDERED_IMAGE_PATH,
+            COMPOSITE_IMAGE_PATH                          AS COMPOSITE_IMAGE_PATH,
+            RENDER_STATUS_CD                              AS RENDER_STATUS_CD,
+            SORT_ORD                                      AS SORT_ORD,
+            CREATE_USER_ID                                AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
         FROM TB_PT_SLIDE
         WHERE TOC_ID = #{tocId}
         ORDER BY SLIDE_NO
+    </select>
+
+    <select id="selectSlideById" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
+        /* 슬라이드 단건 조회 proposal.selectSlideById */
+        SELECT
+            SLIDE_ID                                      AS SLIDE_ID,
+            PT_PROJECT_ID                                 AS PT_PROJECT_ID,
+            TOC_ID                                        AS TOC_ID,
+            SLIDE_NO                                      AS SLIDE_NO,
+            LAYOUT_TYPE_CD                                AS LAYOUT_TYPE,
+            CAST(REQ_IDS_JSON AS CHAR)                    AS REQ_IDS_JSON,
+            EYEBROW_TXT                                   AS EYEBROW_TXT,
+            TITLE_TXT                                     AS TITLE_TXT,
+            SUBTITLE_TXT                                  AS SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT                          AS HIGHLIGHT_BANNER_TXT,
+            CAST(COMPONENTS_JSON AS CHAR)                 AS COMPONENTS_JSON,
+            CAST(STEP_FLOW_BAR_JSON AS CHAR)              AS STEP_FLOW_BAR_JSON,
+            CONCLUSION_RIBBON_TXT                         AS CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX                                   AS COLOR_INDEX,
+            IMAGE_GEN_HINT                                AS IMAGE_GEN_HINT,
+            RENDERED_IMAGE_PATH                           AS RENDERED_IMAGE_PATH,
+            RENDER_STATUS_CD                              AS RENDER_STATUS_CD,
+            SORT_ORD                                      AS SORT_ORD,
+            CREATE_USER_ID                                AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
+        FROM TB_PT_SLIDE
+        WHERE SLIDE_ID = #{slideId}
     </select>
 
     <select id="selectMaxSlideNo" parameterType="String" resultType="Integer">
@@ -676,10 +955,18 @@
         /* 슬라이드 수정 proposal.updateSlide */
         UPDATE TB_PT_SLIDE
         <set>
-            <if test="layoutType != null">LAYOUT_TYPE = #{layoutType},</if>
-            <if test="slideJson != null">SLIDE_JSON = #{slideJson},</if>
+            <if test="layoutType != null">LAYOUT_TYPE_CD = #{layoutType},</if>
+            <if test="reqIdsJson != null">REQ_IDS_JSON = #{reqIdsJson},</if>
+            <if test="eyebrowTxt != null">EYEBROW_TXT = #{eyebrowTxt},</if>
+            <if test="titleTxt != null">TITLE_TXT = #{titleTxt},</if>
+            <if test="subtitleTxt != null">SUBTITLE_TXT = #{subtitleTxt},</if>
+            <if test="highlightBannerTxt != null">HIGHLIGHT_BANNER_TXT = #{highlightBannerTxt},</if>
+            <if test="componentsJson != null">COMPONENTS_JSON = #{componentsJson},</if>
+            <if test="stepFlowBarJson != null">STEP_FLOW_BAR_JSON = #{stepFlowBarJson},</if>
+            <if test="conclusionRibbonTxt != null">CONCLUSION_RIBBON_TXT = #{conclusionRibbonTxt},</if>
             <if test="imageGenHint != null">IMAGE_GEN_HINT = #{imageGenHint},</if>
             <if test="renderedImagePath != null">RENDERED_IMAGE_PATH = #{renderedImagePath},</if>
+            <if test="compositeImagePath != null">COMPOSITE_IMAGE_PATH = #{compositeImagePath},</if>
             <if test="renderStatusCd != null">RENDER_STATUS_CD = #{renderStatusCd},</if>
             MODIFY_DT = NOW()
         </set>
@@ -695,19 +982,27 @@
             resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 프로젝트 전체 슬라이드 목록 조회 (SLIDE_NO 순) proposal.selectAllSlidesByProject */
         SELECT
-            SLIDE_ID                                         AS SLIDE_ID,
-            PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            TOC_ID                                           AS TOC_ID,
-            SLIDE_NO                                         AS SLIDE_NO,
-            COLOR_INDEX                                      AS COLOR_INDEX,
-            LAYOUT_TYPE                                      AS LAYOUT_TYPE,
-            CAST(SLIDE_JSON AS CHAR)                         AS SLIDE_JSON,
-            IMAGE_GEN_HINT                                   AS IMAGE_GEN_HINT,
-            RENDERED_IMAGE_PATH                              AS RENDERED_IMAGE_PATH,
-            RENDER_STATUS_CD                                 AS RENDER_STATUS_CD,
-            CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            SLIDE_ID                                      AS SLIDE_ID,
+            PT_PROJECT_ID                                 AS PT_PROJECT_ID,
+            TOC_ID                                        AS TOC_ID,
+            SLIDE_NO                                      AS SLIDE_NO,
+            LAYOUT_TYPE_CD                                AS LAYOUT_TYPE,
+            CAST(REQ_IDS_JSON AS CHAR)                    AS REQ_IDS_JSON,
+            EYEBROW_TXT                                   AS EYEBROW_TXT,
+            TITLE_TXT                                     AS TITLE_TXT,
+            SUBTITLE_TXT                                  AS SUBTITLE_TXT,
+            HIGHLIGHT_BANNER_TXT                          AS HIGHLIGHT_BANNER_TXT,
+            CAST(COMPONENTS_JSON AS CHAR)                 AS COMPONENTS_JSON,
+            CAST(STEP_FLOW_BAR_JSON AS CHAR)              AS STEP_FLOW_BAR_JSON,
+            CONCLUSION_RIBBON_TXT                         AS CONCLUSION_RIBBON_TXT,
+            COLOR_INDEX                                   AS COLOR_INDEX,
+            IMAGE_GEN_HINT                                AS IMAGE_GEN_HINT,
+            RENDERED_IMAGE_PATH                           AS RENDERED_IMAGE_PATH,
+            RENDER_STATUS_CD                              AS RENDER_STATUS_CD,
+            SORT_ORD                                      AS SORT_ORD,
+            CREATE_USER_ID                                AS CREATE_USER_ID,
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
         FROM TB_PT_SLIDE
         WHERE PT_PROJECT_ID = #{ptProjectId}
         ORDER BY SLIDE_NO
@@ -788,31 +1083,31 @@
     <!-- Step F: TB_PT_EXPORT                                                 -->
     <!-- DDL:                                                                 -->
     <!-- CREATE TABLE TB_PT_EXPORT (                                          -->
-    <!--   EXPORT_ID         VARCHAR(20)  NOT NULL PRIMARY KEY,               -->
-    <!--   PT_PROJECT_ID     VARCHAR(20)  NOT NULL,                           -->
-    <!--   FORMAT_CD         VARCHAR(10)  NOT NULL,                           -->
-    <!--   BUILD_STATUS_CD   VARCHAR(3)   NOT NULL DEFAULT '001',             -->
-    <!--   FILE_PATH         VARCHAR(500) NULL,                               -->
-    <!--   FILE_SIZE         BIGINT       NULL,                               -->
-    <!--   DOWNLOAD_URL      VARCHAR(2000) NULL,                              -->
-    <!--   ERROR_MSG         TEXT         NULL,                               -->
-    <!--   COMPLETE_DT       DATETIME     NULL,                               -->
-    <!--   CREATE_USER_ID    VARCHAR(50)  NULL,                               -->
-    <!--   CREATE_DT         DATETIME     NULL,                               -->
-    <!--   MODIFY_DT         DATETIME     NULL,                               -->
-    <!--   INDEX idx_pt_export_project (PT_PROJECT_ID)                       -->
+    <!--   EXPORT_ID          VARCHAR(20)   NOT NULL PRIMARY KEY,             -->
+    <!--   PT_PROJECT_ID      VARCHAR(20)   NOT NULL,                         -->
+    <!--   BUILD_STATUS_CD    VARCHAR(10)   NOT NULL DEFAULT '001',           -->
+    <!--   TOTAL_SLIDE_CNT    INT           NOT NULL DEFAULT 0,               -->
+    <!--   RENDERED_SLIDE_CNT INT           NOT NULL DEFAULT 0,               -->
+    <!--   FILE_NM            VARCHAR(200)  NULL,                             -->
+    <!--   FILE_PATH          VARCHAR(500)  NULL,                             -->
+    <!--   FILE_SIZE          BIGINT        NULL,                             -->
+    <!--   EXPORT_TYPE_CD     CHAR(3)       NOT NULL DEFAULT '001',           -->
+    <!--   ERROR_MSG          VARCHAR(1000) NULL,                             -->
+    <!--   COMPLETE_DT        DATETIME      NULL,                             -->
+    <!--   CREATE_DT          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP-->
+    <!--   CREATE_USER_ID     VARCHAR(20)   NOT NULL,                         -->
     <!-- );                                                                   -->
-    <!-- BUILD_STATUS_CD: 001=대기, 002=빌드중, 003=캐시재사용, 004=완료, 005=실패 -->
+    <!-- BUILD_STATUS_CD(PT000010): 001=대기 002=이미지생성중 003=PPT조립중 004=완료 005=실패 -->
+    <!-- EXPORT_TYPE_CD(PT_EXPORT_TYPE): 001=PPTX 002=PDF                    -->
     <!-- ================================================================== -->
 
     <insert id="insertExport" parameterType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
         /* PT 출력 빌드 등록 proposal.insertExport */
         INSERT INTO TB_PT_EXPORT (
-            EXPORT_ID, PT_PROJECT_ID, FORMAT_CD, BUILD_STATUS_CD,
+            EXPORT_ID, PT_PROJECT_ID, EXPORT_TYPE_CD, BUILD_STATUS_CD, TOTAL_SLIDE_CNT,
             CREATE_USER_ID, CREATE_DT
         ) VALUES (
-            #{exportId}, #{ptProjectId}, #{formatCd},
-            COALESCE(#{buildStatusCd}, '001'),
+            #{exportId}, #{ptProjectId}, #{exportTypeCd}, '001', #{totalSlideCnt},
             #{createUserId, jdbcType=VARCHAR}, NOW()
         )
     </insert>
@@ -822,12 +1117,12 @@
         UPDATE TB_PT_EXPORT
         <set>
             <if test="buildStatusCd != null">BUILD_STATUS_CD = #{buildStatusCd},</if>
+            <if test="renderedSlideCnt != null">RENDERED_SLIDE_CNT = #{renderedSlideCnt},</if>
+            <if test="fileNm != null">FILE_NM = #{fileNm},</if>
             <if test="filePath != null">FILE_PATH = #{filePath},</if>
             <if test="fileSize != null">FILE_SIZE = #{fileSize},</if>
-            <if test="downloadUrl != null">DOWNLOAD_URL = #{downloadUrl},</if>
             <if test="errorMsg != null">ERROR_MSG = #{errorMsg},</if>
             <if test="completeDt != null">COMPLETE_DT = #{completeDt},</if>
-            MODIFY_DT = NOW()
         </set>
         WHERE EXPORT_ID = #{exportId}
     </update>
@@ -838,39 +1133,41 @@
         SELECT
             EXPORT_ID                                        AS EXPORT_ID,
             PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            FORMAT_CD                                        AS FORMAT_CD,
+            EXPORT_TYPE_CD                                   AS EXPORT_TYPE_CD,
             BUILD_STATUS_CD                                  AS BUILD_STATUS_CD,
+            TOTAL_SLIDE_CNT                                  AS TOTAL_SLIDE_CNT,
+            RENDERED_SLIDE_CNT                               AS RENDERED_SLIDE_CNT,
+            FILE_NM                                          AS FILE_NM,
             FILE_PATH                                        AS FILE_PATH,
             FILE_SIZE                                        AS FILE_SIZE,
-            DOWNLOAD_URL                                     AS DOWNLOAD_URL,
             ERROR_MSG                                        AS ERROR_MSG,
             DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS COMPLETE_DT,
             CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT
         FROM TB_PT_EXPORT
         WHERE EXPORT_ID = #{exportId}
     </select>
 
     <select id="selectLatestCompletedExport" resultType="kr.teamagent.proposal.service.ProposalVO$ExportVO">
-        /* 프로젝트+포맷 기준 최근 완료 출력 빌드 조회 proposal.selectLatestCompletedExport */
+        /* 프로젝트+내보내기형식 기준 최근 완료 출력 빌드 조회 (캐시 재사용 판단용) proposal.selectLatestCompletedExport */
         SELECT
             EXPORT_ID                                        AS EXPORT_ID,
             PT_PROJECT_ID                                    AS PT_PROJECT_ID,
-            FORMAT_CD                                        AS FORMAT_CD,
+            EXPORT_TYPE_CD                                   AS EXPORT_TYPE_CD,
             BUILD_STATUS_CD                                  AS BUILD_STATUS_CD,
+            TOTAL_SLIDE_CNT                                  AS TOTAL_SLIDE_CNT,
+            RENDERED_SLIDE_CNT                               AS RENDERED_SLIDE_CNT,
+            FILE_NM                                          AS FILE_NM,
             FILE_PATH                                        AS FILE_PATH,
             FILE_SIZE                                        AS FILE_SIZE,
-            DOWNLOAD_URL                                     AS DOWNLOAD_URL,
             ERROR_MSG                                        AS ERROR_MSG,
             DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS COMPLETE_DT,
             CREATE_USER_ID                                   AS CREATE_USER_ID,
-            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT,
-            DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')     AS MODIFY_DT
+            DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')     AS CREATE_DT
         FROM TB_PT_EXPORT
         WHERE PT_PROJECT_ID = #{ptProjectId}
-          AND FORMAT_CD = #{formatCd}
-          AND BUILD_STATUS_CD IN ('003', '004')
+          AND EXPORT_TYPE_CD = #{exportTypeCd}
+          AND BUILD_STATUS_CD = '004'
         ORDER BY COMPLETE_DT DESC
         LIMIT 1
     </select>
@@ -881,5 +1178,76 @@
         FROM TB_PT_SLIDE
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </select>
+
+    <!-- ================================================================== -->
+    <!-- TB_PT_TEMPLATE                                                        -->
+    <!-- ================================================================== -->
+
+    <select id="selectPtTemplate" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 단건 조회 (PT_PROJECT_ID 기준) proposal.selectPtTemplate */
+        SELECT
+            TEMPLATE_ID                             AS TEMPLATE_ID
+            , PT_PROJECT_ID                         AS PT_PROJECT_ID
+            , CAST(HEADER_COMPONENTS_JSON AS CHAR)  AS HEADER_COMPONENTS_JSON
+            , CAST(FOOTER_COMPONENTS_JSON AS CHAR)  AS FOOTER_COMPONENTS_JSON
+            , CAST(COLOR_JSON AS CHAR)              AS COLOR_JSON
+            , GEN_STATUS_CD                         AS GEN_STATUS_CD
+            , ERROR_MSG                             AS ERROR_MSG
+            , FRAME_IMAGE_PATH                      AS FRAME_IMAGE_PATH
+            , CREATE_USER_ID                        AS CREATE_USER_ID
+            , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            , MODIFY_USER_ID                        AS MODIFY_USER_ID
+            , DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
+        FROM TB_PT_TEMPLATE
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </select>
+
+    <insert id="insertPtTemplate" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 신규 등록 proposal.insertPtTemplate */
+        INSERT INTO TB_PT_TEMPLATE (
+            TEMPLATE_ID,
+            PT_PROJECT_ID,
+            HEADER_COMPONENTS_JSON,
+            FOOTER_COMPONENTS_JSON,
+            COLOR_JSON,
+            GEN_STATUS_CD,
+            ERROR_MSG,
+            CREATE_DT,
+            CREATE_USER_ID
+        ) VALUES (
+            #{templateId},
+            #{ptProjectId},
+            #{headerComponentsJson},
+            #{footerComponentsJson},
+            #{colorJson},
+            #{genStatusCd},
+            #{errorMsg},
+            NOW(),
+            #{createUserId}
+        )
+    </insert>
+
+    <update id="updatePtTemplate" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 업데이트 proposal.updatePtTemplate */
+        UPDATE TB_PT_TEMPLATE
+        SET
+            HEADER_COMPONENTS_JSON  = #{headerComponentsJson}
+            , FOOTER_COMPONENTS_JSON = #{footerComponentsJson}
+            , COLOR_JSON             = #{colorJson}
+            , GEN_STATUS_CD          = #{genStatusCd}
+            , ERROR_MSG              = #{errorMsg}
+            , MODIFY_USER_ID         = #{modifyUserId}
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <update id="updateTemplateFramePath" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 프레임 이미지 경로 업데이트 proposal.updateTemplateFramePath */
+        UPDATE TB_PT_TEMPLATE
+        SET
+            FRAME_IMAGE_PATH = #{frameImagePath}
+            , MODIFY_DT      = NOW()
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
 
 </mapper>
