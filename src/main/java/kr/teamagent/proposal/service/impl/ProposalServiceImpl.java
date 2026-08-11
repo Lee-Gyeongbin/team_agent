@@ -4444,6 +4444,17 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
                 ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
 
+                // 형제 소목차 완료 슬라이드 조회 (중복 방지 컨텍스트)
+                List<ProposalVO.SiblingSlideVO> siblingSlides = java.util.Collections.emptyList();
+                if (CommonUtil.isNotEmpty(tocVO.getParentTocId())) {
+                    java.util.Map<String, Object> siblingParams = new java.util.HashMap<>();
+                    siblingParams.put("parentTocId", tocVO.getParentTocId());
+                    siblingParams.put("currentTocId", tocId);
+                    siblingSlides = proposalDAO.selectSiblingSlides(siblingParams);
+                    logger.info("[PT D-1] 형제 완료 슬라이드 {}건 로드 (parentTocId={}, tocId={})",
+                            siblingSlides.size(), tocVO.getParentTocId(), tocId);
+                }
+
                 // 5. Stage3 프롬프트 조합 + LLM 호출
                 sendSseEvent(emitter, "progress", "{\"step\":\"llm\"}");
                 String promptContent = null;
@@ -4457,7 +4468,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 String fullPrompt = buildStage3FullPrompt(promptContent, tocVO, linkedEc,
-                        requirements, winThemes, problemDefs, project, configJson);
+                        requirements, winThemes, problemDefs, project, configJson, siblingSlides);
 
                 String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
                 if (CommonUtil.isEmpty(aiResponse)) {
@@ -4610,6 +4621,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     /**
      * components_json + 슬라이드 제목에서 이미지 생성 쿼리 문자열을 추출한다.
      * - 슬라이드 제목 + 컴포넌트 유형 + 핵심 텍스트 키워드 (최대 6개) + "minimal infographic, clean ui" 고정 접미어
+     * <p>
+     * Stage3 LLM이 {@code {type, content:{...}}} 정규 스키마 대신
+     * {@code {rows|steps|cards|items|chips|text}} 평탄 스키마를 내는 경우가 있어
+     * 타입/콘텐츠를 추론해 추출한다. (예: PTS000013 — type 없음 → 기존 로직은 전부 skip)
      */
     private String buildImageQueryFromSlide(ProposalVO.SlideVO slide) {
         StringBuilder sb = new StringBuilder();
@@ -4631,62 +4646,78 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 for (JsonElement el : comps) {
                     if (!el.isJsonObject()) continue;
                     JsonObject comp = el.getAsJsonObject();
-                    String type = getStrOrNull(comp, "type");
+                    String type = resolveComponentType(comp);
                     if (CommonUtil.isEmpty(type)) continue;
-                    JsonObject content = comp.has("content") && !comp.get("content").isJsonNull()
-                            ? comp.getAsJsonObject("content") : null;
+                    JsonObject content = resolveComponentContent(comp);
 
                     switch (type) {
                         case "process_flow":
                             compTypes.add("process flow");
-                            if (content != null && content.has("steps")) {
+                            if (content != null && content.has("steps") && content.get("steps").isJsonArray()) {
                                 for (JsonElement s : content.getAsJsonArray("steps")) {
+                                    if (!s.isJsonObject()) continue;
                                     JsonObject step = s.getAsJsonObject();
                                     String t = getStrOrNull(step, "title");
                                     if (CommonUtil.isNotEmpty(t)) titleKeywords.add(t);
                                     String d = getStrOrNull(step, "desc");
-                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 35));
+                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 40));
                                 }
                             }
                             break;
                         case "card_grid":
                             compTypes.add("card grid");
-                            if (content != null && content.has("cards")) {
+                            if (content != null && content.has("cards") && content.get("cards").isJsonArray()) {
                                 for (JsonElement c : content.getAsJsonArray("cards")) {
+                                    if (!c.isJsonObject()) continue;
                                     JsonObject card = c.getAsJsonObject();
                                     String t = getStrOrNull(card, "title");
                                     if (CommonUtil.isNotEmpty(t)) titleKeywords.add(t);
                                     String d = getStrOrNull(card, "desc");
-                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 35));
+                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 40));
                                 }
                             }
                             break;
                         case "credential_grid":
                             compTypes.add("credential grid");
-                            if (content != null && content.has("items")) {
+                            if (content != null && content.has("items") && content.get("items").isJsonArray()) {
                                 for (JsonElement item : content.getAsJsonArray("items")) {
+                                    if (!item.isJsonObject()) continue;
                                     JsonObject itemObj = item.getAsJsonObject();
                                     String t = getStrOrNull(itemObj, "title");
                                     if (CommonUtil.isNotEmpty(t)) titleKeywords.add(t);
                                     String d = getStrOrNull(itemObj, "desc");
-                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 35));
+                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 40));
                                 }
                             }
                             break;
                         case "icon_chip_group":
                             compTypes.add("icon chips");
-                            if (content != null && content.has("chips")) {
+                            if (content != null && content.has("chips") && content.get("chips").isJsonArray()) {
                                 for (JsonElement ch : content.getAsJsonArray("chips")) {
-                                    if (ch.isJsonPrimitive()) titleKeywords.add(ch.getAsString());
+                                    if (ch.isJsonPrimitive()) {
+                                        titleKeywords.add(ch.getAsString());
+                                    } else if (ch.isJsonObject()) {
+                                        // {"label":"..."} / {"text":"..."} 형태 허용
+                                        String chip = getStrOrNull(ch.getAsJsonObject(), "label");
+                                        if (CommonUtil.isEmpty(chip)) chip = getStrOrNull(ch.getAsJsonObject(), "text");
+                                        if (CommonUtil.isEmpty(chip)) chip = getStrOrNull(ch.getAsJsonObject(), "title");
+                                        if (CommonUtil.isNotEmpty(chip)) titleKeywords.add(chip);
+                                    }
                                 }
                             }
                             break;
                         case "requirement_table":
                             compTypes.add("requirement table");
-                            if (content != null && content.has("rows")) {
+                            if (content != null && content.has("rows") && content.get("rows").isJsonArray()) {
                                 for (JsonElement row : content.getAsJsonArray("rows")) {
-                                    String response = getStrOrNull(row.getAsJsonObject(), "response");
-                                    if (CommonUtil.isNotEmpty(response)) descKeywords.add(truncateDescForImageQuery(response, 35));
+                                    if (!row.isJsonObject()) continue;
+                                    JsonObject rowObj = row.getAsJsonObject();
+                                    String response = getStrOrNull(rowObj, "response");
+                                    if (CommonUtil.isEmpty(response)) continue;
+                                    String reqNo = getStrOrNull(rowObj, "reqNo");
+                                    String labeled = CommonUtil.isNotEmpty(reqNo)
+                                            ? reqNo + ": " + response : response;
+                                    descKeywords.add(truncateDescForImageQuery(labeled, 40));
                                 }
                             }
                             break;
@@ -4694,8 +4725,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                             compTypes.add("callout");
                             if (content != null) {
                                 String text = getStrOrNull(content, "text");
-                                // 기존 60자 제한 제거 → 80자로 완화 (callout은 핵심 강조 메시지이므로 더 포함)
-                                if (CommonUtil.isNotEmpty(text)) descKeywords.add(truncateDescForImageQuery(text, 80));
+                                // callout은 핵심 강조 문장 — 길이 제한 없이 포함 (전체 query 상한에서 절삭)
+                                if (CommonUtil.isNotEmpty(text)) descKeywords.add(text);
                             }
                             break;
                         default:
@@ -4716,11 +4747,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     sb.append(", ").append(String.join(", ", topTitles));
                 }
 
-                // desc 키워드: title 이후 남은 길이를 보며 최대 3개 추가 (전체 content 상한 350자)
+                // desc 키워드: title 이후 남은 길이를 보며 최대 3개 추가 (전체 content 상한 400자)
                 int descAdded = 0;
                 for (String d : descKeywords) {
                     if (descAdded >= 3) break;
-                    if (sb.length() + d.length() + 2 > 350) break;
+                    if (sb.length() + d.length() + 2 > 400) break;
                     sb.append(", ").append(d);
                     descAdded++;
                 }
@@ -4738,8 +4769,42 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 컴포넌트 type 해석.
+     * 정규 스키마({@code type} 필드) 우선, 없으면 평탄 스키마 키로 추론.
+     */
+    private String resolveComponentType(JsonObject comp) {
+        String type = getStrOrNull(comp, "type");
+        if (CommonUtil.isNotEmpty(type)) return type;
+
+        // content 래퍼가 있으면 그 안을 기준으로 추론
+        JsonObject probe = comp;
+        if (comp.has("content") && comp.get("content").isJsonObject()) {
+            probe = comp.getAsJsonObject("content");
+        }
+        if (probe.has("rows"))  return "requirement_table";
+        if (probe.has("steps")) return "process_flow";
+        if (probe.has("cards")) return "card_grid";
+        if (probe.has("items")) return "credential_grid";
+        if (probe.has("chips")) return "icon_chip_group";
+        if (probe.has("text"))  return "callout_box";
+        return null;
+    }
+
+    /**
+     * 컴포넌트 content 객체 해석.
+     * {@code content} 래퍼가 있으면 사용, 없으면 컴포넌트 객체 자체를 content로 본다.
+     */
+    private JsonObject resolveComponentContent(JsonObject comp) {
+        if (comp.has("content") && !comp.get("content").isJsonNull() && comp.get("content").isJsonObject()) {
+            return comp.getAsJsonObject("content");
+        }
+        return comp;
+    }
+
+    /**
      * 이미지 생성 쿼리용 서술형 텍스트 축약.
      * 단어 경계(공백) 우선으로 절삭하고 "..." 접미어를 붙인다.
+     * 한국어처럼 공백이 거의 없으면 maxLen 위치에서 자른다.
      */
     private String truncateDescForImageQuery(String text, int maxLen) {
         if (text == null || text.length() <= maxLen) return text;
@@ -4865,6 +4930,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
         List<ProposalVO.RequirementVO> allRequirements = proposalDAO.selectRequirements(ptProjectId);
 
+        // 형제 소목차 완료 슬라이드 조회 (중복 방지 컨텍스트)
+        ProposalVO.TocVO chatTocVO = proposalDAO.selectTocById(tocId);
+        List<ProposalVO.SiblingSlideVO> siblingSlides = java.util.Collections.emptyList();
+        if (chatTocVO != null && CommonUtil.isNotEmpty(chatTocVO.getParentTocId())) {
+            java.util.Map<String, Object> siblingParams = new java.util.HashMap<>();
+            siblingParams.put("parentTocId", chatTocVO.getParentTocId());
+            siblingParams.put("currentTocId", tocId);
+            siblingSlides = proposalDAO.selectSiblingSlides(siblingParams);
+        }
+
         // 4. 대상 슬라이드 보완
         List<ProposalVO.SlideVO> updatedSlides = new java.util.ArrayList<>();
         Set<String> targetSet = new java.util.HashSet<>(targetSlideIds);
@@ -4876,7 +4951,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             List<ProposalVO.RequirementStage3VO> slideReqs =
                     filterReqsBySlide(allRequirements, existingSlide.getReqIdsJson());
 
-            String chatFullPrompt = buildSectionChatPrompt(existingSlide, slideReqs, userMessage);
+            String chatFullPrompt = buildSectionChatPrompt(existingSlide, slideReqs, userMessage, siblingSlides);
 
             try {
                 String aiResp = riskDiagnosisAgentService.callLlmQuerySync(chatFullPrompt, modelId, "", agentId);
@@ -5012,7 +5087,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private String buildSectionChatPrompt(
             ProposalVO.SlideVO existingSlide,
             List<ProposalVO.RequirementStage3VO> slideReqs,
-            String userMessage) {
+            String userMessage,
+            List<ProposalVO.SiblingSlideVO> siblingSlides) {
         StringBuilder sb = new StringBuilder();
         sb.append("아래 기존 슬라이드의 내용을 유지하면서, 보완 요청에 따라 필요한 부분만 수정하여 슬라이드 1장을 출력하세요.\n")
           .append("변경이 필요 없는 필드는 그대로 유지하세요.\n")
@@ -5035,10 +5111,39 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             sb.append("\n\n## 연결 요구사항\n").append(GSON.toJson(slideReqs));
         }
 
+        appendSiblingContext(sb, siblingSlides);
+
         sb.append("\n\n## 보완 요청\n").append(userMessage)
           .append("\n\n슬라이드 1장을 수정하여 {\"slides\":[{...}]} JSON으로만 출력하세요.");
 
         return sb.toString();
+    }
+
+    /**
+     * 형제 슬라이드 컨텍스트 append 공통 헬퍼.
+     * siblingSlides가 비어있으면 아무것도 추가하지 않음.
+     */
+    private void appendSiblingContext(StringBuilder sb, List<ProposalVO.SiblingSlideVO> siblingSlides) {
+        if (siblingSlides == null || siblingSlides.isEmpty()) return;
+        sb.append("\n\n## 이미 생성된 인접 슬라이드 (제목·강조배너·부제 등 중복 금지)");
+        for (ProposalVO.SiblingSlideVO s : siblingSlides) {
+            String title = s.getTitleTxt();
+            if (title != null && title.length() > 30) {
+                title = title.substring(0, 30) + "...";
+            }
+            sb.append("\n- ").append(s.getSectionNm()).append(": ");
+            if (CommonUtil.isNotEmpty(s.getEyebrowTxt())) {
+                sb.append("eyebrow \"").append(s.getEyebrowTxt()).append("\", ");
+            }
+            sb.append("제목 \"").append(title).append("\"");
+            if (CommonUtil.isNotEmpty(s.getHighlightBannerTxt())) {
+                String banner = s.getHighlightBannerTxt();
+                if (banner.length() > 40) {
+                    banner = banner.substring(0, 40) + "...";
+                }
+                sb.append(", 강조배너 \"").append(banner).append("\"");
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -5800,7 +5905,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             List<ProposalVO.WinThemeStage3VO> winThemes,
             List<ProposalVO.ProblemDefinitionStage3VO> problemDefs,
             ProposalVO.ProjectVO project,
-            String configJson) {
+            String configJson,
+            List<ProposalVO.SiblingSlideVO> siblingSlides) {
 
         StringBuilder sb = new StringBuilder(promptContent);
 
@@ -5852,6 +5958,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
             } catch (Exception ignored) {}
         }
+
+        appendSiblingContext(sb, siblingSlides);
 
         sb.append("\n\n## 출력 형식");
         sb.append("\n슬라이드 배열 JSON으로만 출력하세요. 코드블록(```) 없이 JSON만 출력하세요.");
@@ -5923,6 +6031,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             v.setReqNo(r.getReqNo());
             v.setReqCategoryTxt(r.getReqCategoryTxt());
             v.setReqContent(r.getReqContent());
+            // reqDetailTxt: RFP 상세 원문 — Stage3 호출당 요구사항 1~4건 수준이므로 truncate 없이 원문 전달
+            // (최대 4건 × 1,200자 ≈ 4,800자, 다른 섹션 포함해도 토큰 예산 내 관리 가능)
+            v.setReqDetailTxt(r.getReqDetailTxt());
             v.setMandatoryYn(r.getMandatoryYn());
             v.setSourceTypeCd(r.getSourceTypeCd());
             v.setResponseDirection(r.getResponseDirection());

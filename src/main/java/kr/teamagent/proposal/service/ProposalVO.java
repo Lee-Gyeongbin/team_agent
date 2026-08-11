@@ -215,6 +215,8 @@ public class ProposalVO {
         private String reqCategoryTxt;
         /** 요구사항 원문 내용 */
         private String reqContent;
+        /** 요구사항 상세설명 (RFP 원문 그대로, 없으면 null) */
+        private String reqDetailTxt;
         /** 필수 여부 (Y/N) */
         private String mandatoryYn;
         /** 출처 유형 코드 (001=사실, 002=전략적해석, 003=확인필요) */
@@ -614,6 +616,21 @@ public class ProposalVO {
         private String createDt;
         /** 수정일시 */
         private String modifyDt;
+    }
+
+    /**
+     * 형제 소목차 완료 슬라이드 제목 조회 결과 (중복 방지용)
+     */
+    @Data
+    public static class SiblingSlideVO {
+        /** 소목차 섹션명 */
+        private String sectionNm;
+        /** 슬라이드 제목 */
+        private String titleTxt;
+        /** 하이라이트 배너 텍스트 */
+        private String highlightBannerTxt;
+        /** 아이브로우 텍스트 */
+        private String eyebrowTxt;
     }
 
     /**

@@ -970,6 +970,19 @@
         ORDER BY SLIDE_NO
     </select>
 
+    <select id="selectSiblingSlides" parameterType="map"
+            resultType="kr.teamagent.proposal.service.ProposalVO$SiblingSlideVO">
+        /* 형제 소목차 완료 슬라이드 제목 조회 (중복 방지 컨텍스트용) proposal.selectSiblingSlides */
+        SELECT s.TITLE_TXT, s.EYEBROW_TXT, s.HIGHLIGHT_BANNER_TXT, t.SECTION_NM
+        FROM TB_PT_SLIDE s
+        JOIN TB_PT_TOC t ON s.TOC_ID = t.TOC_ID
+        WHERE t.PARENT_TOC_ID = #{parentTocId}
+          AND t.TOC_ID != #{currentTocId}
+          AND s.RENDER_STATUS_CD = '003'
+        ORDER BY t.SORT_ORD, s.SLIDE_NO
+        LIMIT 10
+    </select>
+
     <select id="selectSlideById" parameterType="String"
             resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 슬라이드 단건 조회 proposal.selectSlideById */

@@ -507,6 +507,15 @@ public class ProposalDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 형제 소목차(같은 PARENT_TOC_ID)의 완료된 슬라이드 제목 조회 (중복 방지 컨텍스트용)
+     * @param params parentTocId, currentTocId
+     * @return List of SiblingSlideVO
+     */
+    public List<ProposalVO.SiblingSlideVO> selectSiblingSlides(java.util.Map<String, Object> params) {
+        return selectList("proposal.selectSiblingSlides", params);
+    }
+
+    /**
      * 슬라이드 단건 조회
      * @param vo SlideVO (slideId)
      * @return SlideVO
