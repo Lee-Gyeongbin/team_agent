@@ -4360,14 +4360,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Step D-1/D-2: 소목차 슬라이드 생성 (Stage3 + Stage3.5)
+    // Step D-1: 소목차 슬라이드 생성 (Stage3)
     // ══════════════════════════════════════════════════════════════════════════
 
     /**
-     * D-1: 소목차 슬라이드 생성 SSE 스트림 (Stage3 + Stage3.5)
+     * D-1: 소목차 슬라이드 생성 SSE 스트림 (Stage3)
      * - 한 번의 LLM 호출로 PLANNED_SLIDE_CNT 장 배열 생성
      * - 이미 슬라이드가 있으면 삭제 후 재생성
-     * - 각 슬라이드 insert → Stage3.5(스타일 조립) → RENDER_STATUS_CD='003'
+     * - 각 슬라이드 insert → RENDER_STATUS_CD='003' (본문 생성 완료)
+     * - IMAGE_GEN_HINT는 이후 온디맨드 이미지 생성 버튼 클릭 시점에 조립될 예정
      *
      * @param ptProjectId 프로젝트 ID
      * @param tocId       소목차 TOC_ID
@@ -4507,7 +4508,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 // 단, 이 소목차에 속한 슬라이드는 방금 삭제했으므로 현재 전체 max를 기준으로 함
                 int maxSlideNo = proposalDAO.selectMaxSlideNo(ptProjectId);
 
-                // 8. 슬라이드 insert (RENDER_STATUS_CD='002' 생성중)
+                // 8. 슬라이드 insert (RENDER_STATUS_CD='003' 본문 생성 완료)
                 List<ProposalVO.SlideVO> insertedSlides = new java.util.ArrayList<>();
                 for (int i = 0; i < slideJsonObjects.size(); i++) {
                     JsonObject sObj = slideJsonObjects.get(i);
@@ -4540,31 +4541,18 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         continue;
                     }
 
-                    slide.setRenderStatusCd("002"); // 생성중
+                    // Stage3(본문 생성) 완료 = '003'. IMAGE_GEN_HINT는 이미지 생성 버튼 클릭 시점에 조립.
+                    // 기존에는 Stage3.5(D-2) 스타일 조립 성공 후 '003'으로 올렸으나,
+                    // Stage3.5 제거로 인해 INSERT 직후 바로 '003'으로 설정한다.
+                    slide.setRenderStatusCd("003");
                     slide.setCreateUserId(userId);
 
                     proposalDAO.insertSlide(slide);
                     insertedSlides.add(slide);
                 }
 
-                // 9. Stage3.5: 스타일 조립 + 이미지 생성 (슬라이드별 개별 처리)
-                sendSseEvent(emitter, "progress", "{\"step\":\"render\"}");
-                int successCount = 0;
-                for (ProposalVO.SlideVO slide : insertedSlides) {
-                    try {
-                        doStyleAssembly(slide, configJson);
-                        successCount++;
-                    } catch (Exception e) {
-                        logger.warn("[PT D-2] 슬라이드 스타일 조립 실패 (slideId={}): {}", slide.getSlideId(), e.getMessage());
-                        // 실패한 슬라이드만 004로 처리, 나머지는 계속
-                        ProposalVO.SlideVO failVO = new ProposalVO.SlideVO();
-                        failVO.setSlideId(slide.getSlideId());
-                        failVO.setRenderStatusCd("004");
-                        proposalDAO.updateSlide(failVO);
-                    }
-                }
-
-                int failCount = insertedSlides.size() - successCount;
+                int successCount = insertedSlides.size();
+                int failCount = 0;
                 String doneData = "{\"tocId\":\"" + tocId + "\""
                         + ",\"slideCount\":" + insertedSlides.size()
                         + ",\"successCount\":" + successCount
@@ -4619,263 +4607,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * components_json + 슬라이드 제목에서 이미지 생성 쿼리 문자열을 추출한다.
-     * - 슬라이드 제목 + 컴포넌트 유형 + 핵심 텍스트 키워드 (최대 6개) + "minimal infographic, clean ui" 고정 접미어
-     * <p>
-     * Stage3 LLM이 {@code {type, content:{...}}} 정규 스키마 대신
-     * {@code {rows|steps|cards|items|chips|text}} 평탄 스키마를 내는 경우가 있어
-     * 타입/콘텐츠를 추론해 추출한다. (예: PTS000013 — type 없음 → 기존 로직은 전부 skip)
-     */
-    private String buildImageQueryFromSlide(ProposalVO.SlideVO slide) {
-        StringBuilder sb = new StringBuilder();
-
-        // 슬라이드 제목 (주제어)
-        String title = CommonUtil.nullToBlank(slide.getTitleTxt());
-        if (CommonUtil.isNotEmpty(title)) {
-            sb.append(title);
-        }
-
-        String compJson = slide.getComponentsJson();
-        if (CommonUtil.isNotEmpty(compJson)) {
-            try {
-                JsonArray comps = JsonParser.parseString(compJson).getAsJsonArray();
-                List<String> compTypes      = new ArrayList<>();
-                List<String> titleKeywords  = new ArrayList<>(); // 짧은 명사형 라벨 (우선순위 높음, 최대 6개)
-                List<String> descKeywords   = new ArrayList<>(); // 서술형 요약 (보조, 최대 3개)
-
-                for (JsonElement el : comps) {
-                    if (!el.isJsonObject()) continue;
-                    JsonObject comp = el.getAsJsonObject();
-                    String type = resolveComponentType(comp);
-                    if (CommonUtil.isEmpty(type)) continue;
-                    JsonObject content = resolveComponentContent(comp);
-
-                    switch (type) {
-                        case "process_flow":
-                            compTypes.add("process flow");
-                            if (content != null && content.has("steps") && content.get("steps").isJsonArray()) {
-                                for (JsonElement s : content.getAsJsonArray("steps")) {
-                                    if (!s.isJsonObject()) continue;
-                                    JsonObject step = s.getAsJsonObject();
-                                    String t = getStrOrNull(step, "title");
-                                    if (CommonUtil.isNotEmpty(t)) titleKeywords.add(t);
-                                    String d = getStrOrNull(step, "desc");
-                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 40));
-                                }
-                            }
-                            break;
-                        case "card_grid":
-                            compTypes.add("card grid");
-                            if (content != null && content.has("cards") && content.get("cards").isJsonArray()) {
-                                for (JsonElement c : content.getAsJsonArray("cards")) {
-                                    if (!c.isJsonObject()) continue;
-                                    JsonObject card = c.getAsJsonObject();
-                                    String t = getStrOrNull(card, "title");
-                                    if (CommonUtil.isNotEmpty(t)) titleKeywords.add(t);
-                                    String d = getStrOrNull(card, "desc");
-                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 40));
-                                }
-                            }
-                            break;
-                        case "credential_grid":
-                            compTypes.add("credential grid");
-                            if (content != null && content.has("items") && content.get("items").isJsonArray()) {
-                                for (JsonElement item : content.getAsJsonArray("items")) {
-                                    if (!item.isJsonObject()) continue;
-                                    JsonObject itemObj = item.getAsJsonObject();
-                                    String t = getStrOrNull(itemObj, "title");
-                                    if (CommonUtil.isNotEmpty(t)) titleKeywords.add(t);
-                                    String d = getStrOrNull(itemObj, "desc");
-                                    if (CommonUtil.isNotEmpty(d)) descKeywords.add(truncateDescForImageQuery(d, 40));
-                                }
-                            }
-                            break;
-                        case "icon_chip_group":
-                            compTypes.add("icon chips");
-                            if (content != null && content.has("chips") && content.get("chips").isJsonArray()) {
-                                for (JsonElement ch : content.getAsJsonArray("chips")) {
-                                    if (ch.isJsonPrimitive()) {
-                                        titleKeywords.add(ch.getAsString());
-                                    } else if (ch.isJsonObject()) {
-                                        // {"label":"..."} / {"text":"..."} 형태 허용
-                                        String chip = getStrOrNull(ch.getAsJsonObject(), "label");
-                                        if (CommonUtil.isEmpty(chip)) chip = getStrOrNull(ch.getAsJsonObject(), "text");
-                                        if (CommonUtil.isEmpty(chip)) chip = getStrOrNull(ch.getAsJsonObject(), "title");
-                                        if (CommonUtil.isNotEmpty(chip)) titleKeywords.add(chip);
-                                    }
-                                }
-                            }
-                            break;
-                        case "requirement_table":
-                            compTypes.add("requirement table");
-                            if (content != null && content.has("rows") && content.get("rows").isJsonArray()) {
-                                for (JsonElement row : content.getAsJsonArray("rows")) {
-                                    if (!row.isJsonObject()) continue;
-                                    JsonObject rowObj = row.getAsJsonObject();
-                                    String response = getStrOrNull(rowObj, "response");
-                                    if (CommonUtil.isEmpty(response)) continue;
-                                    String reqNo = getStrOrNull(rowObj, "reqNo");
-                                    String labeled = CommonUtil.isNotEmpty(reqNo)
-                                            ? reqNo + ": " + response : response;
-                                    descKeywords.add(truncateDescForImageQuery(labeled, 40));
-                                }
-                            }
-                            break;
-                        case "callout_box":
-                            compTypes.add("callout");
-                            if (content != null) {
-                                String text = getStrOrNull(content, "text");
-                                // callout은 핵심 강조 문장 — 길이 제한 없이 포함 (전체 query 상한에서 절삭)
-                                if (CommonUtil.isNotEmpty(text)) descKeywords.add(text);
-                            }
-                            break;
-                        default:
-                            compTypes.add(type.replace("_", " "));
-                            break;
-                    }
-                }
-
-                // 컴포넌트 타입 레이블 추가
-                if (!compTypes.isEmpty()) {
-                    if (sb.length() > 0) sb.append(", ");
-                    sb.append(String.join(", ", compTypes));
-                }
-
-                // title 키워드: 최대 6개 (높은 우선순위 — 이미지 레이아웃 라벨 직결)
-                List<String> topTitles = titleKeywords.size() > 6 ? titleKeywords.subList(0, 6) : titleKeywords;
-                if (!topTitles.isEmpty()) {
-                    sb.append(", ").append(String.join(", ", topTitles));
-                }
-
-                // desc 키워드: title 이후 남은 길이를 보며 최대 3개 추가 (전체 content 상한 400자)
-                int descAdded = 0;
-                for (String d : descKeywords) {
-                    if (descAdded >= 3) break;
-                    if (sb.length() + d.length() + 2 > 400) break;
-                    sb.append(", ").append(d);
-                    descAdded++;
-                }
-
-            } catch (Exception e) {
-                logger.warn("[PT Image] components_json 파싱 실패 (slideId={}): {}", slide.getSlideId(), e.getMessage());
-            }
-        }
-
-        // 이미지 스타일 기본 키워드
-        if (sb.length() > 0) sb.append(", ");
-        sb.append("minimal infographic, clean ui");
-
-        return sb.toString();
-    }
-
-    /**
-     * 컴포넌트 type 해석.
-     * 정규 스키마({@code type} 필드) 우선, 없으면 평탄 스키마 키로 추론.
-     */
-    private String resolveComponentType(JsonObject comp) {
-        String type = getStrOrNull(comp, "type");
-        if (CommonUtil.isNotEmpty(type)) return type;
-
-        // content 래퍼가 있으면 그 안을 기준으로 추론
-        JsonObject probe = comp;
-        if (comp.has("content") && comp.get("content").isJsonObject()) {
-            probe = comp.getAsJsonObject("content");
-        }
-        if (probe.has("rows"))  return "requirement_table";
-        if (probe.has("steps")) return "process_flow";
-        if (probe.has("cards")) return "card_grid";
-        if (probe.has("items")) return "credential_grid";
-        if (probe.has("chips")) return "icon_chip_group";
-        if (probe.has("text"))  return "callout_box";
-        return null;
-    }
-
-    /**
-     * 컴포넌트 content 객체 해석.
-     * {@code content} 래퍼가 있으면 사용, 없으면 컴포넌트 객체 자체를 content로 본다.
-     */
-    private JsonObject resolveComponentContent(JsonObject comp) {
-        if (comp.has("content") && !comp.get("content").isJsonNull() && comp.get("content").isJsonObject()) {
-            return comp.getAsJsonObject("content");
-        }
-        return comp;
-    }
-
-    /**
-     * 이미지 생성 쿼리용 서술형 텍스트 축약.
-     * 단어 경계(공백) 우선으로 절삭하고 "..." 접미어를 붙인다.
-     * 한국어처럼 공백이 거의 없으면 maxLen 위치에서 자른다.
-     */
-    private String truncateDescForImageQuery(String text, int maxLen) {
-        if (text == null || text.length() <= maxLen) return text;
-        String sub = text.substring(0, maxLen);
-        int lastSpace = sub.lastIndexOf(' ');
-        if (lastSpace > maxLen / 2) return sub.substring(0, lastSpace) + "...";
-        return sub + "...";
-    }
-
-    /**
-     * Stage3.5: 슬라이드 스타일 조립 (LLM 호출 없음)
-     * - components_json + project_config_json(색상·docSize·문체)으로 IMAGE_GEN_HINT 조립 후 DB 저장
-     * - RENDER_STATUS_CD='003'(완료)로 업데이트
-     */
-    private void doStyleAssembly(ProposalVO.SlideVO slide, String configJson) throws Exception {
-        // 1. 설정 파싱
-        String docSize = "a4";
-        String writingStyle = "formal";
-        List<String> baseColors = java.util.Arrays.asList("#5B4FE9", "#8B7FFF", "#EFECFE");
-        List<String> accentColors = java.util.Arrays.asList("#E08A2C", "#22A06B");
-
-        if (CommonUtil.isNotEmpty(configJson)) {
-            try {
-                JsonObject root = JsonParser.parseString(configJson).getAsJsonObject();
-                if (root.has("template") && !root.get("template").isJsonNull()) {
-                    JsonObject tmpl = root.getAsJsonObject("template");
-                    String ds = getStrOrNull(tmpl, "docSize");
-                    if (CommonUtil.isNotEmpty(ds)) docSize = ds;
-                }
-                if (root.has("settings") && !root.get("settings").isJsonNull()) {
-                    JsonObject settings = root.getAsJsonObject("settings");
-                    String ws = getStrOrNull(settings, "writingStyle");
-                    if (CommonUtil.isNotEmpty(ws)) writingStyle = ws;
-                    if (settings.has("colors") && !settings.get("colors").isJsonNull()) {
-                        JsonObject colors = settings.getAsJsonObject("colors");
-                        if (colors.has("base")) baseColors = jsonArrayToList(colors.getAsJsonArray("base"));
-                        if (colors.has("accent")) accentColors = jsonArrayToList(colors.getAsJsonArray("accent"));
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("[PT D-2] configJson 파싱 실패 (slideId={}): {}", slide.getSlideId(), e.getMessage());
-            }
-        }
-
-        // 2. COLOR_INDEX로 색상 선택
-        int ci = slide.getColorIndex() % Math.max(1, baseColors.size());
-        String baseColor = baseColors.get(ci);
-        String accentColor = accentColors.isEmpty() ? "#E08A2C" : accentColors.get(0);
-
-        // 3. IMAGE_GEN_HINT 조립 — 스타일 앵커 prefix + components_json 실제 콘텐츠
-        // 모든 슬라이드에 동일한 styleManifest를 prefix로 붙여 AI 이미지 생성기의
-        // 시각 스타일 일관성을 유지한다 (소목차별 독립 호출 간 스타일 편차 방지).
-        String styleManifest = buildStyleManifest(baseColor, accentColor, docSize, writingStyle);
-        String styleParams = String.format(
-                "docSize=%s baseColor=%s accentColor=%s writingStyle=%s colorIndex=%d",
-                docSize, baseColor, accentColor, writingStyle, slide.getColorIndex());
-
-        String imageGenHint = styleManifest + " " + buildImageQueryFromSlide(slide) + " | " + styleParams;
-
-        // 4. DB 업데이트
-        ProposalVO.SlideVO updateVO = new ProposalVO.SlideVO();
-        updateVO.setSlideId(slide.getSlideId());
-        updateVO.setImageGenHint(imageGenHint);
-        updateVO.setRenderStatusCd("003");
-        proposalDAO.updateSlide(updateVO);
-
-        slide.setImageGenHint(imageGenHint);
-        slide.setRenderStatusCd("003");
-    }
-
-    /**
      * D-1: 소목차 슬라이드 목록 조회
      * @param tocId TOC_ID
      * @return List<SlideVO>
@@ -4925,9 +4656,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
 
         // 3. 공통 데이터 조회 — 루프 외부에서 1회만 실행
-        // configJson : doStyleAssembly에 필요
         // allRequirements : 사용자가 요구사항을 언급할 경우 슬라이드별 reqIdsJson으로 필터링하여 프롬프트에 포함
-        String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
         List<ProposalVO.RequirementVO> allRequirements = proposalDAO.selectRequirements(ptProjectId);
 
         // 형제 소목차 완료 슬라이드 조회 (중복 방지 컨텍스트)
@@ -4976,22 +4705,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         updateVO.setRenderStatusCd("002");
                         proposalDAO.updateSlide(updateVO);
 
-                        // Stage3.5 스타일 재조립 (IMAGE_GEN_HINT 갱신)
-                        // doStyleAssembly 내부에서 RENDER_STATUS_CD를 "003"으로 올리므로,
-                        // 완료 후 "001"(대기)로 리셋하여 이미지 재생성 대상임을 표시
-                        existingSlide.setLayoutType(updateVO.getLayoutType());
-                        existingSlide.setTitleTxt(updateVO.getTitleTxt());
-                        existingSlide.setComponentsJson(updateVO.getComponentsJson());
-                        try {
-                            doStyleAssembly(existingSlide, configJson);
-                            ProposalVO.SlideVO resetVO = new ProposalVO.SlideVO();
-                            resetVO.setSlideId(existingSlide.getSlideId());
-                            resetVO.setRenderStatusCd("001");
-                            proposalDAO.updateSlide(resetVO);
-                            existingSlide.setRenderStatusCd("001");
-                        } catch (Exception re) {
-                            logger.warn("[PT D-3] 스타일 조립 실패 slideId={}: {}", existingSlide.getSlideId(), re.getMessage());
-                        }
+                        // 본문이 갱신됐으므로 '001'(이미지 생성 대기)로 리셋
+                        // — IMAGE_GEN_HINT는 이미지 생성 버튼 클릭 시점에 새로 조립될 예정
+                        ProposalVO.SlideVO resetVO = new ProposalVO.SlideVO();
+                        resetVO.setSlideId(existingSlide.getSlideId());
+                        resetVO.setRenderStatusCd("001");
+                        proposalDAO.updateSlide(resetVO);
+                        existingSlide.setRenderStatusCd("001");
 
                         updatedSlides.add(existingSlide);
                     }
@@ -5394,9 +5114,279 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 슬라이드 단건 인포그래픽 이미지 생성 SSE (온디맨드, 버튼 클릭 시 호출)
+     * <p>
+     * S3_IMAGE 프롬프트(LLM)로 {@code imageQuery}를 생성하고,
+     * {@link #buildStyleManifest}와 styleParams를 조합한 IMAGE_GEN_HINT로
+     * 이미지 생성 API를 호출한다.
+     * <p>
+     * SSE 단계: connected → progress(llm) → progress(parse) → progress(image_gen) → done
+     *
+     * @param slideId 생성 대상 슬라이드 ID (TB_PT_SLIDE.SLIDE_ID)
+     * @param modelId LLM 모델 ID
+     * @param agentId 에이전트 ID
+     */
+    public SseEmitter streamGenerateSlideImage(String slideId, String modelId, String agentId) {
+        SseEmitter emitter = new SseEmitter(0L);
+
+        if (CommonUtil.isEmpty(slideId)) {
+            sendSseEvent(emitter, "error", "{\"message\":\"slideId가 없습니다.\"}");
+            emitter.complete();
+            return emitter;
+        }
+
+        emitter.onTimeout(() -> {
+            logger.warn("[PT Img-Gen SSE] timeout - slideId={}", slideId);
+            emitter.complete();
+        });
+        emitter.onError(e -> logger.warn("[PT Img-Gen SSE] error - slideId={}, msg={}", slideId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("[PT Img-Gen SSE] complete - slideId={}", slideId));
+
+        sendSseEvent(emitter, "connected", "{\"slideId\":\"" + slideId + "\"}");
+
+        STAGE_D_EXECUTOR.execute(() -> {
+            try {
+                // ── 1. 슬라이드 조회 ──────────────────────────────────────────
+                ProposalVO.SlideVO query = new ProposalVO.SlideVO();
+                query.setSlideId(slideId);
+                ProposalVO.SlideVO slide = proposalDAO.selectSlideById(query);
+                if (slide == null) {
+                    Map<String, Object> notFound = new HashMap<>();
+                    notFound.put("success", false);
+                    notFound.put("renderStatusCd", "004");
+                    notFound.put("errorMessage", "슬라이드를 찾을 수 없습니다.");
+                    sendSseEvent(emitter, "done", GSON.toJson(notFound));
+                    emitter.complete();
+                    return;
+                }
+                String ptProjectId = slide.getPtProjectId();
+
+                // ── 2. PROJECT_CONFIG_JSON → docSize, colors, writingStyle ───
+                String configJson   = proposalDAO.selectProjectConfigJson(ptProjectId);
+                String docSize      = "169";
+                List<String> baseColorList   = new ArrayList<>();
+                List<String> accentColorList = new ArrayList<>();
+                String writingStyle = "formal";
+
+                if (CommonUtil.isNotEmpty(configJson)) {
+                    try {
+                        JsonObject cfgRoot = JsonParser.parseString(configJson).getAsJsonObject();
+                        if (cfgRoot.has("template") && !cfgRoot.get("template").isJsonNull()) {
+                            JsonObject tmpl = cfgRoot.getAsJsonObject("template");
+                            if (tmpl.has("docSize") && !tmpl.get("docSize").isJsonNull()) {
+                                docSize = tmpl.get("docSize").getAsString();
+                            }
+                        }
+                        if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
+                            JsonObject settings = cfgRoot.getAsJsonObject("settings");
+                            if (settings.has("colors") && !settings.get("colors").isJsonNull()) {
+                                JsonObject colors = settings.getAsJsonObject("colors");
+                                if (colors.has("base")   && !colors.get("base").isJsonNull())   baseColorList   = jsonArrayToList(colors.getAsJsonArray("base"));
+                                if (colors.has("accent") && !colors.get("accent").isJsonNull()) accentColorList = jsonArrayToList(colors.getAsJsonArray("accent"));
+                            }
+                            String ws = getStrOrNull(settings, "writingStyle");
+                            if (CommonUtil.isNotEmpty(ws)) writingStyle = ws;
+                        }
+                    } catch (Exception e) {
+                        logger.warn("[PT Img-Gen SSE] configJson 파싱 실패 (slideId={}): {}", slideId, e.getMessage());
+                    }
+                }
+
+                // COLOR_INDEX % baseColorList.size() → baseColor 선택
+                String baseColor   = baseColorList.isEmpty()   ? "#5B4FE9" : baseColorList.get(slide.getColorIndex() % baseColorList.size());
+                String accentColor = accentColorList.isEmpty() ? "#E08A2C" : accentColorList.get(0);
+
+                // ── 3. RENDER_STATUS_CD = '002' (생성중) 선행 업데이트 ───────
+                ProposalVO.SlideVO startVO = new ProposalVO.SlideVO();
+                startVO.setSlideId(slideId);
+                startVO.setRenderStatusCd("002");
+                proposalDAO.updateSlide(startVO);
+
+                // ── 4. S3_IMAGE 프롬프트 조회 ─────────────────────────────────
+                sendSseEvent(emitter, "progress", "{\"step\":\"llm\"}");
+                String promptContent = null;
+                try {
+                    promptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_IMAGE");
+                } catch (Exception e) {
+                    logger.warn("[PT Img-Gen SSE] S3_IMAGE 프롬프트 조회 실패: {}", e.getMessage());
+                }
+                if (CommonUtil.isEmpty(promptContent)) {
+                    ProposalVO.SlideVO failVO = new ProposalVO.SlideVO();
+                    failVO.setSlideId(slideId);
+                    failVO.setRenderStatusCd("004");
+                    proposalDAO.updateSlide(failVO);
+                    Map<String, Object> failDone = new HashMap<>();
+                    failDone.put("success", false);
+                    failDone.put("renderStatusCd", "004");
+                    failDone.put("errorMessage", "S3_IMAGE 프롬프트가 등록되어 있지 않습니다.");
+                    sendSseEvent(emitter, "done", GSON.toJson(failDone));
+                    emitter.complete();
+                    return;
+                }
+
+                // ── 5. 슬라이드 데이터 → LLM 컨텍스트 조립 ──────────────────
+                // S3_SLIDE가 소목차 데이터를 JSON으로 넘기는 것과 같은 패턴
+                JsonObject slideCtx = new JsonObject();
+                slideCtx.addProperty("title",            CommonUtil.nullToBlank(slide.getTitleTxt()));
+                slideCtx.addProperty("subtitle",         CommonUtil.nullToBlank(slide.getSubtitleTxt()));
+                slideCtx.addProperty("highlightBanner",  CommonUtil.nullToBlank(slide.getHighlightBannerTxt()));
+                slideCtx.addProperty("conclusionRibbon", CommonUtil.nullToBlank(slide.getConclusionRibbonTxt()));
+                if (CommonUtil.isNotEmpty(slide.getComponentsJson())) {
+                    try {
+                        slideCtx.add("components", JsonParser.parseString(slide.getComponentsJson()));
+                    } catch (Exception e) {
+                        slideCtx.addProperty("components", slide.getComponentsJson());
+                    }
+                }
+                String fullPrompt = promptContent + "\n\n## 슬라이드 데이터\n" + GSON.toJson(slideCtx);
+
+                // ── 6. LLM 호출 (1회 재시도) ──────────────────────────────────
+                String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+                if (CommonUtil.isEmpty(aiResponse)) {
+                    logger.warn("[PT Img-Gen SSE] LLM 응답 없음, 1회 재시도 (slideId={})", slideId);
+                    aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+                }
+
+                // ── 7. imageQuery 파싱 (1회 재시도) ───────────────────────────
+                sendSseEvent(emitter, "progress", "{\"step\":\"parse\"}");
+                String imageQuery = null;
+                try {
+                    imageQuery = parseImageQueryFromLlmResponse(aiResponse);
+                } catch (Exception e) {
+                    logger.warn("[PT Img-Gen SSE] imageQuery 파싱 실패, 1회 재시도 (slideId={}): {}", slideId, e.getMessage());
+                    aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+                    try {
+                        imageQuery = parseImageQueryFromLlmResponse(aiResponse);
+                    } catch (Exception e2) {
+                        logger.error("[PT Img-Gen SSE] imageQuery 파싱 재시도 실패 (slideId={}): {}", slideId, e2.getMessage());
+                    }
+                }
+                if (imageQuery == null) {
+                    ProposalVO.SlideVO failVO = new ProposalVO.SlideVO();
+                    failVO.setSlideId(slideId);
+                    failVO.setRenderStatusCd("004");
+                    proposalDAO.updateSlide(failVO);
+                    Map<String, Object> failDone = new HashMap<>();
+                    failDone.put("success", false);
+                    failDone.put("renderStatusCd", "004");
+                    failDone.put("errorMessage", "imageQuery 파싱에 실패했습니다.");
+                    sendSseEvent(emitter, "done", GSON.toJson(failDone));
+                    emitter.complete();
+                    return;
+                }
+
+                // ── 8. IMAGE_GEN_HINT 조립 ────────────────────────────────────
+                sendSseEvent(emitter, "progress", "{\"step\":\"image_gen\"}");
+                String styleManifest = buildStyleManifest(baseColor, accentColor, docSize, writingStyle);
+                String styleParams   = String.format("docSize=%s baseColor=%s accentColor=%s writingStyle=%s colorIndex=%d",
+                        docSize, baseColor, accentColor, writingStyle, slide.getColorIndex());
+                String imageGenHint  = styleManifest + " " + imageQuery + " | " + styleParams;
+
+                // ── 9. 이미지 생성 API 호출 ───────────────────────────────────
+                String base64Image = callPtImageApi(imageGenHint);
+                if (base64Image == null || base64Image.isEmpty()) {
+                    logger.warn("[PT Img-Gen SSE] 이미지 API 응답 없음 (slideId={})", slideId);
+                    ProposalVO.SlideVO failVO = new ProposalVO.SlideVO();
+                    failVO.setSlideId(slideId);
+                    failVO.setRenderStatusCd("004");
+                    proposalDAO.updateSlide(failVO);
+                    Map<String, Object> failDone = new HashMap<>();
+                    failDone.put("success", false);
+                    failDone.put("renderStatusCd", "004");
+                    failDone.put("errorMessage", "이미지 생성 API 응답이 없습니다.");
+                    sendSseEvent(emitter, "done", GSON.toJson(failDone));
+                    emitter.complete();
+                    return;
+                }
+
+                // ── 10. NCP 업로드 ────────────────────────────────────────────
+                byte[] imageBytes   = Base64.getDecoder().decode(base64Image);
+                String renderedPath = uploadSlideImageToNcp(ptProjectId, slideId, imageBytes);
+
+                // ── 11. DB 저장 (IMAGE_GEN_HINT, RENDERED_IMAGE_PATH, 003) ───
+                ProposalVO.SlideVO doneVO = new ProposalVO.SlideVO();
+                doneVO.setSlideId(slideId);
+                doneVO.setImageGenHint(imageGenHint);
+                doneVO.setRenderedImagePath(renderedPath);
+                doneVO.setRenderStatusCd("003");
+
+                // 템플릿 프레임 합성 이미지 (Step D 미리보기용) — doImageRender와 동일 패턴
+                try {
+                    ProposalVO.PtTemplateVO tmpl = proposalDAO.selectPtTemplate(ptProjectId);
+                    if (tmpl != null && tmpl.getFrameImagePath() != null) {
+                        byte[] frameBytes   = downloadNcpObject(tmpl.getFrameImagePath());
+                        byte[] composite    = stackFrameWithContent(frameBytes, imageBytes);
+                        String compositeKey = "pt-slide-images/" + ptProjectId + "/" + slideId + "_composite.png";
+                        uploadNcpObject(compositeKey, composite);
+                        doneVO.setCompositeImagePath(compositeKey);
+                        logger.info("[PT Img-Gen SSE] 합성 이미지 저장 완료 (slideId={}, key={})", slideId, compositeKey);
+                    }
+                } catch (Exception ex) {
+                    logger.warn("[PT Img-Gen SSE] 합성 이미지 생성 실패 — 원본만 저장 (slideId={}): {}", slideId, ex.getMessage());
+                }
+
+                proposalDAO.updateSlide(doneVO);
+                logger.info("[PT Img-Gen SSE] 이미지 생성 완료 (slideId={}, path={})", slideId, renderedPath);
+
+                // ── 12. done (성공) ───────────────────────────────────────────
+                Map<String, Object> successDone = new HashMap<>();
+                successDone.put("success", true);
+                successDone.put("renderStatusCd", "003");
+                successDone.put("renderedImagePath", renderedPath);
+                sendSseEvent(emitter, "done", GSON.toJson(successDone));
+
+            } catch (Exception e) {
+                logger.error("[PT Img-Gen SSE] 이미지 생성 오류 (slideId={}): {}", slideId, e.getMessage(), e);
+                try {
+                    ProposalVO.SlideVO failVO = new ProposalVO.SlideVO();
+                    failVO.setSlideId(slideId);
+                    failVO.setRenderStatusCd("004");
+                    proposalDAO.updateSlide(failVO);
+                } catch (Exception ex) {
+                    logger.warn("[PT Img-Gen SSE] 실패 상태 업데이트 오류 (slideId={}): {}", slideId, ex.getMessage());
+                }
+                Map<String, Object> failDone = new HashMap<>();
+                failDone.put("success", false);
+                failDone.put("renderStatusCd", "004");
+                failDone.put("errorMessage", "이미지 생성 중 오류가 발생했습니다.");
+                sendSseEvent(emitter, "done", GSON.toJson(failDone));
+            } finally {
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
+    /**
+     * LLM 응답에서 {@code imageQuery} 값을 파싱한다.
+     * 마크다운 코드 블록(```json ... ```)을 자동으로 제거한다.
+     *
+     * @param aiResponse LLM 응답 원문
+     * @return imageQuery 문자열
+     * @throws RuntimeException 파싱 실패 또는 키 없음
+     */
+    private String parseImageQueryFromLlmResponse(String aiResponse) {
+        if (CommonUtil.isEmpty(aiResponse)) throw new RuntimeException("aiResponse 가 비어 있음");
+        String cleaned = aiResponse.trim();
+        if (cleaned.startsWith("```")) {
+            int firstNewline = cleaned.indexOf('\n');
+            int lastFence    = cleaned.lastIndexOf("```");
+            if (firstNewline > 0 && lastFence > firstNewline) {
+                cleaned = cleaned.substring(firstNewline + 1, lastFence).trim();
+            }
+        }
+        JsonObject obj = JsonParser.parseString(cleaned).getAsJsonObject();
+        if (!obj.has("imageQuery") || obj.get("imageQuery").isJsonNull()) {
+            throw new RuntimeException("imageQuery 키 없음");
+        }
+        return obj.get("imageQuery").getAsString();
+    }
+
+    /**
      * 슬라이드 단건 이미지 생성 (D-5)
-     * doStyleAssembly에서 조립된 IMAGE_GEN_HINT를 image API에 전달해 base64 이미지를 받고,
-     * NCP에 업로드 후 URL을 반환한다.
+     * IMAGE_GEN_HINT를 image API에 전달해 base64 이미지를 받고, NCP에 업로드 후 URL을 반환한다.
+     * IMAGE_GEN_HINT는 온디맨드 이미지 생성 시점에 조립되어 저장된다.
      *
      * @param slide 슬라이드 VO (imageGenHint 필드 필요)
      * @return 렌더링된 이미지 NCP URL (실패 시 null)
@@ -5468,7 +5458,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * 이미지 생성 API 호출 (MeetingServiceImpl.callAiImageApi 동일 패턴)
      * imageGenHint를 query로 전달 → base64 이미지 문자열 반환 (data: 접두사 제거 완료).
      *
-     * @param imageGenHint doStyleAssembly에서 조립된 이미지 생성 힌트
+     * @param imageGenHint 이미지 생성 힌트 문자열
      * @return 순수 base64 문자열 (실패 시 null)
      */
     private String callPtImageApi(String imageGenHint) {
