@@ -1040,6 +1040,30 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return resultMap;
     }
 
+    /**
+     * PT 파일 다운로드 presigned URL 발급 (TB_PT_FILE.PT_FILE_ID 기준)
+     */
+    public Map<String, Object> downloadPtFile(ProposalVO.PtFileVO dataVO) throws Exception {
+        if (dataVO == null || CommonUtil.isEmpty(dataVO.getPtFileId())) {
+            Map<String, Object> empty = new HashMap<>();
+            empty.put("url", "");
+            return empty;
+        }
+
+        ProposalVO.PtFileVO row = proposalDAO.selectPtFileById(dataVO.getPtFileId());
+        if (row == null || CommonUtil.isEmpty(row.getFilePath())) {
+            Map<String, Object> notFound = new HashMap<>();
+            notFound.put("url", "");
+            return notFound;
+        }
+
+        FileVO fileVo = new FileVO();
+        fileVo.setFilePath(row.getFilePath());
+        fileVo.setFileName(row.getFileNm());
+        fileVo.setFileType(row.getFileType());
+        return fileService.createDownloadPresignedUrlForStorageObject(fileVo);
+    }
+
     // ── Step A: 템플릿 설정 저장 ─────────────────────────────────────────────────
 
     /**

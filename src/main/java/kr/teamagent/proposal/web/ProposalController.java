@@ -79,6 +79,31 @@ public class ProposalController extends BaseController {
         }
     }
 
+    /**
+     * PT 파일 다운로드 presigned URL 발급
+     */
+    @RequestMapping("/ai/proposal/downloadPtFile.do")
+    public @ResponseBody Map<String, Object> downloadPtFile(@RequestBody ProposalVO.PtFileVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        try {
+            if (bindingResult.hasErrors()) {
+                resultMap.put("url", "");
+                return resultMap;
+            }
+            if (dataVO.getPtFileId() == null) {
+                resultMap.put("url", "");
+                return resultMap;
+            }
+            resultMap = proposalService.downloadPtFile(dataVO);
+        } catch (Exception e) {
+            logger.error("downloadPtFile failed", e);
+            resultMap.put("url", "");
+        }
+
+        return resultMap;
+    }
+
     /** PT 프로젝트 단건 조회 (상세 페이지 진입 시) */
     @RequestMapping(value = "/ai/proposal/selectPtProject.do", method = RequestMethod.GET)
     @ResponseBody
