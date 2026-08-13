@@ -409,12 +409,21 @@ public class ProposalPptxUtil {
         TemplateLayout headerLayout = parseTemplateLayout(headerComponentsJson, localGson);
         TemplateLayout footerLayout = parseTemplateLayout(footerComponentsJson, localGson);
 
-        int HEADER_H = headerLayout != null && headerLayout.height > 0 ? headerLayout.height : 64;
-        int FOOTER_H = footerLayout != null && footerLayout.height > 0 ? footerLayout.height : 28;
+        // 헤더/푸터 높이: JSON에 height(%) 명시 시 slideH 대비 퍼센트로 환산,
+        // 미지정 시 프론트(ProposalStepTemplateGen.vue)의 headerHeightPct=9 / footerHeightPct=5와 동일한 비율 사용.
+        final double HEADER_PCT_DEFAULT = 0.09;   // 프론트 headerHeightPct와 동일
+        final double FOOTER_PCT_DEFAULT = 0.05;   // 프론트 footerHeightPct와 동일
+
+        int HEADER_H = (headerLayout != null && headerLayout.height > 0)
+                ? (int)(headerLayout.height * slideH / 100.0)
+                : (int)(slideH * HEADER_PCT_DEFAULT);
+        int FOOTER_H = (footerLayout != null && footerLayout.height > 0)
+                ? (int)(footerLayout.height * slideH / 100.0)
+                : (int)(slideH * FOOTER_PCT_DEFAULT);
 
         double scale = slideH / 842.0;
-        HEADER_H = Math.max(40, (int)(HEADER_H * scale));
-        FOOTER_H = Math.max(16, (int)(FOOTER_H * scale));
+        HEADER_H = Math.max(40, HEADER_H);
+        FOOTER_H = Math.max(16, FOOTER_H);
 
         int IMAGE_Y  = HEADER_H;
         int IMAGE_H  = slideH - HEADER_H - FOOTER_H;
@@ -436,9 +445,12 @@ public class ProposalPptxUtil {
 
                 if (useFrameImage && !skipHeaderFooter) {
                     // ── 이미지+이미지 방식 ────────────────────────────────────
-                    // 1) 프레임 이미지(헤더/본문영역/푸터)를 슬라이드 전체 배경으로
+                    // 1) 프레임 이미지 전체 배경 (헤더·푸터 디자인 포함)
                     addImgLetterbox(pptx, slide, frameImageBytes, 0, 0, slideW, slideH, cBg);
-                    // 2) 인포그래픽을 본문 영역(헤더 아래 ~ 푸터 위)에 오버레이
+                    // 2) 동적 텍스트 오버레이 (divider·배지 배경은 프레임 이미지에 이미 있으므로 스킵)
+                    renderHeaderSlots(slide, headerLayout, page, slideW, HEADER_H, scale, cBase, cAccent, true);
+                    renderFooterSlots(slide, footerLayout, page, slideW, FOOTER_H, FOOTER_Y, scale);
+                    // 3) 본문 인포그래픽 오버레이
                     if (page.imageBytes != null && page.imageBytes.length > 0) {
                         addImgLetterbox(pptx, slide, page.imageBytes, 0, IMAGE_Y, slideW, IMAGE_H, null);
                     }
@@ -447,53 +459,12 @@ public class ProposalPptxUtil {
                     addRect(slide, 0, 0, slideW, slideH, cBg);
 
                     if (!skipHeaderFooter) {
-                        // 헤더
+                        // 헤더 배경 + 슬롯 (배경 rect 포함)
                         addRect(slide, 0, 0, slideW, HEADER_H, new Color(0xFF, 0xFF, 0xFF));
-                        if (headerLayout != null && headerLayout.slots != null) {
-                            for (TemplateSlot slot : headerLayout.slots) {
-                                if (slot == null) continue;
-                                String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
-                                int sx = (int)(slot.x * slideW   / 100.0);
-                                int sy = (int)(slot.y * HEADER_H / 100.0);
-                                int sh = Math.max(1, (int)(slotEffectiveHeight(slot) * HEADER_H / 100.0));
-                                // chapterBadge: 정사각형 배지 (높이로 너비 결정)
-                                int sw = ("chapterBadge".equals(slot.key) && slot.width == 0)
-                                        ? sh
-                                        : Math.max(1, (int)(slotEffectiveWidth(slot) * slideW / 100.0));
-                                if ("divider".equals(slot.key) || "divider".equals(slot.type)) {
-                                    addRect(slide, sx, sy, sw, sh,
-                                            slot.bgColor != null ? parseHex(slot.bgColor, cAccent) : cAccent);
-                                } else if (resolvedText != null && !resolvedText.isEmpty()) {
-                                    Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
-                                    // chapterBadge: bgColor 기본값 = baseColor (흰색 텍스트가 보이도록)
-                                    Color bgSlot = slot.bgColor != null ? parseHex(slot.bgColor, null)
-                                                 : "chapterBadge".equals(slot.key) ? cBase
-                                                 : null;
-                                    if (bgSlot != null) addRect(slide, sx, sy, sw, sh, bgSlot);
-                                    double fs = slot.fontSize > 0 ? slot.fontSize * scale : 9 * scale;
-                                    text(slide, resolvedText, sx, sy, sw, sh, fs,
-                                            "bold".equalsIgnoreCase(slot.fontWeight), false, textColor, parseAlign(slot.align));
-                                }
-                            }
-                        }
-                        // 푸터
+                        renderHeaderSlots(slide, headerLayout, page, slideW, HEADER_H, scale, cBase, cAccent, false);
+                        // 푸터 배경 + 슬롯
                         addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, tint(cBase, 0.88f));
-                        if (footerLayout != null && footerLayout.slots != null) {
-                            for (TemplateSlot slot : footerLayout.slots) {
-                                if (slot == null) continue;
-                                String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
-                                int sx = (int)(slot.x * slideW   / 100.0);
-                                int sy = FOOTER_Y + (int)(slot.y * FOOTER_H / 100.0);
-                                int sw = Math.max(1, (int)(slotEffectiveWidth(slot)  * slideW   / 100.0));
-                                int sh = Math.max(1, (int)(slotEffectiveHeight(slot) * FOOTER_H / 100.0));
-                                if (resolvedText != null && !resolvedText.isEmpty()) {
-                                    Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
-                                    double fs = slot.fontSize > 0 ? slot.fontSize * scale : 8 * scale;
-                                    text(slide, resolvedText, sx, sy, sw, sh, fs,
-                                            "bold".equalsIgnoreCase(slot.fontWeight), false, textColor, parseAlign(slot.align));
-                                }
-                            }
-                        }
+                        renderFooterSlots(slide, footerLayout, page, slideW, FOOTER_H, FOOTER_Y, scale);
                         // 본문 이미지
                         if (page.imageBytes != null && page.imageBytes.length > 0) {
                             addImgLetterbox(pptx, slide, page.imageBytes, 0, IMAGE_Y, slideW, IMAGE_H, cBg);
@@ -522,16 +493,21 @@ public class ProposalPptxUtil {
         }
     }
 
-    /** placeholder → 실제 값 치환 */
+    /**
+     * placeholder → 실제 값 치환.
+     * type 기반 동적값(org_name/page_number/company_name)은 text 필드 유무와 관계없이 항상 우선.
+     * (슬롯 편집기가 미리보기용 예시값을 text에 저장해도 실제 출력은 PageInfo 동적값을 사용하도록)
+     */
     private static String resolveSlotText(TemplateSlot slot, PageInfo page,
                                            Color cBase, Color cAccent) {
+        // type 기반 동적값 우선 — text(placeholder) 존재 여부와 무관하게 항상 실제 값 반환
+        if ("org_name".equals(slot.type))     return page.orgNm;
+        if ("page_number".equals(slot.type))  return page.pageLabel;
+        if ("company_name".equals(slot.type)) return page.submitterNm;
+
+        // 그 외: placeholder 문자열 치환 경로 (헤더 슬롯 — chapterBadge, projectNm 등)
         String t = slot.placeholder;
-        if (t == null || t.isEmpty()) {
-            if ("org_name".equals(slot.type))     return page.orgNm;
-            if ("page_number".equals(slot.type))  return page.pageLabel;
-            if ("company_name".equals(slot.type)) return page.submitterNm;
-            return "";
-        }
+        if (t == null || t.isEmpty()) return "";
         return t
             .replace("{chapter_no}",    page.chapterRoman)
             .replace("{project_nm}",    page.projectNm)
@@ -575,8 +551,121 @@ public class ProposalPptxUtil {
         }
     }
 
+    /**
+     * 텍스트 실제 길이 기반 폭 추정 (pt). 한글/한자 등 전각 문자는 fontSize와 거의 동일한 폭,
+     * 영문/숫자 등 반각 문자는 약 0.55배 폭으로 근사.
+     */
+    private static int estimateTextWidthPt(String text, double fontSizePt) {
+        if (text == null || text.isEmpty()) return 0;
+        double width = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            width += (c > 0x3000) ? fontSizePt * 1.0 : fontSizePt * 0.55;
+        }
+        return (int) Math.ceil(width);
+    }
+
     private static int scalePt(int val, double scale) {
         return (int)(val * scale);
+    }
+
+    /**
+     * 헤더 슬롯 순회·렌더링 공통 메서드.
+     *
+     * @param textOverlayOnly true  — 프레임 이미지 경로: divider rect·배지 배경 스킵, 텍스트만 오버레이
+     *                        false — 코드 렌더링 경로: divider rect·배지 배경(bgSlot)도 함께 그림
+     */
+    private static void renderHeaderSlots(XSLFSlide slide,
+            TemplateLayout headerLayout, PageInfo page,
+            int slideW, int HEADER_H, double scale,
+            Color cBase, Color cAccent, boolean textOverlayOnly) {
+        if (headerLayout == null || headerLayout.slots == null) return;
+        for (TemplateSlot slot : headerLayout.slots) {
+            if (slot == null) continue;
+            String resolvedText = resolveSlotText(slot, page, cBase, cAccent);
+            int sx = (int)(slot.x * slideW   / 100.0);
+            int sy = (int)(slot.y * HEADER_H / 100.0);
+            int sh = Math.max(1, (int)(slotEffectiveHeight(slot) * HEADER_H / 100.0));
+            // chapterBadge: JSON에 height 미지정 시 fontSize 기반 정사각형 크기로 override.
+            // slotEffectiveHeight의 100-y fallback이 배지를 과도하게 크게 만들어
+            // 인접 chapterTitle 슬롯과 겹치는 문제 방지. height 명시된 경우는 그 값 존중.
+            if ("chapterBadge".equals(slot.key) && slot.height == 0) {
+                double fsBadge = slot.fontSize > 0 ? slot.fontSize * scale : 9 * scale;
+                sh = Math.max(16, (int)(fsBadge * 1.8));
+            }
+            // 폰트 크기 — sw 계산(텍스트 길이 기반)에 먼저 필요하므로 여기서 산출
+            double fs = slot.fontSize > 0 ? slot.fontSize * scale : 9 * scale;
+            // sw 계산: ① chapterBadge → 정사각형(sh),
+            //          ② width 미지정 텍스트 슬롯 → 텍스트 길이 기반 추정 (정렬-좌표 불일치 방지),
+            //          ③ 그 외(divider, width 명시, known-key) → 기존 slotEffectiveWidth 경로
+            int sw;
+            if ("chapterBadge".equals(slot.key) && slot.width == 0) {
+                sw = sh;  // 정사각형 배지
+            } else if (slot.width == 0 && !"divider".equals(slot.key) && !"divider".equals(slot.type)
+                    && resolvedText != null && !resolvedText.isEmpty()) {
+                // width 미지정 텍스트 슬롯 — 텍스트 길이 기반 폭 추정 (여유 패딩 6pt 추가)
+                // 큰 박스(100-x%) + align=right 조합으로 x 좌표가 무력화되는 현상 방지
+                int estimatedPt = estimateTextWidthPt(resolvedText, fs) + 6;
+                sw = Math.max(1, estimatedPt);
+            } else {
+                sw = Math.max(1, (int)(slotEffectiveWidth(slot) * slideW / 100.0));
+            }
+            // 우측/하단 경계 클램핑 — sx+sw > slideW 또는 sy+sh > HEADER_H 방지
+            if (sx + sw > slideW) sw = Math.max(1, slideW - sx);
+            if (sy + sh > HEADER_H) sh = Math.max(1, HEADER_H - sy);
+            if ("divider".equals(slot.key) || "divider".equals(slot.type)) {
+                // 프레임 이미지 경로: divider는 프레임에 이미 그려져 있으므로 스킵
+                if (!textOverlayOnly) {
+                    addRect(slide, sx, sy, sw, sh,
+                            slot.bgColor != null ? parseHex(slot.bgColor, cAccent) : cAccent);
+                }
+            } else if (resolvedText != null && !resolvedText.isEmpty()) {
+                Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
+                // chapterBadge: bgColor 기본값 = baseColor (흰색 텍스트가 보이도록)
+                Color bgSlot = slot.bgColor != null ? parseHex(slot.bgColor, null)
+                             : "chapterBadge".equals(slot.key) ? cBase
+                             : null;
+                // chapterBadge는 정사각형 배지라 박스 높이(sh) 유지, 그 외 텍스트 슬롯은
+                // fontSize*1.4 한 줄 높이 + noWrap으로 인접 슬롯 겹침 방지
+                boolean isChapterBadge = "chapterBadge".equals(slot.key);
+                int shText = isChapterBadge ? sh : Math.max(12, (int)(fs * 1.4));
+                // 프레임 이미지 경로: 배지 배경은 프레임에 이미 있으므로 스킵
+                if (!textOverlayOnly && bgSlot != null) {
+                    addRect(slide, sx, sy, sw, shText, bgSlot);
+                }
+                text(slide, resolvedText, sx, sy, sw, shText, fs,
+                        "bold".equalsIgnoreCase(slot.fontWeight), false, textColor,
+                        parseAlign(slot.align), !isChapterBadge);
+            }
+        }
+    }
+
+    /**
+     * 푸터 슬롯 순회·렌더링 공통 메서드.
+     * 푸터는 divider·배지 배경이 없으므로 textOverlayOnly 구분 불필요.
+     */
+    private static void renderFooterSlots(XSLFSlide slide,
+            TemplateLayout footerLayout, PageInfo page,
+            int slideW, int FOOTER_H, int FOOTER_Y, double scale) {
+        if (footerLayout == null || footerLayout.slots == null) return;
+        for (TemplateSlot slot : footerLayout.slots) {
+            if (slot == null) continue;
+            String resolvedText = resolveSlotText(slot, page, null, null);
+            int sx = (int)(slot.x * slideW  / 100.0);
+            int sy = FOOTER_Y + (int)(slot.y * FOOTER_H / 100.0);
+            int sw = Math.max(1, (int)(slotEffectiveWidth(slot) * slideW / 100.0));
+            // 우측 경계 클램핑 — sx+sw > slideW 방지 (예: right 슬롯 x=90%+width=30% → 120% 초과)
+            if (sx + sw > slideW) sw = Math.max(1, slideW - sx);
+            if (resolvedText != null && !resolvedText.isEmpty()) {
+                Color textColor = slot.color != null ? parseHex(slot.color, DARK_TEXT) : DARK_TEXT;
+                double fs = slot.fontSize > 0 ? slot.fontSize * scale : 8 * scale;
+                // 한 줄 높이 + noWrap — 푸터 슬롯 겹침 방지
+                int shLine = Math.max(10, (int)(fs * 1.4));
+                text(slide, resolvedText, sx, sy, sw, shLine, fs,
+                        "bold".equalsIgnoreCase(slot.fontWeight), false, textColor,
+                        parseAlign(slot.align), true);
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1329,8 +1418,21 @@ public class ProposalPptxUtil {
             int x, int y, int w, int h,
             double fs, boolean bold, boolean italic,
             Color color, TextParagraph.TextAlign align) {
+        text(slide, txt, x, y, w, h, fs, bold, italic, color, align, false);
+    }
+
+    /**
+     * 텍스트박스 생성. noWrap=true 이면 word-wrap을 끄고 한 줄로만 렌더링한다.
+     * 슬롯 기반 헤더/푸터 렌더링에서 좁은 x 위치로 인한 줄바꿈·겹침 방지용.
+     */
+    private static void text(XSLFSlide slide, String txt,
+            int x, int y, int w, int h,
+            double fs, boolean bold, boolean italic,
+            Color color, TextParagraph.TextAlign align, boolean noWrap) {
         XSLFTextBox tb = slide.createTextBox();
         tb.setAnchor(new Rectangle(x, y, w, h));
+        if (noWrap) tb.setWordWrap(false);
+        tb.clearText();   // createTextBox()가 만든 기본 빈 문단 제거 — 없으면 텍스트가 두 번째 줄로 밀림
         XSLFTextParagraph p = tb.addNewTextParagraph();
         if (align != null) p.setTextAlign(align);
         XSLFTextRun r = p.addNewTextRun();

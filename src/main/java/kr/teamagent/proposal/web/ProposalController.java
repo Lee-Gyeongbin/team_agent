@@ -546,6 +546,19 @@ public class ProposalController extends BaseController {
         return proposalService.streamRenderSectionImages(ptProjectId, tocId);
     }
 
+    /** 슬라이드 단건 인포그래픽 이미지 생성 SSE (버튼 클릭 시 호출) */
+    @RequestMapping(value = "/ai/proposal/streamGenerateSlideImage.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamGenerateSlideImage(
+            @RequestParam String slideId,
+            @RequestParam String modelId,
+            @RequestParam String agentId,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamGenerateSlideImage(slideId, modelId, agentId);
+    }
+
     /** D-4 — 소목차 확인 → 다음 진행 */
     @RequestMapping(value = "/ai/proposal/confirmSection.do", method = RequestMethod.POST)
     @ResponseBody
