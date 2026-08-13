@@ -612,4 +612,18 @@ public class ProposalDAO extends EgovComAbstractDAO {
         update("proposal.updateTemplateFramePath", vo);
     }
 
+    /**
+     * PT 템플릿 표지 생성 상태 코드만 업데이트
+     */
+    public void updateTemplateCoverStatus(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateCoverStatus", vo);
+    }
+
+    /**
+     * PT 템플릿 표지 이미지 경로 + 상태 코드 업데이트
+     */
+    public void updateTemplateCoverPath(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateCoverPath", vo);
+    }
+
 }

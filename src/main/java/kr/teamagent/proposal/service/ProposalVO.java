@@ -781,6 +781,10 @@ public class ProposalVO {
         private String modifyDt;
         /** 템플릿 프레임 이미지 NCP 경로 (Step E 확정 후 비동기 생성) */
         private String frameImagePath;
+        /** 표지 배경 이미지 NCP 경로 (사용자 트리거 시 동기 생성) */
+        private String coverImagePath;
+        /** 표지 이미지 생성 상태 코드 (PT000007 재사용: 001=대기, 002=생성중, 003=완료, 004=실패) */
+        private String coverGenStatusCd;
     }
 
     /**

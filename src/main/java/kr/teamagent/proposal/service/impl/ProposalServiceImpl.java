@@ -5584,6 +5584,28 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 표지 배경 이미지 presigned URL 조회 (미리보기용).
+     * TB_PT_TEMPLATE.COVER_IMAGE_PATH(objectKey)를 읽어 FileService로 presigned URL 생성.
+     */
+    public Map<String, Object> viewCoverImage(String ptProjectId) throws Exception {
+        ProposalVO.PtTemplateVO template = proposalDAO.selectPtTemplate(ptProjectId);
+        Map<String, Object> notFound = new HashMap<>();
+        notFound.put("viewType", "DOWNLOAD");
+        notFound.put("reason", "FILE_NOT_FOUND");
+        notFound.put("url", "");
+
+        if (template == null || CommonUtil.isEmpty(template.getCoverImagePath())) {
+            return notFound;
+        }
+
+        FileVO fileVo = new FileVO();
+        fileVo.setFilePath(template.getCoverImagePath());
+        fileVo.setFileName("cover.png");
+        fileVo.setFileType("image/png");
+        return fileService.createViewPresignedUrlForStorageObject(fileVo);
+    }
+
+    /**
      * 슬라이드 이미지 미리보기
      * @param dataVO
      * @return
@@ -5756,6 +5778,151 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             baseColor, safeCompany,
             docSize
         );
+    }
+
+    // ── 표지 이미지 생성 ──────────────────────────────────────────────────────────
+
+    /**
+     * TB_PROMPT(STAGE_CD='S3_COVER_TEMPLATE') 텍스트를 조회하고,
+     * TB_PT_PROJECT + PROJECT_CONFIG_JSON 값으로 {{}} 플레이스홀더를 치환해 최종 프롬프트를 반환한다.
+     *
+     * <p>LLM 호출 없음 — 치환된 텍스트를 callPtImageApi에 직접 전달하기 위한 용도.
+     */
+    private String buildCoverPrompt(String ptProjectId, String agentId) {
+        String projectNm      = "";
+        String orgNm          = "";
+        String submissionDate = "";
+        String companyNm      = "";
+        String writingStyle   = "formal";
+        String baseColor      = "\"#5B4FE9\",\"#8B7FFF\",\"#EFECFE\"";
+        String accentColor    = "\"#E08A2C\",\"#22A06B\"";
+        String docSize        = "169";
+
+        try {
+            ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+            if (project != null) {
+                projectNm      = CommonUtil.nullToBlank(project.getProjectNm());
+                orgNm          = CommonUtil.nullToBlank(project.getOrgNm());
+                submissionDate = CommonUtil.nullToBlank(project.getDueDt());
+
+                String configJson = project.getProjectConfigJson();
+                if (CommonUtil.isNotEmpty(configJson)) {
+                    JsonObject cfgRoot = JsonParser.parseString(configJson).getAsJsonObject();
+
+                    if (cfgRoot.has("template") && !cfgRoot.get("template").isJsonNull()) {
+                        JsonObject tmpl = cfgRoot.getAsJsonObject("template");
+                        String ds = getStrOrNull(tmpl, "docSize");
+                        if (CommonUtil.isNotEmpty(ds)) docSize = ds;
+                    }
+
+                    if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
+                        JsonObject settings = cfgRoot.getAsJsonObject("settings");
+
+                        String sn = getStrOrNull(settings, "submitterNm");
+                        if (CommonUtil.isNotEmpty(sn)) companyNm = sn;
+
+                        String ws = getStrOrNull(settings, "writingStyle");
+                        if (CommonUtil.isNotEmpty(ws)) writingStyle = ws;
+
+                        if (settings.has("colors") && !settings.get("colors").isJsonNull()) {
+                            JsonObject colors = settings.getAsJsonObject("colors");
+                            List<String> bases   = colors.has("base")   && !colors.get("base").isJsonNull()   ? jsonArrayToList(colors.getAsJsonArray("base"))   : java.util.Collections.emptyList();
+                            List<String> accents = colors.has("accent") && !colors.get("accent").isJsonNull() ? jsonArrayToList(colors.getAsJsonArray("accent")) : java.util.Collections.emptyList();
+                            if (!bases.isEmpty())   baseColor   = bases.stream().map(c -> "\"" + c + "\"").collect(java.util.stream.Collectors.joining(","));
+                            if (!accents.isEmpty()) accentColor = accents.stream().map(c -> "\"" + c + "\"").collect(java.util.stream.Collectors.joining(","));
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[PT Cover] buildCoverPrompt 파싱 실패, 기본값 사용 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+
+        // safe fallback
+        String safeProject  = projectNm.isEmpty()      ? "제안서"   : projectNm;
+        String safeOrg      = orgNm.isEmpty()           ? "발주기관" : orgNm;
+        String safeCompany  = companyNm.isEmpty()       ? "제안사"   : companyNm;
+        String safeDate     = submissionDate.isEmpty()  ? ""         : submissionDate;
+        String safeStyle    = writingStyle.isEmpty()    ? "formal"   : writingStyle;
+
+        // TB_PROMPT에서 STAGE_CD='S3_COVER_TEMPLATE' 텍스트 조회
+        String promptTemplate = null;
+        try {
+            promptTemplate = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_COVER_TEMPLATE");
+        } catch (Exception e) {
+            logger.warn("[PT Cover] TB_PROMPT 'S3_COVER_TEMPLATE' 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+        if (CommonUtil.isEmpty(promptTemplate)) {
+            throw new RuntimeException("표지 이미지 프롬프트가 등록되어 있지 않습니다. TB_PROMPT에 STAGE_CD='S3_COVER_TEMPLATE'인 프롬프트를 등록해 주세요.");
+        }
+
+        // {{}} 플레이스홀더 치환 (String.replace — LLM 지시문 방식 사용 금지)
+        String prompt = promptTemplate
+                .replace("{{projectNm}}",      safeProject)
+                .replace("{{orgNm}}",          safeOrg)
+                .replace("{{companyNm}}",      safeCompany)
+                .replace("{{submissionDate}}", safeDate)
+                .replace("{{docSize}}",        docSize)
+                .replace("{{baseColor}}",      baseColor)
+                .replace("{{accentColor}}",    accentColor)
+                .replace("{{writingStyle}}",   safeStyle);
+
+        // callPtImageApi 내부 정규식(docSize=(\S+))과 호환되는 마커 append
+        return prompt + " | docSize=" + docSize;
+    }
+
+    /**
+     * 표지 배경 이미지를 생성하고 NCP에 업로드한 뒤 DB를 갱신한다.
+     *
+     * <p>처리 흐름:
+     * <ol>
+     *   <li>COVER_GEN_STATUS_CD = '002' (생성중) 설정</li>
+     *   <li>buildCoverPrompt → callPtImageApi 호출</li>
+     *   <li>실패: COVER_GEN_STATUS_CD = '004', 기존 이미지 경로 보존, return</li>
+     *   <li>성공: NCP 업로드 → COVER_IMAGE_PATH + COVER_GEN_STATUS_CD = '003' 갱신</li>
+     * </ol>
+     */
+    private void generateCoverImage(String ptProjectId, String agentId) {
+        logger.info("[PT Cover] 표지 이미지 생성 시작 (ptProjectId={})", ptProjectId);
+        // 1. 생성중(002) 상태 설정
+        ProposalVO.PtTemplateVO statusVO = new ProposalVO.PtTemplateVO();
+        statusVO.setPtProjectId(ptProjectId);
+        statusVO.setCoverGenStatusCd("002");
+        proposalDAO.updateTemplateCoverStatus(statusVO);
+
+        // 2. 프롬프트 빌드
+        String prompt;
+        try {
+            prompt = buildCoverPrompt(ptProjectId, agentId);
+        } catch (Exception e) {
+            logger.warn("[PT Cover] 프롬프트 빌드 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+            statusVO.setCoverGenStatusCd("004");
+            proposalDAO.updateTemplateCoverStatus(statusVO);
+            return;
+        }
+
+        // 3. 이미지 API 호출 (기존 callPtImageApi 재사용 — 시그니처 변경 없음)
+        String base64Image = callPtImageApi(prompt);
+        if (base64Image == null || base64Image.isEmpty()) {
+            logger.warn("[PT Cover] 이미지 API 응답 없음 (ptProjectId={})", ptProjectId);
+            statusVO.setCoverGenStatusCd("004");
+            proposalDAO.updateTemplateCoverStatus(statusVO);
+            return;
+        }
+
+        // 4. Base64 디코딩 → NCP 업로드
+        byte[] imageBytes = Base64.getDecoder().decode(base64Image);
+        String objectKey  = "pt-cover-images/" + ptProjectId + "/cover.png";
+        uploadNcpObject(objectKey, imageBytes);
+
+        // 5. COVER_IMAGE_PATH + 완료(003) 상태 갱신
+        ProposalVO.PtTemplateVO pathVO = new ProposalVO.PtTemplateVO();
+        pathVO.setPtProjectId(ptProjectId);
+        pathVO.setCoverImagePath(objectKey);
+        pathVO.setCoverGenStatusCd("003");
+        proposalDAO.updateTemplateCoverPath(pathVO);
+
+        logger.info("[PT Cover] 표지 이미지 저장 완료 (ptProjectId={}, key={})", ptProjectId, objectKey);
     }
 
     // ── 이미지 스택 합성 ──────────────────────────────────────────────────────────
@@ -6451,6 +6618,21 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 logger.warn("[PT Frame] 프레임 이미지 생성 실패 (ptProjectId={}): {}", snapshot.getPtProjectId(), e.getMessage());
             }
         });
+    }
+
+    /**
+     * 표지 이미지 생성 · 재생성 (동기, 사용자 명시적 트리거).
+     *
+     * <p>이미지 생성 완료 후 현재 템플릿 레코드를 반환한다.
+     * 프론트에서는 응답의 {@code coverImagePath}로 NCP 이미지를 렌더링하면 된다.
+     *
+     * @param ptProjectId 프로젝트 ID
+     * @param agentId     TB_PROMPT_APPLY_AGT 조회 키 (STAGE_CD='S3_COVER_TEMPLATE')
+     * @return 갱신된 PtTemplateVO (coverImagePath, coverGenStatusCd 포함)
+     */
+    public ProposalVO.PtTemplateVO generatePtCoverImage(String ptProjectId, String agentId) {
+        generateCoverImage(ptProjectId, agentId);
+        return proposalDAO.selectPtTemplate(ptProjectId);
     }
 
     @Transactional(rollbackFor = Exception.class)

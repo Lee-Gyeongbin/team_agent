@@ -1263,6 +1263,8 @@
             , GEN_STATUS_CD                         AS GEN_STATUS_CD
             , ERROR_MSG                             AS ERROR_MSG
             , FRAME_IMAGE_PATH                      AS FRAME_IMAGE_PATH
+            , COVER_IMAGE_PATH                      AS COVER_IMAGE_PATH
+            , COVER_GEN_STATUS_CD                   AS COVER_GEN_STATUS_CD
             , CREATE_USER_ID                        AS CREATE_USER_ID
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
             , MODIFY_USER_ID                        AS MODIFY_USER_ID
@@ -1315,6 +1317,25 @@
         SET
             FRAME_IMAGE_PATH = #{frameImagePath}
             , MODIFY_DT      = NOW()
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <update id="updateTemplateCoverStatus" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 표지 생성 상태 코드만 업데이트 proposal.updateTemplateCoverStatus */
+        UPDATE TB_PT_TEMPLATE
+        SET
+            COVER_GEN_STATUS_CD = #{coverGenStatusCd}
+            , MODIFY_DT         = NOW()
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <update id="updateTemplateCoverPath" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 표지 이미지 경로 + 상태 업데이트 proposal.updateTemplateCoverPath */
+        UPDATE TB_PT_TEMPLATE
+        SET
+            COVER_IMAGE_PATH    = #{coverImagePath}
+            , COVER_GEN_STATUS_CD = #{coverGenStatusCd}
+            , MODIFY_DT         = NOW()
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 

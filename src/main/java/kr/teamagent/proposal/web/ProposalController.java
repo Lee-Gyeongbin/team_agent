@@ -605,6 +605,25 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /** 표지 배경 이미지 presigned URL 조회 (미리보기용) */
+    @RequestMapping("/ai/proposal/viewPtCoverImage.do")
+    public @ResponseBody Map<String, Object> viewPtCoverImage(@RequestParam("ptProjectId") String ptProjectId) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (ptProjectId == null || ptProjectId.trim().isEmpty()) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "MISSING_PT_PROJECT_ID");
+                return resultMap;
+            }
+            resultMap = proposalService.viewCoverImage(ptProjectId);
+        } catch (Exception e) {
+            logger.error("[PT Cover] viewPtCoverImage 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("viewType", "DOWNLOAD");
+            resultMap.put("reason", "ERROR");
+        }
+        return resultMap;
+    }
+
     @RequestMapping("/ai/proposal/viewSlideImage.do")
     public @ResponseBody Map<String, Object> viewSlideImage(@RequestBody ProposalVO.SlideVO dataVO, BindingResult bindingResult) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
@@ -760,6 +779,34 @@ public class ProposalController extends BaseController {
             resultMap.put("msg", e.getMessage());
         } catch (Exception e) {
             logger.error("[PT E] regeneratePtTemplate 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 표지 이미지 생성 / 재생성.
+     *
+     * <p>사용자가 표지형 탭에서 "표지 생성" 또는 "표지 재생성" 버튼을 클릭할 때 호출된다.
+     * 동기 처리 — 응답에 {@code coverImagePath}, {@code coverGenStatusCd}가 포함되므로
+     * 프론트에서는 응답을 받은 후 해당 경로로 이미지를 렌더링하면 된다.
+     */
+    @RequestMapping(value = "/ai/proposal/generatePtCoverImage.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView generatePtCoverImage(@RequestParam("ptProjectId") String ptProjectId,
+                                              @RequestParam("agentId") String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.generatePtCoverImage(ptProjectId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] generatePtCoverImage 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] generatePtCoverImage 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
             resultMap.put("result", "FAIL");
             resultMap.put("msg", e.getMessage());
         }
