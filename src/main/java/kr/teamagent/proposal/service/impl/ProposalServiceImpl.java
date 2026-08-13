@@ -6314,7 +6314,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                             s.getLayoutType()));   // layoutTypeCd 추가 — cover(001)/divider(002) 제외 처리용
                 }
 
-                // PPTX는 코드 기반 헤더/푸터 렌더링 사용 (슬라이드별 동적 텍스트 반영)
+                // 항상 코드 기반 헤더/푸터 렌더링 사용 (frameImageBytes=null → useFrameImage=false)
+                // 프레임 이미지(FRAME_IMAGE_PATH)는 Step D 미리보기 전용이며 실제 출력에는 사용하지 않음
                 pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildProposalDocWithImages(
                         pages, docSize, bgColor, baseColor, accentColor,
                         headerComponentsJson, footerComponentsJson,
@@ -6529,7 +6530,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             if (CommonUtil.isEmpty(aiResponse)) {
                 throw new RuntimeException("LLM 응답이 비어 있습니다.");
             }
-
             // JSON 파싱
             String headerJson = extractJsonBlock(aiResponse, "header");
             String footerJson = extractJsonBlock(aiResponse, "footer");
@@ -6537,7 +6537,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             if (CommonUtil.isEmpty(headerJson) || CommonUtil.isEmpty(footerJson)) {
                 throw new RuntimeException("LLM 응답에서 header/footer JSON을 추출할 수 없습니다.");
             }
-
             // 레이아웃 검증 (width/height 누락, 겹침)
             kr.teamagent.common.util.ProposalPptxUtil.TemplateValidationResult headerVal =
                     kr.teamagent.common.util.ProposalPptxUtil.validateTemplateJson(headerJson, ptProjectId);
