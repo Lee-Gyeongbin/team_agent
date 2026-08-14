@@ -287,7 +287,7 @@ public class ProposalPptxUtil {
         Color cBg     = parseHex(bgColor,     new Color(0xFF, 0xFF, 0xFF));
         Color cBase   = parseHex(baseColor,   new Color(0x5B, 0x4F, 0xE9));
         Color cAccent = parseHex(accentColor, new Color(0xE0, 0x8A, 0x2C));
-        Color cFooter = tint(cBase, 0.88f);
+        Color cFooter = new Color(0xF8, 0xF9, 0xFA);
 
         // ── 레이아웃 상수 (A4 842pt 기준, 비율 스케일 적용) ─────────────────
         double scale     = slideH / 842.0;
@@ -348,7 +348,7 @@ public class ProposalPptxUtil {
                             10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
                 }
 
-                // ── 푸터: 연한 baseColor 바 ──────────────────────────────
+                // ── 푸터: 밝은 회색 바 (#F8F9FA, 프레임 프롬프트와 동일) ──
                 addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, cFooter);
                 // 발주기관 (좌)
                 text(slide, page.orgNm, MARGIN, FOOTER_Y + 3,
@@ -462,8 +462,8 @@ public class ProposalPptxUtil {
                         // 헤더 배경 + 슬롯 (배경 rect 포함)
                         addRect(slide, 0, 0, slideW, HEADER_H, new Color(0xFF, 0xFF, 0xFF));
                         renderHeaderSlots(slide, headerLayout, page, slideW, HEADER_H, scale, cBase, cAccent, false);
-                        // 푸터 배경 + 슬롯
-                        addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, tint(cBase, 0.88f));
+                        // 푸터 배경 + 슬롯 (프레임 프롬프트·프론트 미리보기와 동일: #F8F9FA)
+                        addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, new Color(0xF8, 0xF9, 0xFA));
                         renderFooterSlots(slide, footerLayout, page, slideW, FOOTER_H, FOOTER_Y, scale);
                         // 본문 이미지
                         if (page.imageBytes != null && page.imageBytes.length > 0) {
