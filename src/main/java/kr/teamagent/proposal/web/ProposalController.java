@@ -798,7 +798,7 @@ public class ProposalController extends BaseController {
                                               @RequestParam("agentId") String agentId) {
         HashMap<String, Object> resultMap = new HashMap<>();
         try {
-            ProposalVO.PtTemplateVO data = proposalService.generatePtCoverImage(ptProjectId, agentId);
+            ProposalVO.PtTemplateVO data = proposalService.generatePtCoverImage(ptProjectId, agentId, null, null);
             resultMap.put("result", "OK");
             resultMap.put("data", data);
         } catch (RuntimeException e) {
@@ -1152,4 +1152,27 @@ public class ProposalController extends BaseController {
         }
         return new ModelAndView("jsonView", resultMap);
     }
+
+    /** 표지형 보완요청 채팅 */
+    @RequestMapping(value = "/ai/proposal/chatCover.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView chatCover(@RequestBody ProposalVO.CoverChatVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.generatePtCoverImage(
+                    vo.getPtProjectId(), vo.getAgentId(), "complement_request", vo.getMessage());
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] generatePtCoverImage 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] generatePtCoverImage 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

@@ -438,6 +438,8 @@ public class ProposalVO {
          * Step6 stale 판별: TOC.MODIFY_DT vs SLIDE.CREATE_DT
          */
         private String modifyDt;
+        /** 수정자 ID */
+        private String modifyUserId;
         // ── 파싱/계층 구조용 (DB 컬럼 아님, transient) ──
         /** LLM 응답에서 받은 평가항목명 */
         private String linkedEvalCriteriaNm;
@@ -515,6 +517,8 @@ public class ProposalVO {
         private String ptProjectId;
         /** 제안 구분 코드 (G=공공, P=민간) */
         private String targetTypeCd;
+        /** 수정자 ID */
+        private String modifyUserId;
     }
 
     /**
@@ -614,6 +618,8 @@ public class ProposalVO {
         private String createUserId;
         /** 생성일시 */
         private String createDt;
+        /** 수정자 ID */
+        private String modifyUserId;
         /** 수정일시 */
         private String modifyDt;
     }
@@ -785,6 +791,10 @@ public class ProposalVO {
         private String coverImagePath;
         /** 표지 이미지 생성 상태 코드 (PT000007 재사용: 001=대기, 002=생성중, 003=완료, 004=실패) */
         private String coverGenStatusCd;
+
+        // ── DB에 저장되지 않는 런타임 필드 ──────────────────────────────────
+        /** 표지 보완요청 채팅 AI 응답 요약 — DB 미저장, chatCover 응답 시 설정 */
+        private String aiMessage;
     }
 
     /**
@@ -794,6 +804,19 @@ public class ProposalVO {
     public static class PtTemplateRegenerateVO {
         /** 프로젝트 ID */
         private String ptProjectId;
+    }
+
+    /**
+     * 표지 보완요청 채팅 요청 VO
+     */
+    @Data
+    public static class CoverChatVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 에이전트 ID */
+        private String agentId;
+        /** 사용자 보완 요청 메시지 */
+        private String message;
     }
 
     /**
@@ -990,5 +1013,15 @@ public class ProposalVO {
         private String userFeedback;
         private String modelId;
         private String agentId;
+    }
+
+    @Data
+    public static class ChatCoverVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 템플릿 ID */
+        private String templateId;
+        /** 사용자 보완 요청 메시지 */
+        private String message;
     }
 }

@@ -507,6 +507,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ProposalVO.ProjectVO updateVO = new ProposalVO.ProjectVO();
         updateVO.setPtProjectId(ptProjectId);
         updateVO.setWritingGuidelineJson(parsed.getWritingGuidelineJson());
+        updateVO.setModifyUserId(userId);
         proposalDAO.updateProjectWritingGuideline(updateVO);
 
         // TOC 초기화 + 재등록 (Stage1에서 직접 TB_PT_TOC insert — guideContent 포함)
@@ -545,6 +546,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ProposalVO.ProjectVO statusVO = new ProposalVO.ProjectVO();
         statusVO.setPtProjectId(ptProjectId);
         statusVO.setStatusCd("002");
+        statusVO.setModifyUserId(userId);
         proposalDAO.updateProjectStatus(statusVO);
     }
 
@@ -1125,6 +1127,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ProposalVO.ProjectVO updateVO = new ProposalVO.ProjectVO();
         updateVO.setPtProjectId(vo.getPtProjectId());
         updateVO.setProjectConfigJson(GSON.toJson(root));
+        updateVO.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateProjectConfigJson(updateVO);
 
         // 7. Step A 완료 → TOC 단계(1) 해제
@@ -1509,6 +1512,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ProposalVO.ProjectVO updateVO = new ProposalVO.ProjectVO();
         updateVO.setPtProjectId(vo.getPtProjectId());
         updateVO.setProjectConfigJson(GSON.toJson(root));
+        updateVO.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateProjectConfigJson(updateVO);
 
         // Step C 완료 → 본문 생성 단계(3) 해제
@@ -1560,6 +1564,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         if (!"G".equals(vo.getTargetTypeCd()) && !"P".equals(vo.getTargetTypeCd())) {
             throw new RuntimeException("targetTypeCd는 'G'(공공) 또는 'P'(민간)이어야 합니다.");
         }
+        vo.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateProjectTargetType(vo);
         logger.info("[PT StepC] targetTypeCd 업데이트 (ptProjectId={}, targetTypeCd={})", vo.getPtProjectId(), vo.getTargetTypeCd());
     }
@@ -1617,6 +1622,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * @param vo tocId, sectionNm
      */
     public void updateTocItem(ProposalVO.TocVO vo) throws Exception {
+        vo.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateTocItem(vo);
     }
 
@@ -1634,7 +1640,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      */
     public void reorderTocItems(ProposalVO.TocReorderVO vo) throws Exception {
         if (vo.getItems() == null || vo.getItems().isEmpty()) return;
+        String modifyUserId = SessionUtil.getUserId();
         for (ProposalVO.TocVO item : vo.getItems()) {
+            item.setModifyUserId(modifyUserId);
             proposalDAO.updateTocSortOrd(item);
         }
     }
@@ -2062,6 +2070,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 ProposalVO.ProjectVO statusVO = new ProposalVO.ProjectVO();
                 statusVO.setPtProjectId(ptProjectId);
                 statusVO.setStage2StatusCd(STAGE2_STATUS_PROBLEM_SAVED);
+                statusVO.setModifyUserId(userId);
                 proposalDAO.updateStage2StatusCd(statusVO);
                 return null;
             } catch (RuntimeException re) {
@@ -2211,6 +2220,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     updToc.setLinkedEvalCriteriaId(evalCriteriaId);
                     updToc.setCoveredReqIdsJson(coveredReqIdsJson);
                     updToc.setPlannedSlideCnt(plannedSlideCnt);
+                    updToc.setModifyUserId(SessionUtil.getUserId());
                     logger.info("[PT Stage2] 001 UPDATE 실행: TOC_ID='{}', title(기대값)='{}', evalCriteriaId='{}' (ptProjectId={})",
                             updToc.getTocId(), llmToc.getSectionNm(), evalCriteriaId, ptProjectId);
                     proposalDAO.updateTocEvalLinkAndReqIds(updToc);
@@ -2326,6 +2336,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 ProposalVO.ProjectVO statusVO = new ProposalVO.ProjectVO();
                 statusVO.setPtProjectId(ptProjectId);
                 statusVO.setStatusCd("003"); // 003=완료(Stage 2까지)
+                statusVO.setModifyUserId(userId);
                 proposalDAO.updateProjectStatus(statusVO);
                 statusVO.setStage2StatusCd(STAGE2_STATUS_STRATEGY_DONE);
                 proposalDAO.updateStage2StatusCd(statusVO);
@@ -2345,6 +2356,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             ProposalVO.ProjectVO vo = new ProposalVO.ProjectVO();
             vo.setPtProjectId(ptProjectId);
             vo.setStage2StatusCd(stage2StatusCd);
+            vo.setModifyUserId(SessionUtil.getUserId());
             proposalDAO.updateStage2StatusCd(vo);
             return null;
         });
@@ -2670,6 +2682,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             upd.setTocId(tocId);
             upd.setLinkedEvalCriteriaId(evalId);
             upd.setCoveredReqIdsJson(coveredJson);
+            upd.setModifyUserId(SessionUtil.getUserId());
             proposalDAO.updateTocMappingUser(upd);
             dbToc = proposalDAO.selectTocById(tocId);
         }
@@ -4727,6 +4740,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         updateVO.setStepFlowBarJson(parsed0.has("stepFlowBar") && !parsed0.get("stepFlowBar").isJsonNull()
                                 ? GSON.toJson(parsed0.get("stepFlowBar")) : null);
                         updateVO.setRenderStatusCd("002");
+                        updateVO.setModifyUserId(SessionUtil.getUserId());
                         proposalDAO.updateSlide(updateVO);
 
                         // 본문이 갱신됐으므로 '001'(이미지 생성 대기)로 리셋
@@ -5693,6 +5707,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ProposalVO.PtTemplateVO patch = new ProposalVO.PtTemplateVO();
         patch.setPtProjectId(ptProjectId);
         patch.setFrameImagePath(objectKey);
+        patch.setModifyUserId(template.getModifyUserId() != null ? template.getModifyUserId() : SessionUtil.getUserId());
         proposalDAO.updateTemplateFramePath(patch);
 
         logger.info("[PT Frame] 프레임 이미지 저장 완료 (ptProjectId={}, key={})", ptProjectId, objectKey);
@@ -5882,18 +5897,23 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      *   <li>성공: NCP 업로드 → COVER_IMAGE_PATH + COVER_GEN_STATUS_CD = '003' 갱신</li>
      * </ol>
      */
-    private void generateCoverImage(String ptProjectId, String agentId) {
+    private void generateCoverImage(String ptProjectId, String agentId, String requestType, String message) {
         logger.info("[PT Cover] 표지 이미지 생성 시작 (ptProjectId={})", ptProjectId);
         // 1. 생성중(002) 상태 설정
         ProposalVO.PtTemplateVO statusVO = new ProposalVO.PtTemplateVO();
         statusVO.setPtProjectId(ptProjectId);
         statusVO.setCoverGenStatusCd("002");
+        statusVO.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateTemplateCoverStatus(statusVO);
 
         // 2. 프롬프트 빌드
         String prompt;
         try {
             prompt = buildCoverPrompt(ptProjectId, agentId);
+            if("complement_request".equals(requestType)) {
+                prompt += "\n\n## 추가 반영 요청사항";
+                prompt += "\n" + message;
+            }
         } catch (Exception e) {
             logger.warn("[PT Cover] 프롬프트 빌드 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
             statusVO.setCoverGenStatusCd("004");
@@ -5920,6 +5940,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         pathVO.setPtProjectId(ptProjectId);
         pathVO.setCoverImagePath(objectKey);
         pathVO.setCoverGenStatusCd("003");
+        pathVO.setModifyUserId(statusVO.getModifyUserId());
         proposalDAO.updateTemplateCoverPath(pathVO);
 
         logger.info("[PT Cover] 표지 이미지 저장 완료 (ptProjectId={}, key={})", ptProjectId, objectKey);
@@ -6066,6 +6087,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             ProposalVO.ProjectVO vo = new ProposalVO.ProjectVO();
             vo.setPtProjectId(ptProjectId);
             vo.setMaxStepNo(stepNo);
+            vo.setModifyUserId(SessionUtil.getUserId());
             proposalDAO.updateMaxStepNo(vo);
         } catch (Exception e) {
             logger.warn("[PT] advanceMaxStepNo 실패 (ptProjectId={}, stepNo={}): {}", ptProjectId, stepNo, e.getMessage());
@@ -6608,6 +6630,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * (프롬프트 미등록 시 RuntimeException 발생)
      */
     public void updatePtTemplate(ProposalVO.PtTemplateVO vo) {
+        vo.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updatePtTemplate(vo);
         // 확정 즉시 프레임 이미지를 비동기 생성 (30~120초 소요 → 완료 전 슬라이드 생성 시 합성 건너뜀)
         final ProposalVO.PtTemplateVO snapshot = vo;
@@ -6630,9 +6653,15 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * @param agentId     TB_PROMPT_APPLY_AGT 조회 키 (STAGE_CD='S3_COVER_TEMPLATE')
      * @return 갱신된 PtTemplateVO (coverImagePath, coverGenStatusCd 포함)
      */
-    public ProposalVO.PtTemplateVO generatePtCoverImage(String ptProjectId, String agentId) {
-        generateCoverImage(ptProjectId, agentId);
-        return proposalDAO.selectPtTemplate(ptProjectId);
+    public ProposalVO.PtTemplateVO generatePtCoverImage(String ptProjectId, String agentId, String requestType, String message) {
+        generateCoverImage(ptProjectId, agentId, requestType, message);
+        ProposalVO.PtTemplateVO result = proposalDAO.selectPtTemplate(ptProjectId);
+        if (result != null && "complement_request".equals(requestType)) {
+            result.setAiMessage("003".equals(result.getCoverGenStatusCd())
+                    ? "보완 요청에 따라 표지가 수정되었습니다."
+                    : "보완 요청을 반영하지 못했습니다. 다시 시도해 주세요.");
+        }
+        return result;
     }
 
     @Transactional(rollbackFor = Exception.class)

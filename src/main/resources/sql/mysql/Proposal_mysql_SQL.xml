@@ -117,6 +117,7 @@
         SET
             STAGE2_STATUS_CD = #{stage2StatusCd}
             , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -126,6 +127,7 @@
         SET
             MAX_STEP_NO = GREATEST(COALESCE(MAX_STEP_NO, 0), #{maxStepNo})
             , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -135,6 +137,7 @@
         SET
             STATUS_CD  = #{statusCd}
             , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -144,6 +147,7 @@
         SET
             WRITING_GUIDELINE_JSON = #{writingGuidelineJson}
             , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -153,6 +157,7 @@
         SET
             TARGET_TYPE_CD = #{targetTypeCd}
             , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -169,6 +174,7 @@
         SET
             PROJECT_CONFIG_JSON = #{projectConfigJson}
             , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -693,6 +699,7 @@
             COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
             PLANNED_SLIDE_CNT       = #{plannedSlideCnt},
             MODIFY_DT               = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -702,6 +709,7 @@
         SET LINKED_EVAL_CRITERIA_ID = #{linkedEvalCriteriaId, jdbcType=VARCHAR},
             COVERED_REQ_IDS_JSON    = #{coveredReqIdsJson, jdbcType=VARCHAR},
             MODIFY_DT               = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -709,6 +717,8 @@
         /* TOC 항목 제목 수정 proposal.updateTocItem */
         UPDATE TB_PT_TOC
         SET SECTION_NM = #{sectionNm}
+            , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -716,6 +726,8 @@
         /* S2D: 세부 작성 지침 업데이트 proposal.updateTocGuideContent */
         UPDATE TB_PT_TOC
         SET GUIDE_CONTENT = #{guideContent, jdbcType=VARCHAR}
+            , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -731,6 +743,8 @@
         /* TOC 항목 순서(SORT_ORD) 업데이트 proposal.updateTocSortOrd */
         UPDATE TB_PT_TOC
         SET SORT_ORD = #{sortOrd}
+            , MODIFY_DT = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE TOC_ID = #{tocId}
     </update>
 
@@ -750,6 +764,7 @@
             t.ORIGIN_TYPE_CD          AS ORIGIN_TYPE_CD,
             t.CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            t.MODIFY_USER_ID          AS MODIFY_USER_ID,
             DATE_FORMAT(t.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
         FROM TB_PT_TOC t
         LEFT JOIN TB_PT_TOC p  ON t.PARENT_TOC_ID = p.TOC_ID   /* 직계 부모: 소목차(001) 또는 세부목차(002)의 부모인 소목차 */
@@ -801,6 +816,7 @@
             GUIDE_CONTENT           AS GUIDE_CONTENT,
             CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
+            MODIFY_USER_ID          AS MODIFY_USER_ID,
             DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
         FROM TB_PT_TOC
         WHERE TOC_ID = #{tocId}
@@ -913,6 +929,7 @@
     <!--   RENDER_STATUS_CD    VARCHAR(3)   DEFAULT '001',                    -->
     <!--   CREATE_USER_ID      VARCHAR(50)  NULL,                             -->
     <!--   CREATE_DT           DATETIME     NULL,                             -->
+    <!--   MODIFY_USER_ID      VARCHAR(50)  NULL,                             -->
     <!--   MODIFY_DT           DATETIME     NULL,                             -->
     <!--   INDEX idx_pt_slide_project (PT_PROJECT_ID),                       -->
     <!--   INDEX idx_pt_slide_toc     (TOC_ID)                               -->
@@ -964,6 +981,7 @@
             SORT_ORD                                      AS SORT_ORD,
             CREATE_USER_ID                                AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            MODIFY_USER_ID                                AS MODIFY_USER_ID,
             DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
         FROM TB_PT_SLIDE
         WHERE TOC_ID = #{tocId}
@@ -1007,6 +1025,7 @@
             SORT_ORD                                      AS SORT_ORD,
             CREATE_USER_ID                                AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            MODIFY_USER_ID                                AS MODIFY_USER_ID,
             DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
         FROM TB_PT_SLIDE
         WHERE SLIDE_ID = #{slideId}
@@ -1036,6 +1055,7 @@
             <if test="renderedImagePath != null">RENDERED_IMAGE_PATH = #{renderedImagePath},</if>
             <if test="compositeImagePath != null">COMPOSITE_IMAGE_PATH = #{compositeImagePath},</if>
             <if test="renderStatusCd != null">RENDER_STATUS_CD = #{renderStatusCd},</if>
+            <if test="modifyUserId != null">MODIFY_USER_ID = #{modifyUserId},</if>
             MODIFY_DT = NOW()
         </set>
         WHERE SLIDE_ID = #{slideId}
@@ -1070,6 +1090,7 @@
             SORT_ORD                                      AS SORT_ORD,
             CREATE_USER_ID                                AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s')  AS CREATE_DT,
+            MODIFY_USER_ID                                AS MODIFY_USER_ID,
             DATE_FORMAT(MODIFY_DT, '%Y-%m-%d %H:%i:%s')  AS MODIFY_DT
         FROM TB_PT_SLIDE
         WHERE PT_PROJECT_ID = #{ptProjectId}
@@ -1307,7 +1328,8 @@
             , COLOR_JSON             = #{colorJson}
             , GEN_STATUS_CD          = #{genStatusCd}
             , ERROR_MSG              = #{errorMsg}
-            , MODIFY_USER_ID         = #{modifyUserId}
+            , MODIFY_DT              = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -1317,6 +1339,7 @@
         SET
             FRAME_IMAGE_PATH = #{frameImagePath}
             , MODIFY_DT      = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -1326,6 +1349,7 @@
         SET
             COVER_GEN_STATUS_CD = #{coverGenStatusCd}
             , MODIFY_DT         = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
@@ -1336,6 +1360,7 @@
             COVER_IMAGE_PATH    = #{coverImagePath}
             , COVER_GEN_STATUS_CD = #{coverGenStatusCd}
             , MODIFY_DT         = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
     </update>
 
