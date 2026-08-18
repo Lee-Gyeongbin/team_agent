@@ -654,8 +654,8 @@ public class ProposalController extends BaseController {
     /**
      * F — 출력 시작 (PPTX / PDF)
      * - 내보내기 형식은 PROJECT_CONFIG_JSON.template.docSize 기반 자동 결정 (a4→PDF, 그 외→PPTX)
-     * - 캐시 재사용: 최근 완료(004) 빌드의 COMPLETE_DT가 슬라이드 MODIFY_DT 이후면 재빌드 생략
-     * - body: { ptProjectId, agentId }
+     * - 캐시 재사용: 최근 완료(004) 빌드의 INPUT_FINGERPRINT가 현재 빌드 입력과 같으면 재빌드 생략
+     * - body: { ptProjectId, agentId, forceRebuild? }
      */
     @RequestMapping(value = "/ai/proposal/startExport.do", method = RequestMethod.POST)
     @ResponseBody
@@ -678,9 +678,30 @@ public class ProposalController extends BaseController {
     }
 
     /**
+     * F — 재사용 가능한 최근 완료 출력 조회 (이전 파일 받기용)
+     * - 현재 빌드 입력 지문과 일치하는 004 파일이 있으면 downloadUrl 포함 반환
+     * - 없으면 data=null
+     */
+    @RequestMapping(value = "/ai/proposal/selectReusableExport.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectReusableExport(@RequestParam String ptProjectId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.ExportVO data = proposalService.selectReusableExport(ptProjectId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (Exception e) {
+            logger.error("[PT F] selectReusableExport 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
      * F — 출력 상태 조회 (폴링용)
-     * - BUILD_STATUS_CD: 001=대기, 002=빌드중, 003=캐시재사용, 004=완료, 005=실패
-     * - 완료/캐시 시 downloadUrl 포함
+     * - BUILD_STATUS_CD: 001=대기, 002=이미지생성중, 003=PPT조립중, 004=완료, 005=실패
+     * - 완료 시 downloadUrl 포함 (캐시 재사용도 BUILD_STATUS_CD=004)
      */
     @RequestMapping(value = "/ai/proposal/selectExportStatus.do", method = RequestMethod.GET)
     @ResponseBody
@@ -807,6 +828,34 @@ public class ProposalController extends BaseController {
             resultMap.put("msg", e.getMessage());
         } catch (Exception e) {
             logger.error("[PT E] generatePtCoverImage 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /**
+     * 간지 배경 이미지 생성 / 재생성.
+     *
+     * <p>사용자가 간지형 탭에서 "간지 생성" 또는 "간지 재생성" 버튼을 클릭할 때 호출된다.
+     * 본문형 프레임과 동일하게 TB_PT_TEMPLATE.DIVIDER_IMAGE_PATH에 재사용 배경 1장을 저장한다.
+     * 대목차번호·대목차명·하위목차 텍스트는 문서 출력 시 플레이스홀더 치환으로 오버레이한다.
+     */
+    @RequestMapping(value = "/ai/proposal/generatePtDividerImage.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView generatePtDividerImage(@RequestParam("ptProjectId") String ptProjectId,
+                                                @RequestParam("agentId") String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.generatePtDividerImage(ptProjectId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] generatePtDividerImage 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] generatePtDividerImage 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
             resultMap.put("result", "FAIL");
             resultMap.put("msg", e.getMessage());
         }
@@ -1169,6 +1218,56 @@ public class ProposalController extends BaseController {
             resultMap.put("msg", e.getMessage());
         } catch (Exception e) {
             logger.error("[PT E] generatePtCoverImage 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    // ── 스텝 프롬프트 조회/수정 ────────────────────────────────────────────────
+
+    /** 스텝 프롬프트 목록 조회 (stageCd 목록 기준) */
+    @RequestMapping(value = "/ai/proposal/selectStepPrompts.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView selectStepPrompts(@RequestBody ProposalVO.PromptEditVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("result", "OK");
+            resultMap.put("list", proposalService.selectStepPrompts(vo.getStageCds()));
+        } catch (Exception e) {
+            logger.error("[PT] selectStepPrompts 오류: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 스텝 프롬프트 내용 수정 */
+    @RequestMapping(value = "/ai/proposal/updatePromptContent.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView updatePromptContent(@RequestBody ProposalVO.PromptEditVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.updatePromptContent(vo);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT] updatePromptContent 오류 (promptId={}): {}", vo.getPromptId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 스텝 프롬프트 원본 복구 */
+    @RequestMapping(value = "/ai/proposal/restorePromptContent.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView restorePromptContent(@RequestBody ProposalVO.PromptEditVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.restorePromptContent(vo.getPromptId());
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT] restorePromptContent 오류 (promptId={}): {}", vo.getPromptId(), e.getMessage(), e);
             resultMap.put("result", "FAIL");
             resultMap.put("msg", e.getMessage());
         }

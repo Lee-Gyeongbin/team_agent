@@ -2,6 +2,26 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="proposal">
 
+    <select id="selectPromptByStep" parameterType="kr.teamagent.proposal.service.ProposalVO$PromptVO"
+            resultType="kr.teamagent.proposal.service.ProposalVO$PromptVO">
+        /* 단계별 프롬프트 조회 proposal.selectPromptByStep */
+        SELECT
+            A.PROMPT_ID
+            , A.PROMPT_NAME
+            , A.PROMPT_TYPE_CD
+            , A.CONTENT
+            , A.APPLY_LLM_YN
+            , A.USE_YN
+            , B.STAGE_CD
+        FROM TB_PROMPT A
+        LEFT OUTER JOIN TB_PROMPT_APPLY_AGT B
+            ON B.PROMPT_ID = A.PROMPT_ID
+            AND B.APPLY_YN = 'Y'
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+            AND B.STAGE_CD = #{stageCd}
+    </select>
+
     <!-- ================================================================== -->
     <!-- TB_PT_PROJECT                                                        -->
     <!-- ================================================================== -->
@@ -1181,11 +1201,14 @@
     <!--   FILE_PATH          VARCHAR(500)  NULL,                             -->
     <!--   FILE_SIZE          BIGINT        NULL,                             -->
     <!--   EXPORT_TYPE_CD     CHAR(3)       NOT NULL DEFAULT '001',           -->
+    <!--   INPUT_FINGERPRINT  VARCHAR(64)   NULL,                             -->
     <!--   ERROR_MSG          VARCHAR(1000) NULL,                             -->
     <!--   COMPLETE_DT        DATETIME      NULL,                             -->
     <!--   CREATE_DT          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP-->
     <!--   CREATE_USER_ID     VARCHAR(20)   NOT NULL,                         -->
     <!-- );                                                                   -->
+    <!-- ALTER TABLE TB_PT_EXPORT                                             -->
+    <!--   ADD COLUMN INPUT_FINGERPRINT VARCHAR(64) NULL COMMENT '빌드 입력 SHA-256'; -->
     <!-- BUILD_STATUS_CD(PT000010): 001=대기 002=이미지생성중 003=PPT조립중 004=완료 005=실패 -->
     <!-- EXPORT_TYPE_CD(PT_EXPORT_TYPE): 001=PPTX 002=PDF                    -->
     <!-- ================================================================== -->
@@ -1210,6 +1233,7 @@
             <if test="fileNm != null">FILE_NM = #{fileNm},</if>
             <if test="filePath != null">FILE_PATH = #{filePath},</if>
             <if test="fileSize != null">FILE_SIZE = #{fileSize},</if>
+            <if test="inputFingerprint != null">INPUT_FINGERPRINT = #{inputFingerprint},</if>
             <if test="errorMsg != null">ERROR_MSG = #{errorMsg},</if>
             <if test="completeDt != null">COMPLETE_DT = #{completeDt},</if>
         </set>
@@ -1229,6 +1253,7 @@
             FILE_NM                                          AS FILE_NM,
             FILE_PATH                                        AS FILE_PATH,
             FILE_SIZE                                        AS FILE_SIZE,
+            INPUT_FINGERPRINT                                AS INPUT_FINGERPRINT,
             ERROR_MSG                                        AS ERROR_MSG,
             DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS COMPLETE_DT,
             CREATE_USER_ID                                   AS CREATE_USER_ID,
@@ -1249,6 +1274,7 @@
             FILE_NM                                          AS FILE_NM,
             FILE_PATH                                        AS FILE_PATH,
             FILE_SIZE                                        AS FILE_SIZE,
+            INPUT_FINGERPRINT                                AS INPUT_FINGERPRINT,
             ERROR_MSG                                        AS ERROR_MSG,
             DATE_FORMAT(COMPLETE_DT, '%Y-%m-%d %H:%i:%s')   AS COMPLETE_DT,
             CREATE_USER_ID                                   AS CREATE_USER_ID,
@@ -1259,13 +1285,6 @@
           AND BUILD_STATUS_CD = '004'
         ORDER BY COMPLETE_DT DESC
         LIMIT 1
-    </select>
-
-    <select id="selectMaxSlideModifyDt" parameterType="String" resultType="String">
-        /* 프로젝트 슬라이드 최신 수정일시 조회 (캐시 재사용 판단용) proposal.selectMaxSlideModifyDt */
-        SELECT DATE_FORMAT(MAX(MODIFY_DT), '%Y-%m-%d %H:%i:%s')
-        FROM TB_PT_SLIDE
-        WHERE PT_PROJECT_ID = #{ptProjectId}
     </select>
 
     <!-- ================================================================== -->
@@ -1286,6 +1305,8 @@
             , FRAME_IMAGE_PATH                      AS FRAME_IMAGE_PATH
             , COVER_IMAGE_PATH                      AS COVER_IMAGE_PATH
             , COVER_GEN_STATUS_CD                   AS COVER_GEN_STATUS_CD
+            , DIVIDER_IMAGE_PATH                    AS DIVIDER_IMAGE_PATH
+            , DIVIDER_GEN_STATUS_CD                 AS DIVIDER_GEN_STATUS_CD
             , CREATE_USER_ID                        AS CREATE_USER_ID
             , DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
             , MODIFY_USER_ID                        AS MODIFY_USER_ID
@@ -1362,6 +1383,71 @@
             , MODIFY_DT         = NOW()
             <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
         WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <update id="updateTemplateDividerStatus" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 간지 생성 상태 코드만 업데이트 proposal.updateTemplateDividerStatus */
+        UPDATE TB_PT_TEMPLATE
+        SET
+            DIVIDER_GEN_STATUS_CD = #{dividerGenStatusCd}
+            , MODIFY_DT           = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <update id="updateTemplateDividerPath" parameterType="kr.teamagent.proposal.service.ProposalVO$PtTemplateVO">
+        /* PT 템플릿 간지 이미지 경로 + 상태 업데이트 proposal.updateTemplateDividerPath */
+        UPDATE TB_PT_TEMPLATE
+        SET
+            DIVIDER_IMAGE_PATH      = #{dividerImagePath}
+            , DIVIDER_GEN_STATUS_CD = #{dividerGenStatusCd}
+            , MODIFY_DT             = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
+        WHERE PT_PROJECT_ID = #{ptProjectId}
+    </update>
+
+    <!-- ================================================================== -->
+    <!-- TB_PROMPT — 스텝 프롬프트 조회/수정                                   -->
+    <!-- DDL (최초 1회 실행):                                                  -->
+    <!--   ALTER TABLE TB_PROMPT                                              -->
+    <!--     ADD COLUMN ORIGINAL_CONTENT TEXT NULL AFTER CONTENT;            -->
+    <!--   UPDATE TB_PROMPT SET ORIGINAL_CONTENT = CONTENT                   -->
+    <!--     WHERE ORIGINAL_CONTENT IS NULL;                                  -->
+    <!-- ================================================================== -->
+
+    <select id="selectStepPrompts" parameterType="map"
+            resultType="kr.teamagent.proposal.service.ProposalVO$PromptEditVO">
+        /* 스텝 프롬프트 목록 조회 (STAGE_CD 기준) proposal.selectStepPrompts */
+        SELECT
+            A.PROMPT_ID             AS PROMPT_ID
+            , A.PROMPT_NAME         AS PROMPT_NAME
+            , A.CONTENT             AS CONTENT
+            , A.ORIGINAL_CONTENT    AS ORIGINAL_CONTENT
+            , B.STAGE_CD            AS STAGE_CD
+        FROM TB_PROMPT A
+        LEFT JOIN TB_PROMPT_APPLY_AGT B
+            ON B.PROMPT_ID = A.PROMPT_ID
+            AND B.APPLY_YN = 'Y'
+        WHERE A.USE_YN = 'Y'
+          AND B.STAGE_CD IN
+        <foreach collection="stageCds" item="stageCd" open="(" separator="," close=")">
+            #{stageCd}
+        </foreach>
+        ORDER BY B.STAGE_CD
+    </select>
+
+    <update id="updatePromptContent" parameterType="kr.teamagent.proposal.service.ProposalVO$PromptEditVO">
+        /* 스텝 프롬프트 내용 수정 proposal.updatePromptContent */
+        UPDATE TB_PROMPT
+        SET CONTENT = #{content}
+        WHERE PROMPT_ID = #{promptId}
+    </update>
+
+    <update id="restorePromptContent" parameterType="String">
+        /* 스텝 프롬프트 원본 복구 (CONTENT = ORIGINAL_CONTENT) proposal.restorePromptContent */
+        UPDATE TB_PROMPT
+        SET CONTENT = ORIGINAL_CONTENT
+        WHERE PROMPT_ID = #{promptId}
     </update>
 
 </mapper>

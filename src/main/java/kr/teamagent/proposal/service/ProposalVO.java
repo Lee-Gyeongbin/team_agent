@@ -10,6 +10,37 @@ import lombok.Data;
 public class ProposalVO {
 
     /**
+     * TB_PROMPT - 프롬프트 기본 정보
+     * PromptVO
+     */
+    @Data
+    public static class PromptVO {
+        /** PROMPT_ID */
+        private String promptId;
+        /** 프롬프트명 */
+        private String promptName;
+        /** 프롬프트 유형 코드 */
+        private String promptTypeCd;
+        /** 프롬프트 내용 */
+        private String content;
+        /** LLM 적용 여부 (Y/N) */
+        private String applyLlmYn;
+        /** 사용 여부 (Y/N) */
+        private String useYn;
+        /** 단계 코드
+         *  RFP 구조화 추출 S1_EXTRACT
+         *  문제정의 S2A_PROBLEM_TOC
+         *  승리주제 S2B_WINTHEME
+         *  문제정의 커버드 요구사항 S2C_COVEREDREQNOS
+         *  슬라이드 생성 S3_SLIDE
+         *  슬라이드 템플릿 S3_TEMPLATE
+         *  슬라이드 커버 템플릿 S3_COVER_TEMPLATE
+         *  슬라이드 인포그래픽 이미지 S3_IMAGE
+         *  슬라이드 검토 S4_REVIEW
+         */
+        private String stageCd;
+    }
+    /**
      * TB_PT_PROJECT - PT 프로젝트 기본 정보
      */
     @Data
@@ -705,11 +736,14 @@ public class ProposalVO {
      *     FILE_PATH          VARCHAR(500)  NULL,                   -- NCP 오브젝트 경로
      *     FILE_SIZE          BIGINT        NULL,
      *     EXPORT_TYPE_CD     CHAR(3)       NOT NULL DEFAULT '001', -- PT_EXPORT_TYPE: 001=PPTX 002=PDF
+     *     INPUT_FINGERPRINT  VARCHAR(64)   NULL,                   -- 빌드 입력 SHA-256 (캐시 재사용 판단용)
      *     ERROR_MSG          VARCHAR(1000) NULL,
      *     COMPLETE_DT        DATETIME      NULL,
      *     CREATE_DT          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
      *     CREATE_USER_ID     VARCHAR(20)   NOT NULL
      *   );
+     *   -- 기존 테이블 반영:
+     *   -- ALTER TABLE TB_PT_EXPORT ADD COLUMN INPUT_FINGERPRINT VARCHAR(64) NULL COMMENT '빌드 입력 SHA-256';
      */
     @Data
     public static class ExportVO {
@@ -731,6 +765,8 @@ public class ProposalVO {
         private String filePath;
         /** 파일 크기 (bytes) */
         private Long fileSize;
+        /** 빌드 입력 SHA-256 지문 (캐시 재사용 판단용) */
+        private String inputFingerprint;
         /** 오류 메시지 (실패 시) */
         private String errorMsg;
         /** 완료 일시 */
@@ -743,6 +779,8 @@ public class ProposalVO {
         // ── DB에 저장되지 않는 런타임 필드 ──────────────────────────────────
         /** presigned 다운로드 URL — DB 미저장, 완료 시 동적 발급 */
         private String downloadUrl;
+        /** 캐시 재사용 여부 — DB 미저장, startExport/selectReusableExport 응답 시 설정 */
+        private Boolean cacheReused;
     }
 
     /**
@@ -756,6 +794,8 @@ public class ProposalVO {
         private String ptProjectId;
         /** 에이전트 ID (로그용) */
         private String agentId;
+        /** true면 캐시 무시하고 항상 신규 빌드 */
+        private Boolean forceRebuild;
     }
 
     /**
@@ -791,6 +831,10 @@ public class ProposalVO {
         private String coverImagePath;
         /** 표지 이미지 생성 상태 코드 (PT000007 재사용: 001=대기, 002=생성중, 003=완료, 004=실패) */
         private String coverGenStatusCd;
+        /** 간지 배경 이미지 NCP 경로 (사용자 트리거 시 동기 생성) */
+        private String dividerImagePath;
+        /** 간지 이미지 생성 상태 코드 (001=대기, 002=생성중, 003=완료, 004=실패) */
+        private String dividerGenStatusCd;
 
         // ── DB에 저장되지 않는 런타임 필드 ──────────────────────────────────
         /** 표지 보완요청 채팅 AI 응답 요약 — DB 미저장, chatCover 응답 시 설정 */
@@ -1023,5 +1067,24 @@ public class ProposalVO {
         private String templateId;
         /** 사용자 보완 요청 메시지 */
         private String message;
+    }
+
+    /**
+     * 스텝 프롬프트 조회/수정 VO (TB_PROMPT 기반)
+     */
+    @Data
+    public static class PromptEditVO {
+        /** PROMPT_ID (PK) */
+        private String promptId;
+        /** 프롬프트명 */
+        private String promptName;
+        /** 단계 코드 (STAGE_CD) */
+        private String stageCd;
+        /** 현재 프롬프트 내용 (수정 가능) */
+        private String content;
+        /** 원본 프롬프트 내용 (원본 복구용, 수정 불가) */
+        private String originalContent;
+        /** 조회 요청용 stageCd 목록 (DB 미저장, selectStepPrompts 파라미터용) */
+        private List<String> stageCds;
     }
 }

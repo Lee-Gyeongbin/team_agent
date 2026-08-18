@@ -7,6 +7,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -5824,6 +5826,95 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 간지 재사용 배경 이미지 프롬프트를 빌드한다.
+     *
+     * <p>본문형 프레임과 동일하게 프로젝트 공통 배경 1장용이다.
+     * TB_PROMPT STAGE_CD='S3_DIVIDER_TEMPLATE'를 조회하고,
+     * 사업정보·색상·docSize만 치환한다.
+     * 대목차번호/명/하위목차는 문서 출력 시 오버레이하므로 이미지에 넣지 않는다.
+     */
+    private String buildDividerPrompt(String ptProjectId, String agentId) {
+        String projectNm   = "제안서";
+        String orgNm       = "발주기관";
+        String baseColor   = "\"#5B4FE9\",\"#8B7FFF\",\"#EFECFE\"";
+        String accentColor = "\"#E08A2C\",\"#22A06B\"";
+        String docSize     = "169";
+
+        try {
+            ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+            if (project != null) {
+                if (CommonUtil.isNotEmpty(project.getProjectNm())) projectNm = project.getProjectNm();
+                if (CommonUtil.isNotEmpty(project.getOrgNm()))     orgNm     = project.getOrgNm();
+
+                String configJson = project.getProjectConfigJson();
+                if (CommonUtil.isNotEmpty(configJson)) {
+                    JsonObject cfgRoot = JsonParser.parseString(configJson).getAsJsonObject();
+
+                    if (cfgRoot.has("template") && !cfgRoot.get("template").isJsonNull()) {
+                        JsonObject tmpl = cfgRoot.getAsJsonObject("template");
+                        String ds = getStrOrNull(tmpl, "docSize");
+                        if (CommonUtil.isNotEmpty(ds)) docSize = ds;
+                    }
+
+                    if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
+                        JsonObject settings = cfgRoot.getAsJsonObject("settings");
+                        if (settings.has("colors") && !settings.get("colors").isJsonNull()) {
+                            JsonObject colors = settings.getAsJsonObject("colors");
+                            List<String> bases   = colors.has("base")   && !colors.get("base").isJsonNull()
+                                    ? jsonArrayToList(colors.getAsJsonArray("base")) : java.util.Collections.emptyList();
+                            List<String> accents = colors.has("accent") && !colors.get("accent").isJsonNull()
+                                    ? jsonArrayToList(colors.getAsJsonArray("accent")) : java.util.Collections.emptyList();
+                            if (!bases.isEmpty()) {
+                                baseColor = bases.stream().map(c -> "\"" + c + "\"")
+                                        .collect(java.util.stream.Collectors.joining(","));
+                            }
+                            if (!accents.isEmpty()) {
+                                accentColor = accents.stream().map(c -> "\"" + c + "\"")
+                                        .collect(java.util.stream.Collectors.joining(","));
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[PT Divider] buildDividerPrompt 파싱 실패, 기본값 사용 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+
+        String promptTemplate = null;
+        try {
+            promptTemplate = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_DIVIDER_TEMPLATE");
+        } catch (Exception e) {
+            logger.warn("[PT Divider] TB_PROMPT 'S3_DIVIDER_TEMPLATE' 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+        if (CommonUtil.isEmpty(promptTemplate)) {
+            throw new RuntimeException("간지 이미지 프롬프트가 등록되어 있지 않습니다. TB_PROMPT에 STAGE_CD='S3_DIVIDER_TEMPLATE'인 프롬프트를 등록해 주세요.");
+        }
+
+        // 본문형 프레임과 동일: 이미지는 배경·여백만. 텍스트는 export 시 PPTX 오버레이로 치환.
+        // {{chapter*}} 자리에 {chapter_no} 문자열을 넣으면 이미지 모델이 그대로 그려 export와 겹친다.
+        String prompt = promptTemplate
+                .replace("{{projectNm}}",  projectNm)
+                .replace("{{orgNm}}",      orgNm)
+                .replace("{{docSize}}",    docSize)
+                .replace("{{baseColor}}",  baseColor)
+                .replace("{{accentColor}}", accentColor)
+                .replace("{{chapterNo}}",  "")
+                .replace("{{chapterNm}}",  "")
+                .replace("{{subTocList}}", "");
+
+        prompt += "\n\n## 재사용 배경 제약 (본문형 프레임과 동일 — 텍스트는 출력 단계에서 오버레이)"
+                + "\n- 이 이미지는 대목차마다 동일하게 재사용되는 배경이다."
+                + "\n- 이미지에 글자를 절대 그리지 마세요. 한글·영문·숫자·기호 모두 금지."
+                + "\n- {chapter_no}, {chapter_title}, {sub_toc_list}, {{chapterNo}} 같은 플레이스홀더 문자열도 그리지 마세요."
+                + "\n- 01~06 번호 배지, 점선 리스트 항목, 예시 목차 문구도 그리지 마세요."
+                + "\n- 좌측 중앙에 대목차번호·대목차명용 빈 여백, 우측에 하위목차 리스트용 빈 여백만 확보하세요."
+                + "\n- 그래픽 모티브·색상 체계만 표현하고, 텍스트는 비워 두세요."
+                + "\n- 로고·인장·실존 기관 마크를 생성하지 마세요.";
+
+        return prompt + " | docSize=" + docSize;
+    }
+
+    /**
      * 표지 배경 이미지를 생성하고 NCP에 업로드한 뒤 DB를 갱신한다.
      *
      * <p>처리 흐름:
@@ -5881,6 +5972,65 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         proposalDAO.updateTemplateCoverPath(pathVO);
 
         logger.info("[PT Cover] 표지 이미지 저장 완료 (ptProjectId={}, key={})", ptProjectId, objectKey);
+    }
+
+    /**
+     * 간지 재사용 배경 이미지를 생성하고 NCP에 업로드한 뒤 TB_PT_TEMPLATE을 갱신한다.
+     *
+     * <p>본문형 FRAME_IMAGE_PATH와 동일하게 프로젝트당 1장을 저장한다.
+     * 대목차 텍스트는 문서 빌드 시 플레이스홀더 치환으로 오버레이한다.
+     *
+     * <p>처리 흐름:
+     * <ol>
+     *   <li>DIVIDER_GEN_STATUS_CD = '002' (생성중) 설정</li>
+     *   <li>buildDividerPrompt → callPtImageApi 호출</li>
+     *   <li>실패: DIVIDER_GEN_STATUS_CD = '004', return</li>
+     *   <li>성공: NCP 업로드 → DIVIDER_IMAGE_PATH + DIVIDER_GEN_STATUS_CD = '003' 갱신</li>
+     * </ol>
+     */
+    private void generateDividerImage(String ptProjectId, String agentId) {
+        logger.info("[PT Divider] 간지 이미지 생성 시작 (ptProjectId={})", ptProjectId);
+        // 1. 생성중(002) 상태 설정
+        ProposalVO.PtTemplateVO statusVO = new ProposalVO.PtTemplateVO();
+        statusVO.setPtProjectId(ptProjectId);
+        statusVO.setDividerGenStatusCd("002");
+        statusVO.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateTemplateDividerStatus(statusVO);
+
+        // 2. 프롬프트 빌드
+        String prompt;
+        try {
+            prompt = buildDividerPrompt(ptProjectId, agentId);
+        } catch (Exception e) {
+            logger.warn("[PT Divider] 프롬프트 빌드 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+            statusVO.setDividerGenStatusCd("004");
+            proposalDAO.updateTemplateDividerStatus(statusVO);
+            return;
+        }
+
+        // 3. 이미지 API 호출 (표지와 동일한 callPtImageApi 재사용)
+        String base64Image = callPtImageApi(prompt);
+        if (base64Image == null || base64Image.isEmpty()) {
+            logger.warn("[PT Divider] 이미지 API 응답 없음 (ptProjectId={})", ptProjectId);
+            statusVO.setDividerGenStatusCd("004");
+            proposalDAO.updateTemplateDividerStatus(statusVO);
+            return;
+        }
+
+        // 4. Base64 디코딩 → NCP 업로드
+        byte[] imageBytes = Base64.getDecoder().decode(base64Image);
+        String objectKey  = "proposal/" + ptProjectId + "/divider-images/divider.png";
+        uploadNcpObject(objectKey, imageBytes);
+
+        // 5. TB_PT_TEMPLATE.DIVIDER_IMAGE_PATH + 완료(003) 상태 갱신
+        ProposalVO.PtTemplateVO pathVO = new ProposalVO.PtTemplateVO();
+        pathVO.setPtProjectId(ptProjectId);
+        pathVO.setDividerImagePath(objectKey);
+        pathVO.setDividerGenStatusCd("003");
+        pathVO.setModifyUserId(statusVO.getModifyUserId());
+        proposalDAO.updateTemplateDividerPath(pathVO);
+
+        logger.info("[PT Divider] 간지 이미지 저장 완료 (ptProjectId={}, key={})", ptProjectId, objectKey);
     }
 
     // ── 이미지 스택 합성 ──────────────────────────────────────────────────────────
@@ -6237,13 +6387,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * F — 출력 시작
-     * 1. 캐시 재사용 판단: 최근 완료 빌드의 COMPLETE_DT vs MAX(TB_PT_SLIDE.MODIFY_DT)
-     *    → 캐시가 최신이면 새 presigned URL 발급 후 즉시 반환 (BUILD_STATUS_CD='003')
-     * 2. 신규 빌드: TB_PT_EXPORT row 생성 → 비동기 빌드 시작 → exportId 즉시 반환
-     *    비동기: ProposalPptxUtil.buildPptx() → (pdf 요청 시) LibreOffice 변환 → NCP 업로드
+     * 1. forceRebuild=true 이면 캐시 무시하고 신규 빌드
+     * 2. 캐시 재사용 판단: 최근 완료(004) 빌드의 INPUT_FINGERPRINT vs 현재 빌드 입력 지문
+     *    → 일치하고 NCP 파일이 있으면 presigned URL 발급 후 즉시 반환 (cacheReused=true)
+     * 3. 신규 빌드: TB_PT_EXPORT row 생성 → 비동기 빌드 시작 → exportId 즉시 반환
      *
-     * @param vo ptProjectId, format('pdf'|'pptx'), agentId
-     * @return ExportVO (캐시 재사용 시 즉시 완료, 신규 빌드 시 BUILD_STATUS_CD='002')
+     * @param vo ptProjectId, agentId, forceRebuild
+     * @return ExportVO (캐시 재사용 시 즉시 완료, 신규 빌드 시 BUILD_STATUS_CD='003')
      */
     public ProposalVO.ExportVO startExport(ProposalVO.ExportRequestVO vo) throws Exception {
         String ptProjectId = vo.getPtProjectId();
@@ -6251,23 +6401,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         // 1. docSize 기반 내보내기 형식 코드 결정 (a4 → "002"/PDF, 그 외 → "001"/PPTX)
         String exportTypeCd = resolveExportTypeCd(ptProjectId);
 
-        // 2. 캐시 재사용 판단: 가장 최근 완료(004) 빌드의 COMPLETE_DT vs 슬라이드 최신 수정일
-        ProposalVO.ExportVO cached = proposalDAO.selectLatestCompletedExport(ptProjectId, exportTypeCd);
-        if (cached != null && CommonUtil.isNotEmpty(cached.getCompleteDt())
-                && CommonUtil.isNotEmpty(cached.getFilePath())) {
-            String maxSlideModifyDt = proposalDAO.selectMaxSlideModifyDt(ptProjectId);
-            boolean cacheValid = CommonUtil.isEmpty(maxSlideModifyDt)
-                    || cached.getCompleteDt().compareTo(maxSlideModifyDt) >= 0;
-            if (cacheValid) {
-                logger.info("[PT F] 캐시 재사용 (ptProjectId={}, exportTypeCd={}, completeDt={})",
-                        ptProjectId, exportTypeCd, cached.getCompleteDt());
-                try {
-                    String downloadUrl = fileService.createDownloadPresignedUrlStr(
-                            cached.getFilePath(), cached.getFileNm());
-                    cached.setDownloadUrl(downloadUrl);
-                } catch (Exception e) {
-                    logger.warn("[PT F] 캐시 presigned URL 발급 실패: {}", e.getMessage());
-                }
+        // 2. 캐시 재사용 (forceRebuild가 아닐 때만)
+        if (!Boolean.TRUE.equals(vo.getForceRebuild())) {
+            ProposalVO.ExportVO cached = tryReuseCachedExport(ptProjectId, exportTypeCd);
+            if (cached != null) {
                 return cached;
             }
         }
@@ -6282,6 +6419,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         exportVO.setExportTypeCd(exportTypeCd);
         exportVO.setTotalSlideCnt(totalSlideCnt);
         exportVO.setCreateUserId(SessionUtil.getUserId());
+        exportVO.setCacheReused(Boolean.FALSE);
         proposalDAO.insertExport(exportVO);
 
         // 4. 비동기 빌드 시작
@@ -6292,6 +6430,121 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         exportVO.setBuildStatusCd("003"); // 반환 시점: PPT조립중으로 표시
         return exportVO;
+    }
+
+    /**
+     * F — 지문이 일치하는 최근 완료(004) 출력 조회 (이전 파일 받기용).
+     * 없으면 null.
+     */
+    public ProposalVO.ExportVO selectReusableExport(String ptProjectId) {
+        String exportTypeCd = resolveExportTypeCd(ptProjectId);
+        return tryReuseCachedExport(ptProjectId, exportTypeCd);
+    }
+
+    /**
+     * 최근 완료 export의 INPUT_FINGERPRINT가 현재 빌드 입력과 같고 NCP 파일이 있으면
+     * presigned URL을 붙여 반환. 아니면 null.
+     */
+    private ProposalVO.ExportVO tryReuseCachedExport(String ptProjectId, String exportTypeCd) {
+        ProposalVO.ExportVO cached = proposalDAO.selectLatestCompletedExport(ptProjectId, exportTypeCd);
+        if (cached == null
+                || CommonUtil.isEmpty(cached.getFilePath())
+                || CommonUtil.isEmpty(cached.getInputFingerprint())) {
+            return null;
+        }
+
+        String currentFp = buildExportInputFingerprint(ptProjectId, exportTypeCd);
+        if (CommonUtil.isEmpty(currentFp) || !currentFp.equals(cached.getInputFingerprint())) {
+            return null;
+        }
+
+        try {
+            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            if (!amazonS3.doesObjectExist(bucket, cached.getFilePath())) {
+                logger.warn("[PT F] 캐시 파일 NCP 없음 (key={})", cached.getFilePath());
+                return null;
+            }
+        } catch (Exception e) {
+            logger.warn("[PT F] 캐시 NCP 존재 확인 실패: {}", e.getMessage());
+            return null;
+        }
+
+        logger.info("[PT F] 캐시 재사용 (ptProjectId={}, exportTypeCd={}, exportId={})",
+                ptProjectId, exportTypeCd, cached.getExportId());
+        try {
+            String downloadUrl = fileService.createDownloadPresignedUrlStr(
+                    cached.getFilePath(), cached.getFileNm());
+            cached.setDownloadUrl(downloadUrl);
+        } catch (Exception e) {
+            logger.warn("[PT F] 캐시 presigned URL 발급 실패: {}", e.getMessage());
+        }
+        cached.setCacheReused(Boolean.TRUE);
+        return cached;
+    }
+
+    /**
+     * 출력 빌드 입력 지문(SHA-256 hex) 생성.
+     * runExportBuild가 읽는 값만 포함 (프레임 이미지·maxStepNo·Stage2 상태 제외).
+     */
+    private String buildExportInputFingerprint(String ptProjectId, String exportTypeCd) {
+        try {
+            StringBuilder sb = new StringBuilder(4096);
+            sb.append("exportTypeCd=").append(nullToEmpty(exportTypeCd)).append('\n');
+
+            ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+            sb.append("projectNm=").append(project != null ? nullToEmpty(project.getProjectNm()) : "").append('\n');
+            sb.append("orgNm=").append(project != null ? nullToEmpty(project.getOrgNm()) : "").append('\n');
+            sb.append("config=").append(nullToEmpty(proposalDAO.selectProjectConfigJson(ptProjectId))).append('\n');
+
+            ProposalVO.PtTemplateVO tmpl = proposalDAO.selectPtTemplate(ptProjectId);
+            if (tmpl != null) {
+                sb.append("header=").append(nullToEmpty(tmpl.getHeaderComponentsJson())).append('\n');
+                sb.append("footer=").append(nullToEmpty(tmpl.getFooterComponentsJson())).append('\n');
+                sb.append("color=").append(nullToEmpty(tmpl.getColorJson())).append('\n');
+                sb.append("cover=").append(nullToEmpty(tmpl.getCoverImagePath())).append('\n');
+            } else {
+                sb.append("header=\nfooter=\ncolor=\ncover=\n");
+            }
+
+            List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
+            if (tocList != null) {
+                for (ProposalVO.TocVO toc : tocList) {
+                    sb.append("toc=")
+                            .append(nullToEmpty(toc.getTocId())).append('|')
+                            .append(nullToEmpty(toc.getParentTocId())).append('|')
+                            .append(nullToEmpty(toc.getSectionNm())).append('|')
+                            .append(toc.getSortOrd() != null ? toc.getSortOrd() : 0)
+                            .append('\n');
+                }
+            }
+
+            List<ProposalVO.SlideVO> slides = proposalDAO.selectAllSlidesByProject(ptProjectId);
+            if (slides != null) {
+                for (ProposalVO.SlideVO s : slides) {
+                    sb.append("slide=")
+                            .append(nullToEmpty(s.getSlideId())).append('|')
+                            .append(s.getSlideNo()).append('|')
+                            .append(nullToEmpty(s.getModifyDt())).append('|')
+                            .append(nullToEmpty(s.getRenderedImagePath()))
+                            .append('\n');
+                }
+            }
+
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(sb.toString().getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            logger.warn("[PT F] 지문 계산 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+            return null;
+        }
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     /**
@@ -6401,24 +6654,52 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
 
+            final String submitterNmFinal = submitterNm;
             String projectNm = project != null ? CommonUtil.nullToBlank(project.getProjectNm()) : ptProjectId;
             String orgNm     = project != null ? CommonUtil.nullToBlank(project.getOrgNm())     : "";
 
-            // ── 3. TOC 계층 조회 → 챕터 로마숫자 · 소목차 제목 맵 ────────────
+            // ── 3. TOC 계층 조회 → 챕터 로마숫자 · 소목차 제목 · 하위목차 맵 ──
             List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
-            Map<String, String> tocRomanMap     = new java.util.LinkedHashMap<>();
-            Map<String, String> tocTitleMap     = new HashMap<>();
-            Map<String, String> leafToParentMap = new HashMap<>();
+            Map<String, String> tocRomanMap      = new java.util.LinkedHashMap<>();
+            Map<String, String> tocTitleMap      = new HashMap<>();
+            Map<String, String> tocSectionNoMap  = new HashMap<>();
+            Map<String, String> tocParentMap     = new HashMap<>();
+            List<String> chapterOrder           = new java.util.ArrayList<>();
             int chapterIdx = 0;
             for (ProposalVO.TocVO toc : tocList) {
                 tocTitleMap.put(toc.getTocId(), CommonUtil.nullToBlank(toc.getSectionNm()));
+                tocSectionNoMap.put(toc.getTocId(), CommonUtil.nullToBlank(toc.getSectionNo()));
                 if (CommonUtil.isEmpty(toc.getParentTocId())) {
                     chapterIdx++;
                     tocRomanMap.put(toc.getTocId(),
                             kr.teamagent.common.util.ProposalPptxUtil.toRomanNumeral(chapterIdx));
+                    chapterOrder.add(toc.getTocId());
                 } else {
-                    leafToParentMap.put(toc.getTocId(), toc.getParentTocId());
+                    tocParentMap.put(toc.getTocId(), toc.getParentTocId());
                 }
+            }
+            // tocId → 대목차 tocId (부모 체인 walk-up)
+            Map<String, String> tocToChapterMap = new HashMap<>();
+            for (ProposalVO.TocVO toc : tocList) {
+                String cur = toc.getTocId();
+                while (tocParentMap.containsKey(cur)) {
+                    cur = tocParentMap.get(cur);
+                }
+                tocToChapterMap.put(toc.getTocId(), cur);
+            }
+            // 대목차 → ORIGIN_TYPE_CD=001 직계 소목차 리스트 문자열
+            Map<String, String> chapterSubTocMap = new HashMap<>();
+            for (String chapterId : chapterOrder) {
+                StringBuilder sb = new StringBuilder();
+                for (ProposalVO.TocVO toc : tocList) {
+                    if (!chapterId.equals(toc.getParentTocId())) continue;
+                    if (!"001".equals(toc.getOriginTypeCd())) continue;
+                    String no = CommonUtil.nullToBlank(toc.getSectionNo());
+                    String nm = CommonUtil.nullToBlank(toc.getSectionNm());
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(CommonUtil.isNotEmpty(no) ? no : "").append(". ").append(nm);
+                }
+                chapterSubTocMap.put(chapterId, sb.toString());
             }
 
             // ── 4. 빌드 방식 분기 ────────────────────────────────────────────
@@ -6440,27 +6721,104 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         new java.util.ArrayList<>();
                 Map<String, Integer> chapterSlideCount = new HashMap<>();
 
-                for (ProposalVO.SlideVO s : allSlides) {
-                    String tocId       = s.getTocId();
-                    String parentTocId = leafToParentMap.getOrDefault(tocId, tocId);
-                    String roman       = tocRomanMap.getOrDefault(parentTocId, "Ⅰ");
-                    String secTitle    = tocTitleMap.getOrDefault(tocId, "");
-                    int slideNoInChapter = chapterSlideCount.merge(parentTocId, 1, Integer::sum);
-                    String pageLabel   = roman + "-" + slideNoInChapter;
-
-                    byte[] imageBytes = null;
-                    if (CommonUtil.isNotEmpty(s.getRenderedImagePath())) {
-                        try {
-                            imageBytes = downloadNcpObject(s.getRenderedImagePath());
-                        } catch (Exception e) {
-                            logger.warn("[PT F] 렌더링 이미지 다운로드 실패 (slideId={}, path={}): {}",
-                                    s.getSlideId(), s.getRenderedImagePath(), e.getMessage());
+                // 표지 이미지 완료(003) + 경로 있으면 맨 앞 장에 cover(001)로 삽입 (헤더/푸터 제외·전체 채움)
+                if ("003".equals(ptTemplate.getCoverGenStatusCd())
+                        && CommonUtil.isNotEmpty(ptTemplate.getCoverImagePath())) {
+                    try {
+                        byte[] coverBytes = downloadNcpObject(ptTemplate.getCoverImagePath());
+                        if (coverBytes != null && coverBytes.length > 0) {
+                            pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
+                                    coverBytes, "", "", "", projectNm, orgNm, submitterNmFinal, "001"));
+                            logger.info("[PT F] 표지 이미지 맨 앞 장 추가 (path={})", ptTemplate.getCoverImagePath());
                         }
+                    } catch (Exception e) {
+                        logger.warn("[PT F] 표지 이미지 다운로드 실패 (path={}): {}",
+                                ptTemplate.getCoverImagePath(), e.getMessage());
+                    }
+                }
+
+                // 간지 재사용 배경 (본문형 FRAME과 동일 — TEMPLATE 1장)
+                byte[] dividerBytes = null;
+                if ("003".equals(ptTemplate.getDividerGenStatusCd())
+                        && CommonUtil.isNotEmpty(ptTemplate.getDividerImagePath())) {
+                    try {
+                        dividerBytes = downloadNcpObject(ptTemplate.getDividerImagePath());
+                        if (dividerBytes != null && dividerBytes.length > 0) {
+                            logger.info("[PT F] 간지 재사용 배경 로드 (path={})", ptTemplate.getDividerImagePath());
+                        } else {
+                            dividerBytes = null;
+                        }
+                    } catch (Exception e) {
+                        logger.warn("[PT F] 간지 이미지 다운로드 실패 (path={}): {}",
+                                ptTemplate.getDividerImagePath(), e.getMessage());
+                        dividerBytes = null;
+                    }
+                }
+
+                // 대목차별 본문 슬라이드 그룹 (간지 주입 순서용) — layoutType=002는 TEMPLATE 간지로 대체하므로 스킵
+                Map<String, List<ProposalVO.SlideVO>> slidesByChapter = new java.util.LinkedHashMap<>();
+                for (String chapterId : chapterOrder) {
+                    slidesByChapter.put(chapterId, new java.util.ArrayList<>());
+                }
+                List<ProposalVO.SlideVO> orphanSlides = new java.util.ArrayList<>();
+                for (ProposalVO.SlideVO s : allSlides) {
+                    if ("002".equals(s.getLayoutType()) && dividerBytes != null) {
+                        // TEMPLATE 간지 재사용 시 기존 section_divider 슬라이드는 스킵 (중복 방지)
+                        continue;
+                    }
+                    String chapterId = tocToChapterMap.getOrDefault(s.getTocId(), s.getTocId());
+                    if (slidesByChapter.containsKey(chapterId)) {
+                        slidesByChapter.get(chapterId).add(s);
+                    } else {
+                        orphanSlides.add(s);
+                    }
+                }
+
+                java.util.function.Function<ProposalVO.SlideVO, kr.teamagent.common.util.ProposalPptxUtil.PageInfo> toPage =
+                        s -> {
+                            String tocId     = s.getTocId();
+                            String chapterId = tocToChapterMap.getOrDefault(tocId, tocId);
+                            String roman     = tocRomanMap.getOrDefault(chapterId, "Ⅰ");
+                            String secTitle  = tocTitleMap.getOrDefault(tocId, "");
+                            int slideNoInChapter = chapterSlideCount.merge(chapterId, 1, Integer::sum);
+                            String pageLabel = roman + "-" + slideNoInChapter;
+
+                            byte[] imageBytes = null;
+                            if (CommonUtil.isNotEmpty(s.getRenderedImagePath())) {
+                                try {
+                                    imageBytes = downloadNcpObject(s.getRenderedImagePath());
+                                } catch (Exception e) {
+                                    logger.warn("[PT F] 렌더링 이미지 다운로드 실패 (slideId={}, path={}): {}",
+                                            s.getSlideId(), s.getRenderedImagePath(), e.getMessage());
+                                }
+                            }
+                            return new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
+                                    imageBytes, roman, secTitle, pageLabel, projectNm, orgNm, submitterNmFinal,
+                                    s.getLayoutType());
+                        };
+
+                for (String chapterId : chapterOrder) {
+                    List<ProposalVO.SlideVO> chapterSlides = slidesByChapter.get(chapterId);
+                    if (chapterSlides == null || chapterSlides.isEmpty()) continue;
+
+                    // 대목차 간지 삽입 (TEMPLATE 배경 재사용 + 목차 텍스트 오버레이)
+                    if (dividerBytes != null) {
+                        String chapterNo = CommonUtil.isNotEmpty(tocSectionNoMap.get(chapterId))
+                                ? tocSectionNoMap.get(chapterId)
+                                : tocRomanMap.getOrDefault(chapterId, "Ⅰ");
+                        String chapterNm = tocTitleMap.getOrDefault(chapterId, "");
+                        String subTocList = chapterSubTocMap.getOrDefault(chapterId, "");
+                        pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
+                                dividerBytes, chapterNo, chapterNm, chapterNo,
+                                projectNm, orgNm, submitterNmFinal, "002", subTocList));
                     }
 
-                    pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
-                            imageBytes, roman, secTitle, pageLabel, projectNm, orgNm, submitterNm,
-                            s.getLayoutType()));   // layoutTypeCd 추가 — cover(001)/divider(002) 제외 처리용
+                    for (ProposalVO.SlideVO s : chapterSlides) {
+                        pages.add(toPage.apply(s));
+                    }
+                }
+                for (ProposalVO.SlideVO s : orphanSlides) {
+                    pages.add(toPage.apply(s));
                 }
 
                 // 항상 코드 기반 헤더/푸터 렌더링 사용 (frameImageBytes=null → useFrameImage=false)
@@ -6528,6 +6886,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             doneVO.setFilePath(objectKey);
             doneVO.setFileSize((long) uploadBytes.length);
             doneVO.setCompleteDt(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
+            doneVO.setInputFingerprint(buildExportInputFingerprint(ptProjectId, exportTypeCd));
             proposalDAO.updateExport(doneVO);
             logger.info("[PT F] 출력 빌드 완료 (exportId={}, exportTypeCd={}, ptProjectId={})", exportId, exportTypeCd, ptProjectId);
 
@@ -6598,6 +6957,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     : "보완 요청을 반영하지 못했습니다. 다시 시도해 주세요.");
         }
         return result;
+    }
+
+    public ProposalVO.PtTemplateVO generatePtDividerImage(String ptProjectId, String agentId) {
+        generateDividerImage(ptProjectId, agentId);
+        return proposalDAO.selectPtTemplate(ptProjectId);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -6792,6 +7156,29 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         } catch (Exception ignored) {}
 
         return null;
+    }
+
+    // ── 스텝 프롬프트 조회/수정 ────────────────────────────────────────────────
+
+    /**
+     * 스텝 프롬프트 목록 조회 (stageCd 목록 기준)
+     */
+    public List<ProposalVO.PromptEditVO> selectStepPrompts(List<String> stageCds) throws Exception {
+        return proposalDAO.selectStepPrompts(stageCds);
+    }
+
+    /**
+     * 스텝 프롬프트 내용 수정
+     */
+    public void updatePromptContent(ProposalVO.PromptEditVO vo) throws Exception {
+        proposalDAO.updatePromptContent(vo);
+    }
+
+    /**
+     * 스텝 프롬프트 원본 복구 (CONTENT = ORIGINAL_CONTENT)
+     */
+    public void restorePromptContent(String promptId) throws Exception {
+        proposalDAO.restorePromptContent(promptId);
     }
 
 }
