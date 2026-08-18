@@ -93,9 +93,9 @@ public class ProposalPptxUtil {
     public static class PageInfo {
         /** NCP에서 다운로드한 슬라이드 렌더링 이미지 bytes (null 허용 → 플레이스홀더 표시) */
         public final byte[] imageBytes;
-        /** 챕터 로마숫자 ("Ⅱ" 등) */
+        /** 챕터 번호 ("Ⅱ" 또는 SECTION_NO) — {chapter_no} 치환용 */
         public final String chapterRoman;
-        /** 소목차 제목 */
+        /** 소목차/대목차 제목 — {chapter_title} 치환용 */
         public final String sectionTitle;
         /** 페이지 라벨 ("Ⅱ-1" 등) */
         public final String pageLabel;
@@ -107,17 +107,26 @@ public class ProposalPptxUtil {
         public final String submitterNm;
         /** LAYOUT_TYPE_CD: "001"=cover, "002"=section_divider, 그 외 일반 슬라이드 */
         public final String layoutTypeCd;
+        /** 간지 하위 목차 리스트 ("1.1. xxx\\n1.2. yyy") — section_divider 오버레이용 */
+        public final String subTocList;
 
         // 기존 생성자 (layoutTypeCd = null → 헤더/푸터 적용)
         public PageInfo(byte[] imageBytes, String chapterRoman, String sectionTitle,
                         String pageLabel, String projectNm, String orgNm, String submitterNm) {
-            this(imageBytes, chapterRoman, sectionTitle, pageLabel, projectNm, orgNm, submitterNm, null);
+            this(imageBytes, chapterRoman, sectionTitle, pageLabel, projectNm, orgNm, submitterNm, null, null);
         }
 
-        // 신규 생성자 (layoutTypeCd 포함)
+        // layoutTypeCd 포함
         public PageInfo(byte[] imageBytes, String chapterRoman, String sectionTitle,
                         String pageLabel, String projectNm, String orgNm, String submitterNm,
                         String layoutTypeCd) {
+            this(imageBytes, chapterRoman, sectionTitle, pageLabel, projectNm, orgNm, submitterNm, layoutTypeCd, null);
+        }
+
+        // layoutTypeCd + subTocList 포함 (간지 오버레이)
+        public PageInfo(byte[] imageBytes, String chapterRoman, String sectionTitle,
+                        String pageLabel, String projectNm, String orgNm, String submitterNm,
+                        String layoutTypeCd, String subTocList) {
             this.imageBytes   = imageBytes;
             this.chapterRoman = chapterRoman != null ? chapterRoman : "Ⅰ";
             this.sectionTitle = sectionTitle != null ? sectionTitle : "";
@@ -126,6 +135,7 @@ public class ProposalPptxUtil {
             this.orgNm        = orgNm       != null ? orgNm        : "";
             this.submitterNm  = submitterNm != null ? submitterNm  : "";
             this.layoutTypeCd = layoutTypeCd;
+            this.subTocList   = subTocList  != null ? subTocList   : "";
         }
     }
 
@@ -287,7 +297,7 @@ public class ProposalPptxUtil {
         Color cBg     = parseHex(bgColor,     new Color(0xFF, 0xFF, 0xFF));
         Color cBase   = parseHex(baseColor,   new Color(0x5B, 0x4F, 0xE9));
         Color cAccent = parseHex(accentColor, new Color(0xE0, 0x8A, 0x2C));
-        Color cFooter = tint(cBase, 0.88f);
+        Color cFooter = new Color(0xF8, 0xF9, 0xFA);
 
         // ── 레이아웃 상수 (A4 842pt 기준, 비율 스케일 적용) ─────────────────
         double scale     = slideH / 842.0;
@@ -348,7 +358,7 @@ public class ProposalPptxUtil {
                             10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
                 }
 
-                // ── 푸터: 연한 baseColor 바 ──────────────────────────────
+                // ── 푸터: 밝은 회색 바 (#F8F9FA, 프레임 프롬프트와 동일) ──
                 addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, cFooter);
                 // 발주기관 (좌)
                 text(slide, page.orgNm, MARGIN, FOOTER_Y + 3,
@@ -462,8 +472,8 @@ public class ProposalPptxUtil {
                         // 헤더 배경 + 슬롯 (배경 rect 포함)
                         addRect(slide, 0, 0, slideW, HEADER_H, new Color(0xFF, 0xFF, 0xFF));
                         renderHeaderSlots(slide, headerLayout, page, slideW, HEADER_H, scale, cBase, cAccent, false);
-                        // 푸터 배경 + 슬롯
-                        addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, tint(cBase, 0.88f));
+                        // 푸터 배경 + 슬롯 (프레임 프롬프트·프론트 미리보기와 동일: #F8F9FA)
+                        addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, new Color(0xF8, 0xF9, 0xFA));
                         renderFooterSlots(slide, footerLayout, page, slideW, FOOTER_H, FOOTER_Y, scale);
                         // 본문 이미지
                         if (page.imageBytes != null && page.imageBytes.length > 0) {
@@ -483,6 +493,10 @@ public class ProposalPptxUtil {
                             text(slide, "이미지를 불러올 수 없습니다.",
                                     30, slideH / 2 - 10, slideW - 60, 24,
                                     10, false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
+                        }
+                        // 간지: 재사용 배경 위에 대목차번호/명/하위목차 텍스트 오버레이
+                        if ("002".equals(page.layoutTypeCd)) {
+                            renderDividerTextOverlay(slide, page, slideW, slideH, cBase, cAccent);
                         }
                     }
                 }
@@ -515,7 +529,58 @@ public class ProposalPptxUtil {
             .replace("{breadcrumb}",    page.sectionTitle)
             .replace("{org_nm}",        page.orgNm)
             .replace("{submitter_nm}",  page.submitterNm)
-            .replace("{page_number}",   page.pageLabel);
+            .replace("{page_number}",   page.pageLabel)
+            .replace("{sub_toc_list}",  page.subTocList != null ? page.subTocList : "");
+    }
+
+    /**
+     * 간지(section_divider) 텍스트 오버레이.
+     * 본문형 헤더/푸터의 resolveSlotText와 동일하게,
+     * 재사용 배경 이미지 위에 {chapter_no}/{chapter_title}/{sub_toc_list} 실제값을 PPTX 텍스트로 올린다.
+     * (이미지 픽셀의 플레이스홀더를 지우는 방식이 아님 — 이미지에는 글자가 없어야 함)
+     */
+    private static void renderDividerTextOverlay(XSLFSlide slide, PageInfo page,
+                                                  int slideW, int slideH,
+                                                  Color cBase, Color cAccent) {
+        int margin = Math.max(28, slideW / 24);
+        int leftW  = (int)(slideW * 0.52) - margin;
+        int rightX = (int)(slideW * 0.55);
+        int rightW = slideW - rightX - margin;
+        int centerY = (int)(slideH * 0.42);
+        Color titleColor = (cBase != null) ? cBase : DARK_TEXT;
+        Color listColor  = darken(titleColor, 0.15f);
+
+        // 대목차 번호 — 좌측
+        String chapterNo = nvl(page.chapterRoman, "");
+        if (!chapterNo.isEmpty()) {
+            text(slide, chapterNo, margin, centerY - 90, leftW, 56,
+                    Math.max(28, slideH / 12.0), true, false, titleColor, null);
+        }
+
+        // 구분선 (본문형 accent 라인과 유사한 역할)
+        addRect(slide, margin, centerY - 22, Math.min(120, leftW / 3), 3, cAccent);
+
+        // 대목차명 — 좌측 (핵심)
+        String chapterTitle = nvl(page.sectionTitle, "");
+        if (!chapterTitle.isEmpty()) {
+            text(slide, chapterTitle, margin, centerY - 10, leftW, 90,
+                    Math.max(20, slideH / 18.0), true, false, titleColor, null);
+        }
+
+        // 하위 목차 리스트 — 우측 ({sub_toc_list} 치환 결과)
+        String subToc = page.subTocList != null ? page.subTocList.trim() : "";
+        if (!subToc.isEmpty()) {
+            String[] lines = subToc.split("\\r?\\n");
+            int lineH = Math.max(22, slideH / 18);
+            int blockH = lines.length * lineH;
+            int startY = Math.max(margin, centerY - blockH / 2);
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i] != null ? lines[i].trim() : "";
+                if (line.isEmpty()) continue;
+                text(slide, line, rightX, startY + i * lineH, rightW, lineH,
+                        Math.max(11, slideH / 32.0), false, false, listColor, null);
+            }
+        }
     }
 
     private static TextParagraph.TextAlign parseAlign(String align) {

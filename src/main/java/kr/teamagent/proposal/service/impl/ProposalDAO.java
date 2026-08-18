@@ -573,15 +573,6 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return (ProposalVO.ExportVO) selectOne("proposal.selectLatestCompletedExport", params);
     }
 
-    /**
-     * 프로젝트 슬라이드 최신 수정일시 조회 (캐시 재사용 판단용)
-     * @param ptProjectId 프로젝트 ID
-     * @return "yyyy-MM-dd HH:mm:ss" 문자열, 없으면 null
-     */
-    public String selectMaxSlideModifyDt(String ptProjectId) {
-        return (String) selectOne("proposal.selectMaxSlideModifyDt", ptProjectId);
-    }
-
     // ── TB_PT_TEMPLATE ──────────────────────────────────────────────────────────
 
     /**
@@ -610,6 +601,59 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public void updateTemplateFramePath(ProposalVO.PtTemplateVO vo) {
         update("proposal.updateTemplateFramePath", vo);
+    }
+
+    /**
+     * PT 템플릿 표지 생성 상태 코드만 업데이트
+     */
+    public void updateTemplateCoverStatus(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateCoverStatus", vo);
+    }
+
+    /**
+     * PT 템플릿 표지 이미지 경로 + 상태 코드 업데이트
+     */
+    public void updateTemplateCoverPath(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateCoverPath", vo);
+    }
+
+    /**
+     * PT 템플릿 간지 생성 상태 코드만 업데이트
+     */
+    public void updateTemplateDividerStatus(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateDividerStatus", vo);
+    }
+
+    /**
+     * PT 템플릿 간지 이미지 경로 + 상태 코드 업데이트
+     */
+    public void updateTemplateDividerPath(ProposalVO.PtTemplateVO vo) {
+        update("proposal.updateTemplateDividerPath", vo);
+    }
+
+    // ── 스텝 프롬프트 조회/수정 ────────────────────────────────────────────────
+
+    /**
+     * 스텝 프롬프트 목록 조회 (stageCd 목록 기준)
+     */
+    public List<ProposalVO.PromptEditVO> selectStepPrompts(List<String> stageCds) {
+        java.util.Map<String, Object> param = new java.util.HashMap<>();
+        param.put("stageCds", stageCds);
+        return selectList("proposal.selectStepPrompts", param);
+    }
+
+    /**
+     * 스텝 프롬프트 내용 수정 (CONTENT 업데이트)
+     */
+    public void updatePromptContent(ProposalVO.PromptEditVO vo) {
+        update("proposal.updatePromptContent", vo);
+    }
+
+    /**
+     * 스텝 프롬프트 원본 복구 (CONTENT = ORIGINAL_CONTENT)
+     */
+    public void restorePromptContent(String promptId) {
+        update("proposal.restorePromptContent", promptId);
     }
 
 }
