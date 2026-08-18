@@ -864,6 +864,19 @@ public class ProposalVO {
     }
 
     /**
+     * 간지 보완요청 채팅 요청 VO
+     */
+    @Data
+    public static class DividerChatVO {
+        /** PT 프로젝트 ID */
+        private String ptProjectId;
+        /** 에이전트 ID */
+        private String agentId;
+        /** 사용자 보완 요청 메시지 */
+        private String message;
+    }
+
+    /**
      * Stage4 평가 시뮬레이션 결과 VO (TB_PT_REVIEW)
      */
     @Data

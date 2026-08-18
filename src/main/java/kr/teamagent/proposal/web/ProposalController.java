@@ -1224,6 +1224,47 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /** 간지형 보완요청 채팅 */
+    @RequestMapping(value = "/ai/proposal/chatDivider.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView chatDivider(@RequestBody ProposalVO.DividerChatVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.PtTemplateVO data = proposalService.generatePtDividerImage(
+                    vo.getPtProjectId(), vo.getAgentId(), "complement_request", vo.getMessage());
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (RuntimeException e) {
+            logger.error("[PT E] chatDivider 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        } catch (Exception e) {
+            logger.error("[PT E] chatDivider 오류 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 간지 배경 이미지 presigned URL 조회 (미리보기용) */
+    @RequestMapping("/ai/proposal/viewPtDividerImage.do")
+    public @ResponseBody Map<String, Object> viewPtDividerImage(@RequestParam("ptProjectId") String ptProjectId) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (ptProjectId == null || ptProjectId.trim().isEmpty()) {
+                resultMap.put("viewType", "DOWNLOAD");
+                resultMap.put("reason", "MISSING_PT_PROJECT_ID");
+                return resultMap;
+            }
+            resultMap = proposalService.viewDividerImage(ptProjectId);
+        } catch (Exception e) {
+            logger.error("[PT Divider] viewPtDividerImage 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+            resultMap.put("viewType", "DOWNLOAD");
+            resultMap.put("reason", "ERROR");
+        }
+        return resultMap;
+    }
+
     // ── 스텝 프롬프트 조회/수정 ────────────────────────────────────────────────
 
     /** 스텝 프롬프트 목록 조회 (stageCd 목록 기준) */
