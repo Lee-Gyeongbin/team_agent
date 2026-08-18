@@ -5466,7 +5466,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         try {
             OkHttpClient client = new OkHttpClient.Builder()
-                    .readTimeout(120, TimeUnit.SECONDS)
+                    .readTimeout(200, TimeUnit.SECONDS)
                     .connectTimeout(10, TimeUnit.SECONDS)
                     .build();
 
@@ -5988,7 +5988,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      *   <li>성공: NCP 업로드 → DIVIDER_IMAGE_PATH + DIVIDER_GEN_STATUS_CD = '003' 갱신</li>
      * </ol>
      */
-    private void generateDividerImage(String ptProjectId, String agentId) {
+    private void generateDividerImage(String ptProjectId, String agentId, String requestType, String message) {
         logger.info("[PT Divider] 간지 이미지 생성 시작 (ptProjectId={})", ptProjectId);
         // 1. 생성중(002) 상태 설정
         ProposalVO.PtTemplateVO statusVO = new ProposalVO.PtTemplateVO();
@@ -6001,6 +6001,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String prompt;
         try {
             prompt = buildDividerPrompt(ptProjectId, agentId);
+            if ("complement_request".equals(requestType)) {
+                prompt += "\n\n## 추가 반영 요청사항";
+                prompt += "\n" + message;
+            }
         } catch (Exception e) {
             logger.warn("[PT Divider] 프롬프트 빌드 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
             statusVO.setDividerGenStatusCd("004");
@@ -6960,8 +6964,41 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     public ProposalVO.PtTemplateVO generatePtDividerImage(String ptProjectId, String agentId) {
-        generateDividerImage(ptProjectId, agentId);
+        generateDividerImage(ptProjectId, agentId, null, null);
         return proposalDAO.selectPtTemplate(ptProjectId);
+    }
+
+    public ProposalVO.PtTemplateVO generatePtDividerImage(String ptProjectId, String agentId, String requestType, String message) {
+        generateDividerImage(ptProjectId, agentId, requestType, message);
+        ProposalVO.PtTemplateVO result = proposalDAO.selectPtTemplate(ptProjectId);
+        if (result != null && "complement_request".equals(requestType)) {
+            result.setAiMessage("003".equals(result.getDividerGenStatusCd())
+                    ? "보완 요청에 따라 간지가 수정되었습니다."
+                    : "보완 요청을 반영하지 못했습니다. 다시 시도해 주세요.");
+        }
+        return result;
+    }
+
+    /**
+     * 간지 배경 이미지 presigned URL 조회 (미리보기용).
+     * TB_PT_TEMPLATE.DIVIDER_IMAGE_PATH(objectKey)를 읽어 FileService로 presigned URL 생성.
+     */
+    public Map<String, Object> viewDividerImage(String ptProjectId) throws Exception {
+        ProposalVO.PtTemplateVO template = proposalDAO.selectPtTemplate(ptProjectId);
+        Map<String, Object> notFound = new HashMap<>();
+        notFound.put("viewType", "DOWNLOAD");
+        notFound.put("reason", "FILE_NOT_FOUND");
+        notFound.put("url", "");
+
+        if (template == null || CommonUtil.isEmpty(template.getDividerImagePath())) {
+            return notFound;
+        }
+
+        FileVO fileVo = new FileVO();
+        fileVo.setFilePath(template.getDividerImagePath());
+        fileVo.setFileName("divider.png");
+        fileVo.setFileType("image/png");
+        return fileService.createViewPresignedUrlForStorageObject(fileVo);
     }
 
     @Transactional(rollbackFor = Exception.class)

@@ -571,14 +571,34 @@ public class ProposalPptxUtil {
         String subToc = page.subTocList != null ? page.subTocList.trim() : "";
         if (!subToc.isEmpty()) {
             String[] lines = subToc.split("\\r?\\n");
-            int lineH = Math.max(22, slideH / 18);
+
+            // ── 가용 높이 기반 행간/폰트 동적 조정 ──────────────────────────
+            // A4(842pt)에서 slideH/18=46, slideH/32=26이 되어 항목이 많으면 하단이 잘리므로,
+            // 상한값(22pt 행간, 13pt 폰트)을 두고 항목 수에 따라 추가 축소
+            int availH = slideH - margin * 2;
+            int lineH  = Math.min(22, Math.max(16, slideH / 20));
+            double fontSize = Math.min(13.0, Math.max(10.0, slideH / 65.0));
+
+            // 항목이 많아 가용 높이를 초과하면 행간·폰트를 비례 축소
             int blockH = lines.length * lineH;
-            int startY = Math.max(margin, centerY - blockH / 2);
+            if (blockH > availH) {
+                lineH    = Math.max(14, availH / Math.max(1, lines.length));
+                fontSize = Math.max(9.0, lineH * 0.65);
+                blockH   = lines.length * lineH;
+            }
+
+            // 슬라이드 중앙 기준 배치, 상·하단 margin 이내로 클램프
+            int startY = centerY - blockH / 2;
+            startY = Math.min(startY, slideH - margin - blockH);
+            startY = Math.max(margin, startY);
+
             for (int i = 0; i < lines.length; i++) {
+                int itemY = startY + i * lineH;
+                if (itemY + lineH > slideH - margin) break;  // 하단 초과 시 중단
                 String line = lines[i] != null ? lines[i].trim() : "";
                 if (line.isEmpty()) continue;
-                text(slide, line, rightX, startY + i * lineH, rightW, lineH,
-                        Math.max(11, slideH / 32.0), false, false, listColor, null);
+                text(slide, line, rightX, itemY, rightW, lineH,
+                        fontSize, false, false, listColor, null);
             }
         }
     }
