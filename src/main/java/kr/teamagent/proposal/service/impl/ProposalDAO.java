@@ -443,6 +443,16 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return (ProposalVO.TocVO) selectOne("proposal.selectTocById", tocId);
     }
 
+    /** 콘텐츠 개요 텍스트 단건 조회 */
+    public ProposalVO.TocVO selectTocOutline(String tocId) {
+        return (ProposalVO.TocVO) selectOne("proposal.selectTocOutline", tocId);
+    }
+
+    /** 콘텐츠 개요 텍스트·상태 업데이트 */
+    public void updateTocOutline(ProposalVO.TocVO vo) {
+        update("proposal.updateTocOutline", vo);
+    }
+
     /**
      * 소목차(leaf, PARENT_TOC_ID IS NOT NULL) 목록 조회
      * @param ptProjectId 프로젝트 ID

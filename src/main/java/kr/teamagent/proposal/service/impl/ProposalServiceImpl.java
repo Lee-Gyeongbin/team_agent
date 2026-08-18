@@ -7218,4 +7218,202 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         proposalDAO.restorePromptContent(promptId);
     }
 
+    // ============================================================
+    // Step5 콘텐츠 개요 API
+    // ============================================================
+
+    /**
+     * 콘텐츠 개요 텍스트 단건 조회 (노드 클릭 시 지연 로딩)
+     */
+    public ProposalVO.TocVO selectTocOutline(String tocId) throws Exception {
+        return proposalDAO.selectTocOutline(tocId);
+    }
+
+    /**
+     * 콘텐츠 개요 생성 (S3_OUTLINE 프롬프트 호출)
+     * - 동기 REST: SSE 불필요
+     */
+    public ProposalVO.TocVO generateTocOutline(String tocId, String modelId, String agentId) throws Exception {
+        // 1. 해당 TOC 정보 로드
+        ProposalVO.TocVO tocVO = proposalDAO.selectTocById(tocId);
+        if (tocVO == null) throw new RuntimeException("목차를 찾을 수 없습니다. tocId=" + tocId);
+        String ptProjectId = tocVO.getPtProjectId();
+
+        // 2. 상위 경로 조회 (대목차 > 소분류 경로 구성)
+        List<ProposalVO.TocVO> allToc = proposalDAO.selectTocList(ptProjectId);
+        String sectionPath = buildSectionPath(tocVO, allToc);
+
+        // 3. 매핑된 요구사항 조회
+        List<ProposalVO.RequirementVO> allRequirements = proposalDAO.selectRequirements(ptProjectId);
+        List<ProposalVO.RequirementVO> filteredReqs = filterRequirementsByToc(tocVO, allRequirements);
+
+        // 4. Win Theme 조회
+        List<ProposalVO.WinThemeVO> winThemes = null;
+        try { winThemes = proposalDAO.selectWinThemes(ptProjectId); }
+        catch (Exception e) { logger.warn("[PT Outline] Win Theme 조회 실패, 프롬프트에서 제외 (tocId={})", tocId); }
+
+        // 5. 인접 세부목차 제목 목록 (같은 부모 아래)
+        List<String> siblingTitles = buildSiblingTitles(tocVO, allToc);
+
+        // 6. 프롬프트 조회
+        String promptContent = null;
+        try { promptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_OUTLINE"); }
+        catch (Exception e) { logger.warn("[PT Outline] S3_OUTLINE 프롬프트 조회 실패: {}", e.getMessage()); }
+
+        // 7. 전체 프롬프트 조합
+        String fullPrompt = buildOutlineFullPrompt(promptContent, tocVO, sectionPath, filteredReqs, winThemes, siblingTitles);
+
+        // 8. LLM 호출
+        String aiResponse = callLlmWithRetry(fullPrompt, modelId, agentId, "[PT Outline]");
+        if (CommonUtil.isEmpty(aiResponse)) throw new RuntimeException("AI 응답이 비어 있습니다. 잠시 후 다시 시도해 주세요.");
+
+        // 9. 저장
+        ProposalVO.TocVO upd = new ProposalVO.TocVO();
+        upd.setTocId(tocId);
+        upd.setContentOutlineTxt(aiResponse.trim());
+        upd.setOutlineStatusCd("002"); // 초안
+        upd.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateTocOutline(upd);
+
+        upd.setContentOutlineTxt(aiResponse.trim());
+        return upd;
+    }
+
+    /**
+     * 콘텐츠 개요 보완 채팅 (현재 개요 + 사용자 메시지 → 새 개요)
+     */
+    public ProposalVO.TocVO chatTocOutline(String tocId, String message, String modelId, String agentId) throws Exception {
+        // 1. 현재 개요 텍스트 조회
+        ProposalVO.TocVO current = proposalDAO.selectTocOutline(tocId);
+        if (current == null) throw new RuntimeException("목차를 찾을 수 없습니다. tocId=" + tocId);
+        String currentOutline = current.getContentOutlineTxt();
+        if (CommonUtil.isEmpty(currentOutline)) throw new RuntimeException("개요가 없습니다. 먼저 개요를 생성해주세요.");
+
+        // 2. 채팅 프롬프트 조합
+        String fullPrompt = buildOutlineChatPrompt(currentOutline, message);
+
+        // 3. LLM 호출
+        String aiResponse = callLlmWithRetry(fullPrompt, modelId, agentId, "[PT Outline Chat]");
+        if (CommonUtil.isEmpty(aiResponse)) throw new RuntimeException("AI 응답이 비어 있습니다. 잠시 후 다시 시도해 주세요.");
+
+        // 4. 저장 (확정→초안 강등)
+        ProposalVO.TocVO upd = new ProposalVO.TocVO();
+        upd.setTocId(tocId);
+        upd.setContentOutlineTxt(aiResponse.trim());
+        upd.setOutlineStatusCd("002"); // 채팅으로 수정 시 항상 초안
+        upd.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateTocOutline(upd);
+
+        upd.setContentOutlineTxt(aiResponse.trim());
+        return upd;
+    }
+
+    /**
+     * 콘텐츠 개요 확정 (OUTLINE_STATUS_CD = '003')
+     */
+    public void confirmTocOutline(String tocId, String outlineTxt) throws Exception {
+        ProposalVO.TocVO upd = new ProposalVO.TocVO();
+        upd.setTocId(tocId);
+        upd.setContentOutlineTxt(outlineTxt);
+        upd.setOutlineStatusCd("003");
+        upd.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateTocOutline(upd);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────────
+    // [Outline 내부 헬퍼]
+    // ──────────────────────────────────────────────────────────────────────────────
+
+    /** 세부목차 경로 문자열 조합 (대목차 > 소분류 > 세부목차) */
+    private String buildSectionPath(ProposalVO.TocVO leaf, List<ProposalVO.TocVO> allToc) {
+        if (leaf.getParentTocId() == null) return leaf.getSectionNm();
+        ProposalVO.TocVO parent = allToc.stream()
+                .filter(t -> t.getTocId().equals(leaf.getParentTocId()))
+                .findFirst().orElse(null);
+        if (parent == null) return leaf.getSectionNm();
+        if (parent.getParentTocId() == null) {
+            return parent.getSectionNm() + " > " + leaf.getSectionNm();
+        }
+        ProposalVO.TocVO grandParent = allToc.stream()
+                .filter(t -> t.getTocId().equals(parent.getParentTocId()))
+                .findFirst().orElse(null);
+        String gp = grandParent != null ? grandParent.getSectionNm() + " > " : "";
+        return gp + parent.getSectionNm() + " > " + leaf.getSectionNm();
+    }
+
+    /** TOC에 매핑된 요구사항 필터링 */
+    private List<ProposalVO.RequirementVO> filterRequirementsByToc(
+            ProposalVO.TocVO tocVO, List<ProposalVO.RequirementVO> allReqs) {
+        String coveredJson = tocVO.getCoveredReqIdsJson();
+        if (CommonUtil.isEmpty(coveredJson) || "[]".equals(coveredJson.trim())) return allReqs;
+        try {
+            java.lang.reflect.Type listType = new com.google.gson.reflect.TypeToken<List<String>>(){}.getType();
+            List<String> ids = GSON.fromJson(coveredJson, listType);
+            if (ids == null || ids.isEmpty()) return allReqs;
+            java.util.Set<String> idSet = new java.util.HashSet<>(ids);
+            return allReqs.stream().filter(r -> idSet.contains(r.getRequirementId())).collect(java.util.stream.Collectors.toList());
+        } catch (Exception e) {
+            return allReqs;
+        }
+    }
+
+    /** 같은 부모 아래 형제 세부목차 제목 목록 */
+    private List<String> buildSiblingTitles(ProposalVO.TocVO leaf, List<ProposalVO.TocVO> allToc) {
+        if (leaf.getParentTocId() == null) return java.util.Collections.emptyList();
+        return allToc.stream()
+                .filter(t -> leaf.getParentTocId().equals(t.getParentTocId())
+                        && !t.getTocId().equals(leaf.getTocId()))
+                .map(ProposalVO.TocVO::getSectionNm)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /** 콘텐츠 개요 생성용 전체 프롬프트 조합 */
+    private String buildOutlineFullPrompt(String promptContent,
+            ProposalVO.TocVO tocVO,
+            String sectionPath,
+            List<ProposalVO.RequirementVO> reqs,
+            List<ProposalVO.WinThemeVO> winThemes,
+            List<String> siblingTitles) {
+        StringBuilder sb = new StringBuilder();
+        if (!CommonUtil.isEmpty(promptContent)) {
+            sb.append(promptContent).append("\n\n");
+        } else {
+            sb.append("당신은 PT 제안서 콘텐츠 개요 작성 전문가입니다.\n")
+              .append("아래 정보를 바탕으로 해당 세부목차 슬라이드에 담을 수 있는 아이디어를 5~8개 번호 목록으로 제시하세요.\n")
+              .append("각 아이디어는 2~3줄 설명을 포함하세요.\n\n");
+        }
+        sb.append("## 세부목차 정보\n");
+        sb.append("- 경로: ").append(sectionPath).append("\n");
+        sb.append("- 제목: ").append(tocVO.getSectionNm()).append("\n\n");
+        if (reqs != null && !reqs.isEmpty()) {
+            sb.append("## 관련 요구사항\n");
+            reqs.forEach(r -> sb.append("- [").append(r.getRequirementId()).append("] ")
+                    .append(r.getReqNo() != null ? r.getReqNo() + " " : "")
+                    .append(r.getReqContent()).append("\n"));
+            sb.append("\n");
+        }
+        if (winThemes != null && !winThemes.isEmpty()) {
+            sb.append("## Win Theme\n");
+            winThemes.forEach(w -> sb.append("- ").append(w.getCoreMessage())
+                    .append(w.getProposalStrategy() != null ? ": " + w.getProposalStrategy() : "").append("\n"));
+            sb.append("\n");
+        }
+        if (!siblingTitles.isEmpty()) {
+            sb.append("## 인접 세부목차 (중복 제외)\n");
+            siblingTitles.forEach(t -> sb.append("- ").append(t).append("\n"));
+            sb.append("\n");
+        }
+        return sb.toString();
+    }
+
+    /** 콘텐츠 개요 채팅 프롬프트 조합 */
+    private String buildOutlineChatPrompt(String currentOutline, String userMessage) {
+        return "당신은 PT 제안서 콘텐츠 개요 보완 전문가입니다.\n"
+            + "아래 현재 개요를 사용자의 요청에 맞게 수정하여 전체 개요를 다시 작성해 주세요.\n"
+            + "형식은 기존 번호 목록 형식을 유지하세요.\n\n"
+            + "## 현재 개요\n" + currentOutline + "\n\n"
+            + "## 사용자 요청\n" + userMessage + "\n\n"
+            + "## 지시\n수정된 전체 개요를 번호 목록으로 다시 작성해 주세요.";
+    }
+
 }

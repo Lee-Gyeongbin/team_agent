@@ -1315,4 +1315,81 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    // ============================================================
+    // Step5 콘텐츠 개요 API
+    // ============================================================
+
+    /** 콘텐츠 개요 텍스트 단건 조회 (노드 클릭 시 지연 로딩) */
+    @RequestMapping("/ai/proposal/selectTocOutline.do")
+    @ResponseBody
+    public ModelAndView selectTocOutline(@RequestParam String tocId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.TocVO data = proposalService.selectTocOutline(tocId);
+            resultMap.put("result", "OK");
+            resultMap.put("data", data);
+        } catch (Exception e) {
+            logger.error("[PT Outline] selectTocOutline 오류 (tocId={}): {}", tocId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 콘텐츠 개요 생성 */
+    @RequestMapping(value = "/ai/proposal/generateTocOutline.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView generateTocOutline(
+            @RequestParam String tocId,
+            @RequestParam String modelId,
+            @RequestParam String agentId) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.TocVO data = proposalService.generateTocOutline(tocId, modelId, agentId);
+            resultMap.put("result", "OK");
+            resultMap.put("contentOutlineTxt", data.getContentOutlineTxt());
+            resultMap.put("outlineStatusCd", data.getOutlineStatusCd());
+        } catch (Exception e) {
+            logger.error("[PT Outline] generateTocOutline 오류 (tocId={}): {}", tocId, e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 콘텐츠 개요 보완 채팅 */
+    @RequestMapping(value = "/ai/proposal/chatTocOutline.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView chatTocOutline(@RequestBody ProposalVO.TocOutlineChatVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            ProposalVO.TocVO data = proposalService.chatTocOutline(
+                    vo.getTocId(), vo.getMessage(), vo.getModelId(), vo.getAgentId());
+            resultMap.put("result", "OK");
+            resultMap.put("contentOutlineTxt", data.getContentOutlineTxt());
+            resultMap.put("outlineStatusCd", data.getOutlineStatusCd());
+        } catch (Exception e) {
+            logger.error("[PT Outline] chatTocOutline 오류 (tocId={}): {}", vo.getTocId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 콘텐츠 개요 확정 */
+    @RequestMapping(value = "/ai/proposal/confirmTocOutline.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView confirmTocOutline(@RequestBody ProposalVO.TocOutlineConfirmVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            proposalService.confirmTocOutline(vo.getTocId(), vo.getOutlineTxt());
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT Outline] confirmTocOutline 오류 (tocId={}): {}", vo.getTocId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

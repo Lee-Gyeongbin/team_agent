@@ -486,6 +486,10 @@ public class ProposalVO {
         private String guideContent;
         /** 목차 원본 유형 코드 (001=RFP원본목차, 002=AI생성 세부목차) */
         private String originTypeCd;
+        /** 콘텐츠 개요 텍스트 (LONGTEXT, NULL) */
+        private String contentOutlineTxt;
+        /** 개요 상태 코드 (001=미생성, 002=초안, 003=확정) */
+        private String outlineStatusCd;
         /** 조회 응답용 계층 구조 */
         private java.util.List<TocVO> children;
     }
@@ -1099,5 +1103,25 @@ public class ProposalVO {
         private String originalContent;
         /** 조회 요청용 stageCd 목록 (DB 미저장, selectStepPrompts 파라미터용) */
         private List<String> stageCds;
+    }
+
+    /**
+     * 콘텐츠 개요 보완 채팅 요청 VO
+     */
+    @Data
+    public static class TocOutlineChatVO {
+        private String tocId;
+        private String message;
+        private String modelId;
+        private String agentId;
+    }
+
+    /**
+     * 콘텐츠 개요 확정 요청 VO
+     */
+    @Data
+    public static class TocOutlineConfirmVO {
+        private String tocId;
+        private String outlineTxt;
     }
 }
