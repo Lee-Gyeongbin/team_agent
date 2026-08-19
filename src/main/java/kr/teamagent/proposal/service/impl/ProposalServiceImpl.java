@@ -4530,6 +4530,259 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return emitter;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // Step D-1-Edit: PLANNED_SLIDE_CNT 수정 + 생성 후 스왑 재생성
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private static final String SLIDE_STAGING = "005"; // 스테이징(임시) 상태
+
+    /**
+     * 소목차 목표 슬라이드 수 수정 SSE 스트림.
+     * - 기존 슬라이드 없음: PLANNED_SLIDE_CNT만 UPDATE 후 즉시 완료.
+     * - 기존 슬라이드 있음: PLANNED_SLIDE_CNT UPDATE → 스테이징 생성 → 스왑(성공) / 롤백(실패).
+     */
+    public SseEmitter streamUpdatePlannedSlideCnt(
+            String ptProjectId, String tocId, int newPlannedCnt, String modelId, String agentId) {
+
+        SseEmitter emitter = new SseEmitter(0L);
+        emitter.onTimeout(() -> {
+            logger.warn("[PT D-1-Edit] SSE timeout - tocId={}", tocId);
+            emitter.complete();
+        });
+        emitter.onError(e -> logger.warn("[PT D-1-Edit] SSE error - tocId={}", tocId));
+
+        sendSseEvent(emitter, "connected", "{\"tocId\":\"" + tocId + "\"}");
+
+        if (newPlannedCnt < 1) {
+            sendSseEvent(emitter, "error", "{\"message\":\"목표 슬라이드 수는 1 이상이어야 합니다.\"}");
+            emitter.complete();
+            return emitter;
+        }
+
+        final String userId = SessionUtil.getUserId();
+
+        STAGE_D_EXECUTOR.execute(() -> {
+            try {
+                // 1. TOC 로드
+                ProposalVO.TocVO tocVO = proposalDAO.selectTocById(tocId);
+                if (tocVO == null) {
+                    sendSseEvent(emitter, "error", "{\"message\":\"소목차를 찾을 수 없습니다. tocId=" + tocId + "\"}");
+                    emitter.complete();
+                    return;
+                }
+                int oldPlannedCnt = tocVO.getPlannedSlideCnt();
+
+                // 2. 기존 정식 슬라이드 수 확인
+                int existingCount = proposalDAO.countNonStagingSlidesByToc(tocId);
+
+                // 3. PLANNED_SLIDE_CNT 업데이트
+                ProposalVO.TocVO updToc = new ProposalVO.TocVO();
+                updToc.setTocId(tocId);
+                updToc.setPlannedSlideCnt(newPlannedCnt);
+                updToc.setModifyUserId(userId);
+                proposalDAO.updateTocPlannedSlideCnt(updToc);
+                logger.info("[PT D-1-Edit] PLANNED_SLIDE_CNT 변경: {} → {} (tocId={})", oldPlannedCnt, newPlannedCnt, tocId);
+
+                // 4. 기존 슬라이드 없으면 즉시 완료
+                if (existingCount == 0) {
+                    logger.info("[PT D-1-Edit] 기존 슬라이드 없음 — PLANNED_SLIDE_CNT만 수정 완료 (tocId={})", tocId);
+                    sendSseEvent(emitter, "done",
+                            "{\"tocId\":\"" + tocId + "\",\"slideCount\":0,\"regenTriggered\":false}");
+                    emitter.complete();
+                    return;
+                }
+
+                // 5. 재생성 (생성 후 스왑)
+                sendSseEvent(emitter, "progress", "{\"step\":\"load\"}");
+
+                // ── D-1과 동일한 데이터 로딩 ──────────────────────────────
+                ProposalVO.EvalCriteriaVO linkedEc = null;
+                if (CommonUtil.isNotEmpty(tocVO.getLinkedEvalCriteriaId())) {
+                    List<ProposalVO.EvalCriteriaVO> allEc = proposalDAO.selectEvalCriteria(ptProjectId);
+                    for (ProposalVO.EvalCriteriaVO ec : allEc) {
+                        if (tocVO.getLinkedEvalCriteriaId().equals(ec.getEvalCriteriaId())) {
+                            linkedEc = ec;
+                            break;
+                        }
+                    }
+                }
+
+                List<ProposalVO.RequirementVO> allRequirements = proposalDAO.selectRequirements(ptProjectId);
+                List<ProposalVO.RequirementVO> filteredReqs;
+                String coveredReqIdsJsonRaw = tocVO.getCoveredReqIdsJson();
+                if (CommonUtil.isEmpty(coveredReqIdsJsonRaw)) {
+                    filteredReqs = allRequirements;
+                } else {
+                    Set<String> coveredReqIds = parseCoveredReqIds(coveredReqIdsJsonRaw);
+                    if (coveredReqIds.isEmpty()) {
+                        filteredReqs = java.util.Collections.emptyList();
+                    } else {
+                        filteredReqs = allRequirements.stream()
+                                .filter(r -> coveredReqIds.contains(r.getRequirementId()))
+                                .collect(java.util.stream.Collectors.toList());
+                    }
+                }
+                List<ProposalVO.RequirementStage3VO> requirements = toStage3RequirementVOs(filteredReqs);
+                List<ProposalVO.WinThemeStage3VO> winThemes = toStage3WinThemeVOs(proposalDAO.selectWinThemes(ptProjectId));
+                List<ProposalVO.ProblemDefinitionStage3VO> problemDefs = toStage3ProblemDefVOs(proposalDAO.selectProblemDefinitions(ptProjectId));
+                String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+                ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
+
+                List<ProposalVO.SiblingSlideVO> siblingSlides = java.util.Collections.emptyList();
+                if (CommonUtil.isNotEmpty(tocVO.getParentTocId())) {
+                    java.util.Map<String, Object> siblingParams = new java.util.HashMap<>();
+                    siblingParams.put("parentTocId", tocVO.getParentTocId());
+                    siblingParams.put("currentTocId", tocId);
+                    siblingSlides = proposalDAO.selectSiblingSlides(siblingParams);
+                }
+
+                sendSseEvent(emitter, "progress", "{\"step\":\"llm\"}");
+                String promptContent = null;
+                try {
+                    promptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S3_SLIDE");
+                } catch (Exception e) {
+                    logger.warn("[PT D-1-Edit] S3_SLIDE 프롬프트 조회 실패: {}", e.getMessage());
+                }
+                if (CommonUtil.isEmpty(promptContent)) {
+                    promptContent = buildDefaultStage3Prompt();
+                }
+
+                // tocVO에 새 plannedSlideCnt 반영 후 프롬프트 조합 (이미 DB 업데이트됨)
+                tocVO.setPlannedSlideCnt(newPlannedCnt);
+                String fullPrompt = buildStage3FullPrompt(promptContent, tocVO, linkedEc,
+                        requirements, winThemes, problemDefs, project, configJson, siblingSlides);
+
+                String aiResponse = callLlmWithRetry(fullPrompt, modelId, agentId, "[PT D-1-Edit]");
+                if (CommonUtil.isEmpty(aiResponse)) {
+                    // 실패 — 롤백
+                    proposalDAO.deleteStagingSlidesByToc(tocId);
+                    ProposalVO.TocVO rollback = new ProposalVO.TocVO();
+                    rollback.setTocId(tocId);
+                    rollback.setPlannedSlideCnt(oldPlannedCnt);
+                    rollback.setModifyUserId(userId);
+                    proposalDAO.updateTocPlannedSlideCnt(rollback);
+                    sendSseEvent(emitter, "error", "{\"message\":\"AI 응답이 비어 있습니다. 기존 슬라이드를 유지합니다.\"}");
+                    emitter.complete();
+                    return;
+                }
+
+                sendSseEvent(emitter, "progress", "{\"step\":\"parse\"}");
+                List<JsonObject> slideJsonObjects;
+                try {
+                    slideJsonObjects = parseStage3Response(aiResponse);
+                } catch (RuntimeException e) {
+                    logger.warn("[PT D-1-Edit] 파싱 실패, 1회 재시도: {}", e.getMessage());
+                    aiResponse = riskDiagnosisAgentService.callLlmQuerySync(fullPrompt, modelId, "", agentId);
+                    try {
+                        slideJsonObjects = parseStage3Response(aiResponse);
+                    } catch (RuntimeException e2) {
+                        logger.error("[PT D-1-Edit] 재시도 파싱 실패 (tocId={}): {}", tocId, e2.getMessage());
+                        proposalDAO.deleteStagingSlidesByToc(tocId);
+                        ProposalVO.TocVO rollback = new ProposalVO.TocVO();
+                        rollback.setTocId(tocId);
+                        rollback.setPlannedSlideCnt(oldPlannedCnt);
+                        rollback.setModifyUserId(userId);
+                        proposalDAO.updateTocPlannedSlideCnt(rollback);
+                        sendSseEvent(emitter, "error", "{\"message\":\"슬라이드 생성 결과를 파싱할 수 없습니다. 기존 슬라이드를 유지합니다.\"}");
+                        emitter.complete();
+                        return;
+                    }
+                }
+
+                sendSseEvent(emitter, "progress", "{\"step\":\"save\"}");
+
+                // 이전 실행에서 SSE가 중단돼 남은 고아 스테이징 row 선제 정리
+                proposalDAO.deleteStagingSlidesByToc(tocId);
+
+                // 스테이징 삽입 — 기존 max SLIDE_NO 이후로 임시 배치 (스왑 후 재조정 없음, SORT_ORD 기준 정렬)
+                int maxSlideNo = proposalDAO.selectMaxSlideNo(ptProjectId);
+                List<ProposalVO.SlideVO> stagingSlides = new java.util.ArrayList<>();
+                for (int i = 0; i < slideJsonObjects.size(); i++) {
+                    JsonObject sObj = slideJsonObjects.get(i);
+                    int slideNo = maxSlideNo + i + 1;
+                    int colorIndex = slideNo % 3;
+
+                    ProposalVO.SlideVO slide = new ProposalVO.SlideVO();
+                    slide.setSlideId(keyGenerate.generateTableKey("PTS", "TB_PT_SLIDE", "SLIDE_ID", 6));
+                    slide.setPtProjectId(ptProjectId);
+                    slide.setTocId(tocId);
+                    slide.setSlideNo(slideNo);
+                    slide.setColorIndex(colorIndex);
+                    slide.setSortOrd(i);
+                    slide.setLayoutType(layoutTypeToCode(getStrOrNull(sObj, "layoutType")));
+                    slide.setTitleTxt(getStrOrNull(sObj, "title"));
+                    slide.setEyebrowTxt(getStrOrNull(sObj, "eyebrow"));
+                    slide.setSubtitleTxt(getStrOrNull(sObj, "subtitle"));
+                    slide.setHighlightBannerTxt(getStrOrNull(sObj, "highlightBanner"));
+                    slide.setConclusionRibbonTxt(getStrOrNull(sObj, "conclusionRibbon"));
+                    slide.setReqIdsJson(sObj.has("reqNos") && !sObj.get("reqNos").isJsonNull()
+                            ? GSON.toJson(sObj.get("reqNos")) : null);
+                    slide.setComponentsJson(sObj.has("components") && !sObj.get("components").isJsonNull()
+                            ? GSON.toJson(sObj.get("components")) : null);
+                    slide.setStepFlowBarJson(sObj.has("stepFlowBar") && !sObj.get("stepFlowBar").isJsonNull()
+                            ? GSON.toJson(sObj.get("stepFlowBar")) : null);
+
+                    if (CommonUtil.isEmpty(slide.getTitleTxt())) {
+                        logger.warn("[PT D-1-Edit] title 누락, 스테이징 슬라이드 스킵 (tocId={}, idx={})", tocId, i);
+                        continue;
+                    }
+
+                    slide.setRenderStatusCd(SLIDE_STAGING); // 스테이징 상태
+                    slide.setCreateUserId(userId);
+                    proposalDAO.insertSlide(slide);
+                    stagingSlides.add(slide);
+                }
+
+                if (stagingSlides.isEmpty()) {
+                    // 생성된 슬라이드 없음 — 롤백
+                    proposalDAO.deleteStagingSlidesByToc(tocId);
+                    ProposalVO.TocVO rollback = new ProposalVO.TocVO();
+                    rollback.setTocId(tocId);
+                    rollback.setPlannedSlideCnt(oldPlannedCnt);
+                    rollback.setModifyUserId(userId);
+                    proposalDAO.updateTocPlannedSlideCnt(rollback);
+                    sendSseEvent(emitter, "error", "{\"message\":\"유효한 슬라이드를 생성하지 못했습니다. 기존 슬라이드를 유지합니다.\"}");
+                    emitter.complete();
+                    return;
+                }
+
+                // 스왑: 기존 정식 슬라이드 삭제 + 스테이징 승격을 단일 트랜잭션으로 원자적 처리.
+                // 삭제 후 승격 전 장애 시 기존 슬라이드 전멸을 방지.
+                final String finalTocId = tocId;
+                final int finalOldCnt = oldPlannedCnt;
+                final int finalNewCnt = stagingSlides.size();
+                transactionTemplate.execute(status -> {
+                    try {
+                        proposalDAO.deleteNonStagingSlidesByToc(finalTocId);
+                        proposalDAO.promoteStagingSlidesByToc(finalTocId);
+                    } catch (Exception e) {
+                        status.setRollbackOnly();
+                        throw new RuntimeException("스왑 트랜잭션 실패 (tocId=" + finalTocId + "): " + e.getMessage(), e);
+                    }
+                    return null;
+                });
+                logger.info("[PT D-1-Edit] 스왑 완료: {} → {}장 (tocId={})", finalOldCnt, finalNewCnt, finalTocId);
+
+                sendSseEvent(emitter, "done",
+                        "{\"tocId\":\"" + tocId + "\",\"slideCount\":" + stagingSlides.size()
+                        + ",\"regenTriggered\":true}");
+
+            } catch (Exception e) {
+                logger.error("[PT D-1-Edit] 오류 (tocId={}): {}", tocId, e.getMessage(), e);
+                try {
+                    proposalDAO.deleteStagingSlidesByToc(tocId);
+                } catch (Exception ex) {
+                    logger.warn("[PT D-1-Edit] 스테이징 정리 실패 (tocId={}): {}", tocId, ex.getMessage());
+                }
+                sendSseEvent(emitter, "error", "{\"message\":\"" + e.getMessage().replace("\"", "'") + "\"}");
+            } finally {
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
     /**
      * 이미지 생성 API에 전달할 시각 스타일 앵커 문자열을 반환한다.
      * <p>
@@ -6220,6 +6473,12 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             sb.append("\n- RFP 세부 작성 지침: ").append(tocVO.getGuideContent());
         }
 
+        if ("003".equals(tocVO.getOutlineStatusCd()) && CommonUtil.isNotEmpty(tocVO.getContentOutlineTxt())) {
+            sb.append("\n\n## 확정된 콘텐츠 개요");
+            sb.append("\n사용자가 이 소목차에 대해 아래 방향들을 확정했습니다.\n");
+            sb.append(tocVO.getContentOutlineTxt());
+        }
+
         if (linkedEc != null) {
             sb.append("\n\n## 연결된 평가기준");
             sb.append("\n- 평가항목: ").append(CommonUtil.nullToBlank(linkedEc.getEvalItemNm()));
@@ -7345,15 +7604,26 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private List<ProposalVO.RequirementVO> filterRequirementsByToc(
             ProposalVO.TocVO tocVO, List<ProposalVO.RequirementVO> allReqs) {
         String coveredJson = tocVO.getCoveredReqIdsJson();
-        if (CommonUtil.isEmpty(coveredJson) || "[]".equals(coveredJson.trim())) return allReqs;
+        if (CommonUtil.isEmpty(coveredJson)) {
+            logger.debug("[Outline] filterRequirements: tocId={} coveredReqIdsJson=null/blank → 빈 리스트 반환", tocVO.getTocId());
+            return java.util.Collections.emptyList();
+        }
+        if ("[]".equals(coveredJson.trim())) {
+            logger.debug("[Outline] filterRequirements: tocId={} coveredReqIdsJson=[] (S2C 실행, 0건 매칭) → 빈 리스트 반환", tocVO.getTocId());
+            return java.util.Collections.emptyList();
+        }
         try {
             java.lang.reflect.Type listType = new com.google.gson.reflect.TypeToken<List<String>>(){}.getType();
             List<String> ids = GSON.fromJson(coveredJson, listType);
-            if (ids == null || ids.isEmpty()) return allReqs;
+            if (ids == null || ids.isEmpty()) {
+                logger.debug("[Outline] filterRequirements: tocId={} 파싱 결과 ids 없음 → 빈 리스트 반환", tocVO.getTocId());
+                return java.util.Collections.emptyList();
+            }
             java.util.Set<String> idSet = new java.util.HashSet<>(ids);
             return allReqs.stream().filter(r -> idSet.contains(r.getRequirementId())).collect(java.util.stream.Collectors.toList());
         } catch (Exception e) {
-            return allReqs;
+            logger.warn("[Outline] filterRequirements: tocId={} coveredReqIdsJson 파싱 실패 → 빈 리스트 반환. json={}", tocVO.getTocId(), coveredJson, e);
+            return java.util.Collections.emptyList();
         }
     }
 
@@ -7384,8 +7654,18 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
         sb.append("## 세부목차 정보\n");
         sb.append("- 경로: ").append(sectionPath).append("\n");
-        sb.append("- 제목: ").append(tocVO.getSectionNm()).append("\n\n");
-        if (reqs != null && !reqs.isEmpty()) {
+        sb.append("- 제목: ").append(tocVO.getSectionNm()).append("\n");
+        
+        if (CommonUtil.isNotEmpty(tocVO.getGuideContent())) {
+            sb.append("- 작성 지침(GUIDE_CONTENT): ").append(tocVO.getGuideContent()).append("\n");
+        }
+        sb.append("\n");
+        if (reqs == null || reqs.isEmpty()) {
+            sb.append("## 관련 요구사항\n");
+            sb.append("- 이 세부목차는 특정 RFP 요구사항에 직접 매핑되지 않았습니다. ")
+              .append("위 작성 지침(GUIDE_CONTENT)과 제목, Win Theme을 바탕으로 ")
+              .append("일반적인 콘텐츠 방향을 제안하세요.\n\n");
+        } else {
             sb.append("## 관련 요구사항\n");
             reqs.forEach(r -> sb.append("- [").append(r.getRequirementId()).append("] ")
                     .append(r.getReqNo() != null ? r.getReqNo() + " " : "")
