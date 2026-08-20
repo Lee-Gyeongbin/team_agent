@@ -443,6 +443,16 @@ public class ProposalDAO extends EgovComAbstractDAO {
         return (ProposalVO.TocVO) selectOne("proposal.selectTocById", tocId);
     }
 
+    /** 콘텐츠 개요 텍스트 단건 조회 */
+    public ProposalVO.TocVO selectTocOutline(String tocId) {
+        return (ProposalVO.TocVO) selectOne("proposal.selectTocOutline", tocId);
+    }
+
+    /** 콘텐츠 개요 텍스트·상태 업데이트 */
+    public void updateTocOutline(ProposalVO.TocVO vo) {
+        update("proposal.updateTocOutline", vo);
+    }
+
     /**
      * 소목차(leaf, PARENT_TOC_ID IS NOT NULL) 목록 조회
      * @param ptProjectId 프로젝트 ID
@@ -504,6 +514,34 @@ public class ProposalDAO extends EgovComAbstractDAO {
      */
     public void deleteSlidesByToc(String tocId) {
         delete("proposal.deleteSlidesByToc", tocId);
+    }
+
+    // ── PLANNED_SLIDE_CNT 사용자 수정 + 생성 후 스왑 ──────────────────────
+
+    /** 소목차 목표 슬라이드 수 단건 수정 */
+    public void updateTocPlannedSlideCnt(ProposalVO.TocVO vo) {
+        update("proposal.updateTocPlannedSlideCnt", vo);
+    }
+
+    /** 소목차 정식 슬라이드 수 조회 (005=스테이징 제외) */
+    public int countNonStagingSlidesByToc(String tocId) {
+        Integer cnt = (Integer) selectOne("proposal.countNonStagingSlidesByToc", tocId);
+        return cnt != null ? cnt : 0;
+    }
+
+    /** 소목차 정식 슬라이드 삭제 (005=스테이징 유지) */
+    public void deleteNonStagingSlidesByToc(String tocId) {
+        delete("proposal.deleteNonStagingSlidesByToc", tocId);
+    }
+
+    /** 소목차 스테이징 슬라이드 삭제 */
+    public void deleteStagingSlidesByToc(String tocId) {
+        delete("proposal.deleteStagingSlidesByToc", tocId);
+    }
+
+    /** 소목차 스테이징 슬라이드를 완료 상태로 승격 */
+    public void promoteStagingSlidesByToc(String tocId) {
+        update("proposal.promoteStagingSlidesByToc", tocId);
     }
 
     /**

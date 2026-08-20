@@ -782,6 +782,8 @@
             t.SORT_ORD                AS SORT_ORD,
             t.GUIDE_CONTENT           AS GUIDE_CONTENT,
             t.ORIGIN_TYPE_CD          AS ORIGIN_TYPE_CD,
+            t.CONTENT_OUTLINE_TXT    AS CONTENT_OUTLINE_TXT,
+            t.OUTLINE_STATUS_CD      AS OUTLINE_STATUS_CD,
             t.CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(t.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
             t.MODIFY_USER_ID          AS MODIFY_USER_ID,
@@ -834,6 +836,8 @@
             PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             SORT_ORD                AS SORT_ORD,
             GUIDE_CONTENT           AS GUIDE_CONTENT,
+            CONTENT_OUTLINE_TXT     AS CONTENT_OUTLINE_TXT,
+            OUTLINE_STATUS_CD       AS OUTLINE_STATUS_CD,
             CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
             MODIFY_USER_ID          AS MODIFY_USER_ID,
@@ -841,6 +845,29 @@
         FROM TB_PT_TOC
         WHERE TOC_ID = #{tocId}
     </select>
+
+    <!-- 콘텐츠 개요 텍스트 단건 조회 (지연 로딩용) -->
+    <select id="selectTocOutline" parameterType="String"
+            resultType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* 콘텐츠 개요 텍스트 단건 조회 proposal.selectTocOutline */
+        SELECT
+            TOC_ID              AS TOC_ID,
+            CONTENT_OUTLINE_TXT AS CONTENT_OUTLINE_TXT,
+            OUTLINE_STATUS_CD   AS OUTLINE_STATUS_CD
+        FROM TB_PT_TOC
+        WHERE TOC_ID = #{tocId}
+    </select>
+
+    <!-- 콘텐츠 개요 텍스트·상태 업데이트 -->
+    <update id="updateTocOutline" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* 콘텐츠 개요 업데이트 proposal.updateTocOutline */
+        UPDATE TB_PT_TOC
+        SET CONTENT_OUTLINE_TXT = #{contentOutlineTxt, jdbcType=LONGVARCHAR}
+          , OUTLINE_STATUS_CD   = #{outlineStatusCd}
+          , MODIFY_DT           = NOW()
+          <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
+        WHERE TOC_ID = #{tocId}
+    </update>
 
     <select id="selectLeafTocList" parameterType="String"
             resultType="kr.teamagent.proposal.service.ProposalVO$TocVO">
@@ -854,7 +881,9 @@
             LINKED_EVAL_CRITERIA_ID AS LINKED_EVAL_CRITERIA_ID,
             PLANNED_SLIDE_CNT       AS PLANNED_SLIDE_CNT,
             SORT_ORD                AS SORT_ORD,
-            GUIDE_CONTENT           AS GUIDE_CONTENT
+            GUIDE_CONTENT           AS GUIDE_CONTENT,
+            CONTENT_OUTLINE_TXT     AS CONTENT_OUTLINE_TXT,
+            OUTLINE_STATUS_CD       AS OUTLINE_STATUS_CD
         FROM TB_PT_TOC
         WHERE PT_PROJECT_ID = #{ptProjectId}
           AND PARENT_TOC_ID IS NOT NULL
@@ -1085,6 +1114,50 @@
         /* 소목차 슬라이드 전체 삭제 proposal.deleteSlidesByToc */
         DELETE FROM TB_PT_SLIDE WHERE TOC_ID = #{tocId}
     </delete>
+
+    <!-- ================================================================== -->
+    <!-- PLANNED_SLIDE_CNT 사용자 수정 + 생성 후 스왑 재생성                 -->
+    <!-- ================================================================== -->
+
+    <update id="updateTocPlannedSlideCnt" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* 소목차 목표 슬라이드 수 단건 수정 proposal.updateTocPlannedSlideCnt */
+        UPDATE TB_PT_TOC
+        SET PLANNED_SLIDE_CNT = #{plannedSlideCnt},
+            MODIFY_DT         = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
+        WHERE TOC_ID = #{tocId}
+    </update>
+
+    <select id="countNonStagingSlidesByToc" parameterType="String" resultType="Integer">
+        /* 소목차 정식 슬라이드 수 조회 (005=스테이징 제외) proposal.countNonStagingSlidesByToc */
+        SELECT COUNT(*)
+        FROM TB_PT_SLIDE
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD &lt;&gt; '005'
+    </select>
+
+    <delete id="deleteNonStagingSlidesByToc" parameterType="String">
+        /* 소목차 정식 슬라이드 삭제 (005=스테이징 유지) proposal.deleteNonStagingSlidesByToc */
+        DELETE FROM TB_PT_SLIDE
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD &lt;&gt; '005'
+    </delete>
+
+    <delete id="deleteStagingSlidesByToc" parameterType="String">
+        /* 소목차 스테이징 슬라이드 삭제 proposal.deleteStagingSlidesByToc */
+        DELETE FROM TB_PT_SLIDE
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD = '005'
+    </delete>
+
+    <update id="promoteStagingSlidesByToc" parameterType="String">
+        /* 소목차 스테이징 슬라이드를 완료 상태로 승격 proposal.promoteStagingSlidesByToc */
+        UPDATE TB_PT_SLIDE
+        SET RENDER_STATUS_CD = '003',
+            MODIFY_DT        = NOW()
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD = '005'
+    </update>
 
     <select id="selectAllSlidesByProject" parameterType="String"
             resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">

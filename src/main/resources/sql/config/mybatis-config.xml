@@ -38,6 +38,7 @@
         <typeAlias alias="tmplVO"                            type="kr.teamagent.tmpl.service.TmplVO"/>
         <typeAlias alias="myPageVO"                          type="kr.teamagent.mypage.service.MyPageVO"/>
         <typeAlias alias="meetingVO"                         type="kr.teamagent.meeting.service.MeetingVO"/>
+        <typeAlias alias="marketingVO"                       type="kr.teamagent.marketing.service.MarketingVO"/>
         <typeAlias alias="dataDashboardVO"                   type="kr.teamagent.datadashboard.service.DataDashboardVO"/>
         <typeAlias alias="myDocumentsVO"                     type="kr.teamagent.mydocuments.service.MyDocumentsVO"/>
         <typeAlias alias="apiCallLogVO"                      type="kr.teamagent.common.apilog.service.ApiCallLogVO"/>
