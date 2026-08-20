@@ -516,6 +516,34 @@ public class ProposalDAO extends EgovComAbstractDAO {
         delete("proposal.deleteSlidesByToc", tocId);
     }
 
+    // ── PLANNED_SLIDE_CNT 사용자 수정 + 생성 후 스왑 ──────────────────────
+
+    /** 소목차 목표 슬라이드 수 단건 수정 */
+    public void updateTocPlannedSlideCnt(ProposalVO.TocVO vo) {
+        update("proposal.updateTocPlannedSlideCnt", vo);
+    }
+
+    /** 소목차 정식 슬라이드 수 조회 (005=스테이징 제외) */
+    public int countNonStagingSlidesByToc(String tocId) {
+        Integer cnt = (Integer) selectOne("proposal.countNonStagingSlidesByToc", tocId);
+        return cnt != null ? cnt : 0;
+    }
+
+    /** 소목차 정식 슬라이드 삭제 (005=스테이징 유지) */
+    public void deleteNonStagingSlidesByToc(String tocId) {
+        delete("proposal.deleteNonStagingSlidesByToc", tocId);
+    }
+
+    /** 소목차 스테이징 슬라이드 삭제 */
+    public void deleteStagingSlidesByToc(String tocId) {
+        delete("proposal.deleteStagingSlidesByToc", tocId);
+    }
+
+    /** 소목차 스테이징 슬라이드를 완료 상태로 승격 */
+    public void promoteStagingSlidesByToc(String tocId) {
+        update("proposal.promoteStagingSlidesByToc", tocId);
+    }
+
     /**
      * 형제 소목차(같은 PARENT_TOC_ID)의 완료된 슬라이드 제목 조회 (중복 방지 컨텍스트용)
      * @param params parentTocId, currentTocId

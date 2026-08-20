@@ -1115,6 +1115,50 @@
         DELETE FROM TB_PT_SLIDE WHERE TOC_ID = #{tocId}
     </delete>
 
+    <!-- ================================================================== -->
+    <!-- PLANNED_SLIDE_CNT 사용자 수정 + 생성 후 스왑 재생성                 -->
+    <!-- ================================================================== -->
+
+    <update id="updateTocPlannedSlideCnt" parameterType="kr.teamagent.proposal.service.ProposalVO$TocVO">
+        /* 소목차 목표 슬라이드 수 단건 수정 proposal.updateTocPlannedSlideCnt */
+        UPDATE TB_PT_TOC
+        SET PLANNED_SLIDE_CNT = #{plannedSlideCnt},
+            MODIFY_DT         = NOW()
+            <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
+        WHERE TOC_ID = #{tocId}
+    </update>
+
+    <select id="countNonStagingSlidesByToc" parameterType="String" resultType="Integer">
+        /* 소목차 정식 슬라이드 수 조회 (005=스테이징 제외) proposal.countNonStagingSlidesByToc */
+        SELECT COUNT(*)
+        FROM TB_PT_SLIDE
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD &lt;&gt; '005'
+    </select>
+
+    <delete id="deleteNonStagingSlidesByToc" parameterType="String">
+        /* 소목차 정식 슬라이드 삭제 (005=스테이징 유지) proposal.deleteNonStagingSlidesByToc */
+        DELETE FROM TB_PT_SLIDE
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD &lt;&gt; '005'
+    </delete>
+
+    <delete id="deleteStagingSlidesByToc" parameterType="String">
+        /* 소목차 스테이징 슬라이드 삭제 proposal.deleteStagingSlidesByToc */
+        DELETE FROM TB_PT_SLIDE
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD = '005'
+    </delete>
+
+    <update id="promoteStagingSlidesByToc" parameterType="String">
+        /* 소목차 스테이징 슬라이드를 완료 상태로 승격 proposal.promoteStagingSlidesByToc */
+        UPDATE TB_PT_SLIDE
+        SET RENDER_STATUS_CD = '003',
+            MODIFY_DT        = NOW()
+        WHERE TOC_ID = #{tocId}
+          AND RENDER_STATUS_CD = '005'
+    </update>
+
     <select id="selectAllSlidesByProject" parameterType="String"
             resultType="kr.teamagent.proposal.service.ProposalVO$SlideVO">
         /* 프로젝트 전체 슬라이드 목록 조회 (SLIDE_NO 순) proposal.selectAllSlidesByProject */

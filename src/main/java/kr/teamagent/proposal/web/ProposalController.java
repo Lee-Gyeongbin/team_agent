@@ -521,6 +521,21 @@ public class ProposalController extends BaseController {
         return proposalService.streamGenerateSection(ptProjectId, tocId, modelId, agentId);
     }
 
+    /** D-1-Edit — 소목차 목표 슬라이드 수 수정 + (기존 슬라이드 있으면) 재생성 SSE */
+    @RequestMapping(value = "/ai/proposal/streamUpdatePlannedSlideCnt.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamUpdatePlannedSlideCnt(
+            @RequestParam String ptProjectId,
+            @RequestParam String tocId,
+            @RequestParam int plannedSlideCnt,
+            @RequestParam String modelId,
+            @RequestParam String agentId,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamUpdatePlannedSlideCnt(ptProjectId, tocId, plannedSlideCnt, modelId, agentId);
+    }
+
     /** D-1 — 소목차 슬라이드 목록 조회 */
     @RequestMapping(value = "/ai/proposal/selectSectionSlides.do", method = RequestMethod.GET)
     @ResponseBody
