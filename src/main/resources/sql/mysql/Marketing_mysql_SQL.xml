@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="marketing">
+
+    <select id="selectMarketingProjectList"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO"
+            resultType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 마케팅 프로젝트 목록 조회 marketing.selectMarketingProjectList */
+        SELECT
+            p.MKT_PROJECT_ID    AS MARKETING_PROJECT_ID
+            , p.PROJECT_NM      AS PROJECT_NM
+            , p.ORG_NM          AS ORG_NM
+            , p.PROJECT_OVERVIEW AS PROJECT_OVERVIEW
+            , DATE_FORMAT(p.DUE_DT, '%Y-%m-%d') AS DUE_DT
+            , p.STATUS_CD       AS STATUS_CD
+            , cd.CODE_NM        AS STATUS_NM
+            , CAST(p.PROJECT_CONFIG_JSON AS CHAR) AS PROJECT_CONFIG_JSON
+            , p.CREATE_USER_ID  AS CREATE_USER_ID
+            , DATE_FORMAT(p.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            , p.MODIFY_USER_ID  AS MODIFY_USER_ID
+            , DATE_FORMAT(p.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
+        FROM TB_MKT_PROJECT p
+        LEFT JOIN TB_CODE cd
+            ON cd.CODE_GRP_ID = 'PT000002'
+            AND cd.CODE_ID = p.STATUS_CD
+        WHERE 1 = 1
+            <if test="statusCd != null and statusCd != ''">
+                AND p.STATUS_CD = #{statusCd}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    p.PROJECT_NM LIKE CONCAT('%', #{keyword}, '%')
+                    OR p.ORG_NM LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+        ORDER BY
+            <choose>
+                <when test="sortField == 'CREATE_DT'">p.CREATE_DT</when>
+                <when test="sortField == 'DUE_DT'">p.DUE_DT</when>
+                <otherwise>COALESCE(p.MODIFY_DT, p.CREATE_DT)</otherwise>
+            </choose>
+            <choose>
+                <when test="sortOrder == 'ASC'">ASC</when>
+                <otherwise>DESC</otherwise>
+            </choose>
+        <if test="limit != null">
+            LIMIT #{limit}
+            <if test="offset != null">
+                OFFSET #{offset}
+            </if>
+        </if>
+    </select>
+
+    <select id="selectMarketingProject"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO"
+            resultType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 마케팅 프로젝트 단건 조회 marketing.selectMarketingProject */
+        SELECT
+            p.MKT_PROJECT_ID    AS MARKETING_PROJECT_ID
+            , p.PROJECT_NM      AS PROJECT_NM
+            , p.ORG_NM          AS ORG_NM
+            , p.PROJECT_OVERVIEW AS PROJECT_OVERVIEW
+            , DATE_FORMAT(p.DUE_DT, '%Y-%m-%d') AS DUE_DT
+            , p.STATUS_CD       AS STATUS_CD
+            , cd.CODE_NM        AS STATUS_NM
+            , CAST(p.PROJECT_CONFIG_JSON AS CHAR) AS PROJECT_CONFIG_JSON
+            , p.CREATE_USER_ID  AS CREATE_USER_ID
+            , DATE_FORMAT(p.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            , p.MODIFY_USER_ID  AS MODIFY_USER_ID
+            , DATE_FORMAT(p.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
+        FROM TB_MKT_PROJECT p
+        LEFT JOIN TB_CODE cd
+            ON cd.CODE_GRP_ID = 'PT000002'
+            AND cd.CODE_ID = p.STATUS_CD
+        WHERE 1 = 1
+            AND p.MKT_PROJECT_ID = #{marketingProjectId}
+    </select>
+
+    <insert id="insertMarketingProject"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 마케팅 프로젝트 등록 marketing.insertMarketingProject */
+        INSERT INTO TB_MKT_PROJECT (
+            MKT_PROJECT_ID
+            , PROJECT_NM
+            , ORG_NM
+            , PROJECT_OVERVIEW
+            , DUE_DT
+            , STATUS_CD
+            , PROJECT_CONFIG_JSON
+            , CREATE_USER_ID
+            , CREATE_DT
+        ) VALUES (
+            #{marketingProjectId}
+            , #{projectNm}
+            , #{orgNm}
+            , #{projectOverview}
+            , #{dueDt}
+            , #{statusCd}
+            , #{projectConfigJson}
+            , #{createUserId}
+            , NOW()
+        )
+    </insert>
+
+    <update id="updateMarketingProject"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 마케팅 프로젝트 수정 marketing.updateMarketingProject */
+        UPDATE TB_MKT_PROJECT SET
+            PROJECT_NM          = #{projectNm}
+            , ORG_NM             = #{orgNm, jdbcType=VARCHAR}
+            , PROJECT_OVERVIEW   = #{projectOverview, jdbcType=VARCHAR}
+            , DUE_DT             = #{dueDt, jdbcType=DATE}
+            , PROJECT_CONFIG_JSON = #{projectConfigJson, jdbcType=VARCHAR}
+            <if test="statusCd != null and statusCd != ''">
+                , STATUS_CD      = #{statusCd}
+            </if>
+            , MODIFY_USER_ID     = #{modifyUserId}
+            , MODIFY_DT          = NOW()
+        WHERE MKT_PROJECT_ID = #{marketingProjectId}
+    </update>
+
+    <update id="advanceOverdueProjectsToReview">
+        /* 마감일 경과 프로젝트 작성중→검수중 일괄 전환 marketing.advanceOverdueProjectsToReview */
+        UPDATE TB_MKT_PROJECT SET
+            STATUS_CD           = '002'
+            , MODIFY_DT         = NOW()
+        WHERE STATUS_CD = '001'
+            AND DUE_DT IS NOT NULL
+            AND DUE_DT &lt; CURDATE()
+    </update>
+
+    <delete id="deleteMarketingProject"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 마케팅 프로젝트 삭제 marketing.deleteMarketingProject */
+        DELETE FROM TB_MKT_PROJECT
+        WHERE MKT_PROJECT_ID = #{marketingProjectId}
+    </delete>
+
+    <!-- ===================== TB_MKT_FILE ===================== -->
+
+    <insert id="insertMarketingFile"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$FileVO">
+        /* 마케팅 파일 등록 marketing.insertMarketingFile */
+        INSERT INTO TB_MKT_FILE (
+            MKT_FILE_ID
+            , MKT_PROJECT_ID
+            , FILE_PATH
+            , FILE_NM
+            , FILE_SIZE
+            , FILE_TYPE
+            , CREATE_USER_ID
+            , CREATE_DT
+        ) VALUES (
+            #{marketingFileId}
+            , #{marketingProjectId, jdbcType=VARCHAR}
+            , #{filePath}
+            , #{fileNm}
+            , #{fileSize}
+            , #{fileType}
+            , #{createUserId}
+            , NOW()
+        )
+    </insert>
+
+    <select id="selectMarketingFileList"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$FileVO"
+            resultType="kr.teamagent.marketing.service.MarketingVO$FileVO">
+        /* 마케팅 파일 목록 조회 marketing.selectMarketingFileList */
+        SELECT
+            f.MKT_FILE_ID       AS MARKETING_FILE_ID
+            , f.MKT_PROJECT_ID  AS MARKETING_PROJECT_ID
+            , f.FILE_PATH       AS FILE_PATH
+            , f.FILE_NM         AS FILE_NM
+            , f.FILE_SIZE       AS FILE_SIZE
+            , f.FILE_TYPE       AS FILE_TYPE
+            , f.CREATE_USER_ID  AS CREATE_USER_ID
+            , DATE_FORMAT(f.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM TB_MKT_FILE f
+        WHERE 1 = 1
+            AND f.MKT_PROJECT_ID = #{marketingProjectId}
+        ORDER BY f.CREATE_DT DESC
+    </select>
+
+    <select id="selectMarketingFileById"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$FileVO"
+            resultType="kr.teamagent.marketing.service.MarketingVO$FileVO">
+        /* 마케팅 파일 단건 조회 marketing.selectMarketingFileById */
+        SELECT
+            f.MKT_FILE_ID       AS MARKETING_FILE_ID
+            , f.MKT_PROJECT_ID  AS MARKETING_PROJECT_ID
+            , f.FILE_PATH       AS FILE_PATH
+            , f.FILE_NM         AS FILE_NM
+            , f.FILE_SIZE       AS FILE_SIZE
+            , f.FILE_TYPE       AS FILE_TYPE
+            , f.CREATE_USER_ID  AS CREATE_USER_ID
+            , DATE_FORMAT(f.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM TB_MKT_FILE f
+        WHERE f.MKT_FILE_ID = #{marketingFileId}
+    </select>
+
+    <update id="updateMarketingFile"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$FileVO">
+        /* 마케팅 첨부파일명 수정 marketing.updateMarketingFile */
+        UPDATE TB_MKT_FILE SET
+            FILE_NM = #{fileNm}
+        WHERE MKT_FILE_ID = #{marketingFileId}
+    </update>
+
+    <delete id="deleteMarketingFile"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$FileVO">
+        /* 마케팅 첨부파일 삭제 marketing.deleteMarketingFile */
+        DELETE FROM TB_MKT_FILE
+        WHERE MKT_FILE_ID = #{marketingFileId}
+    </delete>
+
+    <delete id="deleteMarketingFilesByProject"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 프로젝트 소속 첨부파일 전체 삭제 marketing.deleteMarketingFilesByProject */
+        DELETE FROM TB_MKT_FILE WHERE MKT_PROJECT_ID = #{marketingProjectId}
+    </delete>
+
+    <!-- ===================== TB_MKT ===================== -->
+
+    <select id="selectMarketingList" parameterType="marketingVO" resultType="marketingVO">
+        /* 마케팅 콘텐츠 목록 조회 marketing.selectMarketingList */
+        SELECT
+            m.MKT_ID            AS MKT_ID
+            , m.MKT_PROJECT_ID  AS MARKETING_PROJECT_ID
+            , m.AGENT_ID        AS AGENT_ID
+            , m.TITLE           AS TITLE
+            , m.OUTPUT_MODE     AS OUTPUT_MODE
+            , m.STATUS_CD       AS STATUS_CD
+            , m.CONTENT_TYPE    AS CONTENT_TYPE
+            , m.REQUEST_JSON    AS REQUEST_JSON
+            , DATE_FORMAT(m.PUBLISH_SCHEDULED_DT, '%Y-%m-%d %H:%i:%s') AS PUBLISH_SCHEDULED_DT
+            , m.PUBLISHED_YN    AS PUBLISHED_YN
+            , u.USER_NM         AS CREATE_USER_NM
+            , DATE_FORMAT(m.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM TB_MKT m
+        LEFT JOIN TB_USER u ON u.USER_ID = m.CREATE_USER_ID
+        WHERE 1 = 1
+            AND m.MKT_PROJECT_ID = #{marketingProjectId}
+            <if test="keyword != null and keyword != ''">
+                AND m.TITLE LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+            <if test="contentType != null and contentType != ''">
+                AND m.CONTENT_TYPE = #{contentType}
+            </if>
+            <if test="outputMode != null and outputMode != ''">
+                AND m.OUTPUT_MODE = #{outputMode}
+            </if>
+            <if test="periodDays != null">
+                AND m.CREATE_DT &gt;= DATE_SUB(NOW(), INTERVAL #{periodDays} DAY)
+            </if>
+        ORDER BY COALESCE(m.MODIFY_DT, m.CREATE_DT) DESC, m.CREATE_DT DESC
+    </select>
+
+    <select id="selectMarketing" parameterType="marketingVO" resultType="marketingVO">
+        /* 마케팅 콘텐츠 단건 조회 marketing.selectMarketing */
+        SELECT
+            m.MKT_ID            AS MKT_ID
+            , m.MKT_PROJECT_ID  AS MARKETING_PROJECT_ID
+            , m.AGENT_ID        AS AGENT_ID
+            , m.TITLE           AS TITLE
+            , m.OUTPUT_MODE     AS OUTPUT_MODE
+            , m.STATUS_CD       AS STATUS_CD
+            , m.CONTENT_TYPE    AS CONTENT_TYPE
+            , m.REQUEST_JSON    AS REQUEST_JSON
+            , DATE_FORMAT(m.PUBLISH_SCHEDULED_DT, '%Y-%m-%d %H:%i:%s') AS PUBLISH_SCHEDULED_DT
+            , m.PUBLISHED_YN    AS PUBLISHED_YN
+            , u.USER_NM         AS CREATE_USER_NM
+            , DATE_FORMAT(m.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+        FROM TB_MKT m
+        LEFT JOIN TB_USER u ON u.USER_ID = m.CREATE_USER_ID
+        WHERE 1 = 1
+            AND m.MKT_ID = #{mktId}
+    </select>
+
+    <insert id="insertMarketing" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 등록 marketing.insertMarketing */
+        INSERT INTO TB_MKT (
+            MKT_ID
+            , USER_ID
+            , MKT_PROJECT_ID
+            , AGENT_ID
+            , TITLE
+            , OUTPUT_MODE
+            , STATUS_CD
+            , CONTENT_TYPE
+            , REQUEST_JSON
+            , CREATE_USER_ID
+            , MODIFY_USER_ID
+            , CREATE_DT
+        ) VALUES (
+            #{mktId}
+            , #{userId}
+            , #{marketingProjectId}
+            , #{agentId}
+            , #{title}
+            , #{outputMode}
+            , #{statusCd}
+            , #{contentType}
+            , #{requestJson, jdbcType=LONGVARCHAR}
+            , #{createUserId}
+            , #{modifyUserId}
+            , NOW()
+        )
+    </insert>
+
+    <update id="updateMarketingTitle" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 제목 수정 marketing.updateMarketingTitle */
+        UPDATE TB_MKT SET
+            TITLE               = #{title}
+            , MODIFY_USER_ID    = #{modifyUserId}
+            , MODIFY_DT         = NOW()
+        WHERE MKT_ID = #{mktId}
+    </update>
+
+    <update id="updateMarketingStatus" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 생성 상태 수정 marketing.updateMarketingStatus */
+        UPDATE TB_MKT SET
+            STATUS_CD           = #{statusCd}
+            , MODIFY_USER_ID    = #{modifyUserId}
+            , MODIFY_DT         = NOW()
+        WHERE MKT_ID = #{mktId}
+    </update>
+
+    <update id="updateMarketingSchedule" parameterType="marketingVO">
+        /* 발행 예정일 지정/변경 marketing.updateMarketingSchedule */
+        UPDATE TB_MKT SET
+            PUBLISH_SCHEDULED_DT = #{publishScheduledDt, jdbcType=TIMESTAMP}
+            , PUBLISHED_YN       = 'N'
+            , MODIFY_USER_ID     = #{modifyUserId}
+            , MODIFY_DT          = NOW()
+        WHERE MKT_ID = #{mktId}
+    </update>
+
+    <update id="updateMarketingPublished" parameterType="marketingVO">
+        /* 발행 완료 표시/해제 marketing.updateMarketingPublished */
+        UPDATE TB_MKT SET
+            PUBLISHED_YN     = #{publishedYn}
+            , MODIFY_USER_ID = #{modifyUserId}
+            , MODIFY_DT      = NOW()
+        WHERE MKT_ID = #{mktId}
+    </update>
+
+    <update id="touchMarketing" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 수정일 갱신 (시안 수정 시) marketing.touchMarketing */
+        UPDATE TB_MKT SET
+            MODIFY_USER_ID      = #{modifyUserId}
+            , MODIFY_DT         = NOW()
+        WHERE MKT_ID = #{mktId}
+    </update>
+
+    <delete id="deleteMarketing" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 삭제 marketing.deleteMarketing */
+        DELETE FROM TB_MKT WHERE MKT_ID = #{mktId}
+    </delete>
+
+    <delete id="deleteMarketingByProject"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 프로젝트 소속 콘텐츠 전체 삭제 marketing.deleteMarketingByProject */
+        DELETE FROM TB_MKT WHERE MKT_PROJECT_ID = #{marketingProjectId}
+    </delete>
+
+    <!-- ===================== TB_MKT_CONTENT ===================== -->
+
+    <select id="selectMarketingContents" parameterType="marketingVO" resultType="marketingVO">
+        /* 마케팅 콘텐츠 시안 목록 조회 marketing.selectMarketingContents */
+        SELECT
+            c.MKT_CONTENT_ID    AS MKT_CONTENT_ID
+            , c.CONTENT_NO      AS CONTENT_NO
+            , c.RECOMMEND_YN    AS RECOMMEND_YN
+            , c.CONTENT_LABEL   AS CONTENT_LABEL
+            , c.TEXT_CONTENT    AS TEXT_CONTENT
+            , c.IMAGE_FILE      AS IMAGE_FILE
+            , c.MODIFY_USER_ID  AS MODIFY_USER_ID
+            , CASE WHEN c.PREV_TEXT_CONTENT IS NOT NULL OR c.PREV_IMAGE_FILE IS NOT NULL
+                   THEN 'Y' ELSE 'N' END AS HAS_PREVIOUS_YN
+        FROM TB_MKT_CONTENT c
+        WHERE 1 = 1
+            AND c.MKT_ID = #{mktId}
+        ORDER BY c.CONTENT_NO
+    </select>
+
+    <select id="selectMarketingContent" parameterType="marketingVO" resultType="marketingVO">
+        /* 마케팅 콘텐츠 시안 단건 조회 marketing.selectMarketingContent */
+        SELECT
+            c.MKT_CONTENT_ID    AS MKT_CONTENT_ID
+            , c.CONTENT_NO      AS CONTENT_NO
+            , c.TEXT_CONTENT    AS TEXT_CONTENT
+            , c.IMAGE_FILE      AS IMAGE_FILE
+        FROM TB_MKT_CONTENT c
+        WHERE 1 = 1
+            AND c.MKT_ID = #{mktId}
+            AND c.CONTENT_NO = #{contentNo}
+        LIMIT 1
+    </select>
+
+    <insert id="insertMarketingContent" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 시안 등록 marketing.insertMarketingContent */
+        INSERT INTO TB_MKT_CONTENT (
+            MKT_CONTENT_ID
+            , MKT_ID
+            , CONTENT_NO
+            , RECOMMEND_YN
+            , CONTENT_LABEL
+            , TEXT_CONTENT
+            , IMAGE_FILE
+            , CREATE_USER_ID
+            , CREATE_DT
+        ) VALUES (
+            #{mktContentId}
+            , #{mktId}
+            , #{contentNo}
+            , #{recommendYn}
+            , #{contentLabel, jdbcType=VARCHAR}
+            , #{textContent, jdbcType=LONGVARCHAR}
+            , #{imageFile, jdbcType=LONGVARCHAR}
+            , #{createUserId}
+            , NOW()
+        )
+    </insert>
+
+    <update id="updateMarketingContent" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 시안 수정(수정된 필드만 직전 값 백업, 안 바뀐 필드는 백업 비움) marketing.updateMarketingContent */
+        UPDATE TB_MKT_CONTENT SET
+            MODIFY_USER_ID     = #{modifyUserId}
+            , MODIFY_DT        = NOW()
+            <if test="textContent != null">
+                , PREV_TEXT_CONTENT = TEXT_CONTENT
+                , TEXT_CONTENT      = #{textContent, jdbcType=LONGVARCHAR}
+                , PREV_IMAGE_FILE   = NULL
+            </if>
+            <if test="imageFile != null">
+                , PREV_IMAGE_FILE   = IMAGE_FILE
+                , IMAGE_FILE        = #{imageFile, jdbcType=LONGVARCHAR}
+                , PREV_TEXT_CONTENT = NULL
+            </if>
+        WHERE MKT_CONTENT_ID = #{mktContentId}
+            AND MKT_ID = #{mktId}
+    </update>
+
+    <update id="restoreMarketingContentPrevious" parameterType="marketingVO">
+        /* 시안 직전 버전으로 되돌리기(백업 없는 필드는 현재값 유지) marketing.restoreMarketingContentPrevious */
+        UPDATE TB_MKT_CONTENT SET
+            TEXT_CONTENT        = COALESCE(PREV_TEXT_CONTENT, TEXT_CONTENT)
+            , IMAGE_FILE        = COALESCE(PREV_IMAGE_FILE, IMAGE_FILE)
+            , PREV_TEXT_CONTENT = NULL
+            , PREV_IMAGE_FILE   = NULL
+            , MODIFY_USER_ID    = #{modifyUserId}
+            , MODIFY_DT         = NOW()
+        WHERE MKT_CONTENT_ID = #{mktContentId}
+            AND MKT_ID = #{mktId}
+            AND (PREV_TEXT_CONTENT IS NOT NULL OR PREV_IMAGE_FILE IS NOT NULL)
+    </update>
+
+    <delete id="deleteMarketingContents" parameterType="marketingVO">
+        /* 마케팅 콘텐츠 시안 전체 삭제 marketing.deleteMarketingContents */
+        DELETE FROM TB_MKT_CONTENT WHERE MKT_ID = #{mktId}
+    </delete>
+
+    <delete id="deleteMarketingContentsByProject"
+            parameterType="kr.teamagent.marketing.service.MarketingVO$ProjectVO">
+        /* 프로젝트 소속 콘텐츠 시안 전체 삭제 marketing.deleteMarketingContentsByProject */
+        DELETE FROM TB_MKT_CONTENT
+        WHERE MKT_ID IN (SELECT MKT_ID FROM TB_MKT WHERE MKT_PROJECT_ID = #{marketingProjectId})
+    </delete>
+
+</mapper>

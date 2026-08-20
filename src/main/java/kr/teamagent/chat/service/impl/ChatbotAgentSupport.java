@@ -177,6 +177,7 @@ public class ChatbotAgentSupport {
         int readTimeoutSec = ("reAskReport".equals(purpose)
                 || "insightReport".equals(purpose)
                 || "createDoc".equals(purpose)
+                || "marketingExport".equals(purpose)
                 || "news_curate".equals(purpose)
                 || "mtlcareReport".equals(purpose)
                 || "translate_file".equals(purpose))
