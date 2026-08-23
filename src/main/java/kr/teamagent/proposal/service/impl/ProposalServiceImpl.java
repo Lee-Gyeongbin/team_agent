@@ -4797,7 +4797,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * @param writingStyle 문체 코드 ("formal" / "plain" / "persuasive")
      * @return "[STYLE: ...]" 형식의 스타일 앵커 문자열
      */
-    private String buildStyleManifest(String baseColor, String accentColor, String docSize, String writingStyle) {
+    private String buildStyleManifest(String baseColor, String accentColor, String tintColor, String docSize, String writingStyle) {
         String docSizeDesc;
         if ("169".equals(docSize))      docSizeDesc = "16:9 widescreen landscape";
         else if ("43".equals(docSize))  docSizeDesc = "4:3 standard landscape";
@@ -4809,13 +4809,28 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         else                                    toneDesc = "professional and formal";
 
         return String.format(
-                "[STYLE: flat vector infographic illustration, minimalist clean corporate design, " +
-                "white or very light background, outline icons with 2px stroke and rounded corners, " +
-                "primary color %s for main headers and panel borders, " +
-                "accent color %s for highlights callouts and emphasis, " +
-                "dark navy text #1A1A2E, no photographic elements, no gradients, " +
-                "consistent icon family throughout, clean sans-serif typography, " +
-                "Korean corporate presentation, %s layout, %s tone]",
+                "[STYLE: flat vector infographic illustration with subtle dimensional shading on icons " +
+                "(soft drop shadow and highlight only, no full 3D render, no photographic textures), " +
+                "minimalist clean corporate design, white background, generous whitespace between all sections, " +
+                "solid-fill icons with clean rounded silhouettes in a single consistent icon family, " +
+                "cards use white fill, thin border in the primary color, rounded corners, subtle shadow, " +
+                "primary color %s used consistently and exclusively for all headers, section titles, " +
+                "numbered badges, icons, borders, and arrows — this must be the dominant color across " +
+                "the entire image with no exceptions, " +
+                "accent color %s used in exactly ONE small element only (a single badge, checkmark, or icon) " +
+                "and nowhere else — do not use accent color to highlight words within body text, " +
+                "do not use gold, yellow, purple, green, or any color outside primary/accent, " +
+                "dark navy text #1A1A2E for body copy, no photographic elements, no background imagery, " +
+                "clean sans-serif typography, Korean corporate presentation, " +
+                "vary the overall visual composition based on the content — for a small " +
+                "number of components or items, a bold illustrative centerpiece (a single " +
+                "large icon or scene) surrounded by labeled call-outs works well; for " +
+                "strictly sequential steps, a step-by-step flow with connecting arrows " +
+                "works well; for structured comparison or paired label-value data, a " +
+                "formal table with rows and columns works well; do not default to the " +
+                "same stacked title-banner-grid-ribbon template for every slide — let the " +
+                "content determine the composition, " +
+                "%s layout, %s tone]",
                 baseColor, accentColor, docSizeDesc, toneDesc);
     }
 
@@ -5426,9 +5441,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     }
                 }
 
-                // COLOR_INDEX % baseColorList.size() → baseColor 선택
-                String baseColor   = baseColorList.isEmpty()   ? "#5B4FE9" : baseColorList.get(slide.getColorIndex() % baseColorList.size());
+                // baseColor는 항상 base[0] 고정 (색상 일관성 보장)
+                String baseColor   = baseColorList.isEmpty()   ? "#5B4FE9" : baseColorList.get(0);
                 String accentColor = accentColorList.isEmpty() ? "#E08A2C" : accentColorList.get(0);
+
+                // tintPool: base[1], base[2], accent[1] — colorIndex로 미세 변주
+                List<String> tintPool = new ArrayList<>();
+                if (baseColorList.size()   > 1) tintPool.add(baseColorList.get(1));
+                if (baseColorList.size()   > 2) tintPool.add(baseColorList.get(2));
+                if (accentColorList.size() > 1) tintPool.add(accentColorList.get(1));
+                String tintColor = tintPool.isEmpty() ? null : tintPool.get(slide.getColorIndex() % tintPool.size());
 
                 // ── 3. RENDER_STATUS_CD = '002' (생성중) 선행 업데이트 ───────
                 ProposalVO.SlideVO startVO = new ProposalVO.SlideVO();
@@ -5507,10 +5529,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
                 // ── 8. IMAGE_GEN_HINT 조립 ────────────────────────────────────
                 sendSseEvent(emitter, "progress", "{\"step\":\"image_gen\"}");
-                String styleManifest = buildStyleManifest(baseColor, accentColor, docSize, writingStyle);
-                String styleParams   = String.format("docSize=%s baseColor=%s accentColor=%s writingStyle=%s colorIndex=%d",
-                        docSize, baseColor, accentColor, writingStyle, slide.getColorIndex());
+                String styleManifest = buildStyleManifest(baseColor, accentColor, tintColor, docSize, writingStyle);
+                String styleParams   = String.format("docSize=%s baseColor=%s accentColor=%s tintColor=%s writingStyle=%s colorIndex=%d",
+                        docSize, baseColor, accentColor, tintColor, writingStyle, slide.getColorIndex());
                 String imageGenHint  = styleManifest + " " + imageQuery + " | " + styleParams;
+
 
                 // ── 9. 이미지 생성 API 호출 ───────────────────────────────────
                 String base64Image = callPtImageApi(imageGenHint);
@@ -5710,7 +5733,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", "모든 텍스트는 반드시 한국어로 작성. " + imageGenHint);
-        params.put("quality", "high");
+        params.put("quality", "medium");
         params.put("room_id", "");
         params.put("aspect_ratio", aspectRatio);
 
@@ -7695,5 +7718,4 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             + "## 사용자 요청\n" + userMessage + "\n\n"
             + "## 지시\n수정된 전체 개요를 번호 목록으로 다시 작성해 주세요.";
     }
-
 }
