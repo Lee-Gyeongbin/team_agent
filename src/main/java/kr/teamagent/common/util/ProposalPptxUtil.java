@@ -1602,4 +1602,637 @@ public class ProposalPptxUtil {
     private static String nvl(String s, String def) {
         return (s == null || s.trim().isEmpty()) ? def : s.trim();
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 컴포넌트 기반 빌드 — ComponentPageInfo DTO
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 컴포넌트 기반 빌드용 페이지 단위 입력 데이터.
+     * 표지·간지는 이미지 bytes, 일반 슬라이드는 SlideVO 텍스트 필드를 담는다.
+     */
+    public static class ComponentPageInfo {
+        public final String chapterRoman;
+        public final String sectionTitle;
+        public final String pageLabel;
+        public final String projectNm;
+        public final String orgNm;
+        public final String submitterNm;
+        public final String layoutTypeCd;
+        public final String subTocList;
+        // 표지·간지 배경
+        public final byte[] imageBytes;
+        // 일반 슬라이드 컨텐츠
+        public final String eyebrowTxt;
+        public final String titleTxt;
+        public final String subtitleTxt;
+        public final String highlightBannerTxt;
+        public final String componentsJson;
+        public final String conclusionRibbonTxt;
+
+        /** 표지(001) / 간지(002) 생성자 — imageBytes 기반 */
+        public ComponentPageInfo(byte[] imageBytes, String chapterRoman, String sectionTitle,
+                                  String pageLabel, String projectNm, String orgNm, String submitterNm,
+                                  String layoutTypeCd, String subTocList) {
+            this.imageBytes        = imageBytes;
+            this.chapterRoman      = nvl(chapterRoman, "Ⅰ");
+            this.sectionTitle      = nvl(sectionTitle, "");
+            this.pageLabel         = nvl(pageLabel, "");
+            this.projectNm         = nvl(projectNm, "");
+            this.orgNm             = nvl(orgNm, "");
+            this.submitterNm       = nvl(submitterNm, "");
+            this.layoutTypeCd      = layoutTypeCd;
+            this.subTocList        = nvl(subTocList, "");
+            this.eyebrowTxt        = null;
+            this.titleTxt          = null;
+            this.subtitleTxt       = null;
+            this.highlightBannerTxt = null;
+            this.componentsJson    = null;
+            this.conclusionRibbonTxt = null;
+        }
+
+        /** 일반 슬라이드 생성자 — componentsJson 기반 */
+        public ComponentPageInfo(String chapterRoman, String sectionTitle, String pageLabel,
+                                  String projectNm, String orgNm, String submitterNm, String layoutTypeCd,
+                                  String eyebrowTxt, String titleTxt, String subtitleTxt,
+                                  String highlightBannerTxt, String componentsJson, String conclusionRibbonTxt) {
+            this.imageBytes        = null;
+            this.chapterRoman      = nvl(chapterRoman, "Ⅰ");
+            this.sectionTitle      = nvl(sectionTitle, "");
+            this.pageLabel         = nvl(pageLabel, "");
+            this.projectNm         = nvl(projectNm, "");
+            this.orgNm             = nvl(orgNm, "");
+            this.submitterNm       = nvl(submitterNm, "");
+            this.layoutTypeCd      = layoutTypeCd;
+            this.subTocList        = "";
+            this.eyebrowTxt        = eyebrowTxt;
+            this.titleTxt          = nvl(titleTxt, "");
+            this.subtitleTxt       = subtitleTxt;
+            this.highlightBannerTxt = highlightBannerTxt;
+            this.componentsJson    = componentsJson;
+            this.conclusionRibbonTxt = conclusionRibbonTxt;
+        }
+
+        /** renderHeaderSlots / renderFooterSlots 재사용을 위한 PageInfo 변환 */
+        public PageInfo toPageInfo() {
+            return new PageInfo(imageBytes, chapterRoman, sectionTitle, pageLabel,
+                    projectNm, orgNm, submitterNm, layoutTypeCd, subTocList);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 컴포넌트 기반 빌드 — 공개 API
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * componentsJson 기반 제안서 PPTX/PDF 빌드 (텍스트 편집 가능).
+     * <p>슬라이드 본문을 PNG 이미지가 아닌 POI 네이티브 도형/텍스트박스로 렌더링한다.
+     * 헤더·푸터는 TB_PT_TEMPLATE JSON 레이아웃을 그대로 재사용한다.
+     *
+     * @param pages                ComponentPageInfo 리스트 (순서대로 슬라이드 생성)
+     * @param docSize              "a4" | "43" | "169"
+     * @param bgColor              배경색 hex
+     * @param baseColor            기본색 hex
+     * @param accentColor          강조색 hex
+     * @param headerComponentsJson TB_PT_TEMPLATE.HEADER_COMPONENTS_JSON (null 허용 → 기본 헤더)
+     * @param footerComponentsJson TB_PT_TEMPLATE.FOOTER_COMPONENTS_JSON (null 허용 → 기본 푸터)
+     */
+    public static byte[] buildProposalDocFromComponents(
+            List<ComponentPageInfo> pages,
+            String docSize,
+            String bgColor, String baseColor, String accentColor,
+            String headerComponentsJson, String footerComponentsJson) throws IOException {
+
+        // ── 슬라이드 크기 결정 ────────────────────────────────────────────────
+        final int slideW, slideH;
+        if ("a4".equalsIgnoreCase(docSize)) {
+            slideW = 595; slideH = 842;
+        } else if ("43".equals(docSize)) {
+            slideW = 720; slideH = 540;
+        } else {
+            slideW = 720; slideH = 405; // 16:9 기본
+        }
+
+        Color cBg     = parseHex(bgColor,     new Color(0xFF, 0xFF, 0xFF));
+        Color cBase   = parseHex(baseColor,   new Color(0x5B, 0x4F, 0xE9));
+        Color cAccent = parseHex(accentColor, new Color(0xE0, 0x8A, 0x2C));
+
+        // 16:9(405) 기준 스케일
+        double scale = slideH / 405.0;
+
+        // 헤더/푸터 템플릿 파싱
+        Gson localGson = new Gson();
+        TemplateLayout headerLayout = parseTemplateLayout(headerComponentsJson, localGson);
+        TemplateLayout footerLayout = parseTemplateLayout(footerComponentsJson, localGson);
+
+        final double HEADER_PCT_DEFAULT = 0.09;
+        final double FOOTER_PCT_DEFAULT = 0.05;
+
+        int HEADER_H = (headerLayout != null && headerLayout.height > 0)
+                ? (int)(headerLayout.height * slideH / 100.0)
+                : (int)(slideH * HEADER_PCT_DEFAULT);
+        int FOOTER_H = (footerLayout != null && footerLayout.height > 0)
+                ? (int)(footerLayout.height * slideH / 100.0)
+                : (int)(slideH * FOOTER_PCT_DEFAULT);
+        HEADER_H = Math.max(30, HEADER_H);
+        FOOTER_H = Math.max(14, FOOTER_H);
+
+        int BODY_Y   = HEADER_H;
+        int BODY_H   = slideH - HEADER_H - FOOTER_H;
+        int FOOTER_Y = slideH - FOOTER_H;
+        int MARGIN   = Math.max(18, (int)(28 * scale));
+
+        try (XMLSlideShow pptx = new XMLSlideShow();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+            pptx.setPageSize(new Dimension(slideW, slideH));
+
+            for (ComponentPageInfo page : pages) {
+                XSLFSlide slide = pptx.createSlide();
+
+                // 전체 배경
+                addRect(slide, 0, 0, slideW, slideH, cBg);
+
+                if ("001".equals(page.layoutTypeCd)) {
+                    // 표지 — 전체 채움
+                    if (page.imageBytes != null && page.imageBytes.length > 0) {
+                        addImgLetterbox(pptx, slide, page.imageBytes, 0, 0, slideW, slideH, cBg);
+                    }
+                    continue;
+                }
+
+                if ("002".equals(page.layoutTypeCd)) {
+                    // 간지 — 이미지 배경 + 텍스트 오버레이
+                    if (page.imageBytes != null && page.imageBytes.length > 0) {
+                        addImgLetterbox(pptx, slide, page.imageBytes, 0, 0, slideW, slideH, cBg);
+                    }
+                    renderDividerTextOverlay(slide, page.toPageInfo(), slideW, slideH, cBase, cAccent);
+                    continue;
+                }
+
+                // 일반 슬라이드: 헤더 + 바디(컴포넌트) + 푸터
+                // ── 헤더 ─────────────────────────────────────────────────────
+                addRect(slide, 0, 0, slideW, HEADER_H, new Color(0xFF, 0xFF, 0xFF));
+                if (headerLayout != null) {
+                    renderHeaderSlots(slide, headerLayout, page.toPageInfo(),
+                            slideW, HEADER_H, scale, cBase, cAccent, false);
+                } else {
+                    // 기본 헤더: 소목차 타이틀 바
+                    addRect(slide, 0, 0, slideW, HEADER_H, cBase);
+                    text(slide, page.sectionTitle, MARGIN, 4, slideW - MARGIN * 2, HEADER_H - 8,
+                            Math.max(8, 12 * scale), true, false, WHITE, null);
+                }
+
+                // ── 바디 — componentsJson 기반 렌더링 ─────────────────────────
+                renderSlideBodyFromComponents(slide, page, 0, BODY_Y, slideW, BODY_H,
+                        MARGIN, cBase, cAccent, cBg, scale);
+
+                // ── 푸터 ─────────────────────────────────────────────────────
+                addRect(slide, 0, FOOTER_Y, slideW, FOOTER_H, new Color(0xF8, 0xF9, 0xFA));
+                if (footerLayout != null) {
+                    renderFooterSlots(slide, footerLayout, page.toPageInfo(),
+                            slideW, FOOTER_H, FOOTER_Y, scale);
+                } else {
+                    // 기본 푸터: 기관명 | 페이지 | 제안사
+                    double fsF = Math.max(5, 6.5 * scale);
+                    text(slide, page.orgNm, MARGIN, FOOTER_Y + 3, (slideW - MARGIN * 2) / 3, FOOTER_H - 6,
+                            fsF, false, false, DARK_TEXT, null);
+                    text(slide, page.pageLabel, 0, FOOTER_Y + 3, slideW, FOOTER_H - 6,
+                            fsF, true, false, DARK_TEXT, TextParagraph.TextAlign.CENTER);
+                    text(slide, page.submitterNm, MARGIN, FOOTER_Y + 3, slideW - MARGIN * 2, FOOTER_H - 6,
+                            fsF, false, false, DARK_TEXT, TextParagraph.TextAlign.RIGHT);
+                }
+            }
+
+            pptx.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 슬라이드 바디 렌더링 (컴포넌트 기반)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static void renderSlideBodyFromComponents(
+            XSLFSlide slide, ComponentPageInfo page,
+            int bx, int by, int bw, int bh, int margin,
+            Color cBase, Color cAccent, Color cBg, double scale) {
+
+        addRect(slide, bx, by, bw, bh, cBg);
+
+        int contX = bx + margin;
+        int contW = bw - margin * 2;
+        int curY  = by + Math.max(4, (int)(8 * scale));
+
+        // ── 1. eyebrowTxt ───────────────────────────────────────────────────
+        String eyebrow = nvl(page.eyebrowTxt, "");
+        if (!eyebrow.isEmpty()) {
+            int h = Math.max(9, (int)(12 * scale));
+            text(slide, eyebrow.toUpperCase(), contX, curY, contW, h,
+                    Math.max(5, 6.5 * scale), false, false, cAccent, null);
+            curY += h + Math.max(2, (int)(3 * scale));
+        }
+
+        // ── 2. titleTxt ─────────────────────────────────────────────────────
+        String title = nvl(page.titleTxt, "");
+        if (!title.isEmpty()) {
+            int h = Math.max(14, (int)(22 * scale));
+            text(slide, title, contX, curY, contW, h,
+                    Math.max(8, 14 * scale), true, false, DARK_TEXT, null);
+            curY += h + Math.max(2, (int)(3 * scale));
+        }
+
+        // ── 3. subtitleTxt ──────────────────────────────────────────────────
+        String subtitle = nvl(page.subtitleTxt, "");
+        if (!subtitle.isEmpty()) {
+            int h = Math.max(10, (int)(14 * scale));
+            text(slide, subtitle, contX, curY, contW, h,
+                    Math.max(6, 8.5 * scale), false, false, GRAY_TEXT, null);
+            curY += h + Math.max(2, (int)(3 * scale));
+        }
+
+        // ── 4. 구분선 ──────────────────────────────────────────────────────
+        addRect(slide, contX, curY, contW, 1, new Color(0xE5, 0xE7, 0xEB));
+        curY += 1 + Math.max(4, (int)(6 * scale));
+
+        // ── 5. 결론 리본 (하단 고정, 먼저 높이 계산) ──────────────────────
+        int bodyBottom = by + bh;
+        String ribbon = nvl(page.conclusionRibbonTxt, "");
+        int ribbonH = ribbon.isEmpty() ? 0 : Math.max(14, (int)(22 * scale));
+
+        // ── 6. highlightBannerTxt ───────────────────────────────────────────
+        String banner = nvl(page.highlightBannerTxt, "");
+        if (!banner.isEmpty()) {
+            int h = Math.max(14, (int)(22 * scale));
+            addRect(slide, contX, curY, contW, h, tint(cBase, 0.88f));
+            addRect(slide, contX, curY, 3, h, cBase);
+            text(slide, banner, contX + 8, curY + Math.max(2, (int)(3 * scale)),
+                    contW - 12, h - Math.max(4, (int)(6 * scale)),
+                    Math.max(6, 8 * scale), true, false, cBase, null);
+            curY += h + Math.max(4, (int)(6 * scale));
+        }
+
+        // ── 7. componentsJson 렌더링 (가용 영역 균등 분할) ─────────────────
+        int compAreaH = bodyBottom - curY - (ribbonH > 0 ? ribbonH + Math.max(4, (int)(6 * scale)) : Math.max(4, (int)(4 * scale)));
+        String compsJson = page.componentsJson;
+        if (compsJson != null && !compsJson.trim().isEmpty()) {
+            try {
+                com.google.gson.JsonArray comps = JsonParser.parseString(compsJson).getAsJsonArray();
+                int count = comps.size();
+                if (count > 0 && compAreaH > 0) {
+                    int gap = Math.max(4, (int)(6 * scale));
+                    int eachH = (compAreaH - gap * (count - 1)) / count;
+                    int compY = curY;
+                    for (int i = 0; i < count; i++) {
+                        com.google.gson.JsonObject comp = comps.get(i).getAsJsonObject();
+                        String type = comp.has("type") ? comp.get("type").getAsString() : "";
+                        com.google.gson.JsonObject content = extractCompContent(comp);
+                        int thisH = (i == count - 1) ? (bodyBottom - (ribbonH > 0 ? ribbonH + Math.max(4, (int)(6 * scale)) : Math.max(4, (int)(4 * scale))) - compY) : eachH;
+                        if (content != null && !type.isEmpty() && thisH > 4) {
+                            renderSlideComponent(slide, type, content, contX, compY, contW, thisH, cBase, cAccent, scale);
+                        }
+                        compY += eachH + gap;
+                    }
+                }
+            } catch (Exception ignored) {
+                // JSON 파싱 실패 시 빈 영역으로 처리
+            }
+        }
+
+        // ── 8. conclusionRibbonTxt ──────────────────────────────────────────
+        if (!ribbon.isEmpty()) {
+            int ribbonY = bodyBottom - ribbonH - Math.max(2, (int)(3 * scale));
+            addRect(slide, contX, ribbonY, contW, ribbonH, tint(cAccent, 0.85f));
+            addRect(slide, contX, ribbonY, 3, ribbonH, cAccent);
+            text(slide, ribbon, contX + 8, ribbonY + Math.max(2, (int)(3 * scale)),
+                    contW - 12, ribbonH - Math.max(4, (int)(6 * scale)),
+                    Math.max(6, 8 * scale), false, true, darken(cAccent, 0.25f), null);
+        }
+    }
+
+    /** componentsJson 항목에서 content 객체 추출 (포맷 1/2/3 통합) */
+    private static com.google.gson.JsonObject extractCompContent(com.google.gson.JsonObject comp) {
+        // 포맷 1: { type, content: {...} }
+        if (comp.has("content") && comp.get("content").isJsonObject()) {
+            return comp.getAsJsonObject("content");
+        }
+        // 포맷 2: { type, cards:[] } 등 (content 래퍼 없음)
+        if (comp.has("type")) {
+            com.google.gson.JsonObject synthetic = new com.google.gson.JsonObject();
+            for (Map.Entry<String, com.google.gson.JsonElement> entry : comp.entrySet()) {
+                if (!"type".equals(entry.getKey())) synthetic.add(entry.getKey(), entry.getValue());
+            }
+            return synthetic.size() > 0 ? synthetic : null;
+        }
+        return null;
+    }
+
+    /** JsonObject 에서 문자열 값 추출 (null 안전) */
+    private static String jsonStr(com.google.gson.JsonObject obj, String key, String def) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return def;
+        String v = obj.get(key).getAsString().trim();
+        return v.isEmpty() ? def : v;
+    }
+
+    /** 컴포넌트 타입별 렌더러 디스패처 */
+    private static void renderSlideComponent(XSLFSlide slide, String type,
+            com.google.gson.JsonObject content,
+            int x, int y, int w, int h,
+            Color cBase, Color cAccent, double scale) {
+        int pad = Math.max(2, (int)(3 * scale));
+        // 각 컴포넌트 사이 내부 패딩
+        int ix = x + pad; int iy = y + pad; int iw = w - pad * 2; int ih = h - pad * 2;
+        if (iw <= 0 || ih <= 0) return;
+        switch (type) {
+            case "card_grid":         renderCompCardGrid(slide, content, ix, iy, iw, ih, cBase, cAccent, scale); break;
+            case "process_flow":      renderCompProcessFlow(slide, content, ix, iy, iw, ih, cBase, scale); break;
+            case "requirement_table": renderCompRequirementTable(slide, content, ix, iy, iw, ih, cBase, scale); break;
+            case "credential_grid":   renderCompCredentialGrid(slide, content, ix, iy, iw, ih, cBase, cAccent, scale); break;
+            case "icon_chip_group":   renderCompIconChipGroup(slide, content, ix, iy, iw, ih, cBase, scale); break;
+            case "step_flow_bar":     renderCompStepFlowBar(slide, content, ix, iy, iw, ih, cBase, scale); break;
+            case "callout_box":       renderCompCalloutBox(slide, content, ix, iy, iw, ih, scale); break;
+            default: break;
+        }
+    }
+
+    // ── card_grid ─────────────────────────────────────────────────────────────
+
+    private static void renderCompCardGrid(XSLFSlide slide, com.google.gson.JsonObject content,
+            int x, int y, int w, int h, Color cBase, Color cAccent, double scale) {
+        if (!content.has("cards") || !content.get("cards").isJsonArray()) return;
+        com.google.gson.JsonArray cards = content.getAsJsonArray("cards");
+        int count = cards.size();
+        if (count == 0) return;
+
+        int gap  = Math.max(4, (int)(8 * scale));
+        int cardW = (w - gap * (count - 1)) / count;
+
+        for (int i = 0; i < count; i++) {
+            com.google.gson.JsonObject card = cards.get(i).getAsJsonObject();
+            String cardTitle = jsonStr(card, "title", "");
+            String cardDesc  = jsonStr(card, "desc", "");
+            int cx = x + i * (cardW + gap);
+
+            // 카드 배경
+            addRect(slide, cx, y, cardW, h, new Color(0xF9, 0xFA, 0xFB));
+            // 좌측 강조 바
+            addRect(slide, cx, y, Math.max(2, (int)(3 * scale)), h, cBase);
+
+            int innerX  = cx + Math.max(5, (int)(8 * scale));
+            int innerW  = cardW - Math.max(7, (int)(12 * scale));
+            int padTop  = Math.max(4, (int)(6 * scale));
+            int titleH  = Math.max(10, (int)(15 * scale));
+            int descH   = h - padTop - titleH - Math.max(4, (int)(6 * scale));
+
+            text(slide, cardTitle, innerX, y + padTop, innerW, titleH,
+                    Math.max(6, 8.5 * scale), true, false, DARK_TEXT, null);
+            if (!cardDesc.isEmpty() && descH > 0) {
+                text(slide, cardDesc, innerX, y + padTop + titleH + 2, innerW, descH,
+                        Math.max(5, 7 * scale), false, false, GRAY_TEXT, null);
+            }
+        }
+    }
+
+    // ── process_flow ─────────────────────────────────────────────────────────
+
+    private static void renderCompProcessFlow(XSLFSlide slide, com.google.gson.JsonObject content,
+            int x, int y, int w, int h, Color cBase, double scale) {
+        if (!content.has("steps") || !content.get("steps").isJsonArray()) return;
+        com.google.gson.JsonArray steps = content.getAsJsonArray("steps");
+        int count = steps.size();
+        if (count == 0) return;
+
+        int arrowW = Math.max(10, (int)(16 * scale));
+        int stepW  = (w - arrowW * (count - 1)) / count;
+        int numSz  = Math.max(12, (int)(18 * scale));
+        Color stepBg = new Color(0xF3, 0xF4, 0xF6);
+
+        for (int i = 0; i < count; i++) {
+            com.google.gson.JsonObject step = steps.get(i).getAsJsonObject();
+            String stepTitle = jsonStr(step, "title", "");
+            String stepDesc  = jsonStr(step, "desc", "");
+            int sx = x + i * (stepW + arrowW);
+
+            // 단계 배경
+            addRect(slide, sx, y, stepW, h, stepBg);
+
+            // 번호 원
+            int numX = sx + (stepW - numSz) / 2;
+            int numY = y + Math.max(4, (int)(6 * scale));
+            addOval(slide, numX, numY, numSz, numSz, cBase);
+            text(slide, String.valueOf(i + 1), numX, numY, numSz, numSz,
+                    Math.max(5, 7 * scale), true, false, WHITE, TextParagraph.TextAlign.CENTER);
+
+            int textY   = numY + numSz + Math.max(4, (int)(6 * scale));
+            int titleH  = Math.max(10, (int)(14 * scale));
+            int descH   = h - (textY - y) - titleH - Math.max(4, (int)(6 * scale));
+
+            text(slide, stepTitle, sx + 3, textY, stepW - 6, titleH,
+                    Math.max(5.5, 7.5 * scale), true, false, DARK_TEXT, TextParagraph.TextAlign.CENTER);
+            if (!stepDesc.isEmpty() && descH > 0) {
+                text(slide, stepDesc, sx + 3, textY + titleH + 2, stepW - 6, descH,
+                        Math.max(5, 6.5 * scale), false, false, GRAY_TEXT, TextParagraph.TextAlign.CENTER);
+            }
+
+            // 화살표
+            if (i < count - 1) {
+                int arrowX = sx + stepW + 2;
+                int arrowY = y + h / 2 - Math.max(4, (int)(6 * scale));
+                text(slide, "▶", arrowX, arrowY, arrowW - 4, Math.max(10, (int)(12 * scale)),
+                        Math.max(6, 8 * scale), false, false, new Color(0xD1, 0xD5, 0xDB),
+                        TextParagraph.TextAlign.CENTER);
+            }
+        }
+    }
+
+    // ── requirement_table ────────────────────────────────────────────────────
+
+    private static void renderCompRequirementTable(XSLFSlide slide, com.google.gson.JsonObject content,
+            int x, int y, int w, int h, Color cBase, double scale) {
+        if (!content.has("rows") || !content.get("rows").isJsonArray()) return;
+        com.google.gson.JsonArray rows = content.getAsJsonArray("rows");
+        int rowCount = rows.size();
+        if (rowCount == 0) return;
+
+        // 컬럼 폭 (요구사항:18%, 요구내용:40%, 대응방안:나머지)
+        int col1W = (int)(w * 0.18);
+        int col2W = (int)(w * 0.40);
+        int col3W = w - col1W - col2W;
+        int[] colWidths = {col1W, col2W, col3W};
+        String[] headers = {"요구사항", "요구내용", "대응방안"};
+
+        int headerH  = Math.max(14, (int)(18 * scale));
+        int dataRowH = Math.max(10, (h - headerH) / Math.max(1, rowCount));
+        Color border = new Color(0xE5, 0xE7, 0xEB);
+
+        // 헤더 행
+        int xOff = x;
+        for (int c = 0; c < 3; c++) {
+            addRect(slide, xOff, y, colWidths[c], headerH, cBase);
+            text(slide, headers[c], xOff + 4, y + 2, colWidths[c] - 8, headerH - 4,
+                    Math.max(5, 7 * scale), true, false, WHITE, null);
+            xOff += colWidths[c];
+        }
+
+        // 데이터 행
+        for (int r = 0; r < rowCount; r++) {
+            com.google.gson.JsonObject row = rows.get(r).getAsJsonObject();
+            String[] cells = {
+                jsonStr(row, "reqNo", ""),
+                jsonStr(row, "reqContent", ""),
+                jsonStr(row, "response", "")
+            };
+            int rowY = y + headerH + r * dataRowH;
+            Color rowBg = (r % 2 == 0) ? new Color(0xFF, 0xFF, 0xFF) : new Color(0xF9, 0xFA, 0xFB);
+            xOff = x;
+            for (int c = 0; c < 3; c++) {
+                addRect(slide, xOff, rowY, colWidths[c], dataRowH, rowBg);
+                // 하단 경계선
+                addRect(slide, xOff, rowY + dataRowH - 1, colWidths[c], 1, border);
+                text(slide, cells[c], xOff + 4, rowY + 2, colWidths[c] - 8, dataRowH - 4,
+                        Math.max(4.5, 6 * scale), c == 0, false, DARK_TEXT, null);
+                xOff += colWidths[c];
+            }
+        }
+    }
+
+    // ── credential_grid ──────────────────────────────────────────────────────
+
+    private static void renderCompCredentialGrid(XSLFSlide slide, com.google.gson.JsonObject content,
+            int x, int y, int w, int h, Color cBase, Color cAccent, double scale) {
+        if (!content.has("items") || !content.get("items").isJsonArray()) return;
+        com.google.gson.JsonArray items = content.getAsJsonArray("items");
+        int count = items.size();
+        if (count == 0) return;
+
+        int cols   = Math.min(2, count);
+        int rows   = (count + cols - 1) / cols;
+        int gap    = Math.max(4, (int)(8 * scale));
+        int itemW  = (w - gap * (cols - 1)) / cols;
+        int itemH  = (h - gap * (rows - 1)) / rows;
+
+        for (int i = 0; i < count; i++) {
+            com.google.gson.JsonObject item = items.get(i).getAsJsonObject();
+            String itemTitle = jsonStr(item, "title", "");
+            String itemDesc  = jsonStr(item, "desc", "");
+            int col = i % cols;
+            int row = i / cols;
+            int ix  = x + col * (itemW + gap);
+            int iy  = y + row * (itemH + gap);
+
+            // 배경
+            addRect(slide, ix, iy, itemW, itemH, new Color(0xF9, 0xFA, 0xFB));
+            // 상단 강조 바 (accent)
+            int barH = Math.max(2, (int)(3 * scale));
+            addRect(slide, ix, iy, itemW, barH, cAccent);
+
+            int padH   = Math.max(4, (int)(6 * scale));
+            int padTop = barH + Math.max(4, (int)(6 * scale));
+            int titleH = Math.max(10, (int)(14 * scale));
+            int descH  = itemH - padTop - titleH - Math.max(4, (int)(6 * scale));
+
+            text(slide, itemTitle, ix + padH, iy + padTop, itemW - padH * 2, titleH,
+                    Math.max(6, 8 * scale), true, false, DARK_TEXT, null);
+            if (!itemDesc.isEmpty() && descH > 0) {
+                text(slide, itemDesc, ix + padH, iy + padTop + titleH + 2, itemW - padH * 2, descH,
+                        Math.max(5, 6.5 * scale), false, false, GRAY_TEXT, null);
+            }
+        }
+    }
+
+    // ── icon_chip_group ──────────────────────────────────────────────────────
+
+    private static void renderCompIconChipGroup(XSLFSlide slide, com.google.gson.JsonObject content,
+            int x, int y, int w, int h, Color cBase, double scale) {
+        if (!content.has("chips") || !content.get("chips").isJsonArray()) return;
+        com.google.gson.JsonArray chips = content.getAsJsonArray("chips");
+
+        int chipH  = Math.max(12, (int)(18 * scale));
+        int padHor = Math.max(6, (int)(10 * scale));
+        int gap    = Math.max(4, (int)(6 * scale));
+        int curX   = x;
+        int curY   = y + Math.max(2, (int)(4 * scale));
+
+        for (int i = 0; i < chips.size(); i++) {
+            if (chips.get(i).isJsonNull()) continue;
+            String label = chips.get(i).getAsString().trim();
+            if (label.isEmpty()) continue;
+
+            // 칩 폭 추정 (문자당 약 5.5pt × scale)
+            int chipW = (int)(label.length() * 5.5 * Math.min(scale, 1.4)) + padHor * 2;
+            chipW = Math.max(28, Math.min(w / 2, chipW));
+
+            // 줄 바꿈
+            if (curX + chipW > x + w && curX > x) {
+                curX = x;
+                curY += chipH + gap;
+            }
+            if (curY + chipH > y + h) break;
+
+            addRect(slide, curX, curY, chipW, chipH, cBase);
+            text(slide, label, curX + 3, curY, chipW - 6, chipH,
+                    Math.max(5, 6.5 * scale), false, false, WHITE, TextParagraph.TextAlign.CENTER);
+            curX += chipW + gap;
+        }
+    }
+
+    // ── step_flow_bar ────────────────────────────────────────────────────────
+
+    private static void renderCompStepFlowBar(XSLFSlide slide, com.google.gson.JsonObject content,
+            int x, int y, int w, int h, Color cBase, double scale) {
+        if (!content.has("steps") || !content.get("steps").isJsonArray()) return;
+        com.google.gson.JsonArray steps = content.getAsJsonArray("steps");
+        int count = steps.size();
+        if (count == 0) return;
+
+        // 상단 경계선
+        addRect(slide, x, y, w, 1, new Color(0xE5, 0xE7, 0xEB));
+
+        int gap    = Math.max(2, (int)(3 * scale));
+        int stepW  = (w - gap * (count - 1)) / count;
+        int contentY = y + Math.max(4, (int)(5 * scale));
+        int contentH = h - Math.max(4, (int)(5 * scale));
+        Color inactiveBg = new Color(0xE5, 0xE7, 0xEB);
+        Color inactiveFg = new Color(0x9C, 0xA3, 0xAF);
+
+        for (int i = 0; i < count; i++) {
+            com.google.gson.JsonObject step = steps.get(i).getAsJsonObject();
+            String label  = jsonStr(step, "label", "");
+            boolean active = step.has("active") && !step.get("active").isJsonNull()
+                    && step.get("active").getAsBoolean();
+            int sx = x + i * (stepW + gap);
+            addRect(slide, sx, contentY, stepW, contentH, active ? cBase : inactiveBg);
+            text(slide, label, sx + 2, contentY + 2, stepW - 4, contentH - 4,
+                    Math.max(5, 6.5 * scale), active, false,
+                    active ? WHITE : inactiveFg, TextParagraph.TextAlign.CENTER);
+        }
+    }
+
+    // ── callout_box ──────────────────────────────────────────────────────────
+
+    private static void renderCompCalloutBox(XSLFSlide slide, com.google.gson.JsonObject content,
+            int x, int y, int w, int h, double scale) {
+        String calloutText = jsonStr(content, "text", "");
+        String tone        = jsonStr(content, "tone", "info");
+
+        Color bgCol, fgCol;
+        if ("warning".equals(tone)) {
+            bgCol = new Color(0xFF, 0xF7, 0xED);
+            fgCol = new Color(0xC2, 0x41, 0x0C);
+        } else {
+            bgCol = new Color(0xEF, 0xF6, 0xFF);
+            fgCol = new Color(0x1D, 0x4E, 0xD8);
+        }
+
+        addRect(slide, x, y, w, h, bgCol);
+        // 좌측 강조 바
+        addRect(slide, x, y, Math.max(2, (int)(3 * scale)), h, fgCol);
+
+        int padH = Math.max(6, (int)(10 * scale));
+        int padV = Math.max(3, (int)(5 * scale));
+        text(slide, calloutText,
+                x + Math.max(2, (int)(3 * scale)) + padH, y + padV,
+                w - Math.max(2, (int)(3 * scale)) - padH * 2, h - padV * 2,
+                Math.max(6, 8 * scale), false, false, fgCol, null);
+    }
 }

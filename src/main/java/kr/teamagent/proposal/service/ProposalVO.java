@@ -800,6 +800,13 @@ public class ProposalVO {
         private String agentId;
         /** true면 캐시 무시하고 항상 신규 빌드 */
         private Boolean forceRebuild;
+        /**
+         * 출력 방식.
+         * "image"  = 인포그래픽 이미지 기반 (기존 동작).
+         * "component" = JSON componentsJson 기반 POI 네이티브 렌더링 (텍스트 편집 가능).
+         * null/미전달 시 image 기반으로 동작.
+         */
+        private String outputMode;
     }
 
     /**
