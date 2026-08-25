@@ -507,6 +507,7 @@
             PROBLEM_ID, PT_PROJECT_ID, PROBLEM_TYPE_CD, CURRENT_PROBLEM, ROOT_CAUSE,
             RISK_IF_IGNORED, GOAL, REQUIRED_CAPABILITY, STRATEGY_SUMMARY, KPI,
             SOURCE_TYPE_CD, SOURCE_ISSUE_IDS_JSON, SOURCE_REQ_IDS_JSON,
+            PROBLEM_TITLE_TXT,
             SORT_ORD, CREATE_USER_ID, CREATE_DT
         ) VALUES (
             #{problemId}, #{ptProjectId}, #{problemTypeCd}, #{currentProblem}, #{rootCause},
@@ -514,6 +515,7 @@
             COALESCE(#{sourceTypeCd}, '002'),
             #{sourceIssueIdsJson, jdbcType=VARCHAR},
             #{sourceRequirementIdsJson, jdbcType=VARCHAR},
+            #{problemTitleTxt, jdbcType=VARCHAR},
             COALESCE(#{sortOrd}, 0), #{createUserId}, NOW()
         )
     </insert>
@@ -534,6 +536,7 @@
             SOURCE_TYPE_CD          AS SOURCE_TYPE_CD,
             SOURCE_ISSUE_IDS_JSON   AS SOURCE_ISSUE_IDS_JSON,
             SOURCE_REQ_IDS_JSON     AS SOURCE_REQUIREMENT_IDS_JSON,
+            PROBLEM_TITLE_TXT       AS PROBLEM_TITLE_TXT,
             SORT_ORD                AS SORT_ORD,
             CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
@@ -560,6 +563,7 @@
             SOURCE_TYPE_CD          AS SOURCE_TYPE_CD,
             SOURCE_ISSUE_IDS_JSON   AS SOURCE_ISSUE_IDS_JSON,
             SOURCE_REQ_IDS_JSON     AS SOURCE_REQUIREMENT_IDS_JSON,
+            PROBLEM_TITLE_TXT       AS PROBLEM_TITLE_TXT,
             SORT_ORD                AS SORT_ORD,
             CREATE_USER_ID          AS CREATE_USER_ID,
             DATE_FORMAT(CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT,
@@ -583,6 +587,7 @@
             <if test="kpi != null">KPI = #{kpi},</if>
             <if test="sourceIssueIdsJson != null">SOURCE_ISSUE_IDS_JSON = #{sourceIssueIdsJson},</if>
             <if test="sourceRequirementIdsJson != null">SOURCE_REQ_IDS_JSON = #{sourceRequirementIdsJson},</if>
+            <if test="problemTitleTxt != null">PROBLEM_TITLE_TXT = #{problemTitleTxt},</if>
             MODIFY_DT = NOW(),
             MODIFY_USER_ID = #{modifyUserId}
         </set>

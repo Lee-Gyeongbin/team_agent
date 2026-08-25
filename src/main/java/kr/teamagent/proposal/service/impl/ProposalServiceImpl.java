@@ -3,10 +3,12 @@ package kr.teamagent.proposal.service.impl;
 import java.awt.Color;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -14,13 +16,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import org.apache.poi.xslf.usermodel.XMLSlideShow;
-import org.apache.poi.xslf.usermodel.XSLFShape;
-import org.apache.poi.xslf.usermodel.XSLFSimpleShape;
-import org.apache.poi.xslf.usermodel.XSLFSlide;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
@@ -48,6 +45,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import kr.teamagent.agent.service.AgentVO;
+import kr.teamagent.agent.service.impl.AgentDAO;
+import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.service.impl.ChatbotAgentSupport;
 import kr.teamagent.chat.service.impl.ChatbotDAO;
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
@@ -89,6 +89,31 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private static final int PT_SUMMARY_CHUNK_OVERLAP = 800;
     /** LLM 호출 타임아웃 (초) */
     private static final int PT_QUERY_TIMEOUT_SEC = 300;
+    /** /file_query 임시 TB_CHAT_FILE ROOM_ID (마케팅 참고파일 브릿지와 동일) */
+    private static final long PT_FILE_QUERY_ROOM_ID = 0L;
+    /** 템플릿 생성 /file_query 전용 HTTP 클라이언트 */
+    private static final OkHttpClient PT_FILE_QUERY_HTTP_CLIENT = new OkHttpClient.Builder()
+            .readTimeout(PT_QUERY_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .build();
+    /**
+     * 참조 템플릿 시각·레이아웃 분석용 file_query 질의.
+     * 표지/간지 이미지 API는 파일 첨부가 불가하므로 분석 텍스트를 프롬프트에 주입한다.
+     */
+    private static final String PT_REFERENCE_TEMPLATE_ANALYSIS_QUERY =
+            "첨부된 참조 템플릿(문서, 이미지 등)의 핵심을 제안서 본문형 헤더/푸터·표지·간지 제작에 참고할 수 있도록 정리해 주세요. "
+                    + "헤더/푸터 구조·배지·구분선, 표지 구도·그래픽 모티브, 간지 전환 디자인, "
+                    + "색감·타이포·여백·분위기 등 시각적 특징을 구체적으로 설명해 주세요. "
+                    + "색상 hex는 참고만 하고, 최종 색상은 시스템 설정값을 쓴다는 전제로 구조·모티브 중심으로 적어 주세요. "
+                    + "후속 제안·추가 정리 제안·메타 안내 문구는 출력하지 마세요.";
+    /** 본문형(S3_TEMPLATE)에 넣을 참조 분석 최대 길이 */
+    private static final int PT_REF_BRIEF_BODY_MAX = 2200;
+    /** 표지 이미지 프롬프트용 참조 분석 최대 길이 */
+    private static final int PT_REF_BRIEF_COVER_MAX = 1200;
+    /** 간지 이미지 프롬프트용 참조 분석 최대 길이 */
+    private static final int PT_REF_BRIEF_DIVIDER_MAX = 1000;
+    /** 본문 인포그래픽(S3_IMAGE)용 참조 분석 최대 길이 */
+    private static final int PT_REF_BRIEF_INFOGRAPHIC_MAX = 800;
     /** Stage2-A 문제정의용 샘플링 — 전체 요구사항 최대 건수 (mandatoryYn='Y' 우선) */
     private static final int PROBLEM_DEF_REQ_LIMIT = 20;
 
@@ -142,6 +167,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private ChatbotDAO chatbotDAO;
+
+    @Autowired
+    private AgentDAO agentDAO;
 
     @Autowired
     private FileServiceImpl fileService;
@@ -1020,15 +1048,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         if ("fix".equals(vo.getMode()) && CommonUtil.isEmpty(vo.getTemplateFileId())) {
             throw new RuntimeException("fix 모드에서는 templateFileId가 필수입니다.");
         }
-        // 4. templateFileId 파일 존재 + .pptx/.docx 형식 검증
+        // 4. templateFileId 파일 존재 + .pdf/.docx/.png/.jpg/.jpeg 형식 검증
         if (CommonUtil.isNotEmpty(vo.getTemplateFileId())) {
             ProposalVO.PtFileVO fileVO = proposalDAO.selectPtFileById(vo.getTemplateFileId());
             if (fileVO == null) {
                 throw new RuntimeException("templateFileId에 해당하는 파일이 존재하지 않습니다. templateFileId=" + vo.getTemplateFileId());
             }
             String fileNm = CommonUtil.nullToBlank(fileVO.getFileNm()).toLowerCase();
-            if (!fileNm.endsWith(".pptx") && !fileNm.endsWith(".docx")) {
-                throw new RuntimeException("템플릿 파일은 .pptx 또는 .docx 형식이어야 합니다. fileNm=" + fileVO.getFileNm());
+            if (!fileNm.endsWith(".pdf") && !fileNm.endsWith(".docx")
+                    && !fileNm.endsWith(".png") && !fileNm.endsWith(".jpg") && !fileNm.endsWith(".jpeg")) {
+                throw new RuntimeException("템플릿 파일은 .pdf, .docx, .png, .jpg, .jpeg 형식이어야 합니다. fileNm=" + fileVO.getFileNm());
             }
         }
 
@@ -1046,7 +1075,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             root = new JsonObject();
         }
 
-        // template 객체 구성
+        // 기존 브릿지 chatFileId는 설정 변경 시 정리 (생성 직후 DELETE하지 않음 — 표지/간지 재사용)
+        Long oldChatFileId = null;
+        if (root.has("template") && !root.get("template").isJsonNull()) {
+            oldChatFileId = getLongOrNull(root.getAsJsonObject("template"), "chatFileId");
+        }
+
+        // template 객체 구성 (chatFileId·referenceAnalysis는 다음 생성 API에서 다시 브릿지/분석)
         JsonObject templateObj = new JsonObject();
         templateObj.addProperty("mode", vo.getMode());
         if (CommonUtil.isNotEmpty(vo.getTemplateFileId())) {
@@ -1062,10 +1097,18 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         updateVO.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateProjectConfigJson(updateVO);
 
+        if (oldChatFileId != null) {
+            cleanupTempChatFile(oldChatFileId);
+            logger.info("[PT StepA] 이전 참조 템플릿 TB_CHAT_FILE 정리 (ptProjectId={}, chatFileId={})",
+                    vo.getPtProjectId(), oldChatFileId);
+        }
+
         // 7. Step A 완료 → TOC 단계(1) 해제
         advanceMaxStepNo(vo.getPtProjectId(), 1);
 
-        logger.info("[PT StepA] 템플릿 설정 저장 완료 (ptProjectId={}, mode={}, docSize={})", vo.getPtProjectId(), vo.getMode(), vo.getDocSize());
+        logger.info("[PT StepA] 템플릿 설정 저장 완료 (ptProjectId={}, mode={}, templateFileId={}, docSize={})",
+                vo.getPtProjectId(), vo.getMode(),
+                CommonUtil.nullToBlank(vo.getTemplateFileId()), vo.getDocSize());
     }
 
     /**
@@ -1255,6 +1298,26 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private String getStrOrNull(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         return obj.get(key).getAsString();
+    }
+
+    /** JsonObject에서 Long 값을 안전하게 꺼낸다 (Number·String 모두 허용). */
+    private Long getLongOrNull(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
+        try {
+            JsonElement el = obj.get(key);
+            if (el.isJsonPrimitive()) {
+                if (el.getAsJsonPrimitive().isNumber()) {
+                    return el.getAsLong();
+                }
+                String s = el.getAsString();
+                if (CommonUtil.isNotEmpty(s)) {
+                    return Long.parseLong(s.trim());
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[PT] getLongOrNull 파싱 실패 (key={}, value={}): {}", key, obj.get(key), e.getMessage());
+        }
+        return null;
     }
 
     /** LLM 출력 layoutType 명칭 → LAYOUT_TYPE_CD 코드ID (PT000005) 변환 */
@@ -2488,6 +2551,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         upd.setRequiredCapability(vo.getRequiredCapability());
         upd.setStrategySummary(vo.getStrategySummary());
         upd.setKpi(vo.getKpi());
+        upd.setProblemTitleTxt(vo.getProblemTitleTxt());
         upd.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateProblemDefinition(upd);
         return toProblemDefinitionResponse(proposalDAO.selectProblemDefinitionById(problemId));
@@ -2576,6 +2640,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         List<ProposalVO.ProblemDefinitionVO> pds = proposalDAO.selectProblemDefinitions(ptProjectId);
         return toWinThemeResponse(proposalDAO.selectWinThemeById(wt.getWinThemeId()), pds);
     }
+    
 
     public void deleteStage2WinTheme(String ptProjectId, String winThemeId) {
         ProposalVO.WinThemeVO existing = proposalDAO.selectWinThemeById(winThemeId);
@@ -2656,9 +2721,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
 
         StringBuilder sb = new StringBuilder();
+        boolean doRegenTitle = Boolean.TRUE.equals(vo.getRegenerateTitle());
         sb.append("당신은 제안서 전략 분석가입니다. 아래 문제정의 1건을 사용자 보완 요청에 맞게 수정하세요.\n");
         sb.append("다른 문제정의는 만들지 말고, 반드시 JSON 객체 1개만 반환하세요.\n");
-        sb.append("필드: currentProblem, rootCause, riskIfIgnored, goal, requiredCapability, strategySummary, kpi, problemTypeCd\n");
+        if (doRegenTitle) {
+            sb.append("필드: title(15~20자 핵심 요약), currentProblem, rootCause, riskIfIgnored, goal, requiredCapability, strategySummary, kpi, problemTypeCd\n");
+        } else {
+            sb.append("필드: currentProblem, rootCause, riskIfIgnored, goal, requiredCapability, strategySummary, kpi, problemTypeCd\n");
+        }
         sb.append("\n## 사업 기본 정보\n- 사업명: ").append(CommonUtil.nullToBlank(project.getProjectNm()));
         sb.append("\n\n## 수정 대상 문제정의 (JSON)\n");
         java.util.Map<String, Object> pdMap = new java.util.LinkedHashMap<>();
@@ -2713,6 +2783,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             upd.setStrategySummary(obj.get("strategySummary").getAsString());
         if (obj.has("kpi") && !obj.get("kpi").isJsonNull())
             upd.setKpi(obj.get("kpi").getAsString());
+        // regenerateTitle=true 일 때만 title을 갱신 — 채팅 보완요청 경로에서는 title을 건드리지 않는다
+        if (doRegenTitle && obj.has("title") && !obj.get("title").isJsonNull()) {
+            upd.setProblemTitleTxt(obj.get("title").getAsString());
+        }
 
         return updateStage2ProblemDefinition(ptProjectId, problemId, upd);
     }
@@ -2810,6 +2884,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         r.setGeneratedDt(pd.getCreateDt());
         r.setModifyDt(pd.getModifyDt());
         r.setManualYn("999".equals(pd.getSourceTypeCd()) ? "Y" : "N");
+        r.setProblemTitleTxt(pd.getProblemTitleTxt());
         return r;
     }
 
@@ -2992,6 +3067,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     logger.warn("[PT Stage2-A] problemDefinitions 항목에 currentProblem 누락, 건너뜀");
                     continue;
                 }
+                pd.setProblemTitleTxt(getStrOrNull(obj, "title"));
                 pd.setRootCause(getStrOrNull(obj, "rootCause"));
                 pd.setRiskIfIgnored(getStrOrNull(obj, "riskIfIgnored"));
                 pd.setGoal(getStrOrNull(obj, "goal"));
@@ -5411,12 +5487,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
                 String ptProjectId = slide.getPtProjectId();
 
-                // ── 2. PROJECT_CONFIG_JSON → docSize, colors, writingStyle ───
+                // ── 2. PROJECT_CONFIG_JSON → docSize, colors, writingStyle, template ───
                 String configJson   = proposalDAO.selectProjectConfigJson(ptProjectId);
                 String docSize      = "169";
                 List<String> baseColorList   = new ArrayList<>();
                 List<String> accentColorList = new ArrayList<>();
                 String writingStyle = "formal";
+                String templateMode   = "new";
+                String templateFileId = null;
 
                 if (CommonUtil.isNotEmpty(configJson)) {
                     try {
@@ -5426,6 +5504,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                             if (tmpl.has("docSize") && !tmpl.get("docSize").isJsonNull()) {
                                 docSize = tmpl.get("docSize").getAsString();
                             }
+                            String tm = getStrOrNull(tmpl, "mode");
+                            if (CommonUtil.isNotEmpty(tm)) templateMode = tm;
+                            String tfId = getStrOrNull(tmpl, "templateFileId");
+                            if (CommonUtil.isNotEmpty(tfId)) templateFileId = tfId;
                         }
                         if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
                             JsonObject settings = cfgRoot.getAsJsonObject("settings");
@@ -5498,6 +5580,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 String fullPrompt = promptContent + "\n\n## 슬라이드 데이터\n" + GSON.toJson(slideCtx);
 
                 // ── 6. LLM 호출 (1회 재시도) ──────────────────────────────────
+                // S3_IMAGE 원칙7: 시각 스타일은 imageQuery에 넣지 않음 → 참조 브리프는 IMAGE_GEN_HINT에 시스템 부착
                 String aiResponse = callLlmWithRetry(fullPrompt, modelId, agentId, "[PT Img-Gen SSE]");
 
                 // ── 7. imageQuery 파싱 (1회 재시도) ───────────────────────────
@@ -5529,11 +5612,32 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // ── 8. IMAGE_GEN_HINT 조립 ────────────────────────────────────
+                // styleManifest(색·톤) + 참조 템플릿 비주얼 언어(있을 때) + imageQuery(콘텐츠)
                 sendSseEvent(emitter, "progress", "{\"step\":\"image_gen\"}");
                 String styleManifest = buildStyleManifest(baseColor, accentColor, tintColor, docSize, writingStyle);
                 String styleParams   = String.format("docSize=%s baseColor=%s accentColor=%s tintColor=%s writingStyle=%s colorIndex=%d",
                         docSize, baseColor, accentColor, tintColor, writingStyle, slide.getColorIndex());
-                String imageGenHint  = styleManifest + " " + imageQuery + " | " + styleParams;
+
+                String refStyleHint = "";
+                if (CommonUtil.isNotEmpty(templateFileId)) {
+                    try {
+                        String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, modelId);
+                        String brief = buildPtReferenceBrief(referenceAnalysis, "INFOGRAPHIC");
+                        if (CommonUtil.isNotEmpty(brief)) {
+                            String modeHint = buildReferenceTemplateModeHint(templateMode);
+                            // 이미지 API query는 한 덩어리 문자열 — 줄바꿈은 공백으로
+                            String oneLine = (modeHint + " " + brief).replace('\n', ' ').replaceAll("\\s+", " ").trim();
+                            refStyleHint = " [REF_STYLE: " + oneLine + "]";
+                            logger.info("[PT Img-Gen SSE] 참조 템플릿 REF_STYLE 부착 (slideId={}, templateFileId={}, mode={}, briefLen={})",
+                                    slideId, templateFileId, templateMode, brief.length());
+                        }
+                    } catch (Exception e) {
+                        logger.warn("[PT Img-Gen SSE] 참조 템플릿 REF_STYLE 부착 실패 (slideId={}): {}",
+                                slideId, e.getMessage());
+                    }
+                }
+
+                String imageGenHint = styleManifest + refStyleHint + " " + imageQuery + " | " + styleParams;
 
 
                 // ── 9. 이미지 생성 API 호출 ───────────────────────────────────
@@ -6028,6 +6132,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String baseColor      = "\"#5B4FE9\",\"#8B7FFF\",\"#EFECFE\"";
         String accentColor    = "\"#E08A2C\",\"#22A06B\"";
         String docSize        = "169";
+        String templateMode   = "new";
+        String templateFileId = null;
 
         try {
             ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
@@ -6044,6 +6150,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         JsonObject tmpl = cfgRoot.getAsJsonObject("template");
                         String ds = getStrOrNull(tmpl, "docSize");
                         if (CommonUtil.isNotEmpty(ds)) docSize = ds;
+                        String tm = getStrOrNull(tmpl, "mode");
+                        if (CommonUtil.isNotEmpty(tm)) templateMode = tm;
+                        String tfId = getStrOrNull(tmpl, "templateFileId");
+                        if (CommonUtil.isNotEmpty(tfId)) templateFileId = tfId;
                     }
 
                     if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
@@ -6098,6 +6208,18 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 .replace("{{accentColor}}",    accentColor)
                 .replace("{{writingStyle}}",   safeStyle);
 
+        // 참조 템플릿: 이미지 API는 첨부 불가 → 같은 chatFileId로 분석한 텍스트를 프롬프트에 주입
+        if (CommonUtil.isNotEmpty(templateFileId)) {
+            String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, null);
+            prompt = applyReferenceTemplateToPrompt(prompt, templateMode, referenceAnalysis, "COVER");
+            logger.info("[PT Cover] 참조 템플릿 반영 (ptProjectId={}, templateFileId={}, mode={}, analysisLen={}, promptLen={})",
+                    ptProjectId, templateFileId, templateMode,
+                    referenceAnalysis != null ? referenceAnalysis.length() : 0, prompt.length());
+        } else {
+            // DB 프롬프트에 placeholder가 있어도 빈 값으로 치환
+            prompt = prompt.replace("{{templateModeHint}}", "").replace("{{referenceTemplate}}", "");
+        }
+
         // callPtImageApi 내부 정규식(docSize=(\S+))과 호환되는 마커 append
         return prompt + " | docSize=" + docSize;
     }
@@ -6116,6 +6238,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String baseColor   = "\"#5B4FE9\",\"#8B7FFF\",\"#EFECFE\"";
         String accentColor = "\"#E08A2C\",\"#22A06B\"";
         String docSize     = "169";
+        String templateMode   = "new";
+        String templateFileId = null;
 
         try {
             ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
@@ -6131,6 +6255,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         JsonObject tmpl = cfgRoot.getAsJsonObject("template");
                         String ds = getStrOrNull(tmpl, "docSize");
                         if (CommonUtil.isNotEmpty(ds)) docSize = ds;
+                        String tm = getStrOrNull(tmpl, "mode");
+                        if (CommonUtil.isNotEmpty(tm)) templateMode = tm;
+                        String tfId = getStrOrNull(tmpl, "templateFileId");
+                        if (CommonUtil.isNotEmpty(tfId)) templateFileId = tfId;
                     }
 
                     if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
@@ -6179,6 +6307,17 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 .replace("{{chapterNm}}",  "")
                 .replace("{{subTocList}}", "");
 
+        // 참조 템플릿: 이미지 API는 첨부 불가 → 같은 chatFileId로 분석한 텍스트를 프롬프트에 주입
+        if (CommonUtil.isNotEmpty(templateFileId)) {
+            String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, null);
+            prompt = applyReferenceTemplateToPrompt(prompt, templateMode, referenceAnalysis, "DIVIDER");
+            logger.info("[PT Divider] 참조 템플릿 반영 (ptProjectId={}, templateFileId={}, mode={}, analysisLen={}, promptLen={})",
+                    ptProjectId, templateFileId, templateMode,
+                    referenceAnalysis != null ? referenceAnalysis.length() : 0, prompt.length());
+        } else {
+            prompt = prompt.replace("{{templateModeHint}}", "").replace("{{referenceTemplate}}", "");
+        }
+
         prompt += "\n\n## 재사용 배경 제약 (본문형 프레임과 동일 — 텍스트는 출력 단계에서 오버레이)"
                 + "\n- 이 이미지는 대목차마다 동일하게 재사용되는 배경이다."
                 + "\n- 이미지에 글자를 절대 그리지 마세요. 한글·영문·숫자·기호 모두 금지."
@@ -6186,7 +6325,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 + "\n- 01~06 번호 배지, 점선 리스트 항목, 예시 목차 문구도 그리지 마세요."
                 + "\n- 좌측 중앙에 대목차번호·대목차명용 빈 여백, 우측에 하위목차 리스트용 빈 여백만 확보하세요."
                 + "\n- 그래픽 모티브·색상 체계만 표현하고, 텍스트는 비워 두세요."
-                + "\n- 로고·인장·실존 기관 마크를 생성하지 마세요.";
+                + "\n- 로고·인장·실존 기관 마크를 생성하지 마세요."
+                + "\n\n## 표지와의 시각 일관성 (간지)"
+                + "\n- 같은 제안서 표지와 동일 계열의 그래픽 모티브(얇은 그라데이션 라인, 곡선 웨이브, 점/네트워크 패턴, 소프트 코너 장식)를 쓰되,"
+                + " 표지보다 정보량·채도·대비를 낮춘 절제된 배경으로 표현하세요."
+                + "\n- 표지를 축소·복제하지 마세요. 전환 페이지답게 여백을 넓게 두고 장식은 가장자리·모서리 위주로만 배치하세요."
+                + "\n- 중앙·좌측 텍스트 영역은 거의 비워 두어 export 오버레이가 들어가게 하세요."
+                + "\n- 색상은 설정값(baseColor/accentColor)만 사용하고, 참조 파일의 고유 hex는 따르지 마세요.";
 
         return prompt + " | docSize=" + docSize;
     }
@@ -6419,60 +6564,480 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 참조 템플릿 파일(pptx/docx)에서 색상·레이아웃 힌트를 추출해 LLM 프롬프트용 텍스트로 반환.
-     * 추출 실패 시 빈 문자열 반환 (호출부에서 warn 로깅 후 생성 계속 진행).
-     *
-     * @param fileBytes NCP에서 다운로드한 파일 바이트
-     * @param fileNm    원본 파일명 (.pptx / .docx 판별용)
-     * @param mode      "fix" = 기존 스타일 유지 보완, "new" = 참조 스타일 활용
+     * 참조 템플릿 mode별 지시 문구.
+     * 색상은 항상 템플릿 설정(settings.colors / baseColor·accentColor)을 우선한다.
      */
-    private String extractTemplateStyleHint(byte[] fileBytes, String fileNm, String mode) {
-        StringBuilder sb = new StringBuilder();
-
-        // mode별 지시 문구
+    private static String buildReferenceTemplateModeHint(String mode) {
         if ("fix".equals(mode)) {
-            sb.append("[참조 템플릿 보완 모드] 아래 기존 템플릿의 스타일을 최대한 유지하며 헤더/푸터를 생성하세요.\n");
+            return "[참조 템플릿 보완 모드] 첨부된 참조 템플릿의 헤더/푸터·표지·간지 구조·구도·모티브를 최대한 유지하며 보완하세요. "
+                    + "본문형 JSON의 슬롯 키·placeholder·footer type·좌표 스키마는 유지하세요. "
+                    + "색상은 반드시 설정값(baseColor/accentColor)을 사용하고, 참조 파일의 hex는 무시하세요.";
+        }
+        return "[참조 템플릿 스타일 참조] 첨부된 참조 템플릿을 레이아웃·분위기·그래픽 모티브 참고로만 활용하고, "
+                + "색상은 반드시 설정값(baseColor/accentColor)을 우선하세요.";
+    }
+
+    /**
+     * file_query 분석 텍스트에서 메타/잡담·후속 제안 문구를 제거한다.
+     */
+    private static String sanitizePtReferenceAnalysis(String raw) {
+        if (CommonUtil.isEmpty(raw)) return "";
+        String[] lines = raw.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            String t = line.trim();
+            String lower = t.toLowerCase();
+            if (t.isEmpty()) {
+                if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '\n') sb.append('\n');
+                continue;
+            }
+            if (t.startsWith("원하시면")
+                    || t.contains("다음 단계로")
+                    || t.contains("바로 정리해드릴")
+                    || t.contains("형태로 바로 정리")
+                    || t.contains("(참고) templateFileId")
+                    || t.contains("S3_TEMPLATE 는")
+                    || t.contains("S3_COVER_TEMPLATE")
+                    || t.contains("S3_DIVIDER_TEMPLATE")
+                    || lower.contains("would you like")
+                    || lower.startsWith("let me know")) {
+                continue;
+            }
+            // "① 이 템플릿을..." 같은 후속 제안 목록
+            if (t.matches("^[①②③④⑤\\d]+[.)].*(시안|규격표|예시|정리).*$")) {
+                continue;
+            }
+            sb.append(line).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    /** 길이 제한 (문장 중간 절단 시 … 처리) */
+    private static String truncatePtRefBrief(String text, int maxChars) {
+        if (CommonUtil.isEmpty(text) || text.length() <= maxChars) {
+            return CommonUtil.nullToBlank(text);
+        }
+        String cut = text.substring(0, maxChars);
+        int lastBreak = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf('.'));
+        if (lastBreak > maxChars / 2) {
+            cut = cut.substring(0, lastBreak + 1);
+        }
+        return cut.trim() + "\n…(참조 분석 요약)";
+    }
+
+    /**
+     * 단계별(본문/표지/간지/인포그래픽)로 참조 분석에서 관련 섹션만 뽑아 짧게 만든다.
+     * @param stage BODY | COVER | DIVIDER | INFOGRAPHIC
+     */
+    private static String buildPtReferenceBrief(String analysis, String stage) {
+        String cleaned = sanitizePtReferenceAnalysis(analysis);
+        if (CommonUtil.isEmpty(cleaned)) {
+            return "";
+        }
+        String[] keywords;
+        int maxChars;
+        String focusHint;
+        if ("COVER".equals(stage)) {
+            keywords = new String[]{"표지", "커버", "cover", "구도", "그래픽 모티브", "여백", "분위기", "톤앤매너", "색감"};
+            maxChars = PT_REF_BRIEF_COVER_MAX;
+            focusHint = "[표지 적용 포인트] 좌상단 제목·중앙 프로세스/아이콘 흐름·우하단 웨이브 등 참조 구도·모티브를 따르되, "
+                    + "색상은 설정값(baseColor/accentColor)만 사용하세요. 도시 실사·과도한 암부 배경은 피하고 참조의 밝은 여백감을 유지하세요.";
+        } else if ("DIVIDER".equals(stage)) {
+            keywords = new String[]{"간지", "섹션", "전환", "여백", "그래픽", "모티브", "분위기", "톤앤매너", "웨이브", "라인"};
+            maxChars = PT_REF_BRIEF_DIVIDER_MAX;
+            focusHint = "[간지 적용 포인트] 표지와 같은 그래픽 모티브(웨이브·네트워크·점 패턴·얇은 그라데이션 라인)를 "
+                    + "더 옅고 절제된 재사용 배경으로만 표현하세요. 글자·번호·리스트는 그리지 마세요. 색상은 설정값만 사용하세요.";
+        } else if ("INFOGRAPHIC".equals(stage)) {
+            keywords = new String[]{"아이콘", "그래픽", "모티브", "라인", "여백", "톤앤매너", "형태 언어", "배지", "인포그래픽"};
+            maxChars = PT_REF_BRIEF_INFOGRAPHIC_MAX;
+            focusHint = "[인포그래픽 비주얼 언어] 참조 템플릿의 아이콘(라인·소프트 그라데이션)·얇은 구분선·여백 리듬·정보 밀도만 참고하세요. "
+                    + "표지/간지 레이아웃(좌상단 대형 제목·우하단 웨이브·챕터 전환 구도)을 복제하지 마세요. "
+                    + "본문 콘텐츠 다이어그램에 맞게 구성하고, 색상은 설정값(baseColor/accentColor)만 사용하세요. "
+                    + "과한 실사 배경·도시 풍경·장식 과다는 피하세요.";
         } else {
-            sb.append("[참조 템플릿 스타일 참조] 아래 스타일을 참고해 헤더/푸터를 설계하세요.\n");
+            keywords = new String[]{"헤더", "푸터", "배지", "구분선", "본문", "라인", "톤앤매너", "타이포"};
+            maxChars = PT_REF_BRIEF_BODY_MAX;
+            focusHint = "[본문형 적용 포인트] 헤더/푸터·배지·구분선 구조·여백 리듬을 참고하세요. 색상은 설정값(baseColor/accentColor)만 사용하세요.";
         }
 
-        // PPTX: Apache POI로 도형 fill 색상 추출
-        if (fileNm != null && fileNm.toLowerCase().endsWith(".pptx")) {
-            try (XMLSlideShow pptx = new XMLSlideShow(new ByteArrayInputStream(fileBytes))) {
-                Set<String> colors = new LinkedHashSet<>();
+        String extracted = extractPtAnalysisSections(cleaned, keywords);
+        String body = CommonUtil.isNotEmpty(extracted) ? extracted : cleaned;
+        String brief = focusHint + "\n\n" + truncatePtRefBrief(body, maxChars);
+        return brief.trim();
+    }
 
-                List<XSLFSlide> slides = pptx.getSlides();
-                int limit = Math.min(3, slides.size()); // 첫 3슬라이드만 분석
-                for (int i = 0; i < limit; i++) {
-                    for (XSLFShape shape : slides.get(i).getShapes()) {
-                        if (shape instanceof XSLFSimpleShape) {
-                            XSLFSimpleShape ss = (XSLFSimpleShape) shape;
-                            java.awt.Color fill = ss.getFillColor();
-                            if (fill != null) {
-                                String hex = String.format("#%02X%02X%02X",
-                                        fill.getRed(), fill.getGreen(), fill.getBlue());
-                                // 흰색·검정 제외 (의미 없는 배경색)
-                                if (!"#FFFFFF".equals(hex) && !"#000000".equals(hex)) {
-                                    colors.add(hex);
-                                }
+    /** ## / --- 단위 섹션 중 키워드가 제목·본문에 있는 것만 수집 */
+    private static String extractPtAnalysisSections(String analysis, String[] keywords) {
+        if (CommonUtil.isEmpty(analysis) || keywords == null || keywords.length == 0) {
+            return "";
+        }
+        String normalized = analysis.replace("\r\n", "\n");
+        // ## 제목 또는 --- 구분 기준으로 대략 분할
+        String[] chunks = normalized.split("(?m)(?=^#{1,3}\\s)|(?m)(?=^---\\s*$)");
+        StringBuilder sb = new StringBuilder();
+        for (String chunk : chunks) {
+            if (CommonUtil.isEmpty(chunk)) continue;
+            String head = chunk.length() > 120 ? chunk.substring(0, 120) : chunk;
+            String lowerHead = head.toLowerCase();
+            String lowerChunk = chunk.toLowerCase();
+            boolean hit = false;
+            for (String kw : keywords) {
+                if (CommonUtil.isEmpty(kw)) continue;
+                String k = kw.toLowerCase();
+                if (lowerHead.contains(k) || lowerChunk.contains(k)) {
+                    hit = true;
+                    break;
+                }
+            }
+            if (hit) {
+                if (sb.length() > 0) sb.append("\n\n");
+                sb.append(chunk.trim());
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    /** PROJECT_CONFIG_JSON.template 객체를 조회한다. 없으면 null. */
+    private JsonObject loadTemplateConfigObject(String ptProjectId) {
+        String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+        if (CommonUtil.isEmpty(configJson)) return null;
+        try {
+            JsonObject root = JsonParser.parseString(configJson).getAsJsonObject();
+            if (root.has("template") && !root.get("template").isJsonNull()) {
+                return root.getAsJsonObject("template");
+            }
+        } catch (Exception e) {
+            logger.warn("[PT Template] template config 파싱 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * PROJECT_CONFIG_JSON.template에 키를 merge 저장한다 (settings 등 다른 키 유지).
+     * stringValue와 longValue 중 하나만 사용한다. null을 넘기면 해당 키를 제거한다.
+     */
+    private void mergeTemplateConfigProperty(String ptProjectId, String key, String stringValue, Long longValue) {
+        try {
+            String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+            JsonObject root = CommonUtil.isNotEmpty(configJson)
+                    ? JsonParser.parseString(configJson).getAsJsonObject()
+                    : new JsonObject();
+            JsonObject tmpl = (root.has("template") && !root.get("template").isJsonNull())
+                    ? root.getAsJsonObject("template")
+                    : new JsonObject();
+            if (longValue != null) {
+                tmpl.addProperty(key, longValue);
+            } else if (stringValue != null) {
+                tmpl.addProperty(key, stringValue);
+            } else {
+                tmpl.remove(key);
+            }
+            root.add("template", tmpl);
+
+            ProposalVO.ProjectVO updateVO = new ProposalVO.ProjectVO();
+            updateVO.setPtProjectId(ptProjectId);
+            updateVO.setProjectConfigJson(GSON.toJson(root));
+            updateVO.setModifyUserId(SessionUtil.getUserId());
+            proposalDAO.updateProjectConfigJson(updateVO);
+        } catch (Exception e) {
+            logger.warn("[PT Template] template config merge 실패 (ptProjectId={}, key={}): {}",
+                    ptProjectId, key, e.getMessage());
+        }
+    }
+
+    /** TB_CHAT_FILE 행 존재 여부 */
+    private boolean existsChatFile(Long chatFileId) {
+        if (chatFileId == null) return false;
+        try {
+            ChatbotVO search = new ChatbotVO();
+            search.setChatFileId(chatFileId);
+            return chatbotDAO.selectChatFileById(search) != null;
+        } catch (Exception e) {
+            logger.warn("[PT Template] TB_CHAT_FILE 존재 확인 실패 (chatFileId={}): {}", chatFileId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * templateFileId에 대한 TB_CHAT_FILE 브릿지 ID를 확보하고 PROJECT_CONFIG_JSON에 남긴다.
+     * DELETE하지 않는다 — 표지/간지 API가 같은 ID를 재사용한다.
+     * @return chatFileId, templateFileId 없거나 실패 시 null
+     */
+    private Long ensurePtTemplateChatFileId(String ptProjectId) {
+        JsonObject tmpl = loadTemplateConfigObject(ptProjectId);
+        if (tmpl == null) {
+            logger.info("[PT Template] template config 없음 — chatFileId 브릿지 스킵 (ptProjectId={})", ptProjectId);
+            return null;
+        }
+        String templateFileId = getStrOrNull(tmpl, "templateFileId");
+        if (CommonUtil.isEmpty(templateFileId)) {
+            logger.info("[PT Template] templateFileId 없음 — chatFileId 브릿지 스킵 (ptProjectId={})", ptProjectId);
+            return null;
+        }
+
+        Long existingChatFileId = getLongOrNull(tmpl, "chatFileId");
+        if (existingChatFileId != null && existsChatFile(existingChatFileId)) {
+            logger.info("[PT Template] 저장된 chatFileId 재사용 (ptProjectId={}, templateFileId={}, chatFileId={})",
+                    ptProjectId, templateFileId, existingChatFileId);
+            return existingChatFileId;
+        }
+        if (existingChatFileId != null) {
+            logger.warn("[PT Template] 저장된 chatFileId 행 없음 → 재브릿지 (ptProjectId={}, chatFileId={})",
+                    ptProjectId, existingChatFileId);
+        }
+
+        ProposalVO.PtFileVO templateFile = proposalDAO.selectPtFileById(templateFileId);
+        if (templateFile == null || CommonUtil.isEmpty(templateFile.getFilePath())) {
+            logger.warn("[PT Template] 참조 템플릿 파일 없음 또는 경로 비어있음 (ptProjectId={}, templateFileId={})",
+                    ptProjectId, templateFileId);
+            return null;
+        }
+
+        Long chatFileId = bridgePtFileToChatFile(templateFile);
+        if (chatFileId == null) {
+            logger.warn("[PT Template] TB_CHAT_FILE 브릿지 실패 (ptProjectId={}, templateFileId={})",
+                    ptProjectId, templateFileId);
+            return null;
+        }
+        mergeTemplateConfigProperty(ptProjectId, "chatFileId", null, chatFileId);
+        logger.info("[PT Template] chatFileId 브릿지·저장 완료 (ptProjectId={}, templateFileId={}, chatFileId={}, fileNm={})",
+                ptProjectId, templateFileId, chatFileId, templateFile.getFileNm());
+        return chatFileId;
+    }
+
+    /** file_query model_id — 전달값이 없으면 TB_LLM_MDL SORT_ORDER 1순위 */
+    private String resolvePtFileQueryModelId(String preferredModelId) {
+        if (CommonUtil.isNotEmpty(preferredModelId)) {
+            return preferredModelId;
+        }
+        try {
+            List<AgentVO.ModelVO> models = agentDAO.selectModelList();
+            if (models != null) {
+                for (AgentVO.ModelVO model : models) {
+                    if (model != null && CommonUtil.isNotEmpty(model.getModelId())) {
+                        return model.getModelId();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[PT Template] file_query 모델 조회 실패: {}", e.getMessage());
+        }
+        return "";
+    }
+
+    /**
+     * 참조 템플릿 file_query 분석 텍스트를 확보한다.
+     * PROJECT_CONFIG_JSON.template.referenceAnalysis에 캐시하며, DELETE하지 않는다.
+     */
+    private String resolvePtReferenceAnalysis(String ptProjectId, String agentId, String modelId) {
+        Long chatFileId = ensurePtTemplateChatFileId(ptProjectId);
+        if (chatFileId == null) {
+            return "";
+        }
+
+        JsonObject tmpl = loadTemplateConfigObject(ptProjectId);
+        String cached = tmpl != null ? getStrOrNull(tmpl, "referenceAnalysis") : null;
+        if (CommonUtil.isNotEmpty(cached)) {
+            logger.info("[PT Template] referenceAnalysis 캐시 재사용 (ptProjectId={}, chatFileId={}, len={})",
+                    ptProjectId, chatFileId, cached.length());
+            return sanitizePtReferenceAnalysis(cached);
+        }
+
+        String resolvedModelId = resolvePtFileQueryModelId(modelId);
+        List<String> attachmentFileIds = new ArrayList<>();
+        attachmentFileIds.add(String.valueOf(chatFileId));
+        logger.info("[PT Template] referenceAnalysis file_query 시작 (ptProjectId={}, chatFileId={}, modelId={}, agentId={})",
+                ptProjectId, chatFileId, resolvedModelId, agentId);
+        String analysis = callPtFileQuerySync(
+                PT_REFERENCE_TEMPLATE_ANALYSIS_QUERY, attachmentFileIds, resolvedModelId, agentId);
+        if (CommonUtil.isEmpty(analysis)) {
+            logger.warn("[PT Template] referenceAnalysis file_query 빈 응답 (ptProjectId={}, chatFileId={})",
+                    ptProjectId, chatFileId);
+            return "";
+        }
+        analysis = sanitizePtReferenceAnalysis(analysis);
+        if (CommonUtil.isEmpty(analysis)) {
+            logger.warn("[PT Template] referenceAnalysis sanitize 후 비어있음 (ptProjectId={}, chatFileId={})",
+                    ptProjectId, chatFileId);
+            return "";
+        }
+        mergeTemplateConfigProperty(ptProjectId, "referenceAnalysis", analysis, null);
+        logger.info("[PT Template] referenceAnalysis 저장 완료 (ptProjectId={}, chatFileId={}, len={})",
+                ptProjectId, chatFileId, analysis.length());
+        return analysis;
+    }
+
+    /**
+     * 프롬프트에 참조 템플릿 모드/분석 텍스트를 주입한다.
+     * {{templateModeHint}} / {{referenceTemplate}} 치환 후, 섹션이 없으면 append.
+     * templateFileId가 있을 때만 호출한다.
+     *
+     * @param stage BODY | COVER | DIVIDER — 단계별 짧은 브리프 생성
+     */
+    private String applyReferenceTemplateToPrompt(String prompt, String templateMode,
+                                                  String referenceAnalysis, String stage) {
+        if (CommonUtil.isEmpty(prompt)) return prompt;
+
+        String modeHint = buildReferenceTemplateModeHint(templateMode);
+        String analysis = buildPtReferenceBrief(referenceAnalysis, stage);
+        if (CommonUtil.isEmpty(analysis)) {
+            analysis = "(참조 템플릿 분석 텍스트 없음 — 첨부 파일·모드 지시를 직접 참고하세요. 색상은 설정값을 사용하세요.)";
+        }
+        boolean hasPlaceholder = prompt.contains("{{templateModeHint}}") || prompt.contains("{{referenceTemplate}}");
+        String result = prompt
+                .replace("{{templateModeHint}}", modeHint)
+                .replace("{{referenceTemplate}}", analysis);
+
+        // DB 프롬프트에 섹션이 없어도 동작하도록 append (중복 방지)
+        if (!result.contains("## 참조 템플릿")) {
+            result = result + "\n\n## 참조 템플릿\n"
+                    + "- 모드: " + modeHint + "\n"
+                    + "- 첨부 파일 분석:\n" + analysis;
+            logger.info("[PT Template] 참조 템플릿 섹션 append (stage={}, mode={}, analysisLen={}, hadPlaceholder={})",
+                    stage, templateMode, analysis.length(), hasPlaceholder);
+        } else if (hasPlaceholder) {
+            logger.info("[PT Template] 참조 템플릿 placeholder 치환 (stage={}, mode={}, analysisLen={})",
+                    stage, templateMode, analysis.length());
+        }
+        return result;
+    }
+
+    /**
+     * TB_PT_FILE NCP 경로를 TB_CHAT_FILE 임시 행으로 브릿지 (실파일 복사 없음).
+     * @return chatFileId, 실패 시 null
+     */
+    private Long bridgePtFileToChatFile(ProposalVO.PtFileVO templateFile) {
+        if (templateFile == null || CommonUtil.isEmpty(templateFile.getFilePath())) {
+            return null;
+        }
+        try {
+            ChatbotVO tempChatFile = new ChatbotVO();
+            tempChatFile.setRoomId(PT_FILE_QUERY_ROOM_ID);
+            tempChatFile.setFileName(templateFile.getFileNm());
+            tempChatFile.setStoreFileName(templateFile.getFileNm());
+            tempChatFile.setFilePath(templateFile.getFilePath());
+            tempChatFile.setFileSize(templateFile.getFileSize());
+            tempChatFile.setFileType(templateFile.getFileType());
+            tempChatFile.setUserId(CommonUtil.nullToBlank(SessionUtil.getUserId()));
+            chatbotDAO.saveChatFile(tempChatFile);
+            return tempChatFile.getChatFileId();
+        } catch (Exception e) {
+            logger.warn("[PT Template] 참조 템플릿 TB_CHAT_FILE 브릿지 실패 (ptFileId={}): {}",
+                    templateFile.getPtFileId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 임시 TB_CHAT_FILE 행만 삭제 (NCP 원본 유지) */
+    private void cleanupTempChatFile(Long chatFileId) {
+        if (chatFileId == null) return;
+        try {
+            ChatbotVO tempChatFile = new ChatbotVO();
+            tempChatFile.setChatFileId(chatFileId);
+            chatbotDAO.deleteChatFile(tempChatFile);
+            logger.info("[PT Template] 임시 TB_CHAT_FILE 삭제 완료 (chatFileId={})", chatFileId);
+        } catch (Exception e) {
+            logger.warn("[PT Template] 임시 TB_CHAT_FILE 정리 실패 (chatFileId={}): {}", chatFileId, e.getMessage());
+        }
+    }
+
+    /**
+     * /file_query 동기 호출 (참조 템플릿 첨부). 실패·빈 응답 시 "".
+     * 마케팅 callFileQuerySync와 동일 바디/SSE 파싱, 타임아웃은 PT_QUERY_TIMEOUT_SEC.
+     */
+    private String callPtFileQuerySync(String query, List<String> attachmentFileIds, String modelId, String agentId) {
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiFileUrl");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            logger.warn("[PT Template] file_query API URL 미설정");
+            return "";
+        }
+        if (attachmentFileIds == null || attachmentFileIds.isEmpty()) {
+            return "";
+        }
+
+        String userId = CommonUtil.nullToBlank(SessionUtil.getUserId());
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", query);
+        params.put("user_id", userId);
+        params.put("threadId", "string");
+        params.put("dataset_id", "");
+        params.put("room_id", "string");
+        params.put("model_id", CommonUtil.nullToBlank(modelId));
+        params.put("agent_id", CommonUtil.nvl(agentId, ""));
+        params.put("attachment_file_ids", attachmentFileIds);
+        String reqJson = GSON.toJson(params);
+        long startMs = System.currentTimeMillis();
+
+        try {
+            RequestBody body = RequestBody.create(reqJson, okhttp3.MediaType.get("application/json; charset=utf-8"));
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "text/event-stream")
+                    .build();
+
+            logger.info("[PT Template] file_query 호출 시작 - url={}, modelId={}, agentId={}, 첨부={}, queryLen={}",
+                    apiUrl, modelId, agentId, attachmentFileIds, query != null ? query.length() : 0);
+
+            try (okhttp3.Response response = PT_FILE_QUERY_HTTP_CLIENT.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("[PT Template] file_query 응답 오류: HTTP {}, bodyNull={}",
+                            response.code(), response.body() == null);
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "pt_template_file_query", reqJson,
+                            0, 0, (int) (System.currentTimeMillis() - startMs), "N",
+                            "HTTP " + response.code(), userId);
+                    return "";
+                }
+                try (okhttp3.ResponseBody responseBody = response.body()) {
+                    BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(responseBody.byteStream(), StandardCharsets.UTF_8));
+                    StringBuilder answerBuilder = new StringBuilder();
+                    String doneAnswer = "";
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String jsonStr;
+                        if (line.startsWith("data: ")) {
+                            jsonStr = line.substring(6).trim();
+                        } else if (line.trim().startsWith("{")) {
+                            jsonStr = line.trim();
+                        } else {
+                            continue;
+                        }
+                        if (jsonStr.isEmpty()) {
+                            continue;
+                        }
+                        try {
+                            JsonObject data = JsonParser.parseString(jsonStr).getAsJsonObject();
+                            if (data.has("text") && !data.get("text").isJsonNull()) {
+                                answerBuilder.append(data.get("text").getAsString());
                             }
+                            if (data.has("answer") && !data.get("answer").isJsonNull()) {
+                                doneAnswer = data.get("answer").getAsString();
+                            } else if (data.has("답변") && !data.get("답변").isJsonNull()) {
+                                doneAnswer = data.get("답변").getAsString();
+                            }
+                        } catch (Exception ignore) {
+                            // SSE keep-alive/비-JSON 라인 무시
                         }
                     }
-                    if (colors.size() >= 5) break; // 최대 5색
+                    String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                    int respTimeMs = (int) (System.currentTimeMillis() - startMs);
+                    logger.info("[PT Template] file_query 완료 - 응답 길이={}자, 소요={}ms, doneAnswerYn={}",
+                            result != null ? result.length() : 0, respTimeMs,
+                            CommonUtil.isNotEmpty(doneAnswer) ? "Y" : "N");
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "pt_template_file_query", reqJson,
+                            0, result != null ? result.length() : 0, respTimeMs, "Y", null, userId);
+                    return CommonUtil.nullToBlank(result).trim();
                 }
-
-                if (!colors.isEmpty()) {
-                    sb.append("참조 파일 주요 색상: ").append(String.join(", ", colors)).append("\n");
-                }
-            } catch (Exception e) {
-                logger.warn("[PT Template] PPTX 색상 추출 실패: {}", e.getMessage());
             }
-        } else if (fileNm != null && fileNm.toLowerCase().endsWith(".docx")) {
-            // DOCX: 색상 추출 생략, mode 힌트 텍스트만 사용
-            sb.append("(DOCX 참조 파일 — 레이아웃 구조를 참고하세요)\n");
+        } catch (Exception e) {
+            int respTimeMs = (int) (System.currentTimeMillis() - startMs);
+            logger.warn("[PT Template] file_query 호출 실패 ({}ms 경과): {}", respTimeMs, e.getMessage());
+            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "pt_template_file_query", reqJson,
+                    0, 0, respTimeMs, "N", e.getMessage(), userId);
+            return "";
         }
-
-        return sb.toString().trim();
     }
 
     /** data:image/...;base64, 접두사 제거 후 순수 base64 반환 */
@@ -7515,22 +8080,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
 
-            // 참조 템플릿 파일 스타일 힌트 추출
-            String referenceStyleHint = "";
-            if (CommonUtil.isNotEmpty(templateFileId)) {
-                try {
-                    ProposalVO.PtFileVO templateFile = proposalDAO.selectPtFileById(templateFileId);
-                    if (templateFile != null && CommonUtil.isNotEmpty(templateFile.getFilePath())) {
-                        byte[] fileBytes = downloadNcpObject(templateFile.getFilePath());
-                        referenceStyleHint = extractTemplateStyleHint(fileBytes, templateFile.getFileNm(), templateMode);
-                        logger.info("[PT Template] 참조 템플릿 스타일 힌트 추출 완료 (templateFileId={}, mode={})", templateFileId, templateMode);
-                    }
-                } catch (Exception e) {
-                    logger.warn("[PT Template] 참조 템플릿 스타일 추출 실패 (templateFileId={}): {}", templateFileId, e.getMessage());
-                    // 실패해도 생성 자체는 계속 진행
-                }
-            }
-
             // 프롬프트 조회 (agentId + stageCd 'S3_TEMPLATE')
             String promptTemplate = null;
             try {
@@ -7552,13 +8101,42 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     .replace("{{writingStyle}}", writingStyle)
                     .replace("{{topLevelTocList}}", tocSb.toString().trim());
 
-            // 참조 템플릿 스타일 힌트 append (DB 프롬프트 변경 없이 추가)
-            if (CommonUtil.isNotEmpty(referenceStyleHint)) {
-                prompt = prompt + "\n\n" + referenceStyleHint;
+            // 참조 템플릿: chatFileId를 config에 유지하고 분석 텍스트를 프롬프트에 주입한 뒤 /file_query (DELETE 안 함)
+            String aiResponse = "";
+            if (CommonUtil.isNotEmpty(templateFileId)) {
+                Long chatFileId = ensurePtTemplateChatFileId(ptProjectId);
+                String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, modelId);
+                prompt = applyReferenceTemplateToPrompt(prompt, templateMode, referenceAnalysis, "BODY");
+                logger.info("[PT Template] 참조 템플릿 준비 (ptProjectId={}, templateFileId={}, mode={}, chatFileId={}, analysisLen={}, promptLen={})",
+                        ptProjectId, templateFileId, templateMode, chatFileId,
+                        referenceAnalysis != null ? referenceAnalysis.length() : 0, prompt.length());
+
+                if (chatFileId != null) {
+                    try {
+                        List<String> attachmentFileIds = new ArrayList<>();
+                        attachmentFileIds.add(String.valueOf(chatFileId));
+                        aiResponse = callPtFileQuerySync(prompt, attachmentFileIds, modelId, agentId);
+                        logger.info("[PT Template] 참조 템플릿 file_query 생성 완료 (templateFileId={}, mode={}, chatFileId={}, responseLen={})",
+                                templateFileId, templateMode, chatFileId,
+                                aiResponse != null ? aiResponse.length() : 0);
+                    } catch (Exception e) {
+                        logger.warn("[PT Template] 참조 템플릿 file_query 실패 (templateFileId={}, chatFileId={}): {}",
+                                templateFileId, chatFileId, e.getMessage());
+                    }
+                } else {
+                    logger.warn("[PT Template] chatFileId 확보 실패 — /query 폴백 예정 (templateFileId={})", templateFileId);
+                }
+            } else {
+                prompt = prompt.replace("{{templateModeHint}}", "").replace("{{referenceTemplate}}", "");
             }
 
-            // LLM 호출
-            String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(prompt, modelId, "", agentId);
+            // 참조 파일 없거나 file_query 실패/빈 응답 → 기존 /query 폴백
+            if (CommonUtil.isEmpty(aiResponse)) {
+                if (CommonUtil.isNotEmpty(templateFileId)) {
+                    logger.warn("[PT Template] file_query 응답 없음, /query 폴백 (templateFileId={})", templateFileId);
+                }
+                aiResponse = riskDiagnosisAgentService.callLlmQuerySync(prompt, modelId, "", agentId);
+            }
             if (CommonUtil.isEmpty(aiResponse)) {
                 throw new RuntimeException("LLM 응답이 비어 있습니다.");
             }

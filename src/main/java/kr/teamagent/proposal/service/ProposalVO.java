@@ -400,6 +400,8 @@ public class ProposalVO {
         private String modifyDt;
         /** 수정자 ID */
         private String modifyUserId;
+        /** 문제정의 제목 (LLM 생성, PROBLEM_TITLE_TXT) — null이면 currentProblem 기반 폴백 */
+        private String problemTitleTxt;
     }
 
     /**
@@ -984,6 +986,8 @@ public class ProposalVO {
         private String generatedDt;
         private String modifyDt;
         private String manualYn;
+        /** 문제정의 제목 (LLM 생성) — null이면 프론트에서 currentProblem 폴백 */
+        private String problemTitleTxt;
     }
 
     /**
@@ -1029,6 +1033,8 @@ public class ProposalVO {
         private String strategySummary;
         private String kpi;
         private String modifyUserId;
+        /** 문제정의 제목 — 단건 재생성(regenerateTitle=true) 시에만 갱신됨 */
+        private String problemTitleTxt;
     }
 
     /**
@@ -1081,6 +1087,11 @@ public class ProposalVO {
         private String userFeedback;
         private String modelId;
         private String agentId;
+        /**
+         * true이면 LLM에게 title 필드도 요청하고 PROBLEM_TITLE_TXT를 갱신한다.
+         * false(기본)이면 채팅 보완요청으로 간주하여 title은 변경하지 않는다.
+         */
+        private Boolean regenerateTitle;
     }
 
     @Data
