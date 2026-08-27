@@ -1314,6 +1314,28 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /** PT 프로젝트 삭제 (NCP 파일 포함 전체 삭제) */
+    @RequestMapping(value = "/ai/proposal/deletePtProject.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deletePtProject(@RequestBody ProposalVO.ProjectVO vo) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            String ptProjectId = vo.getPtProjectId();
+            if (ptProjectId == null || ptProjectId.trim().isEmpty()) {
+                resultMap.put("result", "FAIL");
+                resultMap.put("msg", "ptProjectId가 필요합니다.");
+                return new ModelAndView("jsonView", resultMap);
+            }
+            proposalService.deleteProject(ptProjectId);
+            resultMap.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT] deletePtProject 실패 (ptProjectId={}): {}", vo.getPtProjectId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
     /** 스텝 프롬프트 원본 복구 */
     @RequestMapping(value = "/ai/proposal/restorePromptContent.do", method = RequestMethod.POST)
     @ResponseBody
@@ -1370,6 +1392,19 @@ public class ProposalController extends BaseController {
             resultMap.put("msg", e.getMessage());
         }
         return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 콘텐츠 개요 전체 일괄 생성 SSE (미생성 항목만 순차 처리) */
+    @RequestMapping(value = "/ai/proposal/streamGenerateAllTocOutline.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamGenerateAllTocOutline(
+            @RequestParam String ptProjectId,
+            @RequestParam String modelId,
+            @RequestParam String agentId,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamGenerateAllTocOutline(ptProjectId, modelId, agentId);
     }
 
     /** 콘텐츠 개요 보완 채팅 */

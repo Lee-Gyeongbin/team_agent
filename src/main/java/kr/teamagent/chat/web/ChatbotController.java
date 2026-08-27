@@ -540,7 +540,7 @@ public class ChatbotController extends BaseController {
                 ? dataVO.getFileName().trim() : "제안서");
         String fileName = baseName + ".pptx";
         String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%20");
-        response.setContentType("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        response.setContentType("pptx");
         response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
         response.setContentLength(bytes.length);
         response.getOutputStream().write(bytes);

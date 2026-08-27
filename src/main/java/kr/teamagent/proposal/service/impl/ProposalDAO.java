@@ -694,4 +694,59 @@ public class ProposalDAO extends EgovComAbstractDAO {
         update("proposal.restorePromptContent", promptId);
     }
 
+    // ── 프로젝트 삭제 ────────────────────────────────────────────────────────
+
+    /** TB_PT_FILE 경로 목록 조회 (NCP 삭제용) */
+    @SuppressWarnings("unchecked")
+    public List<String> selectPtFilePathsByProject(String ptProjectId) {
+        return selectList("proposal.selectPtFilePathsByProject", ptProjectId);
+    }
+
+    /** TB_PT_SLIDE 이미지 경로 목록 조회 (NCP 삭제용) */
+    @SuppressWarnings("unchecked")
+    public List<String> selectSlideImagePathsByProject(String ptProjectId) {
+        return selectList("proposal.selectSlideImagePathsByProject", ptProjectId);
+    }
+
+    /** TB_PT_EXPORT 파일 경로 목록 조회 (NCP 삭제용) */
+    @SuppressWarnings("unchecked")
+    public List<String> selectExportFilePathsByProject(String ptProjectId) {
+        return selectList("proposal.selectExportFilePathsByProject", ptProjectId);
+    }
+
+    /** TB_PT_SLIDE 전체 삭제 (프로젝트 단위) */
+    public void deleteSlidesByProject(String ptProjectId) {
+        delete("proposal.deleteSlidesByProject", ptProjectId);
+    }
+
+    /** TB_PT_TOC 전체 삭제 (프로젝트 단위) */
+    public void deleteTocsByProject(String ptProjectId) {
+        delete("proposal.deleteTocsByProject", ptProjectId);
+    }
+
+    /** TB_PT_EXPORT 전체 삭제 (프로젝트 단위) */
+    public void deleteExportsByProject(String ptProjectId) {
+        delete("proposal.deleteExportsByProject", ptProjectId);
+    }
+
+    /** TB_PT_REVIEW 전체 삭제 (프로젝트 단위) */
+    public void deleteReviewsByProject(String ptProjectId) {
+        delete("proposal.deleteReviewsByProject", ptProjectId);
+    }
+
+    /** TB_PT_TEMPLATE 삭제 (프로젝트 단위) */
+    public void deletePtTemplateByProject(String ptProjectId) {
+        delete("proposal.deletePtTemplateByProject", ptProjectId);
+    }
+
+    /** TB_PT_FILE 전체 삭제 (프로젝트 단위) */
+    public void deletePtFilesByProject(String ptProjectId) {
+        delete("proposal.deletePtFilesByProject", ptProjectId);
+    }
+
+    /** TB_PT_PROJECT 삭제 */
+    public void deletePtProject(String ptProjectId) {
+        delete("proposal.deletePtProject", ptProjectId);
+    }
+
 }

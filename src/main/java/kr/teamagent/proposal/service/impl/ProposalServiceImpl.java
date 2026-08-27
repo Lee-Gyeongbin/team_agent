@@ -3,10 +3,12 @@ package kr.teamagent.proposal.service.impl;
 import java.awt.Color;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -43,6 +45,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import kr.teamagent.agent.service.AgentVO;
+import kr.teamagent.agent.service.impl.AgentDAO;
+import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.service.impl.ChatbotAgentSupport;
 import kr.teamagent.chat.service.impl.ChatbotDAO;
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
@@ -84,6 +89,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private static final int PT_SUMMARY_CHUNK_OVERLAP = 800;
     /** LLM 호출 타임아웃 (초) */
     private static final int PT_QUERY_TIMEOUT_SEC = 300;
+    /** /file_query 임시 TB_CHAT_FILE ROOM_ID (마케팅 참고파일 브릿지와 동일) */
+    private static final long PT_FILE_QUERY_ROOM_ID = 0L;
+    /** 템플릿 생성 /file_query 전용 HTTP 클라이언트 */
+    private static final OkHttpClient PT_FILE_QUERY_HTTP_CLIENT = new OkHttpClient.Builder()
+            .readTimeout(PT_QUERY_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .build();
     /** Stage2-A 문제정의용 샘플링 — 전체 요구사항 최대 건수 (mandatoryYn='Y' 우선) */
     private static final int PROBLEM_DEF_REQ_LIMIT = 20;
 
@@ -137,6 +149,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private ChatbotDAO chatbotDAO;
+
+    @Autowired
+    private AgentDAO agentDAO;
 
     @Autowired
     private FileServiceImpl fileService;
@@ -957,11 +972,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ptFileVO.setFilePath(vo.getFilePath());
         ptFileVO.setFileNm(vo.getFileNm());
         ptFileVO.setFileSize(vo.getFileSize());
-        if (CommonUtil.isNotEmpty(vo.getMimeType())) {
-            ptFileVO.setFileType(vo.getMimeType());
-        } else {
-            ptFileVO.setFileType(CommonUtil.nullToBlank(vo.getFileType()));
-        }
+        ptFileVO.setFileType(CommonUtil.nullToBlank(vo.getFileType()));
         ptFileVO.setCreateUserId(SessionUtil.getUserId());
 
         proposalDAO.insertPtFile(ptFileVO);
@@ -1019,15 +1030,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         if ("fix".equals(vo.getMode()) && CommonUtil.isEmpty(vo.getTemplateFileId())) {
             throw new RuntimeException("fix 모드에서는 templateFileId가 필수입니다.");
         }
-        // 4. templateFileId 파일 존재 + .pptx/.docx 형식 검증
+        // 4. templateFileId 파일 존재 + .pdf/.docx/.png/.jpg/.jpeg 형식 검증
         if (CommonUtil.isNotEmpty(vo.getTemplateFileId())) {
             ProposalVO.PtFileVO fileVO = proposalDAO.selectPtFileById(vo.getTemplateFileId());
             if (fileVO == null) {
                 throw new RuntimeException("templateFileId에 해당하는 파일이 존재하지 않습니다. templateFileId=" + vo.getTemplateFileId());
             }
             String fileNm = CommonUtil.nullToBlank(fileVO.getFileNm()).toLowerCase();
-            if (!fileNm.endsWith(".pptx") && !fileNm.endsWith(".docx")) {
-                throw new RuntimeException("템플릿 파일은 .pptx 또는 .docx 형식이어야 합니다. fileNm=" + fileVO.getFileNm());
+            if (!fileNm.endsWith(".pdf") && !fileNm.endsWith(".docx")
+                    && !fileNm.endsWith(".png") && !fileNm.endsWith(".jpg") && !fileNm.endsWith(".jpeg")) {
+                throw new RuntimeException("템플릿 파일은 .pdf, .docx, .png, .jpg, .jpeg 형식이어야 합니다. fileNm=" + fileVO.getFileNm());
             }
         }
 
@@ -1045,7 +1057,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             root = new JsonObject();
         }
 
-        // template 객체 구성
+        // 기존 브릿지 chatFileId는 설정 변경 시 정리 (생성 직후 DELETE하지 않음 — 표지/간지 재사용)
+        Long oldChatFileId = null;
+        if (root.has("template") && !root.get("template").isJsonNull()) {
+            oldChatFileId = getLongOrNull(root.getAsJsonObject("template"), "chatFileId");
+        }
+
+        // template 객체 구성 (chatFileId·referenceAnalysis는 다음 생성 API에서 다시 브릿지/분석)
         JsonObject templateObj = new JsonObject();
         templateObj.addProperty("mode", vo.getMode());
         if (CommonUtil.isNotEmpty(vo.getTemplateFileId())) {
@@ -1061,10 +1079,18 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         updateVO.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateProjectConfigJson(updateVO);
 
+        if (oldChatFileId != null) {
+            cleanupTempChatFile(oldChatFileId);
+            logger.info("[PT StepA] 이전 참조 템플릿 TB_CHAT_FILE 정리 (ptProjectId={}, chatFileId={})",
+                    vo.getPtProjectId(), oldChatFileId);
+        }
+
         // 7. Step A 완료 → TOC 단계(1) 해제
         advanceMaxStepNo(vo.getPtProjectId(), 1);
 
-        logger.info("[PT StepA] 템플릿 설정 저장 완료 (ptProjectId={}, mode={}, docSize={})", vo.getPtProjectId(), vo.getMode(), vo.getDocSize());
+        logger.info("[PT StepA] 템플릿 설정 저장 완료 (ptProjectId={}, mode={}, templateFileId={}, docSize={})",
+                vo.getPtProjectId(), vo.getMode(),
+                CommonUtil.nullToBlank(vo.getTemplateFileId()), vo.getDocSize());
     }
 
     /**
@@ -1254,6 +1280,26 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     private String getStrOrNull(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         return obj.get(key).getAsString();
+    }
+
+    /** JsonObject에서 Long 값을 안전하게 꺼낸다 (Number·String 모두 허용). */
+    private Long getLongOrNull(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
+        try {
+            JsonElement el = obj.get(key);
+            if (el.isJsonPrimitive()) {
+                if (el.getAsJsonPrimitive().isNumber()) {
+                    return el.getAsLong();
+                }
+                String s = el.getAsString();
+                if (CommonUtil.isNotEmpty(s)) {
+                    return Long.parseLong(s.trim());
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[PT] getLongOrNull 파싱 실패 (key={}, value={}): {}", key, obj.get(key), e.getMessage());
+        }
+        return null;
     }
 
     /** LLM 출력 layoutType 명칭 → LAYOUT_TYPE_CD 코드ID (PT000005) 변환 */
@@ -2487,6 +2533,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         upd.setRequiredCapability(vo.getRequiredCapability());
         upd.setStrategySummary(vo.getStrategySummary());
         upd.setKpi(vo.getKpi());
+        upd.setProblemTitleTxt(vo.getProblemTitleTxt());
         upd.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateProblemDefinition(upd);
         return toProblemDefinitionResponse(proposalDAO.selectProblemDefinitionById(problemId));
@@ -2575,6 +2622,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         List<ProposalVO.ProblemDefinitionVO> pds = proposalDAO.selectProblemDefinitions(ptProjectId);
         return toWinThemeResponse(proposalDAO.selectWinThemeById(wt.getWinThemeId()), pds);
     }
+    
 
     public void deleteStage2WinTheme(String ptProjectId, String winThemeId) {
         ProposalVO.WinThemeVO existing = proposalDAO.selectWinThemeById(winThemeId);
@@ -2655,9 +2703,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
 
         StringBuilder sb = new StringBuilder();
+        boolean doRegenTitle = Boolean.TRUE.equals(vo.getRegenerateTitle());
         sb.append("당신은 제안서 전략 분석가입니다. 아래 문제정의 1건을 사용자 보완 요청에 맞게 수정하세요.\n");
         sb.append("다른 문제정의는 만들지 말고, 반드시 JSON 객체 1개만 반환하세요.\n");
-        sb.append("필드: currentProblem, rootCause, riskIfIgnored, goal, requiredCapability, strategySummary, kpi, problemTypeCd\n");
+        if (doRegenTitle) {
+            sb.append("필드: title(15~20자 핵심 요약), currentProblem, rootCause, riskIfIgnored, goal, requiredCapability, strategySummary, kpi, problemTypeCd\n");
+        } else {
+            sb.append("필드: currentProblem, rootCause, riskIfIgnored, goal, requiredCapability, strategySummary, kpi, problemTypeCd\n");
+        }
         sb.append("\n## 사업 기본 정보\n- 사업명: ").append(CommonUtil.nullToBlank(project.getProjectNm()));
         sb.append("\n\n## 수정 대상 문제정의 (JSON)\n");
         java.util.Map<String, Object> pdMap = new java.util.LinkedHashMap<>();
@@ -2712,6 +2765,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             upd.setStrategySummary(obj.get("strategySummary").getAsString());
         if (obj.has("kpi") && !obj.get("kpi").isJsonNull())
             upd.setKpi(obj.get("kpi").getAsString());
+        // regenerateTitle=true 일 때만 title을 갱신 — 채팅 보완요청 경로에서는 title을 건드리지 않는다
+        if (doRegenTitle && obj.has("title") && !obj.get("title").isJsonNull()) {
+            upd.setProblemTitleTxt(obj.get("title").getAsString());
+        }
 
         return updateStage2ProblemDefinition(ptProjectId, problemId, upd);
     }
@@ -2809,6 +2866,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         r.setGeneratedDt(pd.getCreateDt());
         r.setModifyDt(pd.getModifyDt());
         r.setManualYn("999".equals(pd.getSourceTypeCd()) ? "Y" : "N");
+        r.setProblemTitleTxt(pd.getProblemTitleTxt());
         return r;
     }
 
@@ -2991,6 +3049,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     logger.warn("[PT Stage2-A] problemDefinitions 항목에 currentProblem 누락, 건너뜀");
                     continue;
                 }
+                pd.setProblemTitleTxt(getStrOrNull(obj, "title"));
                 pd.setRootCause(getStrOrNull(obj, "rootCause"));
                 pd.setRiskIfIgnored(getStrOrNull(obj, "riskIfIgnored"));
                 pd.setGoal(getStrOrNull(obj, "goal"));
@@ -4797,7 +4856,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * @param writingStyle 문체 코드 ("formal" / "plain" / "persuasive")
      * @return "[STYLE: ...]" 형식의 스타일 앵커 문자열
      */
-    private String buildStyleManifest(String baseColor, String accentColor, String docSize, String writingStyle) {
+    private String buildStyleManifest(String baseColor, String accentColor, String tintColor, String docSize, String writingStyle) {
         String docSizeDesc;
         if ("169".equals(docSize))      docSizeDesc = "16:9 widescreen landscape";
         else if ("43".equals(docSize))  docSizeDesc = "4:3 standard landscape";
@@ -4809,13 +4868,28 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         else                                    toneDesc = "professional and formal";
 
         return String.format(
-                "[STYLE: flat vector infographic illustration, minimalist clean corporate design, " +
-                "white or very light background, outline icons with 2px stroke and rounded corners, " +
-                "primary color %s for main headers and panel borders, " +
-                "accent color %s for highlights callouts and emphasis, " +
-                "dark navy text #1A1A2E, no photographic elements, no gradients, " +
-                "consistent icon family throughout, clean sans-serif typography, " +
-                "Korean corporate presentation, %s layout, %s tone]",
+                "[STYLE: flat vector infographic illustration with subtle dimensional shading on icons " +
+                "(soft drop shadow and highlight only, no full 3D render, no photographic textures), " +
+                "minimalist clean corporate design, white background, generous whitespace between all sections, " +
+                "solid-fill icons with clean rounded silhouettes in a single consistent icon family, " +
+                "cards use white fill, thin border in the primary color, rounded corners, subtle shadow, " +
+                "primary color %s used consistently and exclusively for all headers, section titles, " +
+                "numbered badges, icons, borders, and arrows — this must be the dominant color across " +
+                "the entire image with no exceptions, " +
+                "accent color %s used in exactly ONE small element only (a single badge, checkmark, or icon) " +
+                "and nowhere else — do not use accent color to highlight words within body text, " +
+                "do not use gold, yellow, purple, green, or any color outside primary/accent, " +
+                "dark navy text #1A1A2E for body copy, no photographic elements, no background imagery, " +
+                "clean sans-serif typography, Korean corporate presentation, " +
+                "vary the overall visual composition based on the content — for a small " +
+                "number of components or items, a bold illustrative centerpiece (a single " +
+                "large icon or scene) surrounded by labeled call-outs works well; for " +
+                "strictly sequential steps, a step-by-step flow with connecting arrows " +
+                "works well; for structured comparison or paired label-value data, a " +
+                "formal table with rows and columns works well; do not default to the " +
+                "same stacked title-banner-grid-ribbon template for every slide — let the " +
+                "content determine the composition, " +
+                "%s layout, %s tone]",
                 baseColor, accentColor, docSizeDesc, toneDesc);
     }
 
@@ -5395,12 +5469,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
                 String ptProjectId = slide.getPtProjectId();
 
-                // ── 2. PROJECT_CONFIG_JSON → docSize, colors, writingStyle ───
+                // ── 2. PROJECT_CONFIG_JSON → docSize, colors, writingStyle, template ───
                 String configJson   = proposalDAO.selectProjectConfigJson(ptProjectId);
                 String docSize      = "169";
                 List<String> baseColorList   = new ArrayList<>();
                 List<String> accentColorList = new ArrayList<>();
                 String writingStyle = "formal";
+                String templateMode   = "new";
+                String templateFileId = null;
 
                 if (CommonUtil.isNotEmpty(configJson)) {
                     try {
@@ -5410,6 +5486,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                             if (tmpl.has("docSize") && !tmpl.get("docSize").isJsonNull()) {
                                 docSize = tmpl.get("docSize").getAsString();
                             }
+                            String tm = getStrOrNull(tmpl, "mode");
+                            if (CommonUtil.isNotEmpty(tm)) templateMode = tm;
+                            String tfId = getStrOrNull(tmpl, "templateFileId");
+                            if (CommonUtil.isNotEmpty(tfId)) templateFileId = tfId;
                         }
                         if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
                             JsonObject settings = cfgRoot.getAsJsonObject("settings");
@@ -5426,9 +5506,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     }
                 }
 
-                // COLOR_INDEX % baseColorList.size() → baseColor 선택
-                String baseColor   = baseColorList.isEmpty()   ? "#5B4FE9" : baseColorList.get(slide.getColorIndex() % baseColorList.size());
+                // baseColor는 항상 base[0] 고정 (색상 일관성 보장)
+                String baseColor   = baseColorList.isEmpty()   ? "#5B4FE9" : baseColorList.get(0);
                 String accentColor = accentColorList.isEmpty() ? "#E08A2C" : accentColorList.get(0);
+
+                // tintPool: base[1], base[2], accent[1] — colorIndex로 미세 변주
+                List<String> tintPool = new ArrayList<>();
+                if (baseColorList.size()   > 1) tintPool.add(baseColorList.get(1));
+                if (baseColorList.size()   > 2) tintPool.add(baseColorList.get(2));
+                if (accentColorList.size() > 1) tintPool.add(accentColorList.get(1));
+                String tintColor = tintPool.isEmpty() ? null : tintPool.get(slide.getColorIndex() % tintPool.size());
 
                 // ── 3. RENDER_STATUS_CD = '002' (생성중) 선행 업데이트 ───────
                 ProposalVO.SlideVO startVO = new ProposalVO.SlideVO();
@@ -5475,6 +5562,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 String fullPrompt = promptContent + "\n\n## 슬라이드 데이터\n" + GSON.toJson(slideCtx);
 
                 // ── 6. LLM 호출 (1회 재시도) ──────────────────────────────────
+                // S3_IMAGE 원칙7: 시각 스타일은 imageQuery에 넣지 않음 → 참조 브리프는 IMAGE_GEN_HINT에 시스템 부착
                 String aiResponse = callLlmWithRetry(fullPrompt, modelId, agentId, "[PT Img-Gen SSE]");
 
                 // ── 7. imageQuery 파싱 (1회 재시도) ───────────────────────────
@@ -5506,11 +5594,62 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // ── 8. IMAGE_GEN_HINT 조립 ────────────────────────────────────
+                // styleManifest(색·톤) + 참조 템플릿 비주얼 언어(있을 때) + imageQuery(콘텐츠)
                 sendSseEvent(emitter, "progress", "{\"step\":\"image_gen\"}");
-                String styleManifest = buildStyleManifest(baseColor, accentColor, docSize, writingStyle);
-                String styleParams   = String.format("docSize=%s baseColor=%s accentColor=%s writingStyle=%s colorIndex=%d",
-                        docSize, baseColor, accentColor, writingStyle, slide.getColorIndex());
-                String imageGenHint  = styleManifest + " " + imageQuery + " | " + styleParams;
+                String styleManifest = buildStyleManifest(baseColor, accentColor, tintColor, docSize, writingStyle);
+                String styleParams   = String.format("docSize=%s baseColor=%s accentColor=%s tintColor=%s writingStyle=%s colorIndex=%d",
+                        docSize, baseColor, accentColor, tintColor, writingStyle, slide.getColorIndex());
+
+                String refStyleHint = "";
+                if (CommonUtil.isNotEmpty(templateFileId)) {
+                    try {
+                        String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, modelId);
+                        // buildPtReferenceBrief("INFOGRAPHIC") → [LAYOUT_PATTERNS] 섹션 전체 반환
+                        String layoutPatterns = buildPtReferenceBrief(referenceAnalysis, "INFOGRAPHIC");
+                        if (CommonUtil.isNotEmpty(layoutPatterns)) {
+                            // ── 콘텐츠 신호 조립 ─────────────────────────────────
+                            List<ProposalVO.TocVO> tocList = null;
+                            try {
+                                tocList = proposalDAO.selectTocList(ptProjectId);
+                            } catch (Exception ex) {
+                                logger.warn("[PT Img-Gen SSE] TOC 목록 조회 실패 (ptProjectId={}): {}", ptProjectId, ex.getMessage());
+                            }
+                            SlideSignals signals = buildSlideSignals(slide, tocList);
+
+                            // ── 반복 방지: 같은 TOC 내 기사용 패턴명 추출 ────────
+                            java.util.Set<String> usedPatterns = java.util.Collections.emptySet();
+                            try {
+                                List<ProposalVO.SlideVO> tocSlides = proposalDAO.selectSlidesByToc(slide.getTocId());
+                                usedPatterns = extractUsedPatternNames(tocSlides);
+                            } catch (Exception ex) {
+                                logger.warn("[PT Img-Gen SSE] 반복 방지용 슬라이드 조회 실패 (tocId={}): {}", slide.getTocId(), ex.getMessage());
+                            }
+
+                            // ── 패턴 선택 (IDF 가중 매칭) ────────────────────────
+                            LayoutPatternRow selected = selectInfographicPattern(
+                                    layoutPatterns, signals.titleSignal, signals.componentSignal, usedPatterns);
+                            if (selected != null) {
+                                String modeHint = buildReferenceTemplateModeHint(templateMode);
+                                // [REF_STYLE: 패턴명 - 구조설명] — 줄바꿈은 공백으로
+                                String patternTag = (selected.patternName + " - " + selected.description)
+                                        .replace('\n', ' ').replaceAll("\\s+", " ").trim();
+                                String oneLine = (modeHint + " " + patternTag).replace('\n', ' ').replaceAll("\\s+", " ").trim();
+                                refStyleHint = " [REF_STYLE: " + oneLine + "]";
+                                logger.info("[PT Img-Gen SSE] 인포그래픽 패턴 선택 완료 (slideId={}, pattern='{}', usedPatterns={}, titleSignal='{}', componentSignal='{}')",
+                                        slideId, selected.patternName, usedPatterns, signals.titleSignal, signals.componentSignal);
+                            } else {
+                                logger.warn("[PT Img-Gen SSE] 패턴 선택 실패 — REF_STYLE 미부착 (slideId={}, titleSignal='{}', componentSignal='{}')",
+                                        slideId, signals.titleSignal, signals.componentSignal);
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.warn("[PT Img-Gen SSE] 참조 템플릿 REF_STYLE 부착 실패 (slideId={}): {}",
+                                slideId, e.getMessage());
+                    }
+                }
+
+                String imageGenHint = styleManifest + refStyleHint + " " + imageQuery + " | " + styleParams;
+
 
                 // ── 9. 이미지 생성 API 호출 ───────────────────────────────────
                 String base64Image = callPtImageApi(imageGenHint);
@@ -5710,7 +5849,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         Map<String, Object> params = new HashMap<>();
         params.put("query", "모든 텍스트는 반드시 한국어로 작성. " + imageGenHint);
-        params.put("quality", "high");
+        params.put("quality", "medium");
         params.put("room_id", "");
         params.put("aspect_ratio", aspectRatio);
 
@@ -6004,6 +6143,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String baseColor      = "\"#5B4FE9\",\"#8B7FFF\",\"#EFECFE\"";
         String accentColor    = "\"#E08A2C\",\"#22A06B\"";
         String docSize        = "169";
+        String templateMode   = "new";
+        String templateFileId = null;
 
         try {
             ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
@@ -6020,6 +6161,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         JsonObject tmpl = cfgRoot.getAsJsonObject("template");
                         String ds = getStrOrNull(tmpl, "docSize");
                         if (CommonUtil.isNotEmpty(ds)) docSize = ds;
+                        String tm = getStrOrNull(tmpl, "mode");
+                        if (CommonUtil.isNotEmpty(tm)) templateMode = tm;
+                        String tfId = getStrOrNull(tmpl, "templateFileId");
+                        if (CommonUtil.isNotEmpty(tfId)) templateFileId = tfId;
                     }
 
                     if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
@@ -6074,6 +6219,18 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 .replace("{{accentColor}}",    accentColor)
                 .replace("{{writingStyle}}",   safeStyle);
 
+        // 참조 템플릿: 이미지 API는 첨부 불가 → 같은 chatFileId로 분석한 텍스트를 프롬프트에 주입
+        if (CommonUtil.isNotEmpty(templateFileId)) {
+            String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, null);
+            prompt = applyReferenceTemplateToPrompt(prompt, templateMode, referenceAnalysis, "COVER");
+            logger.info("[PT Cover] 참조 템플릿 반영 (ptProjectId={}, templateFileId={}, mode={}, analysisLen={}, promptLen={})",
+                    ptProjectId, templateFileId, templateMode,
+                    referenceAnalysis != null ? referenceAnalysis.length() : 0, prompt.length());
+        } else {
+            // DB 프롬프트에 placeholder가 있어도 빈 값으로 치환
+            prompt = prompt.replace("{{templateModeHint}}", "").replace("{{referenceTemplate}}", "");
+        }
+
         // callPtImageApi 내부 정규식(docSize=(\S+))과 호환되는 마커 append
         return prompt + " | docSize=" + docSize;
     }
@@ -6092,6 +6249,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String baseColor   = "\"#5B4FE9\",\"#8B7FFF\",\"#EFECFE\"";
         String accentColor = "\"#E08A2C\",\"#22A06B\"";
         String docSize     = "169";
+        String templateMode   = "new";
+        String templateFileId = null;
 
         try {
             ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
@@ -6107,6 +6266,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         JsonObject tmpl = cfgRoot.getAsJsonObject("template");
                         String ds = getStrOrNull(tmpl, "docSize");
                         if (CommonUtil.isNotEmpty(ds)) docSize = ds;
+                        String tm = getStrOrNull(tmpl, "mode");
+                        if (CommonUtil.isNotEmpty(tm)) templateMode = tm;
+                        String tfId = getStrOrNull(tmpl, "templateFileId");
+                        if (CommonUtil.isNotEmpty(tfId)) templateFileId = tfId;
                     }
 
                     if (cfgRoot.has("settings") && !cfgRoot.get("settings").isJsonNull()) {
@@ -6155,6 +6318,17 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 .replace("{{chapterNm}}",  "")
                 .replace("{{subTocList}}", "");
 
+        // 참조 템플릿: 이미지 API는 첨부 불가 → 같은 chatFileId로 분석한 텍스트를 프롬프트에 주입
+        if (CommonUtil.isNotEmpty(templateFileId)) {
+            String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, null);
+            prompt = applyReferenceTemplateToPrompt(prompt, templateMode, referenceAnalysis, "DIVIDER");
+            logger.info("[PT Divider] 참조 템플릿 반영 (ptProjectId={}, templateFileId={}, mode={}, analysisLen={}, promptLen={})",
+                    ptProjectId, templateFileId, templateMode,
+                    referenceAnalysis != null ? referenceAnalysis.length() : 0, prompt.length());
+        } else {
+            prompt = prompt.replace("{{templateModeHint}}", "").replace("{{referenceTemplate}}", "");
+        }
+
         prompt += "\n\n## 재사용 배경 제약 (본문형 프레임과 동일 — 텍스트는 출력 단계에서 오버레이)"
                 + "\n- 이 이미지는 대목차마다 동일하게 재사용되는 배경이다."
                 + "\n- 이미지에 글자를 절대 그리지 마세요. 한글·영문·숫자·기호 모두 금지."
@@ -6162,7 +6336,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 + "\n- 01~06 번호 배지, 점선 리스트 항목, 예시 목차 문구도 그리지 마세요."
                 + "\n- 좌측 중앙에 대목차번호·대목차명용 빈 여백, 우측에 하위목차 리스트용 빈 여백만 확보하세요."
                 + "\n- 그래픽 모티브·색상 체계만 표현하고, 텍스트는 비워 두세요."
-                + "\n- 로고·인장·실존 기관 마크를 생성하지 마세요.";
+                + "\n- 로고·인장·실존 기관 마크를 생성하지 마세요."
+                + "\n\n## 표지와의 시각 일관성 (간지)"
+                + "\n- 같은 제안서 표지와 동일 계열의 그래픽 모티브(얇은 그라데이션 라인, 곡선 웨이브, 점/네트워크 패턴, 소프트 코너 장식)를 쓰되,"
+                + " 표지보다 정보량·채도·대비를 낮춘 절제된 배경으로 표현하세요."
+                + "\n- 표지를 축소·복제하지 마세요. 전환 페이지답게 여백을 넓게 두고 장식은 가장자리·모서리 위주로만 배치하세요."
+                + "\n- 중앙·좌측 텍스트 영역은 거의 비워 두어 export 오버레이가 들어가게 하세요."
+                + "\n- 색상은 설정값(baseColor/accentColor)만 사용하고, 참조 파일의 고유 hex는 따르지 마세요.";
 
         return prompt + " | docSize=" + docSize;
     }
@@ -6392,6 +6572,759 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         metadata.setContentType("image/png");
         amazonS3.putObject(bucket, objectKey, new ByteArrayInputStream(imageBytes), metadata);
         logger.info("[PT NCP] 업로드 완료 (key={})", objectKey);
+    }
+
+    /**
+     * 참조 템플릿 mode별 지시 문구.
+     * 색상은 항상 템플릿 설정(settings.colors / baseColor·accentColor)을 우선한다.
+     */
+    private static String buildReferenceTemplateModeHint(String mode) {
+        if ("fix".equals(mode)) {
+            return "[참조 템플릿 보완 모드] 첨부된 참조 템플릿의 헤더/푸터·표지·간지 구조·구도·모티브를 최대한 유지하며 보완하세요. "
+                    + "본문형 JSON의 슬롯 키·placeholder·footer type·좌표 스키마는 유지하세요. "
+                    + "색상은 반드시 설정값(baseColor/accentColor)을 사용하고, 참조 파일의 hex는 무시하세요.";
+        }
+        return "[참조 템플릿 스타일 참조] 첨부된 참조 템플릿을 레이아웃·분위기·그래픽 모티브 참고로만 활용하고, "
+                + "색상은 반드시 설정값(baseColor/accentColor)을 우선하세요.";
+    }
+
+    /**
+     * file_query 분석 텍스트에서 메타/잡담·후속 제안 문구를 제거한다.
+     */
+    private static String sanitizePtReferenceAnalysis(String raw) {
+        if (CommonUtil.isEmpty(raw)) return "";
+        String[] lines = raw.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            String t = line.trim();
+            String lower = t.toLowerCase();
+            if (t.isEmpty()) {
+                if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '\n') sb.append('\n');
+                continue;
+            }
+            if (t.startsWith("원하시면")
+                    || t.contains("다음 단계로")
+                    || t.contains("바로 정리해드릴")
+                    || t.contains("형태로 바로 정리")
+                    || t.contains("(참고) templateFileId")
+                    || t.contains("S3_TEMPLATE 는")
+                    || t.contains("S3_COVER_TEMPLATE")
+                    || t.contains("S3_DIVIDER_TEMPLATE")
+                    || lower.contains("would you like")
+                    || lower.startsWith("let me know")) {
+                continue;
+            }
+            // "① 이 템플릿을..." 같은 후속 제안 목록
+            if (t.matches("^[①②③④⑤\\d]+[.)].*(시안|규격표|예시|정리).*$")) {
+                continue;
+            }
+            sb.append(line).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 단계별로 참조 분석에서 적절한 섹션을 그대로 반환한다.
+     * <ul>
+     *   <li>COVER / DIVIDER / BODY(기타) → [STYLE_GUIDE] 섹션 전체</li>
+     *   <li>INFOGRAPHIC → [LAYOUT_PATTERNS] 섹션 전체 (패턴 선택은 3단계에서 처리)</li>
+     * </ul>
+     * 마커가 없는 구 캐시는 폴백으로 전체 텍스트를 STYLE_GUIDE로 취급한다.
+     *
+     * @param stage BODY | COVER | DIVIDER | INFOGRAPHIC
+     */
+    private static String buildPtReferenceBrief(String analysis, String stage) {
+        String cleaned = sanitizePtReferenceAnalysis(analysis);
+        if (CommonUtil.isEmpty(cleaned)) {
+            return "";
+        }
+        PtReferenceSections sections = parsePtReferenceSections(cleaned);
+        if ("INFOGRAPHIC".equals(stage)) {
+            return sections.layoutPatterns;
+        }
+        return sections.styleGuide;
+    }
+
+    // ── 참조 템플릿 분석 섹션 파서 ────────────────────────────────────────────
+
+    /** [STYLE_GUIDE] / [LAYOUT_PATTERNS] 파싱 결과 */
+    static final class PtReferenceSections {
+        final String styleGuide;
+        final String layoutPatterns;
+        PtReferenceSections(String styleGuide, String layoutPatterns) {
+            this.styleGuide     = styleGuide;
+            this.layoutPatterns = layoutPatterns;
+        }
+    }
+ 
+    /**
+     * 분석 텍스트에서 {@code [STYLE_GUIDE]} / {@code [LAYOUT_PATTERNS]} 섹션을
+     * 마커 기반으로 분리한다.
+     * <p>마커가 없거나 파싱 실패 시 전체 텍스트를 styleGuide로, layoutPatterns는
+     * 빈 문자열로 반환한다 (구 프롬프트로 생성된 캐시 폴백).
+     */
+    private static PtReferenceSections parsePtReferenceSections(String analysis) {
+        if (CommonUtil.isEmpty(analysis)) {
+            return new PtReferenceSections("", "");
+        }
+        String normalized = analysis.replace("\r\n", "\n").replace('\r', '\n');
+        String lower      = normalized.toLowerCase();
+        int sgIdx = lower.indexOf("[style_guide]");
+        int lpIdx = lower.indexOf("[layout_patterns]");
+
+        if (sgIdx < 0 && lpIdx < 0) {
+            // 마커 없음 — 구 포맷 캐시 폴백
+            return new PtReferenceSections(normalized.trim(), "");
+        }
+
+        String styleGuide     = "";
+        String layoutPatterns = "";
+
+        if (sgIdx >= 0) {
+            int start = normalized.indexOf('\n', sgIdx);
+            start = start < 0 ? sgIdx + "[style_guide]".length() : start + 1;
+            int end   = (lpIdx >= 0 && lpIdx > sgIdx) ? lpIdx : normalized.length();
+            styleGuide = normalized.substring(start, end).trim();
+        }
+
+        if (lpIdx >= 0) {
+            int start = normalized.indexOf('\n', lpIdx);
+            start = start < 0 ? lpIdx + "[layout_patterns]".length() : start + 1;
+            int end   = (sgIdx >= 0 && sgIdx > lpIdx) ? sgIdx : normalized.length();
+            layoutPatterns = normalized.substring(start, end).trim();
+        }
+
+        return new PtReferenceSections(styleGuide, layoutPatterns);
+    }
+
+    // ── 인포그래픽 레이아웃 패턴 매칭 유틸 ───────────────────────────────────────
+
+    /** 파싱된 LAYOUT_PATTERNS 테이블의 한 행 */
+    static final class LayoutPatternRow {
+        final String patternName;
+        final String description;
+        final String contentTypesCsv;
+        LayoutPatternRow(String patternName, String description, String contentTypesCsv) {
+            this.patternName     = patternName;
+            this.description     = description;
+            this.contentTypesCsv = contentTypesCsv;
+        }
+    }
+
+    /** 슬라이드 콘텐츠 신호 (소스 분리) */
+    static final class SlideSignals {
+        /** 슬라이드 제목 + 상위 TOC(대목차/소목차) 섹션명 */
+        final String titleSignal;
+        /** COMPONENTS_JSON 컴포넌트 타입을 매핑표로 변환한 키워드 */
+        final String componentSignal;
+        SlideSignals(String titleSignal, String componentSignal) {
+            this.titleSignal     = titleSignal;
+            this.componentSignal = componentSignal;
+        }
+    }
+
+    /**
+     * 컴포넌트 타입 → 콘텐츠 신호 키워드 변환 (7종 고정 스키마).
+     * 알 수 없는 타입은 빈 문자열 반환.
+     */
+    private static String infographicComponentKeywords(String componentType) {
+        if (componentType == null) return "";
+        switch (componentType) {
+            case "card_grid":         return "카드, 목록, 분류";
+            case "process_flow":      return "프로세스, 흐름, 절차";
+            case "requirement_table": return "표, 분류, 비교, 요구사항";
+            case "credential_grid":   return "보안, 인증, 자격, 권한";
+            case "icon_chip_group":   return "아이콘, 키워드, 요약";
+            case "step_flow_bar":     return "단계, 로드맵, 추진전략, 마일스톤";
+            case "callout_box":       return "강조, 결론, 핵심";
+            default:                  return "";
+        }
+    }
+
+    /**
+     * LAYOUT_PATTERNS 마크다운 테이블을 파싱해 {@link LayoutPatternRow} 목록을 반환한다.
+     * <p>헤더 행·구분선 행은 스킵하고, 구분선(---) 이후의 데이터 행만 수집한다.
+     * 컬럼 수가 3 미만이거나 패턴명이 비어있는 행은 무시해 방어적으로 처리한다.
+     */
+    private static List<LayoutPatternRow> parseLayoutPatternRows(String layoutPatterns) {
+        List<LayoutPatternRow> rows = new ArrayList<>();
+        if (CommonUtil.isEmpty(layoutPatterns)) return rows;
+        String[] lines = layoutPatterns.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        boolean separatorSeen = false;
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!trimmed.startsWith("|")) continue;
+            // 구분선 행 감지: | 제거 후 [-:\s]만 남으면 구분선
+            if (trimmed.replaceAll("[|:\\-\\s]", "").isEmpty()) {
+                separatorSeen = true;
+                continue;
+            }
+            if (!separatorSeen) continue; // 헤더 행 스킵
+            String[] cells = trimmed.split("\\|", -1);
+            // cells[0]="", cells[1]=패턴명, cells[2]=구조설명, cells[3]=적합콘텐츠유형, cells[last]=""
+            if (cells.length < 4) continue;
+            String patternName     = cells[1].trim();
+            String description     = cells[2].trim();
+            String contentTypesCsv = cells[3].trim();
+            if (CommonUtil.isEmpty(patternName)) continue;
+            rows.add(new LayoutPatternRow(patternName, description, contentTypesCsv));
+        }
+        return rows;
+    }
+
+    /**
+     * 슬라이드 콘텐츠 신호를 두 소스로 분리해 조립한다.
+     * <ul>
+     *   <li>titleSignal  — 슬라이드 제목 + 소목차/대목차 섹션명 (주제 신뢰도 높음, 가중치 3)</li>
+     *   <li>componentSignal — COMPONENTS_JSON 타입을 매핑표로 변환한 키워드 (가중치 1)</li>
+     * </ul>
+     */
+    private static SlideSignals buildSlideSignals(ProposalVO.SlideVO slide,
+                                                   List<ProposalVO.TocVO> tocList) {
+        // titleSignal: 슬라이드 제목 + 소목차·대목차 섹션명
+        StringBuilder titleSb = new StringBuilder();
+        if (CommonUtil.isNotEmpty(slide.getTitleTxt())) titleSb.append(slide.getTitleTxt()).append(' ');
+        if (tocList != null && CommonUtil.isNotEmpty(slide.getTocId())) {
+            ProposalVO.TocVO slideToc = null;
+            for (ProposalVO.TocVO t : tocList) {
+                if (slide.getTocId().equals(t.getTocId())) { slideToc = t; break; }
+            }
+            if (slideToc != null) {
+                if (CommonUtil.isNotEmpty(slideToc.getSectionNm())) titleSb.append(slideToc.getSectionNm()).append(' ');
+                if (CommonUtil.isNotEmpty(slideToc.getParentTocId())) {
+                    for (ProposalVO.TocVO t : tocList) {
+                        if (slideToc.getParentTocId().equals(t.getTocId())) {
+                            if (CommonUtil.isNotEmpty(t.getSectionNm())) titleSb.append(t.getSectionNm()).append(' ');
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // componentSignal: COMPONENTS_JSON 컴포넌트 타입 → 매핑 키워드
+        StringBuilder compSb = new StringBuilder();
+        if (CommonUtil.isNotEmpty(slide.getComponentsJson())) {
+            try {
+                JsonElement el = JsonParser.parseString(slide.getComponentsJson());
+                JsonArray arr = null;
+                if (el.isJsonArray()) {
+                    arr = el.getAsJsonArray();
+                } else if (el.isJsonObject()) {
+                    JsonObject obj = el.getAsJsonObject();
+                    for (String key : new String[]{"components", "items", "data"}) {
+                        if (obj.has(key) && obj.get(key).isJsonArray()) { arr = obj.getAsJsonArray(key); break; }
+                    }
+                }
+                if (arr != null) {
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+                    for (JsonElement item : arr) {
+                        if (!item.isJsonObject()) continue;
+                        JsonObject comp = item.getAsJsonObject();
+                        if (!comp.has("type") || comp.get("type").isJsonNull()) continue;
+                        String type = comp.get("type").getAsString();
+                        if (CommonUtil.isEmpty(type) || !seen.add(type)) continue;
+                        String kws = infographicComponentKeywords(type);
+                        if (CommonUtil.isNotEmpty(kws)) compSb.append(kws).append(' ');
+                    }
+                }
+            } catch (Exception ignored) { /* 파싱 실패 시 무시 */ }
+        }
+
+        return new SlideSignals(titleSb.toString().trim(), compSb.toString().trim());
+    }
+
+    /**
+     * TOC 내 기존 슬라이드들의 IMAGE_GEN_HINT에서 이미 사용된 패턴명 집합을 추출한다.
+     * <p>[REF_STYLE: 패턴명 - 구조설명] 형식을 가정하며, 파싱 실패 행은 무시한다.
+     */
+    private static java.util.Set<String> extractUsedPatternNames(List<ProposalVO.SlideVO> tocSlides) {
+        java.util.Set<String> used = new java.util.HashSet<>();
+        if (tocSlides == null) return used;
+        for (ProposalVO.SlideVO s : tocSlides) {
+            String hint = s.getImageGenHint();
+            if (CommonUtil.isEmpty(hint)) continue;
+            int start = hint.indexOf("[REF_STYLE:");
+            if (start < 0) continue;
+            int end = hint.indexOf(']', start);
+            if (end < 0) continue;
+            String content = hint.substring(start + "[REF_STYLE:".length(), end).trim();
+            int dashIdx = content.indexOf(" - ");
+            if (dashIdx > 0) used.add(content.substring(0, dashIdx).trim());
+        }
+        return used;
+    }
+
+    /**
+     * 문자열을 2글자 이상 소문자 토큰 배열로 분리한다.
+     * 한글·영문·숫자 이외 문자(공백, 쉼표, 가운뎃점 등)를 구분자로 사용한다.
+     */
+    private static String[] tokenizeSignal(String s) {
+        if (CommonUtil.isEmpty(s)) return new String[0];
+        String[] raw = s.toLowerCase().split("[^가-힣a-zA-Z0-9]+");
+        List<String> result = new ArrayList<>();
+        for (String t : raw) { if (t.length() >= 2) result.add(t); }
+        return result.toArray(new String[0]);
+    }
+
+    /**
+     * LAYOUT_PATTERNS 테이블과 슬라이드 신호(소스 분리)를 기반으로 최적 패턴 1개를 선택한다.
+     *
+     * <p><b>알고리즘</b>
+     * <ol>
+     *   <li>패턴 태그 토큰 IDF 계산: 각 태그 토큰이 전체 패턴 중 몇 개에 등장하는지(df) 산정,
+     *       가중치 = 1/df (고유 토큰일수록 높음)</li>
+     *   <li>패턴별 가중 점수: 각 패턴의 태그 토큰이 titleSignal에 포함되면 3×IDF,
+     *       componentSignal에만 포함되면 1×IDF 가산 (부분 문자열 포함 판정)</li>
+     *   <li>이미 사용된 패턴은 -1000 감점 (best-effort 반복 방지)</li>
+     *   <li>모든 패턴이 감점돼 bestScore &lt; 0이면 감점 무시하고 순수 점수 최고점 선택</li>
+     * </ol>
+     *
+     * 패턴 목록이 비어있으면 null 반환.
+     */
+    private static LayoutPatternRow selectInfographicPattern(String layoutPatterns,
+                                                              String titleSignal,
+                                                              String componentSignal,
+                                                              java.util.Set<String> usedPatternNames) {
+        List<LayoutPatternRow> patterns = parseLayoutPatternRows(layoutPatterns);
+        if (patterns.isEmpty()) return null;
+
+        String titleLower     = titleSignal.toLowerCase();
+        String componentLower = componentSignal.toLowerCase();
+        // 양방향 포함 판정에 사용할 신호 토큰 배열 (사전 분리)
+        String[] titleTokens     = tokenizeSignal(titleSignal);
+        String[] componentTokens = tokenizeSignal(componentSignal);
+
+        // ── IDF 계산: 태그 토큰별 document frequency ──────────────────────────
+        java.util.Map<String, Integer> df = new java.util.HashMap<>();
+        for (LayoutPatternRow p : patterns) {
+            java.util.Set<String> tagSet = new java.util.HashSet<>(
+                    java.util.Arrays.asList(tokenizeSignal(p.contentTypesCsv)));
+            for (String tok : tagSet) df.merge(tok, 1, Integer::sum);
+        }
+
+        // ── 패턴별 가중 점수 계산 ────────────────────────────────────────────
+        LayoutPatternRow best     = null;
+        double bestScore          = Double.NEGATIVE_INFINITY;
+        double maxRawScore        = 0.0; // 감점 전 최고 점수 (무매칭 감지용)
+
+        for (LayoutPatternRow p : patterns) {
+            String[] tagTokens = tokenizeSignal(p.contentTypesCsv);
+            double score = 0.0;
+            for (String tagToken : tagTokens) {
+                double idf = 1.0 / df.getOrDefault(tagToken, 1);
+                // 양방향 부분포함: tag⊂title(문자열 전체) 또는 titleToken⊂tag
+                boolean inTitle = titleLower.contains(tagToken);
+                if (!inTitle) {
+                    for (String t : titleTokens) { if (tagToken.contains(t)) { inTitle = true; break; } }
+                }
+                if (inTitle) {
+                    score += 3.0 * idf;
+                } else {
+                    // 양방향 부분포함: tag⊂component(문자열 전체) 또는 componentToken⊂tag
+                    boolean inComponent = componentLower.contains(tagToken);
+                    if (!inComponent) {
+                        for (String t : componentTokens) { if (tagToken.contains(t)) { inComponent = true; break; } }
+                    }
+                    if (inComponent) score += 1.0 * idf;
+                }
+            }
+            if (score > maxRawScore) maxRawScore = score;
+            if (usedPatternNames.contains(p.patternName)) score -= 1000.0;
+            if (score > bestScore) { best = p; bestScore = score; }
+        }
+
+        // 무매칭 감지: 모든 패턴 점수가 0 → 파싱 순서 첫 패턴이 암묵적 기본값이 됨
+        if (maxRawScore == 0.0 && best != null) {
+            logger.warn("[PT Pattern] 콘텐츠 신호와 매칭된 태그 없음 — 무매칭으로 기본값 사용 (pattern='{}', titleSignal='{}', componentSignal='{}')",
+                    best.patternName, titleSignal, componentSignal);
+        }
+
+        // 모든 패턴이 이미 사용된 경우(bestScore < 0) → 감점 무시하고 재선택
+        if (bestScore < 0.0) {
+            best = null; bestScore = Double.NEGATIVE_INFINITY;
+            for (LayoutPatternRow p : patterns) {
+                String[] tagTokens = tokenizeSignal(p.contentTypesCsv);
+                double score = 0.0;
+                for (String tagToken : tagTokens) {
+                    double idf = 1.0 / df.getOrDefault(tagToken, 1);
+                    boolean inTitle = titleLower.contains(tagToken);
+                    if (!inTitle) {
+                        for (String t : titleTokens) { if (tagToken.contains(t)) { inTitle = true; break; } }
+                    }
+                    if (inTitle) {
+                        score += 3.0 * idf;
+                    } else {
+                        boolean inComponent = componentLower.contains(tagToken);
+                        if (!inComponent) {
+                            for (String t : componentTokens) { if (tagToken.contains(t)) { inComponent = true; break; } }
+                        }
+                        if (inComponent) score += 1.0 * idf;
+                    }
+                }
+                if (score > bestScore) { best = p; bestScore = score; }
+            }
+        }
+        return best;
+    }
+
+    // ── PROJECT_CONFIG_JSON 유틸 ───────────────────────────────────────────────
+
+    /** PROJECT_CONFIG_JSON.template 객체를 조회한다. 없으면 null. */
+    private JsonObject loadTemplateConfigObject(String ptProjectId) {
+        String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+        if (CommonUtil.isEmpty(configJson)) return null;
+        try {
+            JsonObject root = JsonParser.parseString(configJson).getAsJsonObject();
+            if (root.has("template") && !root.get("template").isJsonNull()) {
+                return root.getAsJsonObject("template");
+            }
+        } catch (Exception e) {
+            logger.warn("[PT Template] template config 파싱 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * PROJECT_CONFIG_JSON.template에 키를 merge 저장한다 (settings 등 다른 키 유지).
+     * stringValue와 longValue 중 하나만 사용한다. null을 넘기면 해당 키를 제거한다.
+     */
+    private void mergeTemplateConfigProperty(String ptProjectId, String key, String stringValue, Long longValue) {
+        try {
+            String configJson = proposalDAO.selectProjectConfigJson(ptProjectId);
+            JsonObject root = CommonUtil.isNotEmpty(configJson)
+                    ? JsonParser.parseString(configJson).getAsJsonObject()
+                    : new JsonObject();
+            JsonObject tmpl = (root.has("template") && !root.get("template").isJsonNull())
+                    ? root.getAsJsonObject("template")
+                    : new JsonObject();
+            if (longValue != null) {
+                tmpl.addProperty(key, longValue);
+            } else if (stringValue != null) {
+                tmpl.addProperty(key, stringValue);
+            } else {
+                tmpl.remove(key);
+            }
+            root.add("template", tmpl);
+
+            ProposalVO.ProjectVO updateVO = new ProposalVO.ProjectVO();
+            updateVO.setPtProjectId(ptProjectId);
+            updateVO.setProjectConfigJson(GSON.toJson(root));
+            updateVO.setModifyUserId(SessionUtil.getUserId());
+            proposalDAO.updateProjectConfigJson(updateVO);
+        } catch (Exception e) {
+            logger.warn("[PT Template] template config merge 실패 (ptProjectId={}, key={}): {}",
+                    ptProjectId, key, e.getMessage());
+        }
+    }
+
+    /** TB_CHAT_FILE 행 존재 여부 */
+    private boolean existsChatFile(Long chatFileId) {
+        if (chatFileId == null) return false;
+        try {
+            ChatbotVO search = new ChatbotVO();
+            search.setChatFileId(chatFileId);
+            return chatbotDAO.selectChatFileById(search) != null;
+        } catch (Exception e) {
+            logger.warn("[PT Template] TB_CHAT_FILE 존재 확인 실패 (chatFileId={}): {}", chatFileId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * templateFileId에 대한 TB_CHAT_FILE 브릿지 ID를 확보하고 PROJECT_CONFIG_JSON에 남긴다.
+     * DELETE하지 않는다 — 표지/간지 API가 같은 ID를 재사용한다.
+     * @return chatFileId, templateFileId 없거나 실패 시 null
+     */
+    private Long ensurePtTemplateChatFileId(String ptProjectId) {
+        JsonObject tmpl = loadTemplateConfigObject(ptProjectId);
+        if (tmpl == null) {
+            logger.info("[PT Template] template config 없음 — chatFileId 브릿지 스킵 (ptProjectId={})", ptProjectId);
+            return null;
+        }
+        String templateFileId = getStrOrNull(tmpl, "templateFileId");
+        if (CommonUtil.isEmpty(templateFileId)) {
+            logger.info("[PT Template] templateFileId 없음 — chatFileId 브릿지 스킵 (ptProjectId={})", ptProjectId);
+            return null;
+        }
+
+        Long existingChatFileId = getLongOrNull(tmpl, "chatFileId");
+        if (existingChatFileId != null && existsChatFile(existingChatFileId)) {
+            logger.info("[PT Template] 저장된 chatFileId 재사용 (ptProjectId={}, templateFileId={}, chatFileId={})",
+                    ptProjectId, templateFileId, existingChatFileId);
+            return existingChatFileId;
+        }
+        if (existingChatFileId != null) {
+            logger.warn("[PT Template] 저장된 chatFileId 행 없음 → 재브릿지 (ptProjectId={}, chatFileId={})",
+                    ptProjectId, existingChatFileId);
+        }
+
+        ProposalVO.PtFileVO templateFile = proposalDAO.selectPtFileById(templateFileId);
+        if (templateFile == null || CommonUtil.isEmpty(templateFile.getFilePath())) {
+            logger.warn("[PT Template] 참조 템플릿 파일 없음 또는 경로 비어있음 (ptProjectId={}, templateFileId={})",
+                    ptProjectId, templateFileId);
+            return null;
+        }
+
+        Long chatFileId = bridgePtFileToChatFile(templateFile);
+        if (chatFileId == null) {
+            logger.warn("[PT Template] TB_CHAT_FILE 브릿지 실패 (ptProjectId={}, templateFileId={})",
+                    ptProjectId, templateFileId);
+            return null;
+        }
+        mergeTemplateConfigProperty(ptProjectId, "chatFileId", null, chatFileId);
+        logger.info("[PT Template] chatFileId 브릿지·저장 완료 (ptProjectId={}, templateFileId={}, chatFileId={}, fileNm={})",
+                ptProjectId, templateFileId, chatFileId, templateFile.getFileNm());
+        return chatFileId;
+    }
+
+    /** file_query model_id — 전달값이 없으면 TB_LLM_MDL SORT_ORDER 1순위 */
+    private String resolvePtFileQueryModelId(String preferredModelId) {
+        if (CommonUtil.isNotEmpty(preferredModelId)) {
+            return preferredModelId;
+        }
+        try {
+            List<AgentVO.ModelVO> models = agentDAO.selectModelList();
+            if (models != null) {
+                for (AgentVO.ModelVO model : models) {
+                    if (model != null && CommonUtil.isNotEmpty(model.getModelId())) {
+                        return model.getModelId();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[PT Template] file_query 모델 조회 실패: {}", e.getMessage());
+        }
+        return "";
+    }
+
+    /**
+     * 참조 템플릿 file_query 분석 텍스트를 확보한다.
+     * PROJECT_CONFIG_JSON.template.referenceAnalysis에 캐시하며, DELETE하지 않는다.
+     */
+    private String resolvePtReferenceAnalysis(String ptProjectId, String agentId, String modelId) {
+        Long chatFileId = ensurePtTemplateChatFileId(ptProjectId);
+        if (chatFileId == null) {
+            return "";
+        }
+
+        JsonObject tmpl = loadTemplateConfigObject(ptProjectId);
+        String cached = tmpl != null ? getStrOrNull(tmpl, "referenceAnalysis") : null;
+        if (CommonUtil.isNotEmpty(cached)) {
+            logger.info("[PT Template] referenceAnalysis 캐시 재사용 (ptProjectId={}, chatFileId={}, len={})",
+                    ptProjectId, chatFileId, cached.length());
+            return sanitizePtReferenceAnalysis(cached);
+        }
+
+        String resolvedModelId = resolvePtFileQueryModelId(modelId);
+
+        // DB 프롬프트 조회 (TB_PROMPT STAGE_CD='REFERENCE_TEMPLATE_ANALYSIS')
+        String refAnalysisPrompt = null;
+        try {
+            refAnalysisPrompt = promptService.getPromptsByAgentIdAndStageCd(agentId, "REFERENCE_TEMPLATE_ANALYSIS");
+        } catch (Exception e) {
+            logger.warn("[PT Template] REFERENCE_TEMPLATE_ANALYSIS 프롬프트 조회 실패 (agentId={}): {}", agentId, e.getMessage());
+        }
+        if (CommonUtil.isEmpty(refAnalysisPrompt)) {
+            logger.warn("[PT Template] REFERENCE_TEMPLATE_ANALYSIS 프롬프트 미등록 — referenceAnalysis 생성 스킵 (ptProjectId={}, agentId={})",
+                    ptProjectId, agentId);
+            return "";
+        }
+
+        List<String> attachmentFileIds = new ArrayList<>();
+        attachmentFileIds.add(String.valueOf(chatFileId));
+        logger.info("[PT Template] referenceAnalysis file_query 시작 (ptProjectId={}, chatFileId={}, modelId={}, agentId={})",
+                ptProjectId, chatFileId, resolvedModelId, agentId);
+        String analysis = callPtFileQuerySync(
+                refAnalysisPrompt, attachmentFileIds, resolvedModelId, agentId);
+        if (CommonUtil.isEmpty(analysis)) {
+            logger.warn("[PT Template] referenceAnalysis file_query 빈 응답 (ptProjectId={}, chatFileId={})",
+                    ptProjectId, chatFileId);
+            return "";
+        }
+        analysis = sanitizePtReferenceAnalysis(analysis);
+        if (CommonUtil.isEmpty(analysis)) {
+            logger.warn("[PT Template] referenceAnalysis sanitize 후 비어있음 (ptProjectId={}, chatFileId={})",
+                    ptProjectId, chatFileId);
+            return "";
+        }
+        mergeTemplateConfigProperty(ptProjectId, "referenceAnalysis", analysis, null);
+        logger.info("[PT Template] referenceAnalysis 저장 완료 (ptProjectId={}, chatFileId={}, len={})",
+                ptProjectId, chatFileId, analysis.length());
+        return analysis;
+    }
+
+    /**
+     * 프롬프트에 참조 템플릿 모드/분석 텍스트를 주입한다.
+     * {{templateModeHint}} / {{referenceTemplate}} 치환 후, 섹션이 없으면 append.
+     * templateFileId가 있을 때만 호출한다.
+     *
+     * @param stage BODY | COVER | DIVIDER — 단계별 짧은 브리프 생성
+     */
+    private String applyReferenceTemplateToPrompt(String prompt, String templateMode,
+                                                  String referenceAnalysis, String stage) {
+        if (CommonUtil.isEmpty(prompt)) return prompt;
+
+        String modeHint = buildReferenceTemplateModeHint(templateMode);
+        String analysis = buildPtReferenceBrief(referenceAnalysis, stage);
+        if (CommonUtil.isEmpty(analysis)) {
+            analysis = "(참조 템플릿 분석 텍스트 없음 — 첨부 파일·모드 지시를 직접 참고하세요. 색상은 설정값을 사용하세요.)";
+        }
+        boolean hasPlaceholder = prompt.contains("{{templateModeHint}}") || prompt.contains("{{referenceTemplate}}");
+        String result = prompt
+                .replace("{{templateModeHint}}", modeHint)
+                .replace("{{referenceTemplate}}", analysis);
+
+        // DB 프롬프트에 섹션이 없어도 동작하도록 append (중복 방지)
+        if (!result.contains("## 참조 템플릿")) {
+            result = result + "\n\n## 참조 템플릿\n"
+                    + "- 모드: " + modeHint + "\n"
+                    + "- 첨부 파일 분석:\n" + analysis;
+            logger.info("[PT Template] 참조 템플릿 섹션 append (stage={}, mode={}, analysisLen={}, hadPlaceholder={})",
+                    stage, templateMode, analysis.length(), hasPlaceholder);
+        } else if (hasPlaceholder) {
+            logger.info("[PT Template] 참조 템플릿 placeholder 치환 (stage={}, mode={}, analysisLen={})",
+                    stage, templateMode, analysis.length());
+        }
+        return result;
+    }
+
+    /**
+     * TB_PT_FILE NCP 경로를 TB_CHAT_FILE 임시 행으로 브릿지 (실파일 복사 없음).
+     * @return chatFileId, 실패 시 null
+     */
+    private Long bridgePtFileToChatFile(ProposalVO.PtFileVO templateFile) {
+        if (templateFile == null || CommonUtil.isEmpty(templateFile.getFilePath())) {
+            return null;
+        }
+        try {
+            ChatbotVO tempChatFile = new ChatbotVO();
+            tempChatFile.setRoomId(PT_FILE_QUERY_ROOM_ID);
+            tempChatFile.setFileName(templateFile.getFileNm());
+            tempChatFile.setStoreFileName(templateFile.getFileNm());
+            tempChatFile.setFilePath(templateFile.getFilePath());
+            tempChatFile.setFileSize(templateFile.getFileSize());
+            tempChatFile.setFileType(templateFile.getFileType());
+            tempChatFile.setUserId(CommonUtil.nullToBlank(SessionUtil.getUserId()));
+            chatbotDAO.saveChatFile(tempChatFile);
+            return tempChatFile.getChatFileId();
+        } catch (Exception e) {
+            logger.warn("[PT Template] 참조 템플릿 TB_CHAT_FILE 브릿지 실패 (ptFileId={}): {}",
+                    templateFile.getPtFileId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 임시 TB_CHAT_FILE 행만 삭제 (NCP 원본 유지) */
+    private void cleanupTempChatFile(Long chatFileId) {
+        if (chatFileId == null) return;
+        try {
+            ChatbotVO tempChatFile = new ChatbotVO();
+            tempChatFile.setChatFileId(chatFileId);
+            chatbotDAO.deleteChatFile(tempChatFile);
+            logger.info("[PT Template] 임시 TB_CHAT_FILE 삭제 완료 (chatFileId={})", chatFileId);
+        } catch (Exception e) {
+            logger.warn("[PT Template] 임시 TB_CHAT_FILE 정리 실패 (chatFileId={}): {}", chatFileId, e.getMessage());
+        }
+    }
+
+    /**
+     * /file_query 동기 호출 (참조 템플릿 첨부). 실패·빈 응답 시 "".
+     * 마케팅 callFileQuerySync와 동일 바디/SSE 파싱, 타임아웃은 PT_QUERY_TIMEOUT_SEC.
+     */
+    private String callPtFileQuerySync(String query, List<String> attachmentFileIds, String modelId, String agentId) {
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiFileUrl");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            logger.warn("[PT Template] file_query API URL 미설정");
+            return "";
+        }
+        if (attachmentFileIds == null || attachmentFileIds.isEmpty()) {
+            return "";
+        }
+
+        String userId = CommonUtil.nullToBlank(SessionUtil.getUserId());
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", query);
+        params.put("user_id", userId);
+        params.put("threadId", "string");
+        params.put("dataset_id", "");
+        params.put("room_id", "string");
+        params.put("model_id", CommonUtil.nullToBlank(modelId));
+        params.put("agent_id", CommonUtil.nvl(agentId, ""));
+        params.put("attachment_file_ids", attachmentFileIds);
+        String reqJson = GSON.toJson(params);
+        long startMs = System.currentTimeMillis();
+
+        try {
+            RequestBody body = RequestBody.create(reqJson, okhttp3.MediaType.get("application/json; charset=utf-8"));
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "text/event-stream")
+                    .build();
+
+            logger.info("[PT Template] file_query 호출 시작 - url={}, modelId={}, agentId={}, 첨부={}, queryLen={}",
+                    apiUrl, modelId, agentId, attachmentFileIds, query != null ? query.length() : 0);
+
+            try (okhttp3.Response response = PT_FILE_QUERY_HTTP_CLIENT.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("[PT Template] file_query 응답 오류: HTTP {}, bodyNull={}",
+                            response.code(), response.body() == null);
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "pt_template_file_query", reqJson,
+                            0, 0, (int) (System.currentTimeMillis() - startMs), "N",
+                            "HTTP " + response.code(), userId);
+                    return "";
+                }
+                try (okhttp3.ResponseBody responseBody = response.body()) {
+                    BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(responseBody.byteStream(), StandardCharsets.UTF_8));
+                    StringBuilder answerBuilder = new StringBuilder();
+                    String doneAnswer = "";
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String jsonStr;
+                        if (line.startsWith("data: ")) {
+                            jsonStr = line.substring(6).trim();
+                        } else if (line.trim().startsWith("{")) {
+                            jsonStr = line.trim();
+                        } else {
+                            continue;
+                        }
+                        if (jsonStr.isEmpty()) {
+                            continue;
+                        }
+                        try {
+                            JsonObject data = JsonParser.parseString(jsonStr).getAsJsonObject();
+                            if (data.has("text") && !data.get("text").isJsonNull()) {
+                                answerBuilder.append(data.get("text").getAsString());
+                            }
+                            if (data.has("answer") && !data.get("answer").isJsonNull()) {
+                                doneAnswer = data.get("answer").getAsString();
+                            } else if (data.has("답변") && !data.get("답변").isJsonNull()) {
+                                doneAnswer = data.get("답변").getAsString();
+                            }
+                        } catch (Exception ignore) {
+                            // SSE keep-alive/비-JSON 라인 무시
+                        }
+                    }
+                    String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                    int respTimeMs = (int) (System.currentTimeMillis() - startMs);
+                    logger.info("[PT Template] file_query 완료 - 응답 길이={}자, 소요={}ms, doneAnswerYn={}",
+                            result != null ? result.length() : 0, respTimeMs,
+                            CommonUtil.isNotEmpty(doneAnswer) ? "Y" : "N");
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "pt_template_file_query", reqJson,
+                            0, result != null ? result.length() : 0, respTimeMs, "Y", null, userId);
+                    return CommonUtil.nullToBlank(result).trim();
+                }
+            }
+        } catch (Exception e) {
+            int respTimeMs = (int) (System.currentTimeMillis() - startMs);
+            logger.warn("[PT Template] file_query 호출 실패 ({}ms 경과): {}", respTimeMs, e.getMessage());
+            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "pt_template_file_query", reqJson,
+                    0, 0, respTimeMs, "N", e.getMessage(), userId);
+            return "";
+        }
     }
 
     /** data:image/...;base64, 접두사 제거 후 순수 base64 반환 */
@@ -6665,8 +7598,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String exportTypeCd = resolveExportTypeCd(ptProjectId);
 
         // 2. 캐시 재사용 (forceRebuild가 아닐 때만)
+        final String outputModeForCache = (vo.getOutputMode() != null) ? vo.getOutputMode() : "image";
         if (!Boolean.TRUE.equals(vo.getForceRebuild())) {
-            ProposalVO.ExportVO cached = tryReuseCachedExport(ptProjectId, exportTypeCd);
+            ProposalVO.ExportVO cached = tryReuseCachedExport(ptProjectId, exportTypeCd, outputModeForCache);
             if (cached != null) {
                 return cached;
             }
@@ -6687,8 +7621,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         // 4. 비동기 빌드 시작
         final String finalExportTypeCd = exportTypeCd;
+        final String finalOutputMode = (vo.getOutputMode() != null) ? vo.getOutputMode() : "image";
         EXPORT_EXECUTOR.submit(() -> {
-            runExportBuild(exportId, ptProjectId, finalExportTypeCd);
+            runExportBuild(exportId, ptProjectId, finalExportTypeCd, finalOutputMode);
         });
 
         exportVO.setBuildStatusCd("003"); // 반환 시점: PPT조립중으로 표시
@@ -6696,19 +7631,36 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * F — 지문이 일치하는 최근 완료(004) 출력 조회 (이전 파일 받기용).
-     * 없으면 null.
+     * F — 최근 완료(004) 출력 조회 (이전 파일 받기용).
+     * 지문 일치 여부와 무관하게 최신 파일이 있으면 presigned URL을 붙여 반환한다.
+     * (출력 모드가 변경됐어도 직전 파일을 다시 내려받을 수 있도록 하기 위함)
      */
     public ProposalVO.ExportVO selectReusableExport(String ptProjectId) {
         String exportTypeCd = resolveExportTypeCd(ptProjectId);
-        return tryReuseCachedExport(ptProjectId, exportTypeCd);
+        ProposalVO.ExportVO cached = proposalDAO.selectLatestCompletedExport(ptProjectId, exportTypeCd);
+        if (cached == null || CommonUtil.isEmpty(cached.getFilePath())) return null;
+        try {
+            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            if (!amazonS3.doesObjectExist(bucket, cached.getFilePath())) {
+                logger.warn("[PT F] 이전 파일 NCP 없음 (key={})", cached.getFilePath());
+                return null;
+            }
+            String downloadUrl = fileService.createDownloadPresignedUrlStr(
+                    cached.getFilePath(), cached.getFileNm());
+            cached.setDownloadUrl(downloadUrl);
+        } catch (Exception e) {
+            logger.warn("[PT F] 이전 파일 presigned URL 발급 실패: {}", e.getMessage());
+            return null;
+        }
+        cached.setCacheReused(Boolean.TRUE);
+        return cached;
     }
 
     /**
      * 최근 완료 export의 INPUT_FINGERPRINT가 현재 빌드 입력과 같고 NCP 파일이 있으면
      * presigned URL을 붙여 반환. 아니면 null.
      */
-    private ProposalVO.ExportVO tryReuseCachedExport(String ptProjectId, String exportTypeCd) {
+    private ProposalVO.ExportVO tryReuseCachedExport(String ptProjectId, String exportTypeCd, String outputMode) {
         ProposalVO.ExportVO cached = proposalDAO.selectLatestCompletedExport(ptProjectId, exportTypeCd);
         if (cached == null
                 || CommonUtil.isEmpty(cached.getFilePath())
@@ -6716,7 +7668,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             return null;
         }
 
-        String currentFp = buildExportInputFingerprint(ptProjectId, exportTypeCd);
+        String currentFp = buildExportInputFingerprint(ptProjectId, exportTypeCd, outputMode);
         if (CommonUtil.isEmpty(currentFp) || !currentFp.equals(cached.getInputFingerprint())) {
             return null;
         }
@@ -6750,9 +7702,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * runExportBuild가 읽는 값만 포함 (프레임 이미지·maxStepNo·Stage2 상태 제외).
      */
     private String buildExportInputFingerprint(String ptProjectId, String exportTypeCd) {
+        return buildExportInputFingerprint(ptProjectId, exportTypeCd, null);
+    }
+
+    private String buildExportInputFingerprint(String ptProjectId, String exportTypeCd, String outputMode) {
         try {
             StringBuilder sb = new StringBuilder(4096);
             sb.append("exportTypeCd=").append(nullToEmpty(exportTypeCd)).append('\n');
+            sb.append("outputMode=").append(nullToEmpty(outputMode)).append('\n');
 
             ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
             sb.append("projectNm=").append(project != null ? nullToEmpty(project.getProjectNm()) : "").append('\n');
@@ -6865,7 +7822,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * 이미지 기반 빌드(헤더·푸터 템플릿 포함)를 수행하고, 모두 없으면
      * 텍스트 기반 폴백 빌드를 수행한다.
      */
-    private void runExportBuild(String exportId, String ptProjectId, String exportTypeCd) {
+    private void runExportBuild(String exportId, String ptProjectId, String exportTypeCd, String outputMode) {
         try {
             // BUILD_STATUS_CD='003' (PPT조립중) 업데이트
             ProposalVO.ExportVO progVO = new ProposalVO.ExportVO();
@@ -6966,69 +7923,55 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
 
             // ── 4. 빌드 방식 분기 ────────────────────────────────────────────
-            boolean hasRendered = allSlides.stream()
-                    .anyMatch(s -> CommonUtil.isNotEmpty(s.getRenderedImagePath()));
             byte[] pptxBytes;
+            boolean useComponentBuild = "component".equals(outputMode);
 
-            if (hasRendered) {
-                // ── 이미지 기반 빌드 ─────────────────────────────────────────
-                // TB_PT_TEMPLATE 조회 (Step E에서 생성한 헤더/푸터 JSON 레이아웃)
+            if (useComponentBuild) {
+                // ── 컴포넌트 기반 빌드 (수정 가능 텍스트) ─────────────────────
                 ProposalVO.PtTemplateVO ptTemplate = proposalDAO.selectPtTemplate(ptProjectId);
-                if (ptTemplate == null) {
-                    throw new RuntimeException("헤더/푸터 템플릿이 없습니다. Step E(템플릿 생성)를 먼저 완료해 주세요. (ptProjectId=" + ptProjectId + ")");
-                }
-                String headerComponentsJson = ptTemplate.getHeaderComponentsJson();
-                String footerComponentsJson = ptTemplate.getFooterComponentsJson();
+                String headerComponentsJson = (ptTemplate != null) ? ptTemplate.getHeaderComponentsJson() : null;
+                String footerComponentsJson = (ptTemplate != null) ? ptTemplate.getFooterComponentsJson() : null;
 
-                List<kr.teamagent.common.util.ProposalPptxUtil.PageInfo> pages =
+                List<kr.teamagent.common.util.ProposalPptxUtil.ComponentPageInfo> compPages =
                         new java.util.ArrayList<>();
                 Map<String, Integer> chapterSlideCount = new HashMap<>();
 
-                // 표지 이미지 완료(003) + 경로 있으면 맨 앞 장에 cover(001)로 삽입 (헤더/푸터 제외·전체 채움)
-                if ("003".equals(ptTemplate.getCoverGenStatusCd())
+                // 표지 이미지 (있으면 맨 앞 장)
+                if (ptTemplate != null
+                        && "003".equals(ptTemplate.getCoverGenStatusCd())
                         && CommonUtil.isNotEmpty(ptTemplate.getCoverImagePath())) {
                     try {
                         byte[] coverBytes = downloadNcpObject(ptTemplate.getCoverImagePath());
                         if (coverBytes != null && coverBytes.length > 0) {
-                            pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
-                                    coverBytes, "", "", "", projectNm, orgNm, submitterNmFinal, "001"));
-                            logger.info("[PT F] 표지 이미지 맨 앞 장 추가 (path={})", ptTemplate.getCoverImagePath());
+                            compPages.add(new kr.teamagent.common.util.ProposalPptxUtil.ComponentPageInfo(
+                                    coverBytes, "", "", "", projectNm, orgNm, submitterNmFinal, "001", ""));
                         }
                     } catch (Exception e) {
-                        logger.warn("[PT F] 표지 이미지 다운로드 실패 (path={}): {}",
-                                ptTemplate.getCoverImagePath(), e.getMessage());
+                        logger.warn("[PT F-C] 표지 이미지 다운로드 실패: {}", e.getMessage());
                     }
                 }
 
-                // 간지 재사용 배경 (본문형 FRAME과 동일 — TEMPLATE 1장)
+                // 간지 배경 이미지
                 byte[] dividerBytes = null;
-                if ("003".equals(ptTemplate.getDividerGenStatusCd())
+                if (ptTemplate != null
+                        && "003".equals(ptTemplate.getDividerGenStatusCd())
                         && CommonUtil.isNotEmpty(ptTemplate.getDividerImagePath())) {
                     try {
                         dividerBytes = downloadNcpObject(ptTemplate.getDividerImagePath());
-                        if (dividerBytes != null && dividerBytes.length > 0) {
-                            logger.info("[PT F] 간지 재사용 배경 로드 (path={})", ptTemplate.getDividerImagePath());
-                        } else {
-                            dividerBytes = null;
-                        }
+                        if (dividerBytes != null && dividerBytes.length == 0) dividerBytes = null;
                     } catch (Exception e) {
-                        logger.warn("[PT F] 간지 이미지 다운로드 실패 (path={}): {}",
-                                ptTemplate.getDividerImagePath(), e.getMessage());
-                        dividerBytes = null;
+                        logger.warn("[PT F-C] 간지 이미지 다운로드 실패: {}", e.getMessage());
                     }
                 }
 
-                // 대목차별 본문 슬라이드 그룹 (간지 주입 순서용) — layoutType=002는 TEMPLATE 간지로 대체하므로 스킵
+                // 대목차별 슬라이드 그룹 (section_divider 슬라이드는 간지로 대체 시 스킵)
                 Map<String, List<ProposalVO.SlideVO>> slidesByChapter = new java.util.LinkedHashMap<>();
                 for (String chapterId : chapterOrder) {
                     slidesByChapter.put(chapterId, new java.util.ArrayList<>());
                 }
                 List<ProposalVO.SlideVO> orphanSlides = new java.util.ArrayList<>();
                 for (ProposalVO.SlideVO s : allSlides) {
-                    if ("002".equals(s.getLayoutType()) && dividerBytes != null) {
-                        // TEMPLATE 간지 재사용 시 기존 section_divider 슬라이드는 스킵 (중복 방지)
-                        continue;
-                    }
+                    if ("002".equals(s.getLayoutType()) && dividerBytes != null) continue;
                     String chapterId = tocToChapterMap.getOrDefault(s.getTocId(), s.getTocId());
                     if (slidesByChapter.containsKey(chapterId)) {
                         slidesByChapter.get(chapterId).add(s);
@@ -7037,83 +7980,166 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     }
                 }
 
-                java.util.function.Function<ProposalVO.SlideVO, kr.teamagent.common.util.ProposalPptxUtil.PageInfo> toPage =
-                        s -> {
-                            String tocId     = s.getTocId();
-                            String chapterId = tocToChapterMap.getOrDefault(tocId, tocId);
-                            String roman     = tocRomanMap.getOrDefault(chapterId, "Ⅰ");
-                            String secTitle  = tocTitleMap.getOrDefault(tocId, "");
-                            int slideNoInChapter = chapterSlideCount.merge(chapterId, 1, Integer::sum);
-                            String pageLabel = roman + "-" + slideNoInChapter;
-
-                            byte[] imageBytes = null;
-                            if (CommonUtil.isNotEmpty(s.getRenderedImagePath())) {
-                                try {
-                                    imageBytes = downloadNcpObject(s.getRenderedImagePath());
-                                } catch (Exception e) {
-                                    logger.warn("[PT F] 렌더링 이미지 다운로드 실패 (slideId={}, path={}): {}",
-                                            s.getSlideId(), s.getRenderedImagePath(), e.getMessage());
-                                }
-                            }
-                            return new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
-                                    imageBytes, roman, secTitle, pageLabel, projectNm, orgNm, submitterNmFinal,
-                                    s.getLayoutType());
-                        };
-
+                final byte[] finalDividerBytes = dividerBytes;
                 for (String chapterId : chapterOrder) {
                     List<ProposalVO.SlideVO> chapterSlides = slidesByChapter.get(chapterId);
                     if (chapterSlides == null || chapterSlides.isEmpty()) continue;
 
-                    // 대목차 간지 삽입 (TEMPLATE 배경 재사용 + 목차 텍스트 오버레이)
-                    if (dividerBytes != null) {
+                    // 간지 삽입
+                    if (finalDividerBytes != null) {
                         String chapterNo = CommonUtil.isNotEmpty(tocSectionNoMap.get(chapterId))
-                                ? tocSectionNoMap.get(chapterId)
-                                : tocRomanMap.getOrDefault(chapterId, "Ⅰ");
+                                ? tocSectionNoMap.get(chapterId) : tocRomanMap.getOrDefault(chapterId, "Ⅰ");
                         String chapterNm = tocTitleMap.getOrDefault(chapterId, "");
                         String subTocList = chapterSubTocMap.getOrDefault(chapterId, "");
-                        pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
-                                dividerBytes, chapterNo, chapterNm, chapterNo,
+                        compPages.add(new kr.teamagent.common.util.ProposalPptxUtil.ComponentPageInfo(
+                                finalDividerBytes, chapterNo, chapterNm, chapterNo,
                                 projectNm, orgNm, submitterNmFinal, "002", subTocList));
                     }
 
                     for (ProposalVO.SlideVO s : chapterSlides) {
-                        pages.add(toPage.apply(s));
+                        String tocId     = s.getTocId();
+                        String cId       = tocToChapterMap.getOrDefault(tocId, tocId);
+                        String roman     = tocRomanMap.getOrDefault(cId, "Ⅰ");
+                        String secTitle  = tocTitleMap.getOrDefault(tocId, "");
+                        int slideNoInCh  = chapterSlideCount.merge(cId, 1, Integer::sum);
+                        String pageLabel = roman + "-" + slideNoInCh;
+                        compPages.add(new kr.teamagent.common.util.ProposalPptxUtil.ComponentPageInfo(
+                                roman, secTitle, pageLabel, projectNm, orgNm, submitterNmFinal,
+                                s.getLayoutType(),
+                                s.getEyebrowTxt(), s.getTitleTxt(), s.getSubtitleTxt(),
+                                s.getHighlightBannerTxt(), s.getComponentsJson(), s.getConclusionRibbonTxt()));
                     }
                 }
                 for (ProposalVO.SlideVO s : orphanSlides) {
-                    pages.add(toPage.apply(s));
+                    String tocId     = s.getTocId();
+                    String cId       = tocToChapterMap.getOrDefault(tocId, tocId);
+                    String roman     = tocRomanMap.getOrDefault(cId, "Ⅰ");
+                    String secTitle  = tocTitleMap.getOrDefault(tocId, "");
+                    int slideNoInCh  = chapterSlideCount.merge(cId, 1, Integer::sum);
+                    String pageLabel = roman + "-" + slideNoInCh;
+                    compPages.add(new kr.teamagent.common.util.ProposalPptxUtil.ComponentPageInfo(
+                            roman, secTitle, pageLabel, projectNm, orgNm, submitterNmFinal,
+                            s.getLayoutType(),
+                            s.getEyebrowTxt(), s.getTitleTxt(), s.getSubtitleTxt(),
+                            s.getHighlightBannerTxt(), s.getComponentsJson(), s.getConclusionRibbonTxt()));
                 }
 
-                // 항상 코드 기반 헤더/푸터 렌더링 사용 (frameImageBytes=null → useFrameImage=false)
-                // 프레임 이미지(FRAME_IMAGE_PATH)는 Step D 미리보기 전용이며 실제 출력에는 사용하지 않음
-                pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildProposalDocWithImages(
-                        pages, docSize, bgColor, baseColor, accentColor,
-                        headerComponentsJson, footerComponentsJson,
-                        null);
-                logger.info("[PT F] 이미지 기반 빌드 완료 (templateId={}, exportId={}, pages={})",
-                        ptTemplate.getTemplateId(), exportId, pages.size());
+                pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildProposalDocFromComponents(
+                        compPages, docSize, bgColor, baseColor, accentColor,
+                        headerComponentsJson, footerComponentsJson);
+                logger.info("[PT F] 컴포넌트 기반 빌드 완료 (exportId={}, pages={})", exportId, compPages.size());
 
             } else {
-                // ── 텍스트 기반 폴백 빌드 ────────────────────────────────────
-                List<java.util.Map<String, Object>> slideMaps = new java.util.ArrayList<>();
-                for (ProposalVO.SlideVO s : allSlides) {
-                    java.util.Map<String, Object> slideMap = new java.util.LinkedHashMap<>();
-                    slideMap.put("layoutType", codeToLayoutTypeName(s.getLayoutType()));
-                    slideMap.put("title",    s.getTitleTxt());
-                    slideMap.put("subtitle", s.getSubtitleTxt());
-                    slideMap.put("headline", s.getHighlightBannerTxt());
-                    if (CommonUtil.isNotEmpty(s.getComponentsJson())) {
+                // ── 이미지 기반 빌드 (기존 동작) ──────────────────────────────
+                boolean hasRendered = allSlides.stream()
+                        .anyMatch(s -> CommonUtil.isNotEmpty(s.getRenderedImagePath()));
+
+                if (hasRendered) {
+                    ProposalVO.PtTemplateVO ptTemplate = proposalDAO.selectPtTemplate(ptProjectId);
+                    if (ptTemplate == null) {
+                        throw new RuntimeException("헤더/푸터 템플릿이 없습니다. Step E(템플릿 생성)를 먼저 완료해 주세요. (ptProjectId=" + ptProjectId + ")");
+                    }
+                    String headerComponentsJson = ptTemplate.getHeaderComponentsJson();
+                    String footerComponentsJson = ptTemplate.getFooterComponentsJson();
+
+                    List<kr.teamagent.common.util.ProposalPptxUtil.PageInfo> pages =
+                            new java.util.ArrayList<>();
+                    Map<String, Integer> chapterSlideCount = new HashMap<>();
+
+                    if ("003".equals(ptTemplate.getCoverGenStatusCd())
+                            && CommonUtil.isNotEmpty(ptTemplate.getCoverImagePath())) {
                         try {
-                            slideMap.put("components", GSON.fromJson(s.getComponentsJson(), Object.class));
+                            byte[] coverBytes = downloadNcpObject(ptTemplate.getCoverImagePath());
+                            if (coverBytes != null && coverBytes.length > 0) {
+                                pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
+                                        coverBytes, "", "", "", projectNm, orgNm, submitterNmFinal, "001"));
+                                logger.info("[PT F] 표지 이미지 맨 앞 장 추가 (path={})", ptTemplate.getCoverImagePath());
+                            }
                         } catch (Exception e) {
-                            logger.warn("[PT F] components JSON 파싱 실패 (slideId={}): {}", s.getSlideId(), e.getMessage());
+                            logger.warn("[PT F] 표지 이미지 다운로드 실패 (path={}): {}",
+                                    ptTemplate.getCoverImagePath(), e.getMessage());
                         }
                     }
-                    slideMaps.add(slideMap);
+
+                    byte[] dividerBytes = null;
+                    if ("003".equals(ptTemplate.getDividerGenStatusCd())
+                            && CommonUtil.isNotEmpty(ptTemplate.getDividerImagePath())) {
+                        try {
+                            dividerBytes = downloadNcpObject(ptTemplate.getDividerImagePath());
+                            if (dividerBytes != null && dividerBytes.length == 0) dividerBytes = null;
+                            else if (dividerBytes != null) logger.info("[PT F] 간지 재사용 배경 로드 (path={})", ptTemplate.getDividerImagePath());
+                        } catch (Exception e) {
+                            logger.warn("[PT F] 간지 이미지 다운로드 실패 (path={}): {}", ptTemplate.getDividerImagePath(), e.getMessage());
+                        }
+                    }
+
+                    Map<String, List<ProposalVO.SlideVO>> slidesByChapter = new java.util.LinkedHashMap<>();
+                    for (String chapterId : chapterOrder) slidesByChapter.put(chapterId, new java.util.ArrayList<>());
+                    List<ProposalVO.SlideVO> orphanSlides = new java.util.ArrayList<>();
+                    for (ProposalVO.SlideVO s : allSlides) {
+                        if ("002".equals(s.getLayoutType()) && dividerBytes != null) continue;
+                        String chapterId = tocToChapterMap.getOrDefault(s.getTocId(), s.getTocId());
+                        if (slidesByChapter.containsKey(chapterId)) slidesByChapter.get(chapterId).add(s);
+                        else orphanSlides.add(s);
+                    }
+
+                    final byte[] finalDividerBytesImg = dividerBytes;
+                    java.util.function.Function<ProposalVO.SlideVO, kr.teamagent.common.util.ProposalPptxUtil.PageInfo> toPage =
+                            s -> {
+                                String tocId     = s.getTocId();
+                                String cId       = tocToChapterMap.getOrDefault(tocId, tocId);
+                                String roman     = tocRomanMap.getOrDefault(cId, "Ⅰ");
+                                String secTitle  = tocTitleMap.getOrDefault(tocId, "");
+                                int slideNoInCh  = chapterSlideCount.merge(cId, 1, Integer::sum);
+                                String pageLabel = roman + "-" + slideNoInCh;
+                                byte[] imageBytes = null;
+                                if (CommonUtil.isNotEmpty(s.getRenderedImagePath())) {
+                                    try { imageBytes = downloadNcpObject(s.getRenderedImagePath()); }
+                                    catch (Exception e) { logger.warn("[PT F] 이미지 다운로드 실패 (slideId={}): {}", s.getSlideId(), e.getMessage()); }
+                                }
+                                return new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
+                                        imageBytes, roman, secTitle, pageLabel, projectNm, orgNm, submitterNmFinal, s.getLayoutType());
+                            };
+
+                    for (String chapterId : chapterOrder) {
+                        List<ProposalVO.SlideVO> chapterSlides = slidesByChapter.get(chapterId);
+                        if (chapterSlides == null || chapterSlides.isEmpty()) continue;
+                        if (finalDividerBytesImg != null) {
+                            String chapterNo = CommonUtil.isNotEmpty(tocSectionNoMap.get(chapterId))
+                                    ? tocSectionNoMap.get(chapterId) : tocRomanMap.getOrDefault(chapterId, "Ⅰ");
+                            pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
+                                    finalDividerBytesImg, chapterNo, tocTitleMap.getOrDefault(chapterId, ""), chapterNo,
+                                    projectNm, orgNm, submitterNmFinal, "002", chapterSubTocMap.getOrDefault(chapterId, "")));
+                        }
+                        for (ProposalVO.SlideVO s : chapterSlides) pages.add(toPage.apply(s));
+                    }
+                    for (ProposalVO.SlideVO s : orphanSlides) pages.add(toPage.apply(s));
+
+                    pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildProposalDocWithImages(
+                            pages, docSize, bgColor, baseColor, accentColor,
+                            headerComponentsJson, footerComponentsJson, null);
+                    logger.info("[PT F] 이미지 기반 빌드 완료 (templateId={}, exportId={}, pages={})",
+                            ptTemplate.getTemplateId(), exportId, pages.size());
+
+                } else {
+                    // 이미지 없음 → 텍스트 기반 폴백
+                    List<java.util.Map<String, Object>> slideMaps = new java.util.ArrayList<>();
+                    for (ProposalVO.SlideVO s : allSlides) {
+                        java.util.Map<String, Object> slideMap = new java.util.LinkedHashMap<>();
+                        slideMap.put("layoutType", codeToLayoutTypeName(s.getLayoutType()));
+                        slideMap.put("title",    s.getTitleTxt());
+                        slideMap.put("subtitle", s.getSubtitleTxt());
+                        slideMap.put("headline", s.getHighlightBannerTxt());
+                        if (CommonUtil.isNotEmpty(s.getComponentsJson())) {
+                            try { slideMap.put("components", GSON.fromJson(s.getComponentsJson(), Object.class)); }
+                            catch (Exception e) { logger.warn("[PT F] components JSON 파싱 실패 (slideId={}): {}", s.getSlideId(), e.getMessage()); }
+                        }
+                        slideMaps.add(slideMap);
+                    }
+                    pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildPptx(
+                            projectNm, slideMaps, bgColor, baseColor, accentColor);
+                    logger.info("[PT F] 텍스트 기반 폴백 빌드 완료 (exportId={}, slides={})", exportId, slideMaps.size());
                 }
-                pptxBytes = kr.teamagent.common.util.ProposalPptxUtil.buildPptx(
-                        projectNm, slideMaps, bgColor, baseColor, accentColor);
-                logger.info("[PT F] 텍스트 기반 폴백 빌드 완료 (exportId={}, slides={})", exportId, slideMaps.size());
             }
 
             // ── 5. NCP 업로드 및 형식별 처리 ────────────────────────────────
@@ -7135,7 +8161,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 fileNm      = ptProjectId + ".pptx";
                 objectKey   = "proposal/" + ptProjectId + "/exports/" + exportId + ".pptx";
                 uploadBytes = pptxBytes;
-                contentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+                contentType = "pptx";
             }
 
             fileService.uploadBytes(objectKey, uploadBytes, contentType);
@@ -7149,7 +8175,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             doneVO.setFilePath(objectKey);
             doneVO.setFileSize((long) uploadBytes.length);
             doneVO.setCompleteDt(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
-            doneVO.setInputFingerprint(buildExportInputFingerprint(ptProjectId, exportTypeCd));
+            doneVO.setInputFingerprint(buildExportInputFingerprint(ptProjectId, exportTypeCd, outputMode));
             proposalDAO.updateExport(doneVO);
             logger.info("[PT F] 출력 빌드 완료 (exportId={}, exportTypeCd={}, ptProjectId={})", exportId, exportTypeCd, ptProjectId);
 
@@ -7300,6 +8326,8 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             String accentColor  = "#E08A2C";
             String docSize      = "a4";
             String writingStyle = "formal";
+            String templateMode   = "new";
+            String templateFileId = null;
 
             if (CommonUtil.isNotEmpty(configJson)) {
                 try {
@@ -7320,6 +8348,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         JsonObject tmpl = cfgRoot.getAsJsonObject("template");
                         String ds = getStrOrNull(tmpl, "docSize");
                         if (CommonUtil.isNotEmpty(ds)) docSize = ds;
+                        String tm = getStrOrNull(tmpl, "mode");
+                        if (CommonUtil.isNotEmpty(tm)) templateMode = tm;
+                        String tfId = getStrOrNull(tmpl, "templateFileId");
+                        if (CommonUtil.isNotEmpty(tfId)) templateFileId = tfId;
                     }
                 } catch (Exception e) {
                     logger.warn("[PT Template] configJson 파싱 실패: {}", e.getMessage());
@@ -7356,8 +8388,42 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     .replace("{{writingStyle}}", writingStyle)
                     .replace("{{topLevelTocList}}", tocSb.toString().trim());
 
-            // LLM 호출
-            String aiResponse = riskDiagnosisAgentService.callLlmQuerySync(prompt, modelId, "", agentId);
+            // 참조 템플릿: chatFileId를 config에 유지하고 분석 텍스트를 프롬프트에 주입한 뒤 /file_query (DELETE 안 함)
+            String aiResponse = "";
+            if (CommonUtil.isNotEmpty(templateFileId)) {
+                Long chatFileId = ensurePtTemplateChatFileId(ptProjectId);
+                String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, modelId);
+                prompt = applyReferenceTemplateToPrompt(prompt, templateMode, referenceAnalysis, "BODY");
+                logger.info("[PT Template] 참조 템플릿 준비 (ptProjectId={}, templateFileId={}, mode={}, chatFileId={}, analysisLen={}, promptLen={})",
+                        ptProjectId, templateFileId, templateMode, chatFileId,
+                        referenceAnalysis != null ? referenceAnalysis.length() : 0, prompt.length());
+
+                if (chatFileId != null) {
+                    try {
+                        List<String> attachmentFileIds = new ArrayList<>();
+                        attachmentFileIds.add(String.valueOf(chatFileId));
+                        aiResponse = callPtFileQuerySync(prompt, attachmentFileIds, modelId, agentId);
+                        logger.info("[PT Template] 참조 템플릿 file_query 생성 완료 (templateFileId={}, mode={}, chatFileId={}, responseLen={})",
+                                templateFileId, templateMode, chatFileId,
+                                aiResponse != null ? aiResponse.length() : 0);
+                    } catch (Exception e) {
+                        logger.warn("[PT Template] 참조 템플릿 file_query 실패 (templateFileId={}, chatFileId={}): {}",
+                                templateFileId, chatFileId, e.getMessage());
+                    }
+                } else {
+                    logger.warn("[PT Template] chatFileId 확보 실패 — /query 폴백 예정 (templateFileId={})", templateFileId);
+                }
+            } else {
+                prompt = prompt.replace("{{templateModeHint}}", "").replace("{{referenceTemplate}}", "");
+            }
+
+            // 참조 파일 없거나 file_query 실패/빈 응답 → 기존 /query 폴백
+            if (CommonUtil.isEmpty(aiResponse)) {
+                if (CommonUtil.isNotEmpty(templateFileId)) {
+                    logger.warn("[PT Template] file_query 응답 없음, /query 폴백 (templateFileId={})", templateFileId);
+                }
+                aiResponse = riskDiagnosisAgentService.callLlmQuerySync(prompt, modelId, "", agentId);
+            }
             if (CommonUtil.isEmpty(aiResponse)) {
                 throw new RuntimeException("LLM 응답이 비어 있습니다.");
             }
@@ -7480,6 +8546,111 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     // ============================================================
     // Step5 콘텐츠 개요 API
     // ============================================================
+
+    /**
+     * 콘텐츠 개요 전체 일괄 생성 SSE
+     * - 미생성(CONTENT_OUTLINE_TXT IS NULL OR = '') 리프 항목만 순차 처리
+     * - 기존 generateTocOutline() 재사용 (로직 중복 없음)
+     * - 각 항목 완료/실패 시 progress 이벤트, 전체 완료 시 complete 이벤트
+     * - 클라이언트 연결 끊김(취소) 시 루프 중단, 이미 저장된 결과는 유지
+     */
+    public SseEmitter streamGenerateAllTocOutline(String ptProjectId, String modelId, String agentId) {
+        SseEmitter emitter = new SseEmitter(0L);
+
+        if (CommonUtil.isEmpty(ptProjectId)) {
+            sendSseEvent(emitter, "error", "{\"message\":\"ptProjectId가 없습니다.\"}");
+            emitter.complete();
+            return emitter;
+        }
+
+        emitter.onTimeout(() -> {
+            logger.warn("[PT Outline Batch] timeout - ptProjectId={}", ptProjectId);
+            emitter.complete();
+        });
+        emitter.onError(e -> logger.warn("[PT Outline Batch] emitter error - ptProjectId={}, msg={}", ptProjectId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("[PT Outline Batch] complete - ptProjectId={}", ptProjectId));
+
+        sendSseEvent(emitter, "connected", "{\"ptProjectId\":\"" + ptProjectId + "\"}");
+
+        STAGE_D_EXECUTOR.execute(() -> {
+            try {
+                // 리프 항목 전체 조회
+                List<ProposalVO.TocVO> leafList = proposalDAO.selectLeafTocList(ptProjectId);
+
+                // 미생성 항목만 필터링 (이미 개요가 있는 항목은 건너뜀)
+                List<ProposalVO.TocVO> targets = new ArrayList<>();
+                for (ProposalVO.TocVO toc : leafList) {
+                    if (CommonUtil.isEmpty(toc.getContentOutlineTxt())) {
+                        targets.add(toc);
+                    }
+                }
+
+                int total = targets.size();
+                int successCount = 0;
+                int failCount = 0;
+
+                logger.info("[PT Outline Batch] 시작 - ptProjectId={}, 대상: {}/{}", ptProjectId, total, leafList.size());
+
+                for (int i = 0; i < targets.size(); i++) {
+                    // 클라이언트 연결 끊김 감지 (emitter 상태 확인)
+                    try {
+                        emitter.send(SseEmitter.event().comment("ping"));
+                    } catch (Exception disconnected) {
+                        logger.info("[PT Outline Batch] 클라이언트 연결 종료 감지 — 루프 중단 (index={}/{})", i, total);
+                        return;
+                    }
+
+                    ProposalVO.TocVO toc = targets.get(i);
+                    String tocId = toc.getTocId();
+                    String title = toc.getSectionNm() != null ? toc.getSectionNm() : toc.getTocId();
+                    int index = i + 1;
+
+                    try {
+                        generateTocOutline(tocId, modelId, agentId);
+                        successCount++;
+
+                        Map<String, Object> ev = new HashMap<>();
+                        ev.put("tocId", tocId);
+                        ev.put("title", title);
+                        ev.put("status", "success");
+                        ev.put("index", index);
+                        ev.put("total", total);
+                        sendSseEvent(emitter, "progress", GSON.toJson(ev));
+
+                        logger.debug("[PT Outline Batch] 완료 ({}/{}) tocId={}", index, total, tocId);
+                    } catch (Exception e) {
+                        failCount++;
+                        logger.error("[PT Outline Batch] 실패 ({}/{}) tocId={}: {}", index, total, tocId, e.getMessage());
+
+                        Map<String, Object> ev = new HashMap<>();
+                        ev.put("tocId", tocId);
+                        ev.put("title", title);
+                        ev.put("status", "fail");
+                        ev.put("errorMessage", e.getMessage() != null ? e.getMessage().replace("\"", "'") : "오류가 발생했습니다.");
+                        ev.put("index", index);
+                        ev.put("total", total);
+                        sendSseEvent(emitter, "progress", GSON.toJson(ev));
+                    }
+                }
+
+                Map<String, Object> doneEv = new HashMap<>();
+                doneEv.put("status", "complete");
+                doneEv.put("successCount", successCount);
+                doneEv.put("failCount", failCount);
+                doneEv.put("total", total);
+                sendSseEvent(emitter, "complete", GSON.toJson(doneEv));
+
+                logger.info("[PT Outline Batch] 완료 - ptProjectId={}, 성공:{}, 실패:{}, 전체:{}", ptProjectId, successCount, failCount, total);
+            } catch (Exception e) {
+                logger.error("[PT Outline Batch] 스트림 오류 - ptProjectId={}: {}", ptProjectId, e.getMessage(), e);
+                sendSseEvent(emitter, "error", "{\"message\":\"" + (e.getMessage() != null ? e.getMessage().replace("\"", "'") : "오류가 발생했습니다.") + "\"}");
+            } finally {
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
 
     /**
      * 콘텐츠 개요 텍스트 단건 조회 (노드 클릭 시 지연 로딩)
@@ -7696,4 +8867,75 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             + "## 지시\n수정된 전체 개요를 번호 목록으로 다시 작성해 주세요.";
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // 프로젝트 삭제 — NCP 파일 전체 삭제 후 DB 데이터 전체 삭제
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * PT 프로젝트 삭제.
+     * <ol>
+     *   <li>NCP 파일 수집: TB_PT_FILE, TB_PT_SLIDE(이미지), TB_PT_TEMPLATE(이미지), TB_PT_EXPORT</li>
+     *   <li>NCP 오브젝트 삭제 (실패 건은 warn 로그 후 진행)</li>
+     *   <li>DB 레코드 전체 삭제 (자식 → 부모 순서)</li>
+     * </ol>
+     */
+    public void deleteProject(String ptProjectId) {
+        logger.info("[PT Delete] 프로젝트 삭제 시작 (ptProjectId={})", ptProjectId);
+
+        // 1. NCP 삭제 대상 경로 수집
+        List<String> ncpPaths = new ArrayList<>();
+
+        // TB_PT_FILE 경로
+        List<String> filePaths = proposalDAO.selectPtFilePathsByProject(ptProjectId);
+        if (filePaths != null) ncpPaths.addAll(filePaths);
+
+        // TB_PT_SLIDE 이미지 경로
+        List<String> slidePaths = proposalDAO.selectSlideImagePathsByProject(ptProjectId);
+        if (slidePaths != null) ncpPaths.addAll(slidePaths);
+
+        // TB_PT_TEMPLATE 이미지 경로 (frame, cover, divider)
+        ProposalVO.PtTemplateVO template = proposalDAO.selectPtTemplate(ptProjectId);
+        if (template != null) {
+            if (CommonUtil.isNotEmpty(template.getFrameImagePath()))   ncpPaths.add(template.getFrameImagePath());
+            if (CommonUtil.isNotEmpty(template.getCoverImagePath()))   ncpPaths.add(template.getCoverImagePath());
+            if (CommonUtil.isNotEmpty(template.getDividerImagePath())) ncpPaths.add(template.getDividerImagePath());
+        }
+
+        // TB_PT_EXPORT 출력 파일 경로
+        List<String> exportPaths = proposalDAO.selectExportFilePathsByProject(ptProjectId);
+        if (exportPaths != null) ncpPaths.addAll(exportPaths);
+
+        logger.info("[PT Delete] NCP 삭제 대상 {}건 (ptProjectId={})", ncpPaths.size(), ptProjectId);
+
+        // 2. NCP 오브젝트 삭제 (실패해도 DB 삭제 진행)
+        int ncpSuccess = 0, ncpFail = 0;
+        for (String path : ncpPaths) {
+            if (CommonUtil.isEmpty(path)) continue;
+            Map<String, Object> result = fileService.deleteStorageObjectByKey(path);
+            if (Boolean.TRUE.equals(result.get("successYn"))) {
+                ncpSuccess++;
+            } else {
+                ncpFail++;
+                logger.warn("[PT Delete] NCP 삭제 실패 (ptProjectId={}, path={}): {}", ptProjectId, path, result.get("returnMsg"));
+            }
+        }
+        logger.info("[PT Delete] NCP 삭제 완료 — 성공={}, 실패={} (ptProjectId={})", ncpSuccess, ncpFail, ptProjectId);
+
+        // 3. DB 레코드 전체 삭제 (자식 → 부모)
+        proposalDAO.deleteSlidesByProject(ptProjectId);
+        proposalDAO.deleteTocsByProject(ptProjectId);
+        proposalDAO.deleteReviewsByProject(ptProjectId);
+        proposalDAO.deleteExportsByProject(ptProjectId);
+        proposalDAO.deletePtTemplateByProject(ptProjectId);
+        proposalDAO.deletePtFilesByProject(ptProjectId);
+        proposalDAO.deleteRequirementsByProject(ptProjectId);
+        proposalDAO.deleteEvalCriteriaByProject(ptProjectId);
+        proposalDAO.deleteRfpIssuesByProject(ptProjectId);
+        proposalDAO.deleteProblemDefinitionsByProject(ptProjectId);
+        proposalDAO.deleteWinThemesByProject(ptProjectId);
+        proposalDAO.deleteTocByProject(ptProjectId);
+        proposalDAO.deletePtProject(ptProjectId);
+
+        logger.info("[PT Delete] DB 삭제 완료 (ptProjectId={})", ptProjectId);
+    }
 }
