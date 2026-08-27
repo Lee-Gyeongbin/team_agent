@@ -96,24 +96,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             .readTimeout(PT_QUERY_TIMEOUT_SEC, TimeUnit.SECONDS)
             .connectTimeout(10, TimeUnit.SECONDS)
             .build();
-    /**
-     * 참조 템플릿 시각·레이아웃 분석용 file_query 질의.
-     * 표지/간지 이미지 API는 파일 첨부가 불가하므로 분석 텍스트를 프롬프트에 주입한다.
-     */
-    private static final String PT_REFERENCE_TEMPLATE_ANALYSIS_QUERY =
-            "첨부된 참조 템플릿(문서, 이미지 등)의 핵심을 제안서 본문형 헤더/푸터·표지·간지 제작에 참고할 수 있도록 정리해 주세요. "
-                    + "헤더/푸터 구조·배지·구분선, 표지 구도·그래픽 모티브, 간지 전환 디자인, "
-                    + "색감·타이포·여백·분위기 등 시각적 특징을 구체적으로 설명해 주세요. "
-                    + "색상 hex는 참고만 하고, 최종 색상은 시스템 설정값을 쓴다는 전제로 구조·모티브 중심으로 적어 주세요. "
-                    + "후속 제안·추가 정리 제안·메타 안내 문구는 출력하지 마세요.";
-    /** 본문형(S3_TEMPLATE)에 넣을 참조 분석 최대 길이 */
-    private static final int PT_REF_BRIEF_BODY_MAX = 2200;
-    /** 표지 이미지 프롬프트용 참조 분석 최대 길이 */
-    private static final int PT_REF_BRIEF_COVER_MAX = 1200;
-    /** 간지 이미지 프롬프트용 참조 분석 최대 길이 */
-    private static final int PT_REF_BRIEF_DIVIDER_MAX = 1000;
-    /** 본문 인포그래픽(S3_IMAGE)용 참조 분석 최대 길이 */
-    private static final int PT_REF_BRIEF_INFOGRAPHIC_MAX = 800;
     /** Stage2-A 문제정의용 샘플링 — 전체 요구사항 최대 건수 (mandatoryYn='Y' 우선) */
     private static final int PROBLEM_DEF_REQ_LIMIT = 20;
 
@@ -5622,14 +5604,43 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 if (CommonUtil.isNotEmpty(templateFileId)) {
                     try {
                         String referenceAnalysis = resolvePtReferenceAnalysis(ptProjectId, agentId, modelId);
-                        String brief = buildPtReferenceBrief(referenceAnalysis, "INFOGRAPHIC");
-                        if (CommonUtil.isNotEmpty(brief)) {
-                            String modeHint = buildReferenceTemplateModeHint(templateMode);
-                            // 이미지 API query는 한 덩어리 문자열 — 줄바꿈은 공백으로
-                            String oneLine = (modeHint + " " + brief).replace('\n', ' ').replaceAll("\\s+", " ").trim();
-                            refStyleHint = " [REF_STYLE: " + oneLine + "]";
-                            logger.info("[PT Img-Gen SSE] 참조 템플릿 REF_STYLE 부착 (slideId={}, templateFileId={}, mode={}, briefLen={})",
-                                    slideId, templateFileId, templateMode, brief.length());
+                        // buildPtReferenceBrief("INFOGRAPHIC") → [LAYOUT_PATTERNS] 섹션 전체 반환
+                        String layoutPatterns = buildPtReferenceBrief(referenceAnalysis, "INFOGRAPHIC");
+                        if (CommonUtil.isNotEmpty(layoutPatterns)) {
+                            // ── 콘텐츠 신호 조립 ─────────────────────────────────
+                            List<ProposalVO.TocVO> tocList = null;
+                            try {
+                                tocList = proposalDAO.selectTocList(ptProjectId);
+                            } catch (Exception ex) {
+                                logger.warn("[PT Img-Gen SSE] TOC 목록 조회 실패 (ptProjectId={}): {}", ptProjectId, ex.getMessage());
+                            }
+                            SlideSignals signals = buildSlideSignals(slide, tocList);
+
+                            // ── 반복 방지: 같은 TOC 내 기사용 패턴명 추출 ────────
+                            java.util.Set<String> usedPatterns = java.util.Collections.emptySet();
+                            try {
+                                List<ProposalVO.SlideVO> tocSlides = proposalDAO.selectSlidesByToc(slide.getTocId());
+                                usedPatterns = extractUsedPatternNames(tocSlides);
+                            } catch (Exception ex) {
+                                logger.warn("[PT Img-Gen SSE] 반복 방지용 슬라이드 조회 실패 (tocId={}): {}", slide.getTocId(), ex.getMessage());
+                            }
+
+                            // ── 패턴 선택 (IDF 가중 매칭) ────────────────────────
+                            LayoutPatternRow selected = selectInfographicPattern(
+                                    layoutPatterns, signals.titleSignal, signals.componentSignal, usedPatterns);
+                            if (selected != null) {
+                                String modeHint = buildReferenceTemplateModeHint(templateMode);
+                                // [REF_STYLE: 패턴명 - 구조설명] — 줄바꿈은 공백으로
+                                String patternTag = (selected.patternName + " - " + selected.description)
+                                        .replace('\n', ' ').replaceAll("\\s+", " ").trim();
+                                String oneLine = (modeHint + " " + patternTag).replace('\n', ' ').replaceAll("\\s+", " ").trim();
+                                refStyleHint = " [REF_STYLE: " + oneLine + "]";
+                                logger.info("[PT Img-Gen SSE] 인포그래픽 패턴 선택 완료 (slideId={}, pattern='{}', usedPatterns={}, titleSignal='{}', componentSignal='{}')",
+                                        slideId, selected.patternName, usedPatterns, signals.titleSignal, signals.componentSignal);
+                            } else {
+                                logger.warn("[PT Img-Gen SSE] 패턴 선택 실패 — REF_STYLE 미부착 (slideId={}, titleSignal='{}', componentSignal='{}')",
+                                        slideId, signals.titleSignal, signals.componentSignal);
+                            }
                         }
                     } catch (Exception e) {
                         logger.warn("[PT Img-Gen SSE] 참조 템플릿 REF_STYLE 부착 실패 (slideId={}): {}",
@@ -6612,21 +6623,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return sb.toString().trim();
     }
 
-    /** 길이 제한 (문장 중간 절단 시 … 처리) */
-    private static String truncatePtRefBrief(String text, int maxChars) {
-        if (CommonUtil.isEmpty(text) || text.length() <= maxChars) {
-            return CommonUtil.nullToBlank(text);
-        }
-        String cut = text.substring(0, maxChars);
-        int lastBreak = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf('.'));
-        if (lastBreak > maxChars / 2) {
-            cut = cut.substring(0, lastBreak + 1);
-        }
-        return cut.trim() + "\n…(참조 분석 요약)";
-    }
-
     /**
-     * 단계별(본문/표지/간지/인포그래픽)로 참조 분석에서 관련 섹션만 뽑아 짧게 만든다.
+     * 단계별로 참조 분석에서 적절한 섹션을 그대로 반환한다.
+     * <ul>
+     *   <li>COVER / DIVIDER / BODY(기타) → [STYLE_GUIDE] 섹션 전체</li>
+     *   <li>INFOGRAPHIC → [LAYOUT_PATTERNS] 섹션 전체 (패턴 선택은 3단계에서 처리)</li>
+     * </ul>
+     * 마커가 없는 구 캐시는 폴백으로 전체 텍스트를 STYLE_GUIDE로 취급한다.
+     *
      * @param stage BODY | COVER | DIVIDER | INFOGRAPHIC
      */
     private static String buildPtReferenceBrief(String analysis, String stage) {
@@ -6634,68 +6638,337 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         if (CommonUtil.isEmpty(cleaned)) {
             return "";
         }
-        String[] keywords;
-        int maxChars;
-        String focusHint;
-        if ("COVER".equals(stage)) {
-            keywords = new String[]{"표지", "커버", "cover", "구도", "그래픽 모티브", "여백", "분위기", "톤앤매너", "색감"};
-            maxChars = PT_REF_BRIEF_COVER_MAX;
-            focusHint = "[표지 적용 포인트] 좌상단 제목·중앙 프로세스/아이콘 흐름·우하단 웨이브 등 참조 구도·모티브를 따르되, "
-                    + "색상은 설정값(baseColor/accentColor)만 사용하세요. 도시 실사·과도한 암부 배경은 피하고 참조의 밝은 여백감을 유지하세요.";
-        } else if ("DIVIDER".equals(stage)) {
-            keywords = new String[]{"간지", "섹션", "전환", "여백", "그래픽", "모티브", "분위기", "톤앤매너", "웨이브", "라인"};
-            maxChars = PT_REF_BRIEF_DIVIDER_MAX;
-            focusHint = "[간지 적용 포인트] 표지와 같은 그래픽 모티브(웨이브·네트워크·점 패턴·얇은 그라데이션 라인)를 "
-                    + "더 옅고 절제된 재사용 배경으로만 표현하세요. 글자·번호·리스트는 그리지 마세요. 색상은 설정값만 사용하세요.";
-        } else if ("INFOGRAPHIC".equals(stage)) {
-            keywords = new String[]{"아이콘", "그래픽", "모티브", "라인", "여백", "톤앤매너", "형태 언어", "배지", "인포그래픽"};
-            maxChars = PT_REF_BRIEF_INFOGRAPHIC_MAX;
-            focusHint = "[인포그래픽 비주얼 언어] 참조 템플릿의 아이콘(라인·소프트 그라데이션)·얇은 구분선·여백 리듬·정보 밀도만 참고하세요. "
-                    + "표지/간지 레이아웃(좌상단 대형 제목·우하단 웨이브·챕터 전환 구도)을 복제하지 마세요. "
-                    + "본문 콘텐츠 다이어그램에 맞게 구성하고, 색상은 설정값(baseColor/accentColor)만 사용하세요. "
-                    + "과한 실사 배경·도시 풍경·장식 과다는 피하세요.";
-        } else {
-            keywords = new String[]{"헤더", "푸터", "배지", "구분선", "본문", "라인", "톤앤매너", "타이포"};
-            maxChars = PT_REF_BRIEF_BODY_MAX;
-            focusHint = "[본문형 적용 포인트] 헤더/푸터·배지·구분선 구조·여백 리듬을 참고하세요. 색상은 설정값(baseColor/accentColor)만 사용하세요.";
+        PtReferenceSections sections = parsePtReferenceSections(cleaned);
+        if ("INFOGRAPHIC".equals(stage)) {
+            return sections.layoutPatterns;
         }
-
-        String extracted = extractPtAnalysisSections(cleaned, keywords);
-        String body = CommonUtil.isNotEmpty(extracted) ? extracted : cleaned;
-        String brief = focusHint + "\n\n" + truncatePtRefBrief(body, maxChars);
-        return brief.trim();
+        return sections.styleGuide;
     }
 
-    /** ## / --- 단위 섹션 중 키워드가 제목·본문에 있는 것만 수집 */
-    private static String extractPtAnalysisSections(String analysis, String[] keywords) {
-        if (CommonUtil.isEmpty(analysis) || keywords == null || keywords.length == 0) {
-            return "";
+    // ── 참조 템플릿 분석 섹션 파서 ────────────────────────────────────────────
+
+    /** [STYLE_GUIDE] / [LAYOUT_PATTERNS] 파싱 결과 */
+    static final class PtReferenceSections {
+        final String styleGuide;
+        final String layoutPatterns;
+        PtReferenceSections(String styleGuide, String layoutPatterns) {
+            this.styleGuide     = styleGuide;
+            this.layoutPatterns = layoutPatterns;
         }
-        String normalized = analysis.replace("\r\n", "\n");
-        // ## 제목 또는 --- 구분 기준으로 대략 분할
-        String[] chunks = normalized.split("(?m)(?=^#{1,3}\\s)|(?m)(?=^---\\s*$)");
-        StringBuilder sb = new StringBuilder();
-        for (String chunk : chunks) {
-            if (CommonUtil.isEmpty(chunk)) continue;
-            String head = chunk.length() > 120 ? chunk.substring(0, 120) : chunk;
-            String lowerHead = head.toLowerCase();
-            String lowerChunk = chunk.toLowerCase();
-            boolean hit = false;
-            for (String kw : keywords) {
-                if (CommonUtil.isEmpty(kw)) continue;
-                String k = kw.toLowerCase();
-                if (lowerHead.contains(k) || lowerChunk.contains(k)) {
-                    hit = true;
-                    break;
+    }
+ 
+    /**
+     * 분석 텍스트에서 {@code [STYLE_GUIDE]} / {@code [LAYOUT_PATTERNS]} 섹션을
+     * 마커 기반으로 분리한다.
+     * <p>마커가 없거나 파싱 실패 시 전체 텍스트를 styleGuide로, layoutPatterns는
+     * 빈 문자열로 반환한다 (구 프롬프트로 생성된 캐시 폴백).
+     */
+    private static PtReferenceSections parsePtReferenceSections(String analysis) {
+        if (CommonUtil.isEmpty(analysis)) {
+            return new PtReferenceSections("", "");
+        }
+        String normalized = analysis.replace("\r\n", "\n").replace('\r', '\n');
+        String lower      = normalized.toLowerCase();
+        int sgIdx = lower.indexOf("[style_guide]");
+        int lpIdx = lower.indexOf("[layout_patterns]");
+
+        if (sgIdx < 0 && lpIdx < 0) {
+            // 마커 없음 — 구 포맷 캐시 폴백
+            return new PtReferenceSections(normalized.trim(), "");
+        }
+
+        String styleGuide     = "";
+        String layoutPatterns = "";
+
+        if (sgIdx >= 0) {
+            int start = normalized.indexOf('\n', sgIdx);
+            start = start < 0 ? sgIdx + "[style_guide]".length() : start + 1;
+            int end   = (lpIdx >= 0 && lpIdx > sgIdx) ? lpIdx : normalized.length();
+            styleGuide = normalized.substring(start, end).trim();
+        }
+
+        if (lpIdx >= 0) {
+            int start = normalized.indexOf('\n', lpIdx);
+            start = start < 0 ? lpIdx + "[layout_patterns]".length() : start + 1;
+            int end   = (sgIdx >= 0 && sgIdx > lpIdx) ? sgIdx : normalized.length();
+            layoutPatterns = normalized.substring(start, end).trim();
+        }
+
+        return new PtReferenceSections(styleGuide, layoutPatterns);
+    }
+
+    // ── 인포그래픽 레이아웃 패턴 매칭 유틸 ───────────────────────────────────────
+
+    /** 파싱된 LAYOUT_PATTERNS 테이블의 한 행 */
+    static final class LayoutPatternRow {
+        final String patternName;
+        final String description;
+        final String contentTypesCsv;
+        LayoutPatternRow(String patternName, String description, String contentTypesCsv) {
+            this.patternName     = patternName;
+            this.description     = description;
+            this.contentTypesCsv = contentTypesCsv;
+        }
+    }
+
+    /** 슬라이드 콘텐츠 신호 (소스 분리) */
+    static final class SlideSignals {
+        /** 슬라이드 제목 + 상위 TOC(대목차/소목차) 섹션명 */
+        final String titleSignal;
+        /** COMPONENTS_JSON 컴포넌트 타입을 매핑표로 변환한 키워드 */
+        final String componentSignal;
+        SlideSignals(String titleSignal, String componentSignal) {
+            this.titleSignal     = titleSignal;
+            this.componentSignal = componentSignal;
+        }
+    }
+
+    /**
+     * 컴포넌트 타입 → 콘텐츠 신호 키워드 변환 (7종 고정 스키마).
+     * 알 수 없는 타입은 빈 문자열 반환.
+     */
+    private static String infographicComponentKeywords(String componentType) {
+        if (componentType == null) return "";
+        switch (componentType) {
+            case "card_grid":         return "카드, 목록, 분류";
+            case "process_flow":      return "프로세스, 흐름, 절차";
+            case "requirement_table": return "표, 분류, 비교, 요구사항";
+            case "credential_grid":   return "보안, 인증, 자격, 권한";
+            case "icon_chip_group":   return "아이콘, 키워드, 요약";
+            case "step_flow_bar":     return "단계, 로드맵, 추진전략, 마일스톤";
+            case "callout_box":       return "강조, 결론, 핵심";
+            default:                  return "";
+        }
+    }
+
+    /**
+     * LAYOUT_PATTERNS 마크다운 테이블을 파싱해 {@link LayoutPatternRow} 목록을 반환한다.
+     * <p>헤더 행·구분선 행은 스킵하고, 구분선(---) 이후의 데이터 행만 수집한다.
+     * 컬럼 수가 3 미만이거나 패턴명이 비어있는 행은 무시해 방어적으로 처리한다.
+     */
+    private static List<LayoutPatternRow> parseLayoutPatternRows(String layoutPatterns) {
+        List<LayoutPatternRow> rows = new ArrayList<>();
+        if (CommonUtil.isEmpty(layoutPatterns)) return rows;
+        String[] lines = layoutPatterns.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        boolean separatorSeen = false;
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!trimmed.startsWith("|")) continue;
+            // 구분선 행 감지: | 제거 후 [-:\s]만 남으면 구분선
+            if (trimmed.replaceAll("[|:\\-\\s]", "").isEmpty()) {
+                separatorSeen = true;
+                continue;
+            }
+            if (!separatorSeen) continue; // 헤더 행 스킵
+            String[] cells = trimmed.split("\\|", -1);
+            // cells[0]="", cells[1]=패턴명, cells[2]=구조설명, cells[3]=적합콘텐츠유형, cells[last]=""
+            if (cells.length < 4) continue;
+            String patternName     = cells[1].trim();
+            String description     = cells[2].trim();
+            String contentTypesCsv = cells[3].trim();
+            if (CommonUtil.isEmpty(patternName)) continue;
+            rows.add(new LayoutPatternRow(patternName, description, contentTypesCsv));
+        }
+        return rows;
+    }
+
+    /**
+     * 슬라이드 콘텐츠 신호를 두 소스로 분리해 조립한다.
+     * <ul>
+     *   <li>titleSignal  — 슬라이드 제목 + 소목차/대목차 섹션명 (주제 신뢰도 높음, 가중치 3)</li>
+     *   <li>componentSignal — COMPONENTS_JSON 타입을 매핑표로 변환한 키워드 (가중치 1)</li>
+     * </ul>
+     */
+    private static SlideSignals buildSlideSignals(ProposalVO.SlideVO slide,
+                                                   List<ProposalVO.TocVO> tocList) {
+        // titleSignal: 슬라이드 제목 + 소목차·대목차 섹션명
+        StringBuilder titleSb = new StringBuilder();
+        if (CommonUtil.isNotEmpty(slide.getTitleTxt())) titleSb.append(slide.getTitleTxt()).append(' ');
+        if (tocList != null && CommonUtil.isNotEmpty(slide.getTocId())) {
+            ProposalVO.TocVO slideToc = null;
+            for (ProposalVO.TocVO t : tocList) {
+                if (slide.getTocId().equals(t.getTocId())) { slideToc = t; break; }
+            }
+            if (slideToc != null) {
+                if (CommonUtil.isNotEmpty(slideToc.getSectionNm())) titleSb.append(slideToc.getSectionNm()).append(' ');
+                if (CommonUtil.isNotEmpty(slideToc.getParentTocId())) {
+                    for (ProposalVO.TocVO t : tocList) {
+                        if (slideToc.getParentTocId().equals(t.getTocId())) {
+                            if (CommonUtil.isNotEmpty(t.getSectionNm())) titleSb.append(t.getSectionNm()).append(' ');
+                            break;
+                        }
+                    }
                 }
             }
-            if (hit) {
-                if (sb.length() > 0) sb.append("\n\n");
-                sb.append(chunk.trim());
+        }
+
+        // componentSignal: COMPONENTS_JSON 컴포넌트 타입 → 매핑 키워드
+        StringBuilder compSb = new StringBuilder();
+        if (CommonUtil.isNotEmpty(slide.getComponentsJson())) {
+            try {
+                JsonElement el = JsonParser.parseString(slide.getComponentsJson());
+                JsonArray arr = null;
+                if (el.isJsonArray()) {
+                    arr = el.getAsJsonArray();
+                } else if (el.isJsonObject()) {
+                    JsonObject obj = el.getAsJsonObject();
+                    for (String key : new String[]{"components", "items", "data"}) {
+                        if (obj.has(key) && obj.get(key).isJsonArray()) { arr = obj.getAsJsonArray(key); break; }
+                    }
+                }
+                if (arr != null) {
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+                    for (JsonElement item : arr) {
+                        if (!item.isJsonObject()) continue;
+                        JsonObject comp = item.getAsJsonObject();
+                        if (!comp.has("type") || comp.get("type").isJsonNull()) continue;
+                        String type = comp.get("type").getAsString();
+                        if (CommonUtil.isEmpty(type) || !seen.add(type)) continue;
+                        String kws = infographicComponentKeywords(type);
+                        if (CommonUtil.isNotEmpty(kws)) compSb.append(kws).append(' ');
+                    }
+                }
+            } catch (Exception ignored) { /* 파싱 실패 시 무시 */ }
+        }
+
+        return new SlideSignals(titleSb.toString().trim(), compSb.toString().trim());
+    }
+
+    /**
+     * TOC 내 기존 슬라이드들의 IMAGE_GEN_HINT에서 이미 사용된 패턴명 집합을 추출한다.
+     * <p>[REF_STYLE: 패턴명 - 구조설명] 형식을 가정하며, 파싱 실패 행은 무시한다.
+     */
+    private static java.util.Set<String> extractUsedPatternNames(List<ProposalVO.SlideVO> tocSlides) {
+        java.util.Set<String> used = new java.util.HashSet<>();
+        if (tocSlides == null) return used;
+        for (ProposalVO.SlideVO s : tocSlides) {
+            String hint = s.getImageGenHint();
+            if (CommonUtil.isEmpty(hint)) continue;
+            int start = hint.indexOf("[REF_STYLE:");
+            if (start < 0) continue;
+            int end = hint.indexOf(']', start);
+            if (end < 0) continue;
+            String content = hint.substring(start + "[REF_STYLE:".length(), end).trim();
+            int dashIdx = content.indexOf(" - ");
+            if (dashIdx > 0) used.add(content.substring(0, dashIdx).trim());
+        }
+        return used;
+    }
+
+    /**
+     * 문자열을 2글자 이상 소문자 토큰 배열로 분리한다.
+     * 한글·영문·숫자 이외 문자(공백, 쉼표, 가운뎃점 등)를 구분자로 사용한다.
+     */
+    private static String[] tokenizeSignal(String s) {
+        if (CommonUtil.isEmpty(s)) return new String[0];
+        String[] raw = s.toLowerCase().split("[^가-힣a-zA-Z0-9]+");
+        List<String> result = new ArrayList<>();
+        for (String t : raw) { if (t.length() >= 2) result.add(t); }
+        return result.toArray(new String[0]);
+    }
+
+    /**
+     * LAYOUT_PATTERNS 테이블과 슬라이드 신호(소스 분리)를 기반으로 최적 패턴 1개를 선택한다.
+     *
+     * <p><b>알고리즘</b>
+     * <ol>
+     *   <li>패턴 태그 토큰 IDF 계산: 각 태그 토큰이 전체 패턴 중 몇 개에 등장하는지(df) 산정,
+     *       가중치 = 1/df (고유 토큰일수록 높음)</li>
+     *   <li>패턴별 가중 점수: 각 패턴의 태그 토큰이 titleSignal에 포함되면 3×IDF,
+     *       componentSignal에만 포함되면 1×IDF 가산 (부분 문자열 포함 판정)</li>
+     *   <li>이미 사용된 패턴은 -1000 감점 (best-effort 반복 방지)</li>
+     *   <li>모든 패턴이 감점돼 bestScore &lt; 0이면 감점 무시하고 순수 점수 최고점 선택</li>
+     * </ol>
+     *
+     * 패턴 목록이 비어있으면 null 반환.
+     */
+    private static LayoutPatternRow selectInfographicPattern(String layoutPatterns,
+                                                              String titleSignal,
+                                                              String componentSignal,
+                                                              java.util.Set<String> usedPatternNames) {
+        List<LayoutPatternRow> patterns = parseLayoutPatternRows(layoutPatterns);
+        if (patterns.isEmpty()) return null;
+
+        String titleLower     = titleSignal.toLowerCase();
+        String componentLower = componentSignal.toLowerCase();
+        // 양방향 포함 판정에 사용할 신호 토큰 배열 (사전 분리)
+        String[] titleTokens     = tokenizeSignal(titleSignal);
+        String[] componentTokens = tokenizeSignal(componentSignal);
+
+        // ── IDF 계산: 태그 토큰별 document frequency ──────────────────────────
+        java.util.Map<String, Integer> df = new java.util.HashMap<>();
+        for (LayoutPatternRow p : patterns) {
+            java.util.Set<String> tagSet = new java.util.HashSet<>(
+                    java.util.Arrays.asList(tokenizeSignal(p.contentTypesCsv)));
+            for (String tok : tagSet) df.merge(tok, 1, Integer::sum);
+        }
+
+        // ── 패턴별 가중 점수 계산 ────────────────────────────────────────────
+        LayoutPatternRow best     = null;
+        double bestScore          = Double.NEGATIVE_INFINITY;
+        double maxRawScore        = 0.0; // 감점 전 최고 점수 (무매칭 감지용)
+
+        for (LayoutPatternRow p : patterns) {
+            String[] tagTokens = tokenizeSignal(p.contentTypesCsv);
+            double score = 0.0;
+            for (String tagToken : tagTokens) {
+                double idf = 1.0 / df.getOrDefault(tagToken, 1);
+                // 양방향 부분포함: tag⊂title(문자열 전체) 또는 titleToken⊂tag
+                boolean inTitle = titleLower.contains(tagToken);
+                if (!inTitle) {
+                    for (String t : titleTokens) { if (tagToken.contains(t)) { inTitle = true; break; } }
+                }
+                if (inTitle) {
+                    score += 3.0 * idf;
+                } else {
+                    // 양방향 부분포함: tag⊂component(문자열 전체) 또는 componentToken⊂tag
+                    boolean inComponent = componentLower.contains(tagToken);
+                    if (!inComponent) {
+                        for (String t : componentTokens) { if (tagToken.contains(t)) { inComponent = true; break; } }
+                    }
+                    if (inComponent) score += 1.0 * idf;
+                }
+            }
+            if (score > maxRawScore) maxRawScore = score;
+            if (usedPatternNames.contains(p.patternName)) score -= 1000.0;
+            if (score > bestScore) { best = p; bestScore = score; }
+        }
+
+        // 무매칭 감지: 모든 패턴 점수가 0 → 파싱 순서 첫 패턴이 암묵적 기본값이 됨
+        if (maxRawScore == 0.0 && best != null) {
+            logger.warn("[PT Pattern] 콘텐츠 신호와 매칭된 태그 없음 — 무매칭으로 기본값 사용 (pattern='{}', titleSignal='{}', componentSignal='{}')",
+                    best.patternName, titleSignal, componentSignal);
+        }
+
+        // 모든 패턴이 이미 사용된 경우(bestScore < 0) → 감점 무시하고 재선택
+        if (bestScore < 0.0) {
+            best = null; bestScore = Double.NEGATIVE_INFINITY;
+            for (LayoutPatternRow p : patterns) {
+                String[] tagTokens = tokenizeSignal(p.contentTypesCsv);
+                double score = 0.0;
+                for (String tagToken : tagTokens) {
+                    double idf = 1.0 / df.getOrDefault(tagToken, 1);
+                    boolean inTitle = titleLower.contains(tagToken);
+                    if (!inTitle) {
+                        for (String t : titleTokens) { if (tagToken.contains(t)) { inTitle = true; break; } }
+                    }
+                    if (inTitle) {
+                        score += 3.0 * idf;
+                    } else {
+                        boolean inComponent = componentLower.contains(tagToken);
+                        if (!inComponent) {
+                            for (String t : componentTokens) { if (tagToken.contains(t)) { inComponent = true; break; } }
+                        }
+                        if (inComponent) score += 1.0 * idf;
+                    }
+                }
+                if (score > bestScore) { best = p; bestScore = score; }
             }
         }
-        return sb.toString().trim();
+        return best;
     }
+
+    // ── PROJECT_CONFIG_JSON 유틸 ───────────────────────────────────────────────
 
     /** PROJECT_CONFIG_JSON.template 객체를 조회한다. 없으면 null. */
     private JsonObject loadTemplateConfigObject(String ptProjectId) {
@@ -6844,12 +7117,26 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
 
         String resolvedModelId = resolvePtFileQueryModelId(modelId);
+
+        // DB 프롬프트 조회 (TB_PROMPT STAGE_CD='REFERENCE_TEMPLATE_ANALYSIS')
+        String refAnalysisPrompt = null;
+        try {
+            refAnalysisPrompt = promptService.getPromptsByAgentIdAndStageCd(agentId, "REFERENCE_TEMPLATE_ANALYSIS");
+        } catch (Exception e) {
+            logger.warn("[PT Template] REFERENCE_TEMPLATE_ANALYSIS 프롬프트 조회 실패 (agentId={}): {}", agentId, e.getMessage());
+        }
+        if (CommonUtil.isEmpty(refAnalysisPrompt)) {
+            logger.warn("[PT Template] REFERENCE_TEMPLATE_ANALYSIS 프롬프트 미등록 — referenceAnalysis 생성 스킵 (ptProjectId={}, agentId={})",
+                    ptProjectId, agentId);
+            return "";
+        }
+
         List<String> attachmentFileIds = new ArrayList<>();
         attachmentFileIds.add(String.valueOf(chatFileId));
         logger.info("[PT Template] referenceAnalysis file_query 시작 (ptProjectId={}, chatFileId={}, modelId={}, agentId={})",
                 ptProjectId, chatFileId, resolvedModelId, agentId);
         String analysis = callPtFileQuerySync(
-                PT_REFERENCE_TEMPLATE_ANALYSIS_QUERY, attachmentFileIds, resolvedModelId, agentId);
+                refAnalysisPrompt, attachmentFileIds, resolvedModelId, agentId);
         if (CommonUtil.isEmpty(analysis)) {
             logger.warn("[PT Template] referenceAnalysis file_query 빈 응답 (ptProjectId={}, chatFileId={})",
                     ptProjectId, chatFileId);
@@ -8261,6 +8548,111 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     // ============================================================
 
     /**
+     * 콘텐츠 개요 전체 일괄 생성 SSE
+     * - 미생성(CONTENT_OUTLINE_TXT IS NULL OR = '') 리프 항목만 순차 처리
+     * - 기존 generateTocOutline() 재사용 (로직 중복 없음)
+     * - 각 항목 완료/실패 시 progress 이벤트, 전체 완료 시 complete 이벤트
+     * - 클라이언트 연결 끊김(취소) 시 루프 중단, 이미 저장된 결과는 유지
+     */
+    public SseEmitter streamGenerateAllTocOutline(String ptProjectId, String modelId, String agentId) {
+        SseEmitter emitter = new SseEmitter(0L);
+
+        if (CommonUtil.isEmpty(ptProjectId)) {
+            sendSseEvent(emitter, "error", "{\"message\":\"ptProjectId가 없습니다.\"}");
+            emitter.complete();
+            return emitter;
+        }
+
+        emitter.onTimeout(() -> {
+            logger.warn("[PT Outline Batch] timeout - ptProjectId={}", ptProjectId);
+            emitter.complete();
+        });
+        emitter.onError(e -> logger.warn("[PT Outline Batch] emitter error - ptProjectId={}, msg={}", ptProjectId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("[PT Outline Batch] complete - ptProjectId={}", ptProjectId));
+
+        sendSseEvent(emitter, "connected", "{\"ptProjectId\":\"" + ptProjectId + "\"}");
+
+        STAGE_D_EXECUTOR.execute(() -> {
+            try {
+                // 리프 항목 전체 조회
+                List<ProposalVO.TocVO> leafList = proposalDAO.selectLeafTocList(ptProjectId);
+
+                // 미생성 항목만 필터링 (이미 개요가 있는 항목은 건너뜀)
+                List<ProposalVO.TocVO> targets = new ArrayList<>();
+                for (ProposalVO.TocVO toc : leafList) {
+                    if (CommonUtil.isEmpty(toc.getContentOutlineTxt())) {
+                        targets.add(toc);
+                    }
+                }
+
+                int total = targets.size();
+                int successCount = 0;
+                int failCount = 0;
+
+                logger.info("[PT Outline Batch] 시작 - ptProjectId={}, 대상: {}/{}", ptProjectId, total, leafList.size());
+
+                for (int i = 0; i < targets.size(); i++) {
+                    // 클라이언트 연결 끊김 감지 (emitter 상태 확인)
+                    try {
+                        emitter.send(SseEmitter.event().comment("ping"));
+                    } catch (Exception disconnected) {
+                        logger.info("[PT Outline Batch] 클라이언트 연결 종료 감지 — 루프 중단 (index={}/{})", i, total);
+                        return;
+                    }
+
+                    ProposalVO.TocVO toc = targets.get(i);
+                    String tocId = toc.getTocId();
+                    String title = toc.getSectionNm() != null ? toc.getSectionNm() : toc.getTocId();
+                    int index = i + 1;
+
+                    try {
+                        generateTocOutline(tocId, modelId, agentId);
+                        successCount++;
+
+                        Map<String, Object> ev = new HashMap<>();
+                        ev.put("tocId", tocId);
+                        ev.put("title", title);
+                        ev.put("status", "success");
+                        ev.put("index", index);
+                        ev.put("total", total);
+                        sendSseEvent(emitter, "progress", GSON.toJson(ev));
+
+                        logger.debug("[PT Outline Batch] 완료 ({}/{}) tocId={}", index, total, tocId);
+                    } catch (Exception e) {
+                        failCount++;
+                        logger.error("[PT Outline Batch] 실패 ({}/{}) tocId={}: {}", index, total, tocId, e.getMessage());
+
+                        Map<String, Object> ev = new HashMap<>();
+                        ev.put("tocId", tocId);
+                        ev.put("title", title);
+                        ev.put("status", "fail");
+                        ev.put("errorMessage", e.getMessage() != null ? e.getMessage().replace("\"", "'") : "오류가 발생했습니다.");
+                        ev.put("index", index);
+                        ev.put("total", total);
+                        sendSseEvent(emitter, "progress", GSON.toJson(ev));
+                    }
+                }
+
+                Map<String, Object> doneEv = new HashMap<>();
+                doneEv.put("status", "complete");
+                doneEv.put("successCount", successCount);
+                doneEv.put("failCount", failCount);
+                doneEv.put("total", total);
+                sendSseEvent(emitter, "complete", GSON.toJson(doneEv));
+
+                logger.info("[PT Outline Batch] 완료 - ptProjectId={}, 성공:{}, 실패:{}, 전체:{}", ptProjectId, successCount, failCount, total);
+            } catch (Exception e) {
+                logger.error("[PT Outline Batch] 스트림 오류 - ptProjectId={}: {}", ptProjectId, e.getMessage(), e);
+                sendSseEvent(emitter, "error", "{\"message\":\"" + (e.getMessage() != null ? e.getMessage().replace("\"", "'") : "오류가 발생했습니다.") + "\"}");
+            } finally {
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
+    /**
      * 콘텐츠 개요 텍스트 단건 조회 (노드 클릭 시 지연 로딩)
      */
     public ProposalVO.TocVO selectTocOutline(String tocId) throws Exception {
@@ -8473,5 +8865,77 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             + "## 현재 개요\n" + currentOutline + "\n\n"
             + "## 사용자 요청\n" + userMessage + "\n\n"
             + "## 지시\n수정된 전체 개요를 번호 목록으로 다시 작성해 주세요.";
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 프로젝트 삭제 — NCP 파일 전체 삭제 후 DB 데이터 전체 삭제
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * PT 프로젝트 삭제.
+     * <ol>
+     *   <li>NCP 파일 수집: TB_PT_FILE, TB_PT_SLIDE(이미지), TB_PT_TEMPLATE(이미지), TB_PT_EXPORT</li>
+     *   <li>NCP 오브젝트 삭제 (실패 건은 warn 로그 후 진행)</li>
+     *   <li>DB 레코드 전체 삭제 (자식 → 부모 순서)</li>
+     * </ol>
+     */
+    public void deleteProject(String ptProjectId) {
+        logger.info("[PT Delete] 프로젝트 삭제 시작 (ptProjectId={})", ptProjectId);
+
+        // 1. NCP 삭제 대상 경로 수집
+        List<String> ncpPaths = new ArrayList<>();
+
+        // TB_PT_FILE 경로
+        List<String> filePaths = proposalDAO.selectPtFilePathsByProject(ptProjectId);
+        if (filePaths != null) ncpPaths.addAll(filePaths);
+
+        // TB_PT_SLIDE 이미지 경로
+        List<String> slidePaths = proposalDAO.selectSlideImagePathsByProject(ptProjectId);
+        if (slidePaths != null) ncpPaths.addAll(slidePaths);
+
+        // TB_PT_TEMPLATE 이미지 경로 (frame, cover, divider)
+        ProposalVO.PtTemplateVO template = proposalDAO.selectPtTemplate(ptProjectId);
+        if (template != null) {
+            if (CommonUtil.isNotEmpty(template.getFrameImagePath()))   ncpPaths.add(template.getFrameImagePath());
+            if (CommonUtil.isNotEmpty(template.getCoverImagePath()))   ncpPaths.add(template.getCoverImagePath());
+            if (CommonUtil.isNotEmpty(template.getDividerImagePath())) ncpPaths.add(template.getDividerImagePath());
+        }
+
+        // TB_PT_EXPORT 출력 파일 경로
+        List<String> exportPaths = proposalDAO.selectExportFilePathsByProject(ptProjectId);
+        if (exportPaths != null) ncpPaths.addAll(exportPaths);
+
+        logger.info("[PT Delete] NCP 삭제 대상 {}건 (ptProjectId={})", ncpPaths.size(), ptProjectId);
+
+        // 2. NCP 오브젝트 삭제 (실패해도 DB 삭제 진행)
+        int ncpSuccess = 0, ncpFail = 0;
+        for (String path : ncpPaths) {
+            if (CommonUtil.isEmpty(path)) continue;
+            Map<String, Object> result = fileService.deleteStorageObjectByKey(path);
+            if (Boolean.TRUE.equals(result.get("successYn"))) {
+                ncpSuccess++;
+            } else {
+                ncpFail++;
+                logger.warn("[PT Delete] NCP 삭제 실패 (ptProjectId={}, path={}): {}", ptProjectId, path, result.get("returnMsg"));
+            }
+        }
+        logger.info("[PT Delete] NCP 삭제 완료 — 성공={}, 실패={} (ptProjectId={})", ncpSuccess, ncpFail, ptProjectId);
+
+        // 3. DB 레코드 전체 삭제 (자식 → 부모)
+        proposalDAO.deleteSlidesByProject(ptProjectId);
+        proposalDAO.deleteTocsByProject(ptProjectId);
+        proposalDAO.deleteReviewsByProject(ptProjectId);
+        proposalDAO.deleteExportsByProject(ptProjectId);
+        proposalDAO.deletePtTemplateByProject(ptProjectId);
+        proposalDAO.deletePtFilesByProject(ptProjectId);
+        proposalDAO.deleteRequirementsByProject(ptProjectId);
+        proposalDAO.deleteEvalCriteriaByProject(ptProjectId);
+        proposalDAO.deleteRfpIssuesByProject(ptProjectId);
+        proposalDAO.deleteProblemDefinitionsByProject(ptProjectId);
+        proposalDAO.deleteWinThemesByProject(ptProjectId);
+        proposalDAO.deleteTocByProject(ptProjectId);
+        proposalDAO.deletePtProject(ptProjectId);
+
+        logger.info("[PT Delete] DB 삭제 완료 (ptProjectId={})", ptProjectId);
     }
 }
