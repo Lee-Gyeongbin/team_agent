@@ -1620,6 +1620,9 @@ public class ProposalPptxUtil {
         public final String submitterNm;
         public final String layoutTypeCd;
         public final String subTocList;
+        // 슬라이드 컬러 팔레트 인덱스 (colorIndex % bases.size() 로 base/accent 선택)
+        // 표지(001) / 간지(002)는 0 고정, 일반 슬라이드는 SlideVO.colorIndex 값을 그대로 전달
+        public final int colorIndex;
         // 표지·간지 배경
         public final byte[] imageBytes;
         // 일반 슬라이드 컨텐츠
@@ -1630,10 +1633,11 @@ public class ProposalPptxUtil {
         public final String componentsJson;
         public final String conclusionRibbonTxt;
 
-        /** 표지(001) / 간지(002) 생성자 — imageBytes 기반 */
+        /** 표지(001) / 간지(002) 생성자 — imageBytes 기반 (colorIndex=0 고정) */
         public ComponentPageInfo(byte[] imageBytes, String chapterRoman, String sectionTitle,
                                   String pageLabel, String projectNm, String orgNm, String submitterNm,
                                   String layoutTypeCd, String subTocList) {
+            this.colorIndex        = 0;
             this.imageBytes        = imageBytes;
             this.chapterRoman      = nvl(chapterRoman, "Ⅰ");
             this.sectionTitle      = nvl(sectionTitle, "");
@@ -1651,11 +1655,13 @@ public class ProposalPptxUtil {
             this.conclusionRibbonTxt = null;
         }
 
-        /** 일반 슬라이드 생성자 — componentsJson 기반 */
+        /** 일반 슬라이드 생성자 — componentsJson 기반 (SlideVO.colorIndex를 그대로 전달) */
         public ComponentPageInfo(String chapterRoman, String sectionTitle, String pageLabel,
                                   String projectNm, String orgNm, String submitterNm, String layoutTypeCd,
                                   String eyebrowTxt, String titleTxt, String subtitleTxt,
-                                  String highlightBannerTxt, String componentsJson, String conclusionRibbonTxt) {
+                                  String highlightBannerTxt, String componentsJson, String conclusionRibbonTxt,
+                                  int colorIndex) {
+            this.colorIndex        = colorIndex;
             this.imageBytes        = null;
             this.chapterRoman      = nvl(chapterRoman, "Ⅰ");
             this.sectionTitle      = nvl(sectionTitle, "");
@@ -1700,7 +1706,7 @@ public class ProposalPptxUtil {
     public static byte[] buildProposalDocFromComponents(
             List<ComponentPageInfo> pages,
             String docSize,
-            String bgColor, String baseColor, String accentColor,
+            String bgColor, List<String> bases, List<String> accents,
             String headerComponentsJson, String footerComponentsJson) throws IOException {
 
         // ── 슬라이드 크기 결정 ────────────────────────────────────────────────
@@ -1713,9 +1719,8 @@ public class ProposalPptxUtil {
             slideW = 720; slideH = 405; // 16:9 기본
         }
 
-        Color cBg     = parseHex(bgColor,     new Color(0xFF, 0xFF, 0xFF));
-        Color cBase   = parseHex(baseColor,   new Color(0x5B, 0x4F, 0xE9));
-        Color cAccent = parseHex(accentColor, new Color(0xE0, 0x8A, 0x2C));
+        Color cBg = parseHex(bgColor, new Color(0xFF, 0xFF, 0xFF));
+        // cBase / cAccent는 슬라이드별로 루프 안에서 page.colorIndex 기반으로 계산
 
         // 16:9(405) 기준 스케일
         double scale = slideH / 405.0;
@@ -1749,6 +1754,13 @@ public class ProposalPptxUtil {
 
             for (ComponentPageInfo page : pages) {
                 XSLFSlide slide = pptx.createSlide();
+
+                // ── 슬라이드별 컬러 결정 (colorIndex 기반 팔레트 회전) ─────────
+                int ci = page.colorIndex;
+                Color cBase   = bases.isEmpty()   ? new Color(0x5B, 0x4F, 0xE9)
+                        : parseHex(bases.get(ci % bases.size()),     new Color(0x5B, 0x4F, 0xE9));
+                Color cAccent = accents.isEmpty() ? new Color(0xE0, 0x8A, 0x2C)
+                        : parseHex(accents.get(ci % accents.size()), new Color(0xE0, 0x8A, 0x2C));
 
                 // 전체 배경
                 addRect(slide, 0, 0, slideW, slideH, cBg);
