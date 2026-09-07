@@ -17,6 +17,7 @@ import kr.teamagent.common.exception.DuplicateUserIdException;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.security.service.impl.LoginServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.PasswordRuleUtil;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.library.service.impl.LibraryServiceImpl;
 
@@ -46,10 +47,10 @@ public class ApiSignupController {
             String phone = CommonUtil.nullToBlank(signupRequest.get("phone"));
             String orgId = CommonUtil.nullToBlank(signupRequest.get("orgId"));
 
-            if (userId.isEmpty() || password.isEmpty() || userNm.isEmpty()) {
+            if (userId.isEmpty() || password.isEmpty() || userNm.isEmpty() || email.isEmpty() || phone.isEmpty()) {
                 result.put("success", false);
                 result.put("errorType", "validationError");
-                result.put("message", "아이디, 비밀번호, 사용자명은 필수입니다.");
+                result.put("message", "아이디, 비밀번호, 사용자명, 이메일, 전화번호는 필수입니다.");
                 return ResponseEntity.ok(result);
             }
 
@@ -60,10 +61,11 @@ public class ApiSignupController {
                 return ResponseEntity.ok(result);
             }
 
-            if (password.length() < 4) {
+            String passwordRuleMsg = PasswordRuleUtil.validateNewPassword(password, userId, email, phone);
+            if (passwordRuleMsg != null) {
                 result.put("success", false);
                 result.put("errorType", "validationError");
-                result.put("message", "비밀번호는 4자 이상 입력해주세요.");
+                result.put("message", passwordRuleMsg);
                 return ResponseEntity.ok(result);
             }
 
@@ -74,8 +76,8 @@ public class ApiSignupController {
             userVO.setCompId(compId);
             userVO.setUserId(userId);
             userVO.setUserNm(userNm);
-            userVO.setEmail(email.isEmpty() ? null : email);
-            userVO.setPhone(phone.isEmpty() ? null : phone);
+            userVO.setEmail(email);
+            userVO.setPhone(phone);
             userVO.setOrgId(orgId.isEmpty() ? null : orgId);
             userVO.setMasterDbId(dbId);
             userVO.setDbId(dbId);
