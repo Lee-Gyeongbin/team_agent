@@ -152,6 +152,12 @@ public class ProposalVO {
         private String reqContent;
         /** 요구사항 상세설명 (RFP 상세설명 항목 원문, 없으면 null) */
         private String reqDetailTxt;
+        /** 문제/전략 매핑용 요구사항 핵심 요약 (REQ_SUMMARY_TXT, VARCHAR 500) */
+        private String reqSummaryTxt;
+        /** 문제/전략 매핑용 핵심 키워드 JSON 배열 문자열 (REQ_KEYWORDS_JSON) */
+        private String reqKeywordsJson;
+        /** 요구사항 적용 업무·대상 범위 (REQ_SCOPE_TXT, VARCHAR 300) */
+        private String reqScopeTxt;
         /** 필수 여부 (Y/N) */
         private String mandatoryYn;
         /** 출처 유형 코드 (PT000004: 001=사실, 002=전략적해석, 003=확인필요) */

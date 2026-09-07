@@ -271,6 +271,9 @@
             , REQ_CATEGORY_TXT
             , REQ_CONTENT
             , REQ_DETAIL_TXT
+            , REQ_SUMMARY_TXT
+            , REQ_KEYWORDS_JSON
+            , REQ_SCOPE_TXT
             , MANDATORY_YN
             , SOURCE_TYPE_CD
             , CONFIRM_NEEDED_YN
@@ -284,6 +287,9 @@
             , #{reqCategoryTxt}
             , #{reqContent}
             , #{reqDetailTxt}
+            , #{reqSummaryTxt}
+            , #{reqKeywordsJson}
+            , #{reqScopeTxt}
             , COALESCE(#{mandatoryYn}, 'Y')
             , COALESCE(#{sourceTypeCd}, '001')
             , COALESCE(#{confirmNeededYn}, 'N')
@@ -303,6 +309,9 @@
             , r.REQ_CATEGORY_TXT      AS REQ_CATEGORY_TXT
             , r.REQ_CONTENT           AS REQ_CONTENT
             , r.REQ_DETAIL_TXT        AS REQ_DETAIL_TXT
+            , r.REQ_SUMMARY_TXT       AS REQ_SUMMARY_TXT
+            , CAST(r.REQ_KEYWORDS_JSON AS CHAR) AS REQ_KEYWORDS_JSON
+            , r.REQ_SCOPE_TXT         AS REQ_SCOPE_TXT
             , r.MANDATORY_YN          AS MANDATORY_YN
             , r.SOURCE_TYPE_CD        AS SOURCE_TYPE_CD
             , r.CONFIRM_NEEDED_YN     AS CONFIRM_NEEDED_YN
@@ -311,7 +320,7 @@
             , DATE_FORMAT(r.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
         FROM TB_PT_REQUIREMENT r
         WHERE r.PT_PROJECT_ID = #{ptProjectId}
-        ORDER BY r.SORT_ORD, r.REQUIREMENT_ID
+        ORDER BY  r.REQUIREMENT_ID
     </select>
 
     <update id="updateRequirement" parameterType="kr.teamagent.proposal.service.ProposalVO$RequirementVO">
