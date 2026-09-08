@@ -1457,4 +1457,21 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+    /** 콘텐츠 개요 일괄 확정 */
+    @RequestMapping(value = "/ai/proposal/confirmAllTocOutline.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView confirmAllTocOutline(@RequestBody Map<String, String> param) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            int count = proposalService.confirmAllTocOutline(param.get("ptProjectId"));
+            resultMap.put("result", "OK");
+            resultMap.put("confirmedCount", count);
+        } catch (Exception e) {
+            logger.error("[PT Outline] confirmAllTocOutline 오류: {}", e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
 }

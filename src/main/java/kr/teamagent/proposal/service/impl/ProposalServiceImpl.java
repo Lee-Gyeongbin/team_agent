@@ -48,7 +48,6 @@ import com.google.gson.JsonParser;
 import kr.teamagent.agent.service.AgentVO;
 import kr.teamagent.agent.service.impl.AgentDAO;
 import kr.teamagent.chat.service.ChatbotVO;
-import kr.teamagent.chat.service.impl.ChatbotAgentSupport;
 import kr.teamagent.chat.service.impl.ChatbotDAO;
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
 import kr.teamagent.chat.service.impl.agent.RiskDiagnosisAgentService;
@@ -101,6 +100,25 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     /** 프롬프트 플레이스홀더 미치환 검출 */
     private static final java.util.regex.Pattern UNRESOLVED_PLACEHOLDER_PATTERN =
             java.util.regex.Pattern.compile("\\{\\{[A-Z0-9_]+\\}\\}");
+
+    /** 세부목차 생성 역할 판별용 키워드 (동일 키워드 반복은 1건으로 계산). */
+    private static final String[] TOC_STRATEGY_KEYWORDS = {
+            "사업이해", "추진전략", "제안전략", "기술전략", "적용기술",
+            "표준프레임워크", "개발프레임워크", "기술표준",
+            "개발방법론", "수행방법론", "수행방안", "추진방안"
+    };
+    /** STRATEGY 판별 전에 우선 차단할 관리·운영·기업/증빙 성격 키워드. */
+    private static final String[] TOC_NON_STRATEGY_KEYWORDS = {
+            "관리방법론", "관리역량", "사업관리", "프로젝트관리", "수행관리",
+            "일정", "품질보증", "품질관리", "기술이전", "교육", "하자보수",
+            "기밀보안", "보안관리", "정보보호관리", "비상대책",
+            "일반현황", "회사", "자사", "경영상태", "재무", "신인도", "수행실적",
+            "조직", "인력", "상생협력", "하도급", "중소기업", "지역업체"
+    };
+
+    private enum TocPipelineType {
+        REQUIREMENT, STRATEGY, UNCLASSIFIED
+    }
 
     /** 슬라이드 이미지 렌더 상태 (PT000007) — 완료 */
     private static final String SLIDE_RENDER_DONE = "003";
@@ -164,9 +182,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private RiskDiagnosisAgentService riskDiagnosisAgentService;
-
-    @Autowired
-    private ChatbotAgentSupport agentSupport;
 
     @Autowired
     @Lazy
@@ -2032,13 +2047,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         List<ProposalVO.RequirementVO> requirements = proposalDAO.selectRequirements(ptProjectId);
         List<ProposalVO.EvalCriteriaVO> evalCriteria = proposalDAO.selectEvalCriteria(ptProjectId);
-        List<ProposalVO.TocVO> tocList = proposalDAO.selectTocList(ptProjectId);
-        if (tocList == null || tocList.isEmpty())
+        List<ProposalVO.TocVO> selectedTocList = proposalDAO.selectTocList(ptProjectId);
+        if (selectedTocList == null || selectedTocList.isEmpty())
             throw new RuntimeException("목차가 없습니다. Stage1 완료 후 다시 시도하세요. ptProjectId=" + ptProjectId);
-
-        List<ProposalVO.WinThemeVO> winThemes = null;
-        try { winThemes = proposalDAO.selectWinThemes(ptProjectId); }
-        catch (Exception e) { logger.warn("[PT Stage2-C] Win Theme 조회 실패, 프롬프트에서 제외 (ptProjectId={}): {}", ptProjectId, e.getMessage()); }
+        List<ProposalVO.TocVO> existingGeneratedTocs = selectedTocList.stream()
+                .filter(t -> "002".equals(t.getOriginTypeCd()))
+                .collect(java.util.stream.Collectors.toList());
+        List<ProposalVO.TocVO> tocList = selectedTocList.stream()
+                .filter(t -> !"002".equals(t.getOriginTypeCd()))
+                .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+        java.util.Set<String> currentGenerationTargetTocIds = new java.util.LinkedHashSet<>();
 
         java.util.Set<String> validReqIds = new java.util.HashSet<>();
         if (requirements != null)
@@ -2054,17 +2072,16 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         // ── 요구사항 → 대목차 배치 라우팅 ──────────────────────────────────────
         List<ProposalVO.RequirementVO> unmatchedReqs = new java.util.ArrayList<>();
+        java.util.Map<String, List<ProposalVO.RequirementVO>> childReqMap = new java.util.LinkedHashMap<>();
         java.util.Map<String, List<ProposalVO.RequirementVO>> batchReqMap =
-                routeRequirementsToTocGroups(tocList, requirements, unmatchedReqs);
+                routeRequirementsToTocGroups(tocList, requirements, unmatchedReqs, childReqMap);
+        java.util.Map<String, TocPipelineType> tocPipelineTypes =
+                classifyTocNodes(tocList, childReqMap, evalCriteria);
 
-        // 고정 프리픽스 (캐싱 구조 대비 분리) + 공통 경량 리스트 + WinTheme (배치 간 공통)
+        // 요구사항 배치 고정 프리픽스 + 공통 미매칭 요구사항 경량 목록
         String fixedPrefix = buildS2cFixedPrefix(s2cPromptContent, evalCriteria);
         List<java.util.Map<String, Object>> unmatchedReqsLite = unmatchedReqs.stream()
                 .map(this::toRequirementMinimalLite)
-                .collect(java.util.stream.Collectors.toList());
-        List<java.util.Map<String, Object>> winThemeLite =
-                (winThemes != null ? winThemes : java.util.Collections.<ProposalVO.WinThemeVO>emptyList())
-                .stream().map(this::toWinThemeUltraLite)
                 .collect(java.util.stream.Collectors.toList());
 
         // ── 대목차별 배치 구성 및 병렬 제출 ─────────────────────────────────────
@@ -2075,50 +2092,82 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         long s2cStart = System.currentTimeMillis();
         java.util.List<java.util.concurrent.Future<String>> batchFutures = new java.util.ArrayList<>();
         java.util.List<String> batchParentTocIds = new java.util.ArrayList<>();
+        java.util.List<List<ProposalVO.TocVO>> requirementBatchNodes = new java.util.ArrayList<>();
 
         for (Map.Entry<String, List<ProposalVO.RequirementVO>> entry : batchReqMap.entrySet()) {
             String parentTocId = entry.getKey();
             List<ProposalVO.RequirementVO> matchedReqs = entry.getValue();
             String parentSectionNm = tocIdToSectionNm.getOrDefault(parentTocId, parentTocId);
 
-            // 배치 노드: 대목차 자신 + 직계 소분류
+            ProposalVO.TocVO parentNode = null;
+            int directChildCount = 0;
             List<ProposalVO.TocVO> batchNodes = new java.util.ArrayList<>();
             for (ProposalVO.TocVO t : tocList) {
-                if (parentTocId.equals(t.getTocId()) || parentTocId.equals(t.getParentTocId()))
-                    batchNodes.add(t);
+                if (parentTocId.equals(t.getTocId())) {
+                    parentNode = t;
+                } else if (parentTocId.equals(t.getParentTocId())
+                        && "001".equals(t.getOriginTypeCd())) {
+                    directChildCount++;
+                    if (tocPipelineTypes.getOrDefault(t.getTocId(), TocPipelineType.UNCLASSIFIED)
+                            != TocPipelineType.STRATEGY) {
+                        batchNodes.add(t);
+                    }
+                }
+            }
+            // 부모는 컨테이너로 포함한다. 단층 목차이거나 부모명에 직접 매칭된 요구사항이 있으면 부모 자신이 처리 대상이다.
+            if (parentNode != null && (!batchNodes.isEmpty()
+                    || directChildCount == 0 && tocPipelineTypes.getOrDefault(parentNode.getTocId(),
+                            TocPipelineType.UNCLASSIFIED) != TocPipelineType.STRATEGY
+                    || !matchedReqs.isEmpty())) {
+                batchNodes.add(0, parentNode);
             }
 
-            // 스킵: 매칭 요구사항 0건 && 공통 미매칭도 없음
-            if (matchedReqs.isEmpty() && unmatchedReqsLite.isEmpty()) {
-                logger.info("[PT Stage2-C] 배치 스킵 — 대목차='{}' (요구사항 없음, ptProjectId={})",
+            if (batchNodes.isEmpty()) {
+                logger.info("[PT Stage2-C][요구사항] 배치 스킵 — 대목차='{}' (요구사항형 소분류 없음, ptProjectId={})",
                         parentSectionNm, ptProjectId);
                 continue;
             }
 
+            // 스킵: 배정할 요구사항이 없고 공통 미매칭 요구사항도 없음
+            if (matchedReqs.isEmpty() && unmatchedReqsLite.isEmpty()) {
+                logger.info("[PT Stage2-C][요구사항] 배치 스킵 — 대목차='{}' (요구사항 없음, ptProjectId={})",
+                        parentSectionNm, ptProjectId);
+                continue;
+            }
+
+            logger.info("[PT Stage2-C][요구사항][배치={}] 대상 노드: {}",
+                    parentSectionNm, batchNodes.stream()
+                            .filter(t -> !parentTocId.equals(t.getTocId()) || batchNodes.size() == 1)
+                            .map(t -> t.getTocId() + ":" + t.getSectionNm())
+                            .collect(java.util.stream.Collectors.joining(", ")));
+
             batchParentTocIds.add(parentTocId);
+            requirementBatchNodes.add(new java.util.ArrayList<>(batchNodes));
+            collectBatchTargetTocIds(batchNodes, parentTocId, currentGenerationTargetTocIds);
             final String batchPrompt = buildStage2cBatchPrompt(
-                    fixedPrefix, batchNodes, matchedReqs, unmatchedReqsLite, winThemeLite, parentSectionNm);
+                    fixedPrefix, batchNodes, matchedReqs, unmatchedReqsLite, parentSectionNm);
             final String batchNm = parentSectionNm;
             final String pId = ptProjectId;
 
             batchFutures.add(STAGE_S2C_BATCH_EXECUTOR.submit(() -> {
-                logger.info("[PT Stage2-C][배치={}] LLM 호출 시작 — 프롬프트:{}자 (ptProjectId={})",
+                logger.info("[PT Stage2-C][요구사항][배치={}] LLM 호출 시작 — 프롬프트:{}자 (ptProjectId={})",
                         batchNm, batchPrompt.length(), pId);
                 try {
                     String resp = callLlmWithRetry(batchPrompt, modelId, agentId,
-                            "[PT Stage2-C][배치=" + batchNm + "]");
+                            "[PT Stage2-C][요구사항][배치=" + batchNm + "]");
                     if (CommonUtil.isEmpty(resp))
-                        logger.warn("[PT Stage2-C][배치={}] LLM 응답 없음, 배치 결과 없음 (ptProjectId={})", batchNm, pId);
+                        logger.warn("[PT Stage2-C][요구사항][배치={}] LLM 응답 없음, 배치 결과 없음 (ptProjectId={})",
+                                batchNm, pId);
                     return resp;
                 } catch (Exception e) {
-                    logger.warn("[PT Stage2-C][배치={}] LLM 호출 예외, 배치 스킵 (ptProjectId={}): {}",
+                    logger.warn("[PT Stage2-C][요구사항][배치={}] LLM 호출 예외, 배치 스킵 (ptProjectId={}): {}",
                             batchNm, pId, e.getMessage());
                     return null;
                 }
             }));
         }
 
-        // ── 병렬 배치 결과 수집 + parseAndApplyStage2cResponse 반복 적용 ────────
+        // ── 요구사항 배치 결과 수집 ─────────────────────────────────────────────
         java.util.Set<String> validEvalCriteriaIds = new java.util.HashSet<>();
         if (evalCriteria != null)
             for (ProposalVO.EvalCriteriaVO ec : evalCriteria)
@@ -2131,24 +2180,36 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             try {
                 String resp = batchFutures.get(i).get(PT_QUERY_TIMEOUT_SEC + 30L, java.util.concurrent.TimeUnit.SECONDS);
                 if (CommonUtil.isNotEmpty(resp)) {
-                    parseAndApplyStage2cResponse(tocList, resp, ptProjectId, validEvalCriteriaIds, parentTocId, parentSectionNm);
+                    parseAndApplyStage2cResponse(tocList, resp, ptProjectId, validEvalCriteriaIds,
+                            parentTocId, parentSectionNm, requirementBatchNodes.get(i));
                     batchSuccess++;
                 } else {
                     batchFail++;
                 }
             } catch (Exception e) {
-                logger.warn("[PT Stage2-C][배치={}] 결과 수집 실패 (ptProjectId={}): {}",
+                logger.warn("[PT Stage2-C][요구사항][배치={}] 결과 수집 실패 (ptProjectId={}): {}",
                         parentSectionNm, ptProjectId, e.getMessage());
                 batchFail++;
             }
         }
-        logger.info("[PT Stage2-C] 전체 배치 완료 — 성공:{}개, 실패/스킵:{}개, 소요시간:{}ms (ptProjectId={})",
+        logger.info("[PT Stage2-C][요구사항] 전체 배치 완료 — 성공:{}개, 실패/스킵:{}개, 소요시간:{}ms (ptProjectId={})",
                 batchSuccess, batchFail, System.currentTimeMillis() - s2cStart, ptProjectId);
+
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"strategy_toc\"}");
+        runS2cStrategyBatches(ptProjectId, modelId, agentId, tocList, tocPipelineTypes,
+                evalCriteria, validEvalCriteriaIds, tocIdToSectionNm, currentGenerationTargetTocIds);
+
+        reconcileExistingGeneratedTocs(tocList, existingGeneratedTocs,
+                currentGenerationTargetTocIds, ptProjectId);
+        applyMandatoryRequirementFallback(tocList, requirements, childReqMap, batchReqMap, ptProjectId);
+        applyTocEvalCriteriaFallback(tocList, evalCriteria, ptProjectId);
+        normalizeChildEvalCriteriaLinks(tocList, validEvalCriteriaIds, ptProjectId);
 
         // 배치 병렬 호출로 인한 동일 requirementId 중복 배정 제거 (대목차 순서 우선 유지)
         deduplicateS2cCoveredReqIds(tocList, ptProjectId);
 
         validateAndCleanTocReqIds(tocList, validReqIds, ptProjectId);
+        logMandatoryCoverage(tocList, requirements, ptProjectId);
         if (!tocList.isEmpty()) {
             warnUncoveredRequirements(tocList, validReqIds, ptProjectId);
         }
@@ -3564,15 +3625,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      */
     private static final class ReqCandidate {
         private final String requirementId;
-        private final String relationType;
         private final String relationStrength;
-        private final String reason;
 
-        private ReqCandidate(String requirementId, String relationType, String relationStrength, String reason) {
+        private ReqCandidate(String requirementId, String relationStrength) {
             this.requirementId = requirementId;
-            this.relationType = relationType;
             this.relationStrength = relationStrength;
-            this.reason = reason;
         }
     }
 
@@ -3773,8 +3830,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 String type = CommonUtil.nullToBlank(getStrOrNull(obj, "relationType")).toUpperCase();
                 if (!"DIRECT".equals(type) && !"SUPPORT".equals(type) && !"VALIDATION".equals(type)) continue;
                 if (deduped.containsKey(reqId)) continue; // 선도착 유지
-                deduped.put(reqId, new ReqCandidate(
-                        reqId, type, strength, getStrOrNull(obj, "reason")));
+                deduped.put(reqId, new ReqCandidate(reqId, strength));
             }
         }
 
@@ -3988,6 +4044,419 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     // ── S2C 배치 분할 관련 헬퍼 ──────────────────────────────────────────────────
 
+    private void collectBatchTargetTocIds(List<ProposalVO.TocVO> batchNodes,
+            String parentTocId, java.util.Set<String> targetTocIds) {
+        boolean hasDirectChild = batchNodes.stream()
+                .anyMatch(t -> parentTocId.equals(t.getParentTocId()));
+        for (ProposalVO.TocVO toc : batchNodes) {
+            if (!"001".equals(toc.getOriginTypeCd())) continue;
+            if (hasDirectChild && parentTocId.equals(toc.getTocId())) continue;
+            if (CommonUtil.isNotEmpty(toc.getTocId())) targetTocIds.add(toc.getTocId());
+        }
+    }
+
+    /**
+     * 현재 생성 대상인데 신규 002가 하나도 만들어지지 않은 노드만 기존 002로 복원한다.
+     * 저장 단계가 기존 002를 삭제하므로 복원 항목은 tocId=null인 INSERT 후보로 변환한다.
+     */
+    private void reconcileExistingGeneratedTocs(List<ProposalVO.TocVO> tocList,
+            List<ProposalVO.TocVO> existingGeneratedTocs,
+            java.util.Set<String> currentGenerationTargetTocIds,
+            String ptProjectId) {
+        java.util.Set<String> replacedTargetTocIds = tocList.stream()
+                .filter(t -> "002".equals(t.getOriginTypeCd()))
+                .map(ProposalVO.TocVO::getParentTocId)
+                .filter(CommonUtil::isNotEmpty)
+                .collect(java.util.stream.Collectors.toSet());
+
+        int restored = 0, replaced = 0, discarded = 0;
+        for (ProposalVO.TocVO existing : existingGeneratedTocs) {
+            String targetTocId = existing.getParentTocId();
+            if (!currentGenerationTargetTocIds.contains(targetTocId)) {
+                discarded++;
+                continue;
+            }
+            if (replacedTargetTocIds.contains(targetTocId)) {
+                replaced++;
+                continue;
+            }
+            tocList.add(copyGeneratedTocForInsert(existing));
+            restored++;
+        }
+        logger.info("[PT Stage2-C][RECONCILE] 기존 002 처리 — 복원:{}건, 교체폐기:{}건, 비대상폐기:{}건 (ptProjectId={})",
+                restored, replaced, discarded, ptProjectId);
+    }
+
+    private ProposalVO.TocVO copyGeneratedTocForInsert(ProposalVO.TocVO source) {
+        ProposalVO.TocVO copy = new ProposalVO.TocVO();
+        copy.setPtProjectId(source.getPtProjectId());
+        copy.setParentTocId(source.getParentTocId());
+        copy.setSectionNo(source.getSectionNo());
+        copy.setSectionNm(source.getSectionNm());
+        copy.setLinkedEvalCriteriaId(source.getLinkedEvalCriteriaId());
+        List<String> coveredReqIds = parseIdList(source.getCoveredReqIdsJson());
+        copy.setCoveredReqIds(coveredReqIds.isEmpty() ? null : coveredReqIds);
+        copy.setPlannedSlideCnt(source.getPlannedSlideCnt());
+        copy.setSortOrd(source.getSortOrd());
+        copy.setGuideContent(source.getGuideContent());
+        copy.setOriginTypeCd("002");
+        return copy;
+    }
+
+    /**
+     * LLM 결과에서 누락된 필수 요구사항만 기존 라우팅과 설명 가능한 문자열 비교로 보정한다.
+     */
+    private void applyMandatoryRequirementFallback(List<ProposalVO.TocVO> tocList,
+            List<ProposalVO.RequirementVO> requirements,
+            java.util.Map<String, List<ProposalVO.RequirementVO>> childReqMap,
+            java.util.Map<String, List<ProposalVO.RequirementVO>> batchReqMap,
+            String ptProjectId) {
+        if (requirements == null || requirements.isEmpty()) return;
+
+        java.util.Set<String> coveredReqIds = collectCoveredRequirementIds(tocList);
+        java.util.Map<String, ProposalVO.TocVO> tocById = tocList.stream()
+                .filter(t -> CommonUtil.isNotEmpty(t.getTocId()))
+                .collect(java.util.stream.Collectors.toMap(
+                        ProposalVO.TocVO::getTocId, t -> t, (a, b) -> a, java.util.LinkedHashMap::new));
+        List<ProposalVO.TocVO> eligibleTargets = findRequirementFallbackTargets(tocList);
+
+        for (ProposalVO.RequirementVO requirement : requirements) {
+            if (!"Y".equalsIgnoreCase(CommonUtil.nullToBlank(requirement.getMandatoryYn()).trim())) continue;
+            if (CommonUtil.isEmpty(requirement.getRequirementId())
+                    || coveredReqIds.contains(requirement.getRequirementId())) continue;
+
+            MandatoryTargetSelection selection = selectMandatoryTarget(
+                    requirement, childReqMap, batchReqMap, tocById, eligibleTargets, tocList);
+            if (selection == null || selection.target == null) {
+                logger.warn("[PT Stage2-C][REQ-FALLBACK] requirementId={}, reqNo={}, assignedTocId=null, assignedSubToc=null, reason=NO_TOC_CANDIDATE",
+                        requirement.getRequirementId(), requirement.getReqNo());
+                continue;
+            }
+
+            ProposalVO.TocVO subToc = findReusableOrRelatedSubToc(tocList, selection.target, requirement);
+            boolean created = false;
+            if (subToc == null) {
+                subToc = createRequirementFallbackSubToc(tocList, selection.target, requirement, ptProjectId);
+                tocList.add(subToc);
+                created = true;
+            }
+            List<String> ids = subToc.getCoveredReqIds() != null
+                    ? new java.util.ArrayList<>(subToc.getCoveredReqIds()) : new java.util.ArrayList<>();
+            if (!ids.contains(requirement.getRequirementId())) ids.add(requirement.getRequirementId());
+            subToc.setCoveredReqIds(ids);
+            coveredReqIds.add(requirement.getRequirementId());
+
+            if (created) {
+                logger.info("[PT Stage2-C][REQ-FALLBACK] requirementId={}, reqNo={}, assignedTocId={}, assignedSubToc={}, reason=NEW_SUBTOC_CREATED, routeReason={}",
+                        requirement.getRequirementId(), requirement.getReqNo(), selection.target.getTocId(),
+                        subToc.getSectionNm(), selection.reason);
+            } else {
+                logger.info("[PT Stage2-C][REQ-FALLBACK] requirementId={}, reqNo={}, assignedTocId={}, assignedSubToc={}, reason={}",
+                        requirement.getRequirementId(), requirement.getReqNo(), selection.target.getTocId(),
+                        subToc.getSectionNm(), selection.reason);
+            }
+        }
+    }
+
+    private java.util.Set<String> collectCoveredRequirementIds(List<ProposalVO.TocVO> tocList) {
+        java.util.Set<String> covered = new java.util.LinkedHashSet<>();
+        for (ProposalVO.TocVO toc : tocList) {
+            if (toc.getCoveredReqIds() != null) covered.addAll(toc.getCoveredReqIds());
+        }
+        return covered;
+    }
+
+    private List<ProposalVO.TocVO> findRequirementFallbackTargets(List<ProposalVO.TocVO> tocList) {
+        java.util.Set<String> parentIds = tocList.stream()
+                .filter(t -> "001".equals(t.getOriginTypeCd()) && CommonUtil.isNotEmpty(t.getParentTocId()))
+                .map(ProposalVO.TocVO::getParentTocId)
+                .collect(java.util.stream.Collectors.toSet());
+        return tocList.stream()
+                .filter(t -> "001".equals(t.getOriginTypeCd()))
+                .filter(t -> CommonUtil.isNotEmpty(t.getTocId()) && !parentIds.contains(t.getTocId()))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    private MandatoryTargetSelection selectMandatoryTarget(ProposalVO.RequirementVO requirement,
+            java.util.Map<String, List<ProposalVO.RequirementVO>> childReqMap,
+            java.util.Map<String, List<ProposalVO.RequirementVO>> batchReqMap,
+            java.util.Map<String, ProposalVO.TocVO> tocById,
+            List<ProposalVO.TocVO> eligibleTargets,
+            List<ProposalVO.TocVO> tocList) {
+
+        for (Map.Entry<String, List<ProposalVO.RequirementVO>> entry : childReqMap.entrySet()) {
+            if (containsRequirement(entry.getValue(), requirement.getRequirementId())) {
+                ProposalVO.TocVO direct = tocById.get(entry.getKey());
+                if (direct != null) return new MandatoryTargetSelection(direct, "DIRECT_CHILD_MATCH");
+            }
+        }
+
+        for (Map.Entry<String, List<ProposalVO.RequirementVO>> entry : batchReqMap.entrySet()) {
+            if (!containsRequirement(entry.getValue(), requirement.getRequirementId())) continue;
+            List<ProposalVO.TocVO> parentCandidates = tocList.stream()
+                    .filter(t -> "001".equals(t.getOriginTypeCd())
+                            && entry.getKey().equals(t.getParentTocId()))
+                    .collect(java.util.stream.Collectors.toList());
+            if (parentCandidates.isEmpty()) {
+                ProposalVO.TocVO singleLevelParent = tocById.get(entry.getKey());
+                if (singleLevelParent != null) parentCandidates.add(singleLevelParent);
+            }
+            ProposalVO.TocVO parentMatch = selectBestTocCandidate(requirement, parentCandidates);
+            if (parentMatch != null)
+                return new MandatoryTargetSelection(parentMatch, "PARENT_ROUTE_MATCH");
+        }
+
+        ProposalVO.TocVO semantic = selectBestTocCandidate(requirement, eligibleTargets);
+        return semantic != null ? new MandatoryTargetSelection(semantic, "SEMANTIC_FALLBACK") : null;
+    }
+
+    private boolean containsRequirement(List<ProposalVO.RequirementVO> candidates, String requirementId) {
+        if (candidates == null) return false;
+        for (ProposalVO.RequirementVO candidate : candidates) {
+            if (java.util.Objects.equals(requirementId, candidate.getRequirementId())) return true;
+        }
+        return false;
+    }
+
+    private ProposalVO.TocVO selectBestTocCandidate(
+            ProposalVO.RequirementVO requirement, List<ProposalVO.TocVO> candidates) {
+        ProposalVO.TocVO best = null;
+        TocSemanticScore bestScore = null;
+        for (ProposalVO.TocVO candidate : candidates) {
+            TocSemanticScore score = scoreRequirementAgainstToc(requirement, candidate);
+            if (best == null || score.compareTo(bestScore) > 0) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    private ProposalVO.TocVO findReusableOrRelatedSubToc(List<ProposalVO.TocVO> tocList,
+            ProposalVO.TocVO target, ProposalVO.RequirementVO requirement) {
+        List<ProposalVO.TocVO> children = tocList.stream()
+                .filter(t -> "002".equals(t.getOriginTypeCd())
+                        && target.getTocId().equals(t.getParentTocId()))
+                .collect(java.util.stream.Collectors.toList());
+        String fallbackTitleKey = normalizeTocMatchKey(requirement.getReqContent());
+        for (ProposalVO.TocVO child : children) {
+            if (fallbackTitleKey.equals(normalizeTocMatchKey(child.getSectionNm()))) return child;
+        }
+
+        ProposalVO.TocVO best = null;
+        TocSemanticScore bestScore = null;
+        for (ProposalVO.TocVO child : children) {
+            TocSemanticScore score = scoreRequirementAgainstToc(requirement, child);
+            if (best == null || score.compareTo(bestScore) > 0) {
+                best = child;
+                bestScore = score;
+            }
+        }
+        return bestScore != null && !bestScore.isZero() ? best : null;
+    }
+
+    private ProposalVO.TocVO createRequirementFallbackSubToc(List<ProposalVO.TocVO> tocList,
+            ProposalVO.TocVO target, ProposalVO.RequirementVO requirement, String ptProjectId) {
+        String sectionNm = trimToNull(requirement.getReqContent());
+        if (sectionNm == null) sectionNm = trimToNull(requirement.getReqDetailTxt());
+        if (sectionNm == null) sectionNm = trimToNull(requirement.getReqCategoryTxt());
+        if (sectionNm == null) sectionNm = trimToNull(requirement.getReqNo());
+        if (sectionNm == null) sectionNm = requirement.getRequirementId();
+
+        int nextSortOrd = tocList.stream()
+                .filter(t -> "002".equals(t.getOriginTypeCd())
+                        && target.getTocId().equals(t.getParentTocId()))
+                .map(ProposalVO.TocVO::getSortOrd)
+                .filter(java.util.Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(0) + 1;
+
+        ProposalVO.TocVO subToc = new ProposalVO.TocVO();
+        subToc.setPtProjectId(ptProjectId);
+        subToc.setParentTocId(target.getTocId());
+        subToc.setSectionNm(sectionNm);
+        subToc.setCoveredReqIds(new java.util.ArrayList<>());
+        subToc.setPlannedSlideCnt(1);
+        subToc.setSortOrd(nextSortOrd);
+        subToc.setOriginTypeCd("002");
+        return subToc;
+    }
+
+    private TocSemanticScore scoreRequirementAgainstToc(
+            ProposalVO.RequirementVO requirement, ProposalVO.TocVO toc) {
+        String categoryKey = normalizeTocMatchKey(requirement.getReqCategoryTxt());
+        String titleKey = normalizeTocMatchKey(toc.getSectionNm());
+        int categoryExact = CommonUtil.isNotEmpty(categoryKey) && categoryKey.equals(titleKey) ? 1 : 0;
+
+        java.util.Set<String> requirementTokens = tokenizeSemanticText(
+                CommonUtil.nullToBlank(requirement.getReqCategoryTxt()) + " "
+                + CommonUtil.nullToBlank(requirement.getReqContent()) + " "
+                + CommonUtil.nullToBlank(requirement.getReqDetailTxt()));
+        java.util.Set<String> tocTokens = tokenizeSemanticText(
+                CommonUtil.nullToBlank(toc.getSectionNm()) + " "
+                + CommonUtil.nullToBlank(toc.getGuideContent()));
+        java.util.Set<String> overlap = new java.util.HashSet<>(requirementTokens);
+        overlap.retainAll(tocTokens);
+
+        String[] requirementFields = {
+                requirement.getReqCategoryTxt(), requirement.getReqContent(), requirement.getReqDetailTxt()
+        };
+        String[] tocFields = { toc.getSectionNm(), toc.getGuideContent() };
+        int containmentCount = 0;
+        for (String reqField : requirementFields) {
+            String reqKey = normalizeTocMatchKey(reqField);
+            if (reqKey.length() < 2) continue;
+            for (String tocField : tocFields) {
+                String tocKey = normalizeTocMatchKey(tocField);
+                if (tocKey.length() < 2) continue;
+                if (reqKey.contains(tocKey) || tocKey.contains(reqKey)) containmentCount++;
+            }
+        }
+        return new TocSemanticScore(categoryExact, overlap.size(), containmentCount);
+    }
+
+    private java.util.Set<String> tokenizeSemanticText(String text) {
+        java.util.Set<String> tokens = new java.util.LinkedHashSet<>();
+        if (CommonUtil.isEmpty(text)) return tokens;
+        for (String token : text.toLowerCase(java.util.Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
+            if (token.length() >= 2) tokens.add(token);
+        }
+        return tokens;
+    }
+
+    private static final class MandatoryTargetSelection {
+        private final ProposalVO.TocVO target;
+        private final String reason;
+
+        private MandatoryTargetSelection(ProposalVO.TocVO target, String reason) {
+            this.target = target;
+            this.reason = reason;
+        }
+    }
+
+    private static final class TocSemanticScore implements Comparable<TocSemanticScore> {
+        private final int categoryExact;
+        private final int tokenOverlap;
+        private final int containmentCount;
+
+        private TocSemanticScore(int categoryExact, int tokenOverlap, int containmentCount) {
+            this.categoryExact = categoryExact;
+            this.tokenOverlap = tokenOverlap;
+            this.containmentCount = containmentCount;
+        }
+
+        @Override
+        public int compareTo(TocSemanticScore other) {
+            if (other == null) return 1;
+            int compared = Integer.compare(categoryExact, other.categoryExact);
+            if (compared != 0) return compared;
+            compared = Integer.compare(tokenOverlap, other.tokenOverlap);
+            if (compared != 0) return compared;
+            return Integer.compare(containmentCount, other.containmentCount);
+        }
+
+        private boolean isZero() {
+            return categoryExact == 0 && tokenOverlap == 0 && containmentCount == 0;
+        }
+    }
+
+    private void applyTocEvalCriteriaFallback(List<ProposalVO.TocVO> tocList,
+            List<ProposalVO.EvalCriteriaVO> evalCriteria, String ptProjectId) {
+        if (evalCriteria == null || evalCriteria.isEmpty()) return;
+        for (ProposalVO.TocVO toc : tocList) {
+            if (!"001".equals(toc.getOriginTypeCd())
+                    || CommonUtil.isNotEmpty(toc.getLinkedEvalCriteriaId())
+                    || CommonUtil.isEmpty(toc.getSectionNm())) continue;
+
+            java.util.Set<String> exactCandidates = evalCriteria.stream()
+                    .filter(ec -> CommonUtil.isNotEmpty(ec.getEvalCriteriaId())
+                            && CommonUtil.isNotEmpty(ec.getEvalItemNm())
+                            && toc.getSectionNm().trim().equals(ec.getEvalItemNm().trim()))
+                    .map(ProposalVO.EvalCriteriaVO::getEvalCriteriaId)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            if (applyUniqueEvalCandidate(toc, exactCandidates, "EXACT", ptProjectId)) continue;
+            if (exactCandidates.size() > 1) continue;
+
+            String tocKey = normalizeTocMatchKey(toc.getSectionNm());
+            if (CommonUtil.isEmpty(tocKey)) continue;
+            java.util.Set<String> normalizedCandidates = evalCriteria.stream()
+                    .filter(ec -> CommonUtil.isNotEmpty(ec.getEvalCriteriaId())
+                            && CommonUtil.isNotEmpty(ec.getEvalItemNm())
+                            && tocKey.equals(normalizeTocMatchKey(ec.getEvalItemNm())))
+                    .map(ProposalVO.EvalCriteriaVO::getEvalCriteriaId)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            applyUniqueEvalCandidate(toc, normalizedCandidates, "NORMALIZED", ptProjectId);
+        }
+    }
+
+    private boolean applyUniqueEvalCandidate(ProposalVO.TocVO toc,
+            java.util.Set<String> candidates, String matchType, String ptProjectId) {
+        if (candidates.size() == 1) {
+            String evalCriteriaId = candidates.iterator().next();
+            toc.setLinkedEvalCriteriaId(evalCriteriaId);
+            logger.info("[PT Stage2-C][EVAL-FALLBACK] tocId={}, title={}, evalCriteriaId={}, matchType={} (ptProjectId={})",
+                    toc.getTocId(), toc.getSectionNm(), evalCriteriaId, matchType, ptProjectId);
+            return true;
+        }
+        if (candidates.size() > 1) {
+            logger.warn("[PT Stage2-C][EVAL-FALLBACK] tocId={}, title={}, skipped=true, reason=MULTIPLE_CANDIDATES, candidates={} (ptProjectId={})",
+                    toc.getTocId(), toc.getSectionNm(), candidates, ptProjectId);
+        }
+        return false;
+    }
+
+    private void normalizeChildEvalCriteriaLinks(List<ProposalVO.TocVO> tocList,
+            java.util.Set<String> validEvalCriteriaIds, String ptProjectId) {
+        java.util.Map<String, ProposalVO.TocVO> parentById = tocList.stream()
+                .filter(t -> "001".equals(t.getOriginTypeCd()) && CommonUtil.isNotEmpty(t.getTocId()))
+                .collect(java.util.stream.Collectors.toMap(
+                        ProposalVO.TocVO::getTocId, t -> t, (a, b) -> a, java.util.LinkedHashMap::new));
+        for (ProposalVO.TocVO child : tocList) {
+            if (!"002".equals(child.getOriginTypeCd())
+                    || CommonUtil.isEmpty(child.getLinkedEvalCriteriaId())) continue;
+            if (validEvalCriteriaIds == null
+                    || !validEvalCriteriaIds.contains(child.getLinkedEvalCriteriaId())) {
+                logger.warn("[PT Stage2-C][EVAL-NORMALIZE] child='{}' invalid evalCriteriaId={} → null (ptProjectId={})",
+                        child.getSectionNm(), child.getLinkedEvalCriteriaId(), ptProjectId);
+                child.setLinkedEvalCriteriaId(null);
+                continue;
+            }
+            ProposalVO.TocVO parent = parentById.get(child.getParentTocId());
+            if (parent != null && CommonUtil.isNotEmpty(parent.getLinkedEvalCriteriaId())
+                    && parent.getLinkedEvalCriteriaId().equals(child.getLinkedEvalCriteriaId())) {
+                logger.info("[PT Stage2-C][EVAL-NORMALIZE] parentTocId={}, child='{}', evalCriteriaId={} → null (ptProjectId={})",
+                        parent.getTocId(), child.getSectionNm(), child.getLinkedEvalCriteriaId(), ptProjectId);
+                child.setLinkedEvalCriteriaId(null);
+            }
+        }
+    }
+
+    private void logMandatoryCoverage(List<ProposalVO.TocVO> tocList,
+            List<ProposalVO.RequirementVO> requirements, String ptProjectId) {
+        java.util.Map<String, Integer> coverageCounts = new java.util.HashMap<>();
+        for (ProposalVO.TocVO toc : tocList) {
+            if (toc.getCoveredReqIds() == null) continue;
+            for (String reqId : toc.getCoveredReqIds())
+                coverageCounts.merge(reqId, 1, Integer::sum);
+        }
+        List<String> uncovered = new java.util.ArrayList<>();
+        List<String> duplicated = new java.util.ArrayList<>();
+        for (ProposalVO.RequirementVO requirement :
+                (requirements != null ? requirements : java.util.Collections.<ProposalVO.RequirementVO>emptyList())) {
+            if (!"Y".equalsIgnoreCase(CommonUtil.nullToBlank(requirement.getMandatoryYn()).trim())
+                    || CommonUtil.isEmpty(requirement.getRequirementId())) continue;
+            int count = coverageCounts.getOrDefault(requirement.getRequirementId(), 0);
+            if (count == 0) uncovered.add(requirement.getRequirementId());
+            if (count > 1) duplicated.add(requirement.getRequirementId());
+        }
+        logger.info("[PT Stage2-C][REQ-FALLBACK] 최종 필수요구사항 검사 — uncoveredCount={}, duplicateCount={}, uncovered={}, duplicated={} (ptProjectId={})",
+                uncovered.size(), duplicated.size(), uncovered, duplicated, ptProjectId);
+        if (!uncovered.isEmpty() || !duplicated.isEmpty()) {
+            throw new IllegalStateException("Stage2-C 필수요구사항 coverage 불변조건 위반: uncovered="
+                    + uncovered.size() + ", duplicated=" + duplicated.size());
+        }
+    }
+
     /**
      * 배치 병렬 호출로 인한 동일 requirementId 중복 배정을 제거한다.
      * - 002(세부목차) 항목을 tocList 순서대로 순회 (대목차 SORT_ORD 순 보장 — selectTocList 반환순 기준)
@@ -4025,12 +4494,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * - 어느 대목차에도 매칭 안 된 요구사항은 unmatchedReqsOut에 수집
      *
      * @param unmatchedReqsOut (out) 미매칭 요구사항 수집 리스트 (호출 전 비어있어야 함)
+     * @param childReqMapOut (out) 직계 소분류 tocId별 직접 매칭 요구사항
      * @return parentTocId → 매칭된 RequirementVO 리스트 (대목차 순서 유지)
      */
     private java.util.Map<String, List<ProposalVO.RequirementVO>> routeRequirementsToTocGroups(
             List<ProposalVO.TocVO> tocList,
             List<ProposalVO.RequirementVO> requirements,
-            List<ProposalVO.RequirementVO> unmatchedReqsOut) {
+            List<ProposalVO.RequirementVO> unmatchedReqsOut,
+            java.util.Map<String, List<ProposalVO.RequirementVO>> childReqMapOut) {
 
         // 1. 대목차 식별 (PARENT_TOC_ID 없는 노드)
         List<ProposalVO.TocVO> parentTocs = new java.util.ArrayList<>();
@@ -4042,46 +4513,59 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
         }
         for (ProposalVO.TocVO t : (tocList != null ? tocList : java.util.Collections.<ProposalVO.TocVO>emptyList())) {
-            if (CommonUtil.isNotEmpty(t.getParentTocId()) && childrenByParent.containsKey(t.getParentTocId()))
+            if ("001".equals(t.getOriginTypeCd())
+                    && CommonUtil.isNotEmpty(t.getParentTocId())
+                    && childrenByParent.containsKey(t.getParentTocId()))
                 childrenByParent.get(t.getParentTocId()).add(t);
         }
 
         // 2. 정규화 키 → 대목차ID 역색인 구성
         //    대목차 자신의 SECTION_NM + 직계 소분류 SECTION_NM 모두 포함
         java.util.Map<String, String> normalizedKeyToParentId = new java.util.LinkedHashMap<>();
+        java.util.Map<String, String> normalizedKeyToChildTocId = new java.util.LinkedHashMap<>();
         for (ProposalVO.TocVO parent : parentTocs) {
-            String parentKey = normalizeTocSectionNm(parent.getSectionNm());
+            String parentKey = normalizeTocMatchKey(parent.getSectionNm());
             if (CommonUtil.isNotEmpty(parentKey))
                 normalizedKeyToParentId.putIfAbsent(parentKey, parent.getTocId());
-            for (ProposalVO.TocVO child : childrenByParent.getOrDefault(parent.getTocId(), java.util.Collections.emptyList())) {
-                String childKey = normalizeTocSectionNm(child.getSectionNm());
-                if (CommonUtil.isNotEmpty(childKey))
+            List<ProposalVO.TocVO> directChildren =
+                    childrenByParent.getOrDefault(parent.getTocId(), java.util.Collections.emptyList());
+            if (directChildren.isEmpty() && CommonUtil.isNotEmpty(parentKey)) {
+                // 단층 목차는 대목차 자신이 실제 생성 대상 노드다.
+                normalizedKeyToChildTocId.putIfAbsent(parentKey, parent.getTocId());
+                childReqMapOut.putIfAbsent(parent.getTocId(), new java.util.ArrayList<>());
+            }
+            for (ProposalVO.TocVO child : directChildren) {
+                String childKey = normalizeTocMatchKey(child.getSectionNm());
+                if (CommonUtil.isNotEmpty(childKey)) {
                     normalizedKeyToParentId.putIfAbsent(childKey, parent.getTocId());
+                    // 동일 제목이 다른 대목차에 중복되어도 부모 라우팅과 소분류 직접 매칭이 어긋나지 않게 한다.
+                    if (parent.getTocId().equals(normalizedKeyToParentId.get(childKey)))
+                        normalizedKeyToChildTocId.putIfAbsent(childKey, child.getTocId());
+                }
+                if (CommonUtil.isNotEmpty(child.getTocId()))
+                    childReqMapOut.putIfAbsent(child.getTocId(), new java.util.ArrayList<>());
             }
         }
 
-        // 3. alias 테이블 (key: 정규화 후 REQ_CATEGORY_TXT, value: 매칭에 쓸 정규화 TOC 키)
-        // REQ_CATEGORY_TXT도 normalizeTocSectionNm과 동일 정규화("요구사항" 제거 + 공백 제거) 적용하므로
-        // 대부분의 케이스는 정규화 후 직접 매칭됨. alias는 TOC 오타 등 진짜 불일치만 처리.
-        java.util.Map<String, String> categoryAlias = new java.util.HashMap<>();
-        categoryAlias.put("제약사항", "제약사향");  // TOC 데이터 오타("제약사향") 흡수
-
-        // 4. 결과 맵 초기화 (대목차 순서 유지)
+        // 3. 결과 맵 초기화 (대목차 순서 유지)
         java.util.Map<String, List<ProposalVO.RequirementVO>> result = new java.util.LinkedHashMap<>();
         for (ProposalVO.TocVO parent : parentTocs)
             result.put(parent.getTocId(), new java.util.ArrayList<>());
 
-        // 5. 요구사항별 라우팅
+        // 4. 요구사항별 라우팅
         // REQ_CATEGORY_TXT에 TOC 쪽과 동일한 정규화("요구사항" 접미사 제거 + 공백 제거)를 적용해야
         // "성능 요구사항" → "성능", "프로젝트 관리 요구사항" → "프로젝트관리" 등이 올바르게 매칭됨
         if (requirements != null) {
             for (ProposalVO.RequirementVO req : requirements) {
                 String rawCategory = req.getReqCategoryTxt() != null ? req.getReqCategoryTxt().trim() : "";
                 String normalizedCategory = normalizeTocSectionNm(rawCategory); // TOC 쪽과 동일 정규화
-                String tocKey = categoryAlias.getOrDefault(normalizedCategory, normalizedCategory);
+                String tocKey = normalizeTocMatchKey(rawCategory);
                 String parentTocId = normalizedKeyToParentId.get(tocKey);
                 if (parentTocId != null) {
                     result.get(parentTocId).add(req);
+                    String childTocId = normalizedKeyToChildTocId.get(tocKey);
+                    if (childTocId != null)
+                        childReqMapOut.computeIfAbsent(childTocId, k -> new java.util.ArrayList<>()).add(req);
                 } else {
                     unmatchedReqsOut.add(req);
                     logger.debug("[PT Stage2-C] 요구사항 라우팅 미매칭 — reqNo={}, category='{}' (normalized='{}', tocKey='{}')",
@@ -4090,7 +4574,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        // 6. 로깅
+        // 5. 로깅
         int totalMatched = result.values().stream().mapToInt(List::size).sum();
         logger.info("[PT Stage2-C] 요구사항 라우팅 완료 — 매칭:{}건, 미매칭:{}건 (대목차:{}개)",
                 totalMatched, unmatchedReqsOut.size(), parentTocs.size());
@@ -4105,6 +4589,113 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                             .collect(java.util.stream.Collectors.joining(", ")));
         }
         return result;
+    }
+
+    /**
+     * 직계 소분류 단위로 세부목차 생성 역할을 판별한다.
+     * 요구사항 직접 매칭이 최우선이며, 미매칭 노드는 평가항목 → 작성지침 → 제목 순으로 판별한다.
+     */
+    private java.util.Map<String, TocPipelineType> classifyTocNodes(
+            List<ProposalVO.TocVO> tocList,
+            java.util.Map<String, List<ProposalVO.RequirementVO>> childReqMap,
+            List<ProposalVO.EvalCriteriaVO> evalCriteria) {
+
+        java.util.Map<String, ProposalVO.EvalCriteriaVO> evalById = new java.util.HashMap<>();
+        if (evalCriteria != null) {
+            for (ProposalVO.EvalCriteriaVO ec : evalCriteria) {
+                if (CommonUtil.isNotEmpty(ec.getEvalCriteriaId()))
+                    evalById.put(ec.getEvalCriteriaId(), ec);
+            }
+        }
+
+        java.util.Set<String> parentIdsWithChildren = new java.util.HashSet<>();
+        if (tocList != null) {
+            for (ProposalVO.TocVO t : tocList) {
+                if ("001".equals(t.getOriginTypeCd()) && CommonUtil.isNotEmpty(t.getParentTocId()))
+                    parentIdsWithChildren.add(t.getParentTocId());
+            }
+        }
+
+        java.util.Map<String, TocPipelineType> result = new java.util.LinkedHashMap<>();
+        if (tocList == null) return result;
+        for (ProposalVO.TocVO toc : tocList) {
+            if (!"001".equals(toc.getOriginTypeCd())) continue;
+            boolean directChild = CommonUtil.isNotEmpty(toc.getParentTocId());
+            boolean singleLevelParent = CommonUtil.isEmpty(toc.getParentTocId())
+                    && !parentIdsWithChildren.contains(toc.getTocId());
+            if (!directChild && !singleLevelParent) continue;
+
+            List<ProposalVO.RequirementVO> directReqs =
+                    childReqMap.getOrDefault(toc.getTocId(), java.util.Collections.emptyList());
+            TocPipelineType type;
+            String decidedBy;
+            if (!directReqs.isEmpty()) {
+                type = TocPipelineType.REQUIREMENT;
+                decidedBy = "requirement";
+            } else {
+                ProposalVO.EvalCriteriaVO linkedEval = evalById.get(toc.getLinkedEvalCriteriaId());
+                type = linkedEval != null ? classifyTocShortSignal(linkedEval.getEvalItemNm()) : null;
+                decidedBy = "evalItemNm";
+                if (type == null) {
+                    type = linkedEval != null ? classifyTocLongSignal(linkedEval.getEvalIntent()) : null;
+                    decidedBy = "evalIntent";
+                }
+                if (type == null) {
+                    type = classifyTocLongSignal(toc.getGuideContent());
+                    decidedBy = "guideContent";
+                }
+                if (type == null) {
+                    type = classifyTocShortSignal(normalizeTocSectionNm(toc.getSectionNm()));
+                    decidedBy = "sectionNm";
+                }
+                if (type == null) {
+                    type = TocPipelineType.UNCLASSIFIED;
+                    decidedBy = "none";
+                }
+            }
+            result.put(toc.getTocId(), type);
+            logger.info("[PT Stage2-C][역할판별] tocId={}, title='{}', type={}, decidedBy={}, directReqCount={}",
+                    toc.getTocId(), toc.getSectionNm(), type, decidedBy, directReqs.size());
+        }
+        return result;
+    }
+
+    /** 제목·평가항목명: 관리·운영·기업/증빙 성격을 강하게 차단한 뒤 전략 화이트리스트를 적용한다. */
+    private TocPipelineType classifyTocShortSignal(String text) {
+        if (CommonUtil.isEmpty(text)) return null;
+        String normalized = text.replaceAll("\\s+", "");
+
+        // "관리"를 단순 contains로 검사하면 "통합관리 추진전략"까지 오차단되므로 단독 제목만 차단한다.
+        if ("관리".equals(normalized)) return TocPipelineType.UNCLASSIFIED;
+        for (String keyword : TOC_NON_STRATEGY_KEYWORDS) {
+            if (normalized.contains(keyword.replaceAll("\\s+", "")))
+                return TocPipelineType.UNCLASSIFIED;
+        }
+        for (String keyword : TOC_STRATEGY_KEYWORDS) {
+            if (normalized.contains(keyword.replaceAll("\\s+", "")))
+                return TocPipelineType.STRATEGY;
+        }
+        return null;
+    }
+
+    /** 평가의도·작성지침: 한 단어만으로 차단하지 않고 매칭된 키워드 종류 수를 비교한다. */
+    private TocPipelineType classifyTocLongSignal(String text) {
+        if (CommonUtil.isEmpty(text)) return null;
+        String normalized = text.replaceAll("\\s+", "");
+        java.util.Set<String> strategyMatches = new java.util.LinkedHashSet<>();
+        java.util.Set<String> nonStrategyMatches = new java.util.LinkedHashSet<>();
+        for (String keyword : TOC_STRATEGY_KEYWORDS) {
+            if (normalized.contains(keyword.replaceAll("\\s+", "")))
+                strategyMatches.add(keyword);
+        }
+        for (String keyword : TOC_NON_STRATEGY_KEYWORDS) {
+            if (normalized.contains(keyword.replaceAll("\\s+", "")))
+                nonStrategyMatches.add(keyword);
+        }
+
+        if (strategyMatches.size() > nonStrategyMatches.size()) return TocPipelineType.STRATEGY;
+        if (nonStrategyMatches.size() > strategyMatches.size()) return TocPipelineType.UNCLASSIFIED;
+        return null;
     }
 
     private String trimToNull(String s) {
@@ -4158,6 +4749,12 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return s.replaceAll("\\s+", "");
     }
 
+    /** 기존 TOC 오타 alias를 포함한 공통 exact/normalized 매칭 키. */
+    private String normalizeTocMatchKey(String text) {
+        String normalized = normalizeTocSectionNm(text);
+        return "제약사항".equals(normalized) ? "제약사향" : normalized;
+    }
+
     /**
      * S2C 고정 프리픽스 조립 — 캐싱 구조 대비 분리.
      * promptContent(원칙·출력형식) + 평가기준 전체 목록. 모든 배치 호출에서 동일.
@@ -4182,14 +4779,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * 구조:
      * [고정] fixedPrefix (promptContent + 평가기준 전체)
      * [가변] 배치 목차 소분류 + 매칭 요구사항(전문, truncate 없음)
-     *        + 미매칭 요구사항(경량, 모든 배치 공통) + WinTheme(조건부, 공통)
+     *        + 미매칭 요구사항(경량, 모든 배치 공통)
      */
     private String buildStage2cBatchPrompt(
             String fixedPrefix,
             List<ProposalVO.TocVO> batchNodes,
             List<ProposalVO.RequirementVO> matchedRequirements,
             List<java.util.Map<String, Object>> unmatchedReqsLite,
-            List<java.util.Map<String, Object>> winThemeLite,
             String batchParentSectionNm) {
 
         // 배치 내 소분류만 추출 (대목차 자신은 leaf 아님)
@@ -4201,7 +4797,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         for (ProposalVO.TocVO t : batchNodes) {
             if (CommonUtil.isNotEmpty(t.getTocId()) && batchParentTocIds.contains(t.getTocId())) continue;
             java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("tocId", t.getTocId());
             m.put("title", t.getSectionNm());
+            if (CommonUtil.isNotEmpty(t.getGuideContent()))
+                m.put("guideContent", t.getGuideContent());
             if (CommonUtil.isNotEmpty(t.getParentTocId())) {
                 batchNodes.stream().filter(p -> t.getParentTocId().equals(p.getTocId()))
                         .map(ProposalVO.TocVO::getSectionNm).findFirst()
@@ -4228,15 +4827,198 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             sb.append("\n※ 특정 대목차에 자동 배정되지 않은 요구사항입니다. 소분류 내용과 관련 있으면 coveredReqIds에 포함하세요.\n");
             sb.append(GSON.toJson(unmatchedReqsLite));
         }
-        if (!winThemeLite.isEmpty()) {
-            sb.append("\n\n## Win Theme 목록 (JSON)");
-            sb.append("\n※ 세부목차 생성 시 Win Theme의 핵심 메시지와 전략을 반영하세요.\n");
-            sb.append(GSON.toJson(winThemeLite));
+
+        logger.info("[PT Stage2-C][요구사항][배치={}] 프롬프트 구성 — 소분류:{}개, 매칭요구사항:{}건, 미매칭:{}건, 합계:{}자",
+                batchParentSectionNm, batchLeafList.size(), matchedReqFull.size(),
+                unmatchedReqsLite.size(), sb.length());
+        return sb.toString();
+    }
+
+    /**
+     * 전략형 소분류를 부모 단위로 묶어 TOC_STRATEGY 프롬프트로 병렬 생성한다.
+     * 프롬프트 미등록·개별 배치 실패는 요구사항 기반 생성 결과를 보존하기 위해 non-fatal로 처리한다.
+     */
+    private void runS2cStrategyBatches(String ptProjectId, String modelId, String agentId,
+            List<ProposalVO.TocVO> tocList,
+            java.util.Map<String, TocPipelineType> tocPipelineTypes,
+            List<ProposalVO.EvalCriteriaVO> evalCriteria,
+            java.util.Set<String> validEvalCriteriaIds,
+            java.util.Map<String, String> tocIdToSectionNm,
+            java.util.Set<String> currentGenerationTargetTocIds) {
+
+        java.util.Map<String, List<ProposalVO.TocVO>> strategyNodesByParent = new java.util.LinkedHashMap<>();
+        for (ProposalVO.TocVO toc : tocList) {
+            if (tocPipelineTypes.get(toc.getTocId()) != TocPipelineType.STRATEGY) continue;
+            currentGenerationTargetTocIds.add(toc.getTocId());
+            String parentTocId = CommonUtil.isNotEmpty(toc.getParentTocId())
+                    ? toc.getParentTocId() : toc.getTocId();
+            strategyNodesByParent.computeIfAbsent(parentTocId, k -> new java.util.ArrayList<>()).add(toc);
+        }
+        if (strategyNodesByParent.isEmpty()) {
+            logger.info("[PT Stage2-C][전략] 전략형 소분류 없음 — 파이프라인 스킵 (ptProjectId={})", ptProjectId);
+            return;
         }
 
-        logger.info("[PT Stage2-C][배치={}] 프롬프트 구성 — 소분류:{}개, 매칭요구사항:{}건, 미매칭:{}건, WinTheme:{}건, 합계:{}자",
-                batchParentSectionNm, batchLeafList.size(), matchedReqFull.size(),
-                unmatchedReqsLite.size(), winThemeLite.size(), sb.length());
+        String strategyPromptContent = null;
+        try {
+            strategyPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "TOC_STRATEGY");
+        } catch (Exception e) {
+            logger.warn("[PT Stage2-C][전략] TOC_STRATEGY 프롬프트 조회 실패, 전략 배치 스킵 (ptProjectId={}): {}",
+                    ptProjectId, e.getMessage());
+        }
+        if (CommonUtil.isEmpty(strategyPromptContent)) {
+            logger.warn("[PT Stage2-C][전략] TOC_STRATEGY 프롬프트 미등록, 전략 배치 스킵 (ptProjectId={})",
+                    ptProjectId);
+            return;
+        }
+
+        List<ProposalVO.ProblemDefinitionVO> problemDefinitions = java.util.Collections.emptyList();
+        List<ProposalVO.WinThemeVO> winThemes = java.util.Collections.emptyList();
+        try {
+            List<ProposalVO.ProblemDefinitionVO> selected = proposalDAO.selectProblemDefinitions(ptProjectId);
+            if (selected != null) problemDefinitions = selected;
+        } catch (Exception e) {
+            logger.warn("[PT Stage2-C][전략] Problem Definition 조회 실패, 빈 목록 사용 (ptProjectId={}): {}",
+                    ptProjectId, e.getMessage());
+        }
+        try {
+            List<ProposalVO.WinThemeVO> selected = proposalDAO.selectWinThemes(ptProjectId);
+            if (selected != null) winThemes = selected;
+        } catch (Exception e) {
+            logger.warn("[PT Stage2-C][전략] Win Theme 조회 실패, 빈 목록 사용 (ptProjectId={}): {}",
+                    ptProjectId, e.getMessage());
+        }
+
+        java.util.Map<String, ProposalVO.TocVO> tocById = new java.util.LinkedHashMap<>();
+        for (ProposalVO.TocVO toc : tocList)
+            if (CommonUtil.isNotEmpty(toc.getTocId())) tocById.put(toc.getTocId(), toc);
+
+        java.util.List<java.util.concurrent.Future<String>> futures = new java.util.ArrayList<>();
+        java.util.List<String> parentIds = new java.util.ArrayList<>();
+        java.util.List<List<ProposalVO.TocVO>> submittedNodes = new java.util.ArrayList<>();
+        for (Map.Entry<String, List<ProposalVO.TocVO>> entry : strategyNodesByParent.entrySet()) {
+            String parentTocId = entry.getKey();
+            List<ProposalVO.TocVO> strategyNodes = entry.getValue();
+            String parentSectionNm = tocIdToSectionNm.getOrDefault(parentTocId, parentTocId);
+            List<ProposalVO.EvalCriteriaVO> relatedEval =
+                    filterStrategyEvalCriteria(strategyNodes, tocById.get(parentTocId), evalCriteria);
+            final String prompt = buildTocStrategyPrompt(strategyPromptContent, strategyNodes,
+                    problemDefinitions, winThemes, relatedEval, parentSectionNm);
+            final String batchNm = parentSectionNm;
+            final String pId = ptProjectId;
+            parentIds.add(parentTocId);
+            submittedNodes.add(new java.util.ArrayList<>(strategyNodes));
+
+            logger.info("[PT Stage2-C][전략][배치={}] 대상 노드: {}", parentSectionNm,
+                    strategyNodes.stream().map(t -> t.getTocId() + ":" + t.getSectionNm())
+                            .collect(java.util.stream.Collectors.joining(", ")));
+            futures.add(STAGE_S2C_BATCH_EXECUTOR.submit(() -> {
+                logger.info("[PT Stage2-C][전략][배치={}] LLM 호출 시작 — 프롬프트:{}자 (ptProjectId={})",
+                        batchNm, prompt.length(), pId);
+                try {
+                    return callLlmWithRetry(prompt, modelId, agentId,
+                            "[PT Stage2-C][전략][배치=" + batchNm + "]");
+                } catch (Exception e) {
+                    logger.warn("[PT Stage2-C][전략][배치={}] LLM 호출 예외, 배치 스킵 (ptProjectId={}): {}",
+                            batchNm, pId, e.getMessage());
+                    return null;
+                }
+            }));
+        }
+
+        int success = 0, fail = 0;
+        for (int i = 0; i < futures.size(); i++) {
+            String parentTocId = parentIds.get(i);
+            String parentSectionNm = tocIdToSectionNm.getOrDefault(parentTocId, parentTocId);
+            try {
+                String response = futures.get(i).get(
+                        PT_QUERY_TIMEOUT_SEC + 30L, java.util.concurrent.TimeUnit.SECONDS);
+                if (CommonUtil.isNotEmpty(response)) {
+                    parseAndApplyStage2cResponse(tocList, response, ptProjectId, validEvalCriteriaIds,
+                            parentTocId, parentSectionNm, submittedNodes.get(i));
+                    success++;
+                } else {
+                    fail++;
+                }
+            } catch (Exception e) {
+                logger.warn("[PT Stage2-C][전략][배치={}] 결과 수집 실패 (ptProjectId={}): {}",
+                        parentSectionNm, ptProjectId, e.getMessage());
+                fail++;
+            }
+        }
+        logger.info("[PT Stage2-C][전략] 전체 배치 완료 — 성공:{}개, 실패/스킵:{}개 (ptProjectId={})",
+                success, fail, ptProjectId);
+    }
+
+    private List<ProposalVO.EvalCriteriaVO> filterStrategyEvalCriteria(
+            List<ProposalVO.TocVO> strategyNodes,
+            ProposalVO.TocVO parentNode,
+            List<ProposalVO.EvalCriteriaVO> evalCriteria) {
+        List<ProposalVO.EvalCriteriaVO> all = evalCriteria != null
+                ? evalCriteria : java.util.Collections.emptyList();
+        java.util.Set<String> linkedIds = new java.util.LinkedHashSet<>();
+        for (ProposalVO.TocVO toc : strategyNodes)
+            if (CommonUtil.isNotEmpty(toc.getLinkedEvalCriteriaId()))
+                linkedIds.add(toc.getLinkedEvalCriteriaId());
+        if (parentNode != null && CommonUtil.isNotEmpty(parentNode.getLinkedEvalCriteriaId()))
+            linkedIds.add(parentNode.getLinkedEvalCriteriaId());
+
+        List<ProposalVO.EvalCriteriaVO> filtered = all.stream()
+                .filter(ec -> linkedIds.contains(ec.getEvalCriteriaId()))
+                .collect(java.util.stream.Collectors.toList());
+        return filtered.isEmpty() ? all : filtered;
+    }
+
+    private String buildTocStrategyPrompt(String promptContent,
+            List<ProposalVO.TocVO> strategyNodes,
+            List<ProposalVO.ProblemDefinitionVO> problemDefinitions,
+            List<ProposalVO.WinThemeVO> winThemes,
+            List<ProposalVO.EvalCriteriaVO> relatedEvalCriteria,
+            String batchParentSectionNm) {
+
+        List<java.util.Map<String, Object>> tocInput = new java.util.ArrayList<>();
+        for (ProposalVO.TocVO toc : strategyNodes) {
+            java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("tocId", toc.getTocId());
+            item.put("title", toc.getSectionNm());
+            if (CommonUtil.isNotEmpty(toc.getGuideContent()))
+                item.put("guideContent", toc.getGuideContent());
+            tocInput.add(item);
+        }
+
+        List<java.util.Map<String, Object>> evalInput = new java.util.ArrayList<>();
+        for (ProposalVO.EvalCriteriaVO ec : relatedEvalCriteria) {
+            java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("evalCriteriaId", ec.getEvalCriteriaId());
+            item.put("evalItemNm", ec.getEvalItemNm());
+            item.put("score", ec.getScore());
+            item.put("evalIntent", ec.getEvalIntent());
+            item.put("highScoreCondition", ec.getHighScoreCondition());
+            item.put("differentiationDirection", ec.getDifferentiationDirection());
+            evalInput.add(item);
+        }
+
+        List<java.util.Map<String, Object>> winThemeInput =
+                (winThemes != null ? winThemes : java.util.Collections.<ProposalVO.WinThemeVO>emptyList())
+                .stream().map(this::toWinThemeUltraLite)
+                .collect(java.util.stream.Collectors.toList());
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(promptContent);
+        sb.append("\n\n## [배치] 전략형 TOC 목록 (JSON) — 대목차: ")
+                .append(batchParentSectionNm).append("\n");
+        sb.append(GSON.toJson(tocInput));
+        sb.append("\n\n## Problem Definition 목록 (JSON)\n");
+        sb.append(GSON.toJson(toStage2bProblemDefVOs(problemDefinitions)));
+        sb.append("\n\n## Win Theme 목록 (JSON)\n");
+        sb.append(GSON.toJson(winThemeInput));
+        sb.append("\n\n## 관련 평가기준 목록 (JSON)");
+        sb.append("\n※ linkedEvalCriteriaId에는 아래 evalCriteriaId만 사용하세요.");
+        sb.append(" 목록에 배치와 무관한 항목이 포함되어 있으면 억지로 연결하지 마세요.\n");
+        sb.append(GSON.toJson(evalInput));
+        sb.append("\n\n## 출력 식별 규칙");
+        sb.append("\n각 최상위 결과에 입력의 tocId를 그대로 반환하세요.");
+        sb.append(" title은 보조 확인값이며, tocId를 새로 만들거나 변형하지 마세요.");
         return sb.toString();
     }
 
@@ -4271,6 +5053,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * 응답 형식:
      * [
      *   {
+     *     "tocId": "PTT000001",
      *     "title": "소분류제목",
      *     "linkedEvalCriteriaId": "PTE000001",
      *     "subTocs": [
@@ -4286,38 +5069,49 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      */
     private void parseAndApplyStage2cResponse(List<ProposalVO.TocVO> tocList, String s2cResponse,
             String ptProjectId, java.util.Set<String> validEvalCriteriaIds,
-            String batchParentTocId, String batchParentSectionNm) {
+            String batchParentTocId, String batchParentSectionNm,
+            List<ProposalVO.TocVO> targetBatchNodes) {
         String json = stripJsonCodeBlock(s2cResponse);
         try {
             JsonArray arr = JsonParser.parseString(json).getAsJsonArray();
 
-            // sectionNm → TocVO 맵 구성 (이번 배치의 001 소분류만 포함 — 대목차·002·다른 배치 항목 제외)
-            // 키: sectionNm 공백 정규화 값, 값: TocVO
+            // 이번 배치 노드로만 id/title 맵을 구성해 다른 타입·배치의 노드를 덮어쓰지 않는다.
+            java.util.Map<String, ProposalVO.TocVO> idMap = new java.util.LinkedHashMap<>();
             java.util.Map<String, ProposalVO.TocVO> titleMap = new java.util.LinkedHashMap<>();
-            if (tocList != null) {
-                for (ProposalVO.TocVO t : tocList) {
-                    // 이번 배치 대목차(batchParentTocId)의 직접 자식 001 소분류만 포함
+            if (targetBatchNodes != null) {
+                boolean hasDirectChild = targetBatchNodes.stream()
+                        .anyMatch(t -> batchParentTocId.equals(t.getParentTocId()));
+                for (ProposalVO.TocVO t : targetBatchNodes) {
                     if (!"001".equals(t.getOriginTypeCd())) continue;
-                    if (!batchParentTocId.equals(t.getParentTocId())) continue;
+                    if (batchParentTocId.equals(t.getTocId()) && hasDirectChild) continue;
+                    if (!batchParentTocId.equals(t.getTocId())
+                            && !batchParentTocId.equals(t.getParentTocId())) continue;
+                    if (CommonUtil.isNotEmpty(t.getTocId())) idMap.put(t.getTocId(), t);
                     if (CommonUtil.isNotEmpty(t.getSectionNm()))
                         titleMap.put(normalizeTocSectionNm(t.getSectionNm()), t);
                 }
             }
-            logger.info("[PT Stage2-C][배치={}] 001 소분류 titleMap 구성: {}개 항목 (ptProjectId={})",
-                    batchParentSectionNm, titleMap.size(), ptProjectId);
+            logger.info("[PT Stage2-C][배치={}] 응답 매칭 맵 구성: id={}개, title={}개 (ptProjectId={})",
+                    batchParentSectionNm, idMap.size(), titleMap.size(), ptProjectId);
 
             int appliedParent = 0, appendedSubToc = 0, matchFail = 0, evalNullCount = 0;
             List<ProposalVO.TocVO> newSubTocs = new java.util.ArrayList<>();
 
             for (JsonElement el : arr) {
                 JsonObject obj = el.getAsJsonObject();
+                String responseTocId = getStrOrNull(obj, "tocId");
                 String title = getStrOrNull(obj, "title");
-                // 공백 정규화 후 매칭
                 String normalizedTitle = normalizeTocSectionNm(title);
-                ProposalVO.TocVO parentToc = titleMap.get(normalizedTitle);
+                ProposalVO.TocVO parentToc = CommonUtil.isNotEmpty(responseTocId)
+                        ? idMap.get(responseTocId) : null;
+                if (CommonUtil.isNotEmpty(responseTocId) && parentToc == null) {
+                    logger.warn("[PT Stage2-C][배치={}] 응답 tocId가 현재 배치에 없어 title 폴백 적용: tocId={}, title={}",
+                            batchParentSectionNm, responseTocId, title);
+                }
+                if (parentToc == null) parentToc = titleMap.get(normalizedTitle);
                 if (parentToc == null) {
-                    logger.warn("[PT Stage2-C][배치={}] 001 업데이트 스킵: title='{}' 매칭 실패 (정규화='{}', ptProjectId={})",
-                            batchParentSectionNm, title, normalizedTitle, ptProjectId);
+                    logger.warn("[PT Stage2-C][배치={}] 001 업데이트 스킵: tocId='{}', title='{}' 매칭 실패 (정규화='{}', ptProjectId={})",
+                            batchParentSectionNm, responseTocId, title, normalizedTitle, ptProjectId);
                     matchFail++;
                     continue;
                 }
@@ -4602,8 +5396,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         sendSseEvent(emitter, "connected", "{\"ptProjectId\":\"" + ptProjectId + "\"}");
 
-        final String userId = SessionUtil.getUserId();
-
         STAGE_D_EXECUTOR.execute(() -> {
             try {
                 // Stage2 완료 여부 — 문제정의 건수가 아니라 STAGE2_STATUS_CD=003 기준
@@ -4705,8 +5497,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         emitter.onError(e -> logger.warn("[PT D-0T] SSE error - ptProjectId={}, msg={}", ptProjectId, e.getMessage()));
 
         sendSseEvent(emitter, "connected", "{\"ptProjectId\":\"" + ptProjectId + "\"}");
-
-        final String userId = SessionUtil.getUserId();
 
         STAGE_D_EXECUTOR.execute(() -> {
             try {
@@ -8044,10 +8834,6 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * 출력 빌드 입력 지문(SHA-256 hex) 생성.
      * runExportBuild가 읽는 값만 포함 (프레임 이미지·maxStepNo·Stage2 상태 제외).
      */
-    private String buildExportInputFingerprint(String ptProjectId, String exportTypeCd) {
-        return buildExportInputFingerprint(ptProjectId, exportTypeCd, null);
-    }
-
     private String buildExportInputFingerprint(String ptProjectId, String exportTypeCd, String outputMode) {
         try {
             StringBuilder sb = new StringBuilder(4096);
@@ -9096,6 +9882,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         upd.setOutlineStatusCd("003");
         upd.setModifyUserId(SessionUtil.getUserId());
         proposalDAO.updateTocOutline(upd);
+    }
+
+    /**
+     * 콘텐츠 개요 일괄 확정 — CONTENT_OUTLINE_TXT가 있는 항목을 모두 003 처리
+     * @return 확정된 행 수
+     */
+    public int confirmAllTocOutline(String ptProjectId) throws Exception {
+        return proposalDAO.confirmAllTocOutline(ptProjectId, SessionUtil.getUserId());
     }
 
     // ──────────────────────────────────────────────────────────────────────────────

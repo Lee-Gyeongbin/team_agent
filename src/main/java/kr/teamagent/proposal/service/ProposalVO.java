@@ -32,6 +32,7 @@ public class ProposalVO {
          *  문제정의 S2A_PROBLEM_TOC
          *  승리주제 S2B_WINTHEME
          *  문제정의 커버드 요구사항 S2C_COVEREDREQNOS
+         *  전략형 세부목차 TOC_STRATEGY
          *  슬라이드 생성 S3_SLIDE
          *  슬라이드 템플릿 S3_TEMPLATE
          *  슬라이드 커버 템플릿 S3_COVER_TEMPLATE

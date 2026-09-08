@@ -883,6 +883,18 @@
         WHERE TOC_ID = #{tocId}
     </update>
 
+    <!-- 콘텐츠 개요 일괄 확정: CONTENT_OUTLINE_TXT가 있는 항목을 모두 003(확정) 처리 -->
+    <update id="confirmAllTocOutline" parameterType="map">
+        /* 콘텐츠 개요 일괄 확정 proposal.confirmAllTocOutline */
+        UPDATE TB_PT_TOC
+        SET OUTLINE_STATUS_CD = '003'
+          , MODIFY_DT         = NOW()
+          <if test="modifyUserId != null">, MODIFY_USER_ID = #{modifyUserId}</if>
+        WHERE PT_PROJECT_ID       = #{ptProjectId}
+          AND CONTENT_OUTLINE_TXT IS NOT NULL
+          AND OUTLINE_STATUS_CD  != '003'
+    </update>
+
     <select id="selectLeafTocList" parameterType="String"
             resultType="kr.teamagent.proposal.service.ProposalVO$TocVO">
         /* 진짜 리프(leaf) TOC 목록 조회 — 자신을 PARENT_TOC_ID로 참조하는 자식이 없는 노드만 반환 proposal.selectLeafTocList */

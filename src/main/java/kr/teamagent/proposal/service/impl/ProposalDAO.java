@@ -1,6 +1,8 @@
 package kr.teamagent.proposal.service.impl;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Repository;
 
@@ -451,6 +453,14 @@ public class ProposalDAO extends EgovComAbstractDAO {
     /** 콘텐츠 개요 텍스트·상태 업데이트 */
     public void updateTocOutline(ProposalVO.TocVO vo) {
         update("proposal.updateTocOutline", vo);
+    }
+
+    /** 콘텐츠 개요 일괄 확정 (CONTENT_OUTLINE_TXT가 있는 항목 → 003) */
+    public int confirmAllTocOutline(String ptProjectId, String modifyUserId) {
+        Map<String, String> param = new HashMap<>();
+        param.put("ptProjectId", ptProjectId);
+        param.put("modifyUserId", modifyUserId);
+        return update("proposal.confirmAllTocOutline", param);
     }
 
     /**
