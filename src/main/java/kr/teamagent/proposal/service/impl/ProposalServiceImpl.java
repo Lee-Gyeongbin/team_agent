@@ -1739,14 +1739,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     /**
      * Stage 2 실행 (진행상황 콜백 지원 오버로드) — 전략 오케스트레이터 (S2A + S2B만).
      * S2A → S2B를 순차 호출하며, 세부목차(S2C)는 {@link #executeStage2Toc}에서 별도 실행한다.
-     * @param progressCallback step 코드 콜백 (null 허용).
-     *                         step: load | prompt | problem_def | parse | win_theme | save
+     * @param progressCallback JSON 형식 진행 콜백 (null 허용). SSE progress data로 직접 전달됨.
+     *                         step: load | prompt | evidence_map(+current,total) | pd_generate(+current,total) | dedup | win_theme | save
      * STAGE2_STATUS_CD: 001미시작 | 002문제정의저장(S2B 재개 대상) | 005전략완료(세부목차 미생성) | 003완료 | 004실패
      */
     public ProposalVO.Stage2ResultVO executeStage2(String ptProjectId, int totalSlideBudget, String modelId, String agentId,
             java.util.function.Consumer<String> progressCallback) throws Exception {
 
-        if (progressCallback != null) progressCallback.accept("load");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"load\"}");
         ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
         if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
 
@@ -1761,7 +1761,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         try {
             if (resumeFromS2b) {
                 logger.info("[PT Stage2] STAGE2_STATUS_CD=002 — S2B(WinTheme)부터 재개 (ptProjectId={})", ptProjectId);
-                if (progressCallback != null) progressCallback.accept("parse");
+                if (progressCallback != null) progressCallback.accept("{\"step\":\"parse\"}");
                 List<ProposalVO.ProblemDefinitionVO> existing =
                         proposalDAO.selectProblemDefinitions(ptProjectId);
                 if (existing == null || existing.isEmpty()) {
@@ -1850,7 +1850,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        if (progressCallback != null) progressCallback.accept("prompt");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"prompt\"}");
         String mapPromptTpl = loadStagePromptOrThrow(agentId, "ISSUE_REQUIREMENT_MAP");
         String pdPromptTpl = loadStagePromptOrThrow(agentId, "ISSUE_PD_GENERATE");
         String finalPromptTpl = loadStagePromptOrThrow(agentId, "PROBLEM_FINAL");
@@ -1872,15 +1872,22 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 issues001.size(), issues002.size(), issues003.size(), compactIndex.size(),
                 totalSlideBudget, ptProjectId);
 
-        if (progressCallback != null) progressCallback.accept("problem_def");
         List<KeyedProblemDefinition> keyedPds = new java.util.ArrayList<>();
         int pdSeq = 1;
         long pipelineStart = System.currentTimeMillis();
+        int issueTotal = issues001.size();
+        int issueIdx = 0;
 
         for (ProposalVO.RfpIssueVO primary : issues001) {
+            issueIdx++;
             long issueStart = System.currentTimeMillis();
-            logger.info("[PT Stage2-A] CALL#1 시작 — primaryIssueId={} (ptProjectId={})",
-                    primary.getIssueId(), ptProjectId);
+
+            // SSE: 근거 매핑 진행률 (current/total 포함)
+            if (progressCallback != null) {
+                progressCallback.accept("{\"step\":\"evidence_map\",\"current\":" + issueIdx + ",\"total\":" + issueTotal + "}");
+            }
+            logger.info("[PT Stage2-A] CALL#1 시작 — primaryIssueId={} ({}/{}) (ptProjectId={})",
+                    primary.getIssueId(), issueIdx, issueTotal, ptProjectId);
 
             java.util.Map<String, String> ph1 = new java.util.LinkedHashMap<>();
             ph1.put("PRIMARY_ISSUE_JSON", GSON.toJson(buildIssueLiteMap(primary)));
@@ -1925,6 +1932,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             shownIssueIds.addAll(evidence.contextIssueIds);
             shownIssueIds.addAll(evidence.solutionIssueIds);
 
+            // SSE: 문제정의 생성 진행률
+            if (progressCallback != null) {
+                progressCallback.accept("{\"step\":\"pd_generate\",\"current\":" + issueIdx + ",\"total\":" + issueTotal + "}");
+            }
+
             java.util.Map<String, String> ph2 = new java.util.LinkedHashMap<>();
             ph2.put("PRIMARY_ISSUE_JSON", GSON.toJson(buildIssueLiteMap(primary)));
             ph2.put("SELECTED_CONTEXT_ISSUES_JSON", GSON.toJson(selectedContext));
@@ -1954,7 +1966,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("Stage 2-A(문제정의) 결과가 비어 있습니다. 001 Issue 처리에 실패했습니다. ptProjectId="
                     + ptProjectId);
 
-        if (progressCallback != null) progressCallback.accept("parse");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"dedup\"}");
 
         java.util.Set<String> unionIssueIds = new java.util.HashSet<>();
         java.util.Set<String> unionReqIds = new java.util.HashSet<>();
@@ -2033,7 +2045,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             for (ProposalVO.RequirementVO r : requirements)
                 if (CommonUtil.isNotEmpty(r.getRequirementId())) validReqIds.add(r.getRequirementId());
 
-        if (progressCallback != null) progressCallback.accept("req_mapping");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"req_mapping\"}");
         String s2cPromptContent = null;
         try { s2cPromptContent = promptService.getPromptsByAgentIdAndStageCd(agentId, "S2C_COVEREDREQNOS"); }
         catch (Exception e) { logger.warn("[PT Stage2-C] 프롬프트 조회 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage()); }
@@ -2187,7 +2199,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             logger.warn("[PT Stage2-B] 설정 파일 ID 파싱 실패 (ptProjectId={}): {}", ptProjectId, e.getMessage());
         }
 
-        if (progressCallback != null) progressCallback.accept("extract_ref");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"extract_ref\"}");
         String ownContext = extractMultiFileText(companyFileIds);
         if (CommonUtil.isEmpty(ownContext)) ownContext = "(자사 자료 없음)";
         String competitorContext = extractMultiFileText(competitorFileIds);
@@ -2204,7 +2216,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String s2bPrompt = buildStage2bWinThemePrompt(
                 s2bPromptContent, project, problemDefinitions, ownContext, competitorContext, etcRefContext, feedback);
 
-        if (progressCallback != null) progressCallback.accept("win_theme");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"win_theme\"}");
         long s2bStart = System.currentTimeMillis();
         logger.info("[PT Stage2-B] 호출 시작 - 프롬프트 길이: {}자 (ptProjectId={})", s2bPrompt.length(), ptProjectId);
         String s2bResponse = callLlmWithRetry(s2bPrompt, modelId, agentId, "[PT Stage2-B]");
@@ -2231,7 +2243,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
         validateStage2Evidence(winThemes, ptProjectId);
 
-        if (progressCallback != null) progressCallback.accept("save");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"save\"}");
         saveStage2WinThemes(ptProjectId, winThemes);
         return winThemes;
     }
@@ -4541,7 +4553,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     public List<ProposalVO.TocVO> executeStage2Toc(String ptProjectId, int totalSlideBudget,
             String modelId, String agentId, java.util.function.Consumer<String> progressCallback) throws Exception {
 
-        if (progressCallback != null) progressCallback.accept("load");
+        if (progressCallback != null) progressCallback.accept("{\"step\":\"load\"}");
         ProposalVO.ProjectVO project = proposalDAO.selectProject(ptProjectId);
         if (project == null) throw new RuntimeException("프로젝트를 찾을 수 없습니다. ptProjectId=" + ptProjectId);
 
@@ -4606,9 +4618,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
 
                 // Stage2 실행 (동기 호출, 별도 스레드에서 실행 중이므로 OK)
-                // progressCallback step 코드를 그대로 SSE progress 이벤트로 전달 (Stage1 패턴과 동일)
+                // progressCallback이 JSON 문자열을 그대로 SSE progress 이벤트 data로 전달
                 ProposalVO.Stage2ResultVO result = executeStage2(ptProjectId, totalSlideBudget, modelId, agentId,
-                        step -> sendSseEvent(emitter, "progress", "{\"step\":\"" + step + "\"}"));
+                        progressJson -> sendSseEvent(emitter, "progress", progressJson));
 
                 int tocCount = result.getToc() != null ? result.getToc().size() : 0;
                 int wtCount  = result.getWinThemes() != null ? result.getWinThemes().size() : 0;
@@ -4623,6 +4635,46 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
             } catch (Exception e) {
                 logger.error("[PT D-0] Stage2 처리 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
+                sendSseEvent(emitter, "error", "{\"message\":\"" + e.getMessage().replace("\"", "'") + "\"}");
+            } finally {
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
+    /**
+     * 문제정의 재생성 SSE 스트림 — runS2a만 재실행하며 진행 단계를 SSE로 전달.
+     * progress step: prompt | evidence_map(+current,total) | pd_generate(+current,total) | dedup
+     */
+    public SseEmitter streamRegenerateStage2Pd(String ptProjectId, int totalSlideBudget,
+            String modelId, String agentId, String userFeedback) {
+        SseEmitter emitter = new SseEmitter(0L);
+
+        emitter.onTimeout(() -> {
+            logger.warn("[PT PD-regen] SSE timeout - ptProjectId={}", ptProjectId);
+            emitter.complete();
+        });
+        emitter.onError(e -> logger.warn("[PT PD-regen] SSE error - ptProjectId={}, msg={}", ptProjectId, e.getMessage()));
+
+        sendSseEvent(emitter, "connected", "{\"ptProjectId\":\"" + ptProjectId + "\"}");
+
+        STAGE_D_EXECUTOR.execute(() -> {
+            try {
+                int budget = totalSlideBudget > 0 ? totalSlideBudget : 40;
+                runS2a(ptProjectId, budget, modelId, agentId,
+                        progressJson -> sendSseEvent(emitter, "progress", progressJson),
+                        userFeedback);
+
+                List<ProposalVO.ProblemDefinitionResponseVO> pds = selectStage2ProblemDefinitions(ptProjectId);
+                int pdCount = pds != null ? pds.size() : 0;
+
+                sendSseEvent(emitter, "done",
+                        "{\"ptProjectId\":\"" + ptProjectId + "\""
+                        + ",\"problemDefCount\":" + pdCount + "}");
+            } catch (Exception e) {
+                logger.error("[PT PD-regen] 문제정의 재생성 오류 (ptProjectId={}): {}", ptProjectId, e.getMessage(), e);
                 sendSseEvent(emitter, "error", "{\"message\":\"" + e.getMessage().replace("\"", "'") + "\"}");
             } finally {
                 emitter.complete();
@@ -4659,7 +4711,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         STAGE_D_EXECUTOR.execute(() -> {
             try {
                 List<ProposalVO.TocVO> result = executeStage2Toc(ptProjectId, totalSlideBudget, modelId, agentId,
-                        step -> sendSseEvent(emitter, "progress", "{\"step\":\"" + step + "\"}"));
+                        progressJson -> sendSseEvent(emitter, "progress", progressJson));
 
                 int tocCount = result != null ? result.size() : 0;
 
