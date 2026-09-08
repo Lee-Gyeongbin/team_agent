@@ -493,6 +493,21 @@ public class ProposalController extends BaseController {
         return proposalService.streamAnalyzeStage2(ptProjectId, totalSlideBudget, modelId, agentId);
     }
 
+    /** 문제정의 재생성 SSE — runS2a만 재실행하며 진행 단계 전달 */
+    @RequestMapping(value = "/ai/proposal/streamRegenerateStage2Pd.do",
+            produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamRegenerateStage2Pd(
+            @RequestParam String ptProjectId,
+            @RequestParam(defaultValue = "40") int totalSlideBudget,
+            @RequestParam String modelId,
+            @RequestParam String agentId,
+            @RequestParam(required = false) String userFeedback,
+            HttpServletResponse response) {
+        response.setCharacterEncoding("UTF-8");
+        return proposalService.streamRegenerateStage2Pd(ptProjectId, totalSlideBudget, modelId, agentId, userFeedback);
+    }
+
     /** D-0T — Stage2 세부목차 생성 SSE */
     @RequestMapping(value = "/ai/proposal/streamAnalyzeStage2Toc.do",
             produces = "text/event-stream;charset=UTF-8")
@@ -1436,6 +1451,23 @@ public class ProposalController extends BaseController {
             resultMap.put("result", "OK");
         } catch (Exception e) {
             logger.error("[PT Outline] confirmTocOutline 오류 (tocId={}): {}", vo.getTocId(), e.getMessage(), e);
+            resultMap.put("result", "FAIL");
+            resultMap.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 콘텐츠 개요 일괄 확정 */
+    @RequestMapping(value = "/ai/proposal/confirmAllTocOutline.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView confirmAllTocOutline(@RequestBody Map<String, String> param) {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        try {
+            int count = proposalService.confirmAllTocOutline(param.get("ptProjectId"));
+            resultMap.put("result", "OK");
+            resultMap.put("confirmedCount", count);
+        } catch (Exception e) {
+            logger.error("[PT Outline] confirmAllTocOutline 오류: {}", e.getMessage(), e);
             resultMap.put("result", "FAIL");
             resultMap.put("msg", e.getMessage());
         }

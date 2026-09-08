@@ -17,21 +17,11 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.DeleteObjectRequest;
 
-import org.passay.AllowedCharacterRule;
-import org.passay.CharacterData;
-import org.passay.CharacterRule;
-import org.passay.EnglishCharacterData;
-import org.passay.EnglishSequenceData;
-import org.passay.IllegalSequenceRule;
-import org.passay.PasswordData;
-import org.passay.PasswordValidator;
-import org.passay.RepeatCharacterRegexRule;
-import org.passay.RuleResult;
-
 import kr.teamagent.common.CommonVO;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.util.CommonUtil;
+import kr.teamagent.common.util.PasswordRuleUtil;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.service.FileVO;
@@ -43,38 +33,6 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
     /** NCP 객체 키: profiles/{userId}/파일명 */
     private static final String PROFILE_STORAGE_PREFIX = "profiles";
     private static final long PROFILE_UPLOAD_EXPIRE_MILLIS = 60 * 60 * 1000L;
-    private static final CharacterData PASSWORD_SPECIAL_CHAR_DATA = new CharacterData() {
-        @Override
-        public String getErrorCode() {
-            return "ERR_SPECIAL_CHAR";
-        }
-
-        @Override
-        public String getCharacters() {
-            return "!@#$%^&*()_-+=";
-        }
-    };
-
-    /** 영문 + 숫자 + {@link #PASSWORD_SPECIAL_CHAR_DATA} (AllowedCharacterRule은 char[] 만 지원해 문자열을 합쳐 구성) */
-    private static final char[] PASSWORD_ALLOWED_CHARS = (
-            EnglishCharacterData.Alphabetical.getCharacters()
-                    + EnglishCharacterData.Digit.getCharacters()
-                    + PASSWORD_SPECIAL_CHAR_DATA.getCharacters()
-    ).toCharArray();
-
-    private static final PasswordValidator PASSWORD_ALLOWED_VALIDATOR = new PasswordValidator(
-            java.util.Arrays.asList(new AllowedCharacterRule(PASSWORD_ALLOWED_CHARS)));
-
-    private static final PasswordValidator PASSWORD_PATTERN_VALIDATOR = new PasswordValidator(java.util.Arrays.asList(
-            new IllegalSequenceRule(EnglishSequenceData.Numerical, 4, false),
-            new IllegalSequenceRule(EnglishSequenceData.Alphabetical, 4, false),
-            new RepeatCharacterRegexRule(4)
-    ));
-    private static final PasswordValidator PASSWORD_COMPOSITION_VALIDATOR = new PasswordValidator(java.util.Arrays.asList(
-            new CharacterRule(EnglishCharacterData.Alphabetical, 1),
-            new CharacterRule(EnglishCharacterData.Digit, 1),
-            new CharacterRule(PASSWORD_SPECIAL_CHAR_DATA, 1)
-    ));
 
     @Autowired
     private MyPageDAO myPageDAO;
@@ -156,45 +114,13 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
-        if (newPasswd == null) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "비밀번호를 입력해주세요.");
-            return resultMap;
-        }
-        RuleResult allowedRuleResult = PASSWORD_ALLOWED_VALIDATOR.validate(new PasswordData(newPasswd));
-        if (!allowedRuleResult.isValid()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "허용되지 않은 특수문자가 포함되어 있습니다.");
-            return resultMap;
-        }
-
-        RuleResult compositionRuleResult = PASSWORD_COMPOSITION_VALIDATOR.validate(new PasswordData(newPasswd));
-        if (!compositionRuleResult.isValid()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "문자 숫자 특수문자를 모두 포함해야 합니다.");
-            return resultMap;
-        }
-
-        RuleResult passwordRuleResult = PASSWORD_PATTERN_VALIDATOR.validate(new PasswordData(newPasswd));
-        if (!passwordRuleResult.isValid()) {
-            resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "연속된 문자 혹은 동일한 문자를 반복하여 사용할 수 없습니다");
-            return resultMap;
-        }
-
-        String emailLocalForCheck = null;
         UserVO userVO = SessionUtil.getUserVO();
-        String emailRaw = userVO != null ? userVO.getEmail() : null;
-        if (!CommonUtil.isEmpty(emailRaw)) {
-            int atIdx = emailRaw.indexOf('@');
-            if (atIdx > 0) {
-                emailLocalForCheck = emailRaw.substring(0, atIdx);
-            }
-        }
-
-        if (newPasswd.contains(loginUserId) || newPasswd.contains(emailLocalForCheck)) {
+        String email = userVO != null ? userVO.getEmail() : null;
+        String phone = userVO != null ? userVO.getPhone() : null;
+        String passwordRuleMsg = PasswordRuleUtil.validateNewPassword(newPasswd, loginUserId, email, phone);
+        if (passwordRuleMsg != null) {
             resultMap.put("successYn", false);
-            resultMap.put("returnMsg", "이메일 혹은 아이디와 동일한 문자는 사용할 수 없습니다.");
+            resultMap.put("returnMsg", passwordRuleMsg);
             return resultMap;
         }
 
