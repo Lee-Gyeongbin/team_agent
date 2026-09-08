@@ -112,6 +112,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return update("ai.meeting.updateSpeakerUtterances", dataVO);
     }
 
+    /** 화자 레이블/발화만 수정 (참석자 이름·USER_ID 유지) */
+    public int updateSpeakerLabelAndUtterances(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateSpeakerLabelAndUtterances", dataVO);
+    }
+
     /** 화자 행 삭제 (머지 후 중복 제거) */
     public int deleteSpeaker(MeetingVO dataVO) throws Exception {
         return delete("ai.meeting.deleteSpeaker", dataVO);
@@ -205,5 +210,30 @@ public class MeetingDAO extends EgovComAbstractDAO {
     /** 회의록 통합 등록 */
     public int insertMeetingIntegration(MeetingVO dataVO) throws Exception {
         return insert("ai.meeting.insertMeetingIntegration", dataVO);
+    }
+
+    /** 회의 음성 등록 */
+    public int insertMeetingVoiceEnrollment(MeetingVO dataVO) throws Exception {
+        return insert("ai.meeting.insertMeetingVoiceEnrollment", dataVO);
+    }
+
+    /** 회의 음성 등록 조회 */
+    public MeetingVO selectMeetingVoiceEnrollment(MeetingVO searchVO) throws Exception {
+        return selectOne("ai.meeting.selectMeetingVoiceEnrollment", searchVO);
+    }
+
+    /** 회의별 Voice Enrollment 목록 조회 */
+    public List<MeetingVO> selectMeetingVoiceEnrollmentList(MeetingVO searchVO) throws Exception {
+        return selectList("ai.meeting.selectMeetingVoiceEnrollmentList", searchVO);
+    }
+
+    /** 회의 음성 등록 삭제 */
+    public int deleteMeetingVoiceEnrollment(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteMeetingVoiceEnrollment", dataVO);
+    }
+
+    /** 회의 음성 상태 수정 */
+    public int updateMeetingVoiceEnrollmentStatus(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingVoiceEnrollmentStatus", dataVO);
     }
 }

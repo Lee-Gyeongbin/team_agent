@@ -30,7 +30,15 @@ import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -101,6 +109,11 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return meetingDAO.selectMeetingList(searchVO);
     }
 
+    /** 회의별 Voice Enrollment 목록 조회 */
+    public List<MeetingVO> selectMeetingVoiceEnrollmentList(MeetingVO searchVO) throws Exception {
+        return meetingDAO.selectMeetingVoiceEnrollmentList(searchVO);
+    }
+
     /** 회의 단건 + 회의록 + 화자 목록 조회 */
     public Map<String, Object> selectMeetingDetail(MeetingVO searchVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
@@ -134,9 +147,52 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         String showSpeaker = dataVO.getShowSpeakerYn();
         dataVO.setShowSpeakerYn((showSpeaker != null && "N".equalsIgnoreCase(showSpeaker.trim())) ? "N" : "Y");
         meetingDAO.insertMeeting(dataVO);
+        insertSpeakersFromAttendees(dataVO);
         result.put("successYn", true);
         result.put("meetingId", dataVO.getMeetingId());
+        result.put("speakers", meetingDAO.selectSpeakerList(dataVO));
         return result;
+    }
+
+    /**
+     * 회의 생성 시 참석자 JSON([{userId, userNm}])만큼 TB_MEETING_SPEAKER 선등록.
+     * SPEAKER_LABEL·UTTERANCES는 전사/화자분리 후 채운다.
+     */
+    private void insertSpeakersFromAttendees(MeetingVO dataVO) throws Exception {
+        if (CommonUtil.isEmpty(dataVO.getAttendees()) || dataVO.getMeetingId() == null) {
+            return;
+        }
+        Object parsed;
+        try {
+            parsed = new JSONParser().parse(dataVO.getAttendees());
+        } catch (Exception e) {
+            logger.warn("[createMeeting] ATTENDEES JSON 파싱 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+            return;
+        }
+        if (!(parsed instanceof JSONArray)) {
+            logger.warn("[createMeeting] ATTENDEES가 배열이 아님 - meetingId: {}", dataVO.getMeetingId());
+            return;
+        }
+        JSONArray arr = (JSONArray) parsed;
+        int count = 0;
+        for (Object obj : arr) {
+            if (!(obj instanceof JSONObject)) {
+                continue;
+            }
+            JSONObject attendee = (JSONObject) obj;
+            String userId = stringValue(attendee.get("userId"));
+            String userNm = stringValue(attendee.get("userNm"));
+            if (userId.isEmpty() && userNm.isEmpty()) {
+                continue;
+            }
+            MeetingVO speakerVO = new MeetingVO();
+            speakerVO.setMeetingId(dataVO.getMeetingId());
+            speakerVO.setSpeakerNm(userNm.isEmpty() ? null : userNm);
+            speakerVO.setSpeakerUserId(userId.isEmpty() ? null : userId);
+            meetingDAO.insertSpeaker(speakerVO);
+            count++;
+        }
+        logger.info("[createMeeting] 참석자 화자 등록 완료 - meetingId: {}, 건수: {}", dataVO.getMeetingId(), count);
     }
 
     /**
@@ -148,10 +204,13 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> finishMeetingWithAudio(MeetingVO dataVO, MultipartFile audioFile) throws Exception {
         Map<String, Object> result = new HashMap<>();
 
+        // 0. 기존 데이터 정리 (재첨부 시 이전 오디오·회의록·인포그래픽 삭제)
+        cleanupPreviousProcessingData(dataVO);
+
         // 1. NCP 스토리지에 오디오 업로드
         String objectKey;
         try {
-            objectKey = uploadAudioToStorage(audioFile, dataVO.getMeetingId());
+            objectKey = uploadAudioToStorage(audioFile, dataVO.getMeetingId(), "N");
         } catch (Exception e) {
             logger.error("[finishMeetingWithAudio] 스토리지 업로드 실패 - meetingId: {}", dataVO.getMeetingId(), e);
             result.put("successYn", false);
@@ -204,6 +263,59 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             // 백업 삭제 실패는 회의 종료 자체를 막지 않음 — 경고 로그만
             logger.warn("[deleteBackupFiles] 백업 파일 삭제 실패 - meetingId: {}", meetingId, e);
         }
+    }
+
+    /**
+     * 오디오 재첨부 시 이전 처리 데이터 정리
+     * - NCP S3 기존 오디오 파일 삭제
+     * - TB_MEETING_AUDIO, TB_MEETING_MINUTES, TB_MEETING_INFOGRAPHIC 삭제
+     * - TB_MEETING_SPEAKER는 유지 (createMeeting에서 사전등록한 화자 보존)
+     */
+    private void cleanupPreviousProcessingData(MeetingVO dataVO) {
+        try {
+            MeetingVO existingAudio = meetingDAO.selectMeetingAudio(dataVO);
+            if (existingAudio == null) return; // 첫 업로드 — 정리 불필요
+
+            logger.info("[cleanupPreviousProcessingData] 기존 데이터 정리 시작 - meetingId: {}", dataVO.getMeetingId());
+
+            // 1. NCP S3 기존 오디오 파일 삭제 (메인 + 백업 전체)
+            deleteMeetingAudioFiles(dataVO.getMeetingId());
+
+            // 2. TB_MEETING_AUDIO 삭제
+            int audioDeleted = meetingDAO.deleteAudioByMeetingId(dataVO);
+
+            // 3. TB_MEETING_MINUTES 삭제
+            int minutesDeleted = meetingDAO.deleteMeetingMinutes(dataVO);
+
+            // 4. TB_MEETING_INFOGRAPHIC 삭제
+            int infographicDeleted = meetingDAO.deleteInfographicByMeetingIdPhysical(dataVO);
+
+            // 5. TB_MEETING_SPEAKER — 화자분리 결과(utterances/label)만 초기화, 행 자체는 보존
+            //    (createMeeting에서 사전등록한 speakerNm/speakerUserId를 유지하기 위함)
+            resetSpeakerDiarizationData(dataVO);
+
+            logger.info("[cleanupPreviousProcessingData] 정리 완료 - meetingId: {}, audio: {}, minutes: {}, infographic: {}",
+                dataVO.getMeetingId(), audioDeleted, minutesDeleted, infographicDeleted);
+        } catch (Exception e) {
+            // 정리 실패가 새 업로드를 막지 않도록 경고 로그만 남김
+            logger.warn("[cleanupPreviousProcessingData] 기존 데이터 정리 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+        }
+    }
+
+    /**
+     * 화자 행을 삭제하지 않고 화자분리 결과(label·utterances)만 초기화
+     * 사전등록한 speakerNm/speakerUserId는 그대로 유지
+     */
+    private void resetSpeakerDiarizationData(MeetingVO dataVO) throws Exception {
+        List<MeetingVO> speakers = meetingDAO.selectSpeakerList(dataVO);
+        if (speakers == null || speakers.isEmpty()) return;
+
+        for (MeetingVO speaker : speakers) {
+            speaker.setSpeakerLabel(null);
+            speaker.setUtterances(null);
+            meetingDAO.updateSpeakerLabelAndUtterances(speaker);
+        }
+        logger.info("[resetSpeakerDiarizationData] 화자 {}건 초기화 완료 - meetingId: {}", speakers.size(), dataVO.getMeetingId());
     }
 
     /**
@@ -312,14 +424,19 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     /**
      * NCP 오브젝트 스토리지에 오디오 파일 업로드 후 오브젝트 키 반환
      */
-    private String uploadAudioToStorage(MultipartFile audioFile, Long meetingId) throws Exception {
+    private String uploadAudioToStorage(MultipartFile audioFile, Long meetingId, String enrollYn) throws Exception {
         String originalFilename = audioFile.getOriginalFilename();
         String ext = Optional.ofNullable(originalFilename)
             .filter(n -> n.contains("."))
             .map(n -> n.substring(n.lastIndexOf('.')))
             .orElse(".webm");
 
-        String objectKey = "meeting-audio/" + meetingId + "/" + UUID.randomUUID() + ext;
+        String objectKey = "";
+        if (enrollYn.equals("Y")) {
+            objectKey = "meeting-audio/" + meetingId + "/voice-enroll/" + UUID.randomUUID() + ext;
+        } else {
+            objectKey = "meeting-audio/" + meetingId + "/" + UUID.randomUUID() + ext;
+        }
         String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
 
         ObjectMetadata metadata = new ObjectMetadata();
@@ -1453,12 +1570,12 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      * gpt-4o-transcribe-diarize 결과 세그먼트를 화자별로 그룹화해 TB_MEETING_SPEAKER 저장
      * - segments: [{speaker: "SPEAKER_0", text: "...", start: 0.0, end: 1.5}, ...]
      * - 화자 등장 순서 기준으로 "화자1", "화자2" ... 레이블 부여
+     * - 회의 생성 시 선등록된 참석자 화자가 있으면 SPEAKER_ID·이름·USER_ID를 유지하고 레이블/발화만 갱신
      */
     @SuppressWarnings("unchecked")
     private void saveAudioDiarizedSpeakers(MeetingVO dataVO, JSONArray segments) {
         try {
-            // 기존 화자 데이터 삭제 (재처리 시 중복 방지)
-            meetingDAO.deleteSpeakersByMeetingId(dataVO);
+            List<MeetingVO> existingSpeakers = meetingDAO.selectSpeakerList(dataVO);
 
             // 화자 등장 순서 유지 LinkedHashMap: speakerKey → utterances JSONArray
             java.util.LinkedHashMap<String, JSONArray> speakerMap = new java.util.LinkedHashMap<>();
@@ -1475,15 +1592,45 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 utterances.add(utterance);
             }
 
-            // 등장 순서대로 화자N 레이블 부여 후 DB 저장
-            int num = 1;
-            for (java.util.Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
-                MeetingVO speakerVO = new MeetingVO();
-                speakerVO.setMeetingId(dataVO.getMeetingId());
-                speakerVO.setSpeakerLabel("화자" + num);
-                speakerVO.setUtterances(entry.getValue().toJSONString());
-                meetingDAO.insertSpeaker(speakerVO);
-                num++;
+            if (existingSpeakers == null || existingSpeakers.isEmpty()) {
+                // 선등록 화자가 없으면 기존처럼 삭제 후 신규 저장
+                meetingDAO.deleteSpeakersByMeetingId(dataVO);
+                int num = 1;
+                for (java.util.Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
+                    MeetingVO speakerVO = new MeetingVO();
+                    speakerVO.setMeetingId(dataVO.getMeetingId());
+                    speakerVO.setSpeakerLabel("화자" + num);
+                    speakerVO.setUtterances(entry.getValue().toJSONString());
+                    meetingDAO.insertSpeaker(speakerVO);
+                    num++;
+                }
+            } else {
+                // 선등록 화자(참석자)는 유지하고 등장 순서대로 레이블/발화만 반영
+                int num = 1;
+                int existingIdx = 0;
+                for (java.util.Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
+                    if (existingIdx < existingSpeakers.size()) {
+                        MeetingVO existing = existingSpeakers.get(existingIdx);
+                        existing.setSpeakerLabel("화자" + num);
+                        existing.setUtterances(entry.getValue().toJSONString());
+                        meetingDAO.updateSpeakerLabelAndUtterances(existing);
+                        existingIdx++;
+                    } else {
+                        MeetingVO speakerVO = new MeetingVO();
+                        speakerVO.setMeetingId(dataVO.getMeetingId());
+                        speakerVO.setSpeakerLabel("화자" + num);
+                        speakerVO.setUtterances(entry.getValue().toJSONString());
+                        meetingDAO.insertSpeaker(speakerVO);
+                    }
+                    num++;
+                }
+                // 발화에 등장하지 않은 선등록 화자는 레이블/발화만 비움 (이름·USER_ID 유지)
+                for (int i = existingIdx; i < existingSpeakers.size(); i++) {
+                    MeetingVO leftover = existingSpeakers.get(i);
+                    leftover.setSpeakerLabel(null);
+                    leftover.setUtterances(null);
+                    meetingDAO.updateSpeakerLabelAndUtterances(leftover);
+                }
             }
 
             logger.info("화자 저장 완료 (오디오 기반) - meetingId: {}, 화자 수: {}", dataVO.getMeetingId(), speakerMap.size());
@@ -1927,5 +2074,305 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             result.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
         return result;
+    }
+
+    public Map<String, Object> voiceEnroll(
+        MeetingVO dataVO,
+        MultipartFile audioFile) throws Exception {
+
+        Map<String, Object> result = new HashMap<>();
+        String objectKey = null;
+
+        try {
+
+            // =====================================================
+            // 0. 기존 Enrollment 있으면 NCP 파일 + DB 행 삭제 후 재등록
+            // =====================================================
+
+            deleteExistingVoiceEnrollment(dataVO);
+
+            // =====================================================
+            // 1. NCP 스토리지에 Enrollment 음성 업로드
+            // =====================================================
+
+            objectKey = uploadAudioToStorage(
+                audioFile,
+                dataVO.getMeetingId(),
+                "Y"
+            );
+
+
+            // =====================================================
+            // 2. 파일 메타정보 세팅
+            // =====================================================
+
+            String originalFilename = audioFile.getOriginalFilename();
+
+            String ext = Optional.ofNullable(originalFilename)
+                .filter(n -> n.contains("."))
+                .map(n -> n.substring(n.lastIndexOf('.')))
+                .orElse(".webm");
+
+            String fileExt = ext.startsWith(".")
+                ? ext.substring(1)
+                : ext;
+
+            dataVO.setFilePath(objectKey);
+            dataVO.setOriginalFilename(originalFilename);
+            dataVO.setFileExt(fileExt);
+            dataVO.setFileSize(audioFile.getSize());
+
+            // 최초 AI 처리 대기
+            dataVO.setStatus("001");
+
+
+            // =====================================================
+            // 3. TB_MEETING_VOICE_ENROLLMENT 저장
+            // =====================================================
+
+            meetingDAO.insertMeetingVoiceEnrollment(dataVO);
+
+            logger.info(
+                "[voiceEnroll] Enrollment 저장 완료 "
+                + "- meetingId: {}, speakerId: {}, speakerNm: {}, key: {}",
+                dataVO.getMeetingId(),
+                dataVO.getSpeakerId(),
+                dataVO.getSpeakerNm(),
+                objectKey
+            );
+
+
+            // =====================================================
+            // 4. AI 처리 중(002)
+            // =====================================================
+
+            dataVO.setStatus("002");
+            dataVO.setErrorMsg(null);
+
+            meetingDAO.updateMeetingVoiceEnrollmentStatus(dataVO);
+
+
+            // =====================================================
+            // 5. AI 서버 /voice/enroll 호출
+            // =====================================================
+
+            Map<String, Object> aiResult = callVoiceEnrollAi(dataVO);
+
+
+            // =====================================================
+            // 6. AI 결과 판단
+            // =====================================================
+
+            boolean aiSuccess = Boolean.TRUE.equals(
+                aiResult.get("successYn")
+            );
+
+            if (!aiSuccess) {
+
+                String errorMessage = String.valueOf(
+                    aiResult.getOrDefault(
+                        "returnMsg",
+                        aiResult.getOrDefault(
+                            "detail",
+                            "Voice Enrollment AI 처리 실패"
+                        )
+                    )
+                );
+
+                dataVO.setStatus("004");
+                dataVO.setErrorMsg(errorMessage);
+
+                meetingDAO.updateMeetingVoiceEnrollmentStatus(dataVO);
+
+                result.put("successYn", false);
+                result.put("returnMsg", errorMessage);
+
+                return result;
+            }
+
+
+            // =====================================================
+            // 7. AI 성공 → Enrollment 완료(003)
+            // =====================================================
+
+            dataVO.setStatus("003");
+            dataVO.setErrorMsg(null);
+
+            // 필요하면 AI가 반환한 embeddingDimension 등도 로그만 남김
+            Object embeddingDimension =
+                aiResult.get("embeddingDimension");
+
+            meetingDAO.updateMeetingVoiceEnrollmentStatus(dataVO);
+
+
+            logger.info(
+                "[voiceEnroll] Voice Profile 생성 완료 "
+                + "- meetingId: {}, speakerId: {}, dimension: {}",
+                dataVO.getMeetingId(),
+                dataVO.getSpeakerId(),
+                embeddingDimension
+            );
+
+
+            // =====================================================
+            // 8. Front 응답
+            // =====================================================
+
+            result.put("successYn", true);
+            result.put("meetingId", dataVO.getMeetingId());
+            result.put("speakerId", dataVO.getSpeakerId());
+            result.put("speakerNm", dataVO.getSpeakerNm());
+
+            return result;
+
+
+        } catch (Exception e) {
+
+            logger.error(
+                "[voiceEnroll] 처리 실패 - meetingId: {}, speakerId: {}",
+                dataVO.getMeetingId(),
+                dataVO.getSpeakerId(),
+                e
+            );
+
+
+            // =====================================================
+            // Enrollment DB가 이미 생성된 경우 오류상태 반영
+            // =====================================================
+
+            try {
+
+                dataVO.setStatus("004");
+                dataVO.setErrorMsg(e.getMessage());
+
+                meetingDAO.updateMeetingVoiceEnrollmentStatus(dataVO);
+
+            } catch (Exception dbException) {
+
+                logger.error(
+                    "[voiceEnroll] 오류 상태 DB 반영 실패 "
+                    + "- meetingId: {}, speakerId: {}",
+                    dataVO.getMeetingId(),
+                    dataVO.getSpeakerId(),
+                    dbException
+                );
+            }
+
+
+            result.put("successYn", false);
+            result.put(
+                "returnMsg",
+                "요청사항을 실패하였습니다. (" + e.getMessage() + ")"
+            );
+
+            return result;
+        }
+    }
+
+    /**
+     * 동일 회의·화자의 기존 Voice Enrollment 삭제.
+     * NCP 오브젝트(FILE_PATH)를 먼저 지운 뒤 TB_MEETING_VOICE_ENROLLMENT 행을 삭제한다.
+     */
+    private void deleteExistingVoiceEnrollment(MeetingVO dataVO) throws Exception {
+        if (dataVO.getMeetingId() == null || dataVO.getSpeakerId() == null) {
+            return;
+        }
+        MeetingVO existing = meetingDAO.selectMeetingVoiceEnrollment(dataVO);
+        if (existing == null) {
+            return;
+        }
+        if (!CommonUtil.isEmpty(existing.getFilePath())) {
+            try {
+                String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+                amazonS3.deleteObject(bucket, existing.getFilePath());
+                logger.info("[voiceEnroll] 기존 NCP 파일 삭제 완료 - meetingId: {}, speakerId: {}, key: {}",
+                    dataVO.getMeetingId(), dataVO.getSpeakerId(), existing.getFilePath());
+            } catch (Exception e) {
+                logger.warn("[voiceEnroll] 기존 NCP 파일 삭제 실패 - meetingId: {}, speakerId: {}, key: {}",
+                    dataVO.getMeetingId(), dataVO.getSpeakerId(), existing.getFilePath(), e);
+            }
+        }
+        meetingDAO.deleteMeetingVoiceEnrollment(dataVO);
+        logger.info("[voiceEnroll] 기존 Enrollment 삭제 완료 - meetingId: {}, speakerId: {}",
+            dataVO.getMeetingId(), dataVO.getSpeakerId());
+    }
+
+    private Map<String, Object> callVoiceEnrollAi(
+        MeetingVO dataVO) throws Exception {
+
+        String aiBaseUrl = PropertyUtil.getProperty("Globals.chatbot.voice.enroll.pythonUrl");
+        String url = aiBaseUrl;
+
+
+        // =====================================================
+        // Request Body
+        // =====================================================
+
+        Map<String, Object> requestBody = new HashMap<>();
+
+        requestBody.put("meeting_id", dataVO.getMeetingId());
+        requestBody.put("speaker_id", dataVO.getSpeakerId());
+        requestBody.put("speaker_nm", dataVO.getSpeakerNm());
+        requestBody.put("file_path", dataVO.getFilePath());
+        requestBody.put("file_ext", dataVO.getFileExt());
+
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<Map<String, Object>> entity =
+            new HttpEntity<>(requestBody, headers);
+
+
+        RestTemplate restTemplate = new RestTemplate();
+
+
+        try {
+
+            ResponseEntity<Map> response =
+                restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+                );
+
+            Map<String, Object> body =
+                response.getBody();
+
+            if (body == null) {
+                throw new RuntimeException(
+                    "AI 서버 응답 데이터가 없습니다."
+                );
+            }
+
+            return body;
+
+
+        } catch (HttpStatusCodeException e) {
+
+            logger.error(
+                "[voiceEnroll][AI Error] "
+                + "status: {}, body: {}",
+                e.getStatusCode(),
+                e.getResponseBodyAsString()
+            );
+
+            throw new RuntimeException(
+                "Voice Enrollment AI 처리 실패: "
+                + e.getResponseBodyAsString()
+            );
+
+        } catch (ResourceAccessException e) {
+
+            logger.error(
+                "[voiceEnroll][AI Connection Error]",
+                e
+            );
+
+            throw new RuntimeException(
+                "AI 서버에 연결할 수 없습니다."
+            );
+        }
     }
 }
