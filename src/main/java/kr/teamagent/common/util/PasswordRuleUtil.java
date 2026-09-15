@@ -72,12 +72,12 @@ public final class PasswordRuleUtil {
         }
         RuleResult allowedRuleResult = PASSWORD_ALLOWED_VALIDATOR.validate(new PasswordData(password));
         if (!allowedRuleResult.isValid()) {
-            return "허용되지 않은 특수문자가 포함되어 있습니다.";
+            return "허용되지 않은 특수문자가 포함되어 있습니다. 허용 특수문자 : " + PASSWORD_SPECIAL_CHAR_DATA.getCharacters();
         }
 
         RuleResult compositionRuleResult = PASSWORD_COMPOSITION_VALIDATOR.validate(new PasswordData(password));
         if (!compositionRuleResult.isValid()) {
-            return "문자 숫자 특수문자를 모두 포함해야 합니다.";
+            return "비밀번호는 문자, 숫자, 특수문자를 모두 포함해야 합니다. 허용 특수문자 : " + PASSWORD_SPECIAL_CHAR_DATA.getCharacters();
         }
 
         RuleResult passwordRuleResult = PASSWORD_PATTERN_VALIDATOR.validate(new PasswordData(password));

@@ -298,10 +298,10 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
                 resultMap.put("returnMsg", "삭제 대상 파일 정보를 찾을 수 없습니다. (" + targetId + ")");
                 return resultMap;
             }
-            Map<String, Object> ncp = fileService.deleteStorageObjectByKey(row.getFilePath());
-            if (ncp != null && Boolean.FALSE.equals(ncp.get("successYn"))) {
+            Map<String, Object> s3Result = fileService.deleteStorageObjectByKey(row.getFilePath());
+            if (s3Result != null && Boolean.FALSE.equals(s3Result.get("successYn"))) {
                 resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + ncp.get("returnMsg") + ")");
+                resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + s3Result.get("returnMsg") + ")");
                 return resultMap;
             }
         }
@@ -479,7 +479,7 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
-        // URL에 연결된 TB_DOC_FILE 조회 (AI 서버 삭제 + NCP 삭제에 공통 사용)
+        // URL에 연결된 TB_DOC_FILE 조회 (AI 서버 삭제 + S3 삭제에 공통 사용)
         List<RepositoryVO> docFiles = repositoryDAO.selectDocFilePathsByUrlIds(urlIdList);
 
         // 1. AI 서버 삭제
@@ -499,13 +499,13 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        // 2. NCP 물리 파일 삭제
+        // 2. S3 물리 파일 삭제
         for (RepositoryVO f : docFiles) {
             if (StringUtils.isBlank(f.getFilePath())) continue;
-            Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(f.getFilePath());
-            if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
+            Map<String, Object> s3Result = fileService.deleteStorageObjectByKey(f.getFilePath());
+            if (s3Result != null && Boolean.FALSE.equals(s3Result.get("successYn"))) {
                 resultMap.put("successYn", false);
-                resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + ncpResult.get("returnMsg") + ")");
+                resultMap.put("returnMsg", "저장소 파일 삭제에 실패하였습니다. (" + s3Result.get("returnMsg") + ")");
                 return resultMap;
             }
         }
@@ -549,15 +549,15 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
             return resultMap;
         }
 
-        // 재수집 전 기존 NCP 오브젝트 스토리지 파일 삭제
+        // 재수집 전 기존 S3 오브젝트 스토리지 파일 삭제
         List<String> scrapingUrlIds = new ArrayList<>();
         for (RepositoryVO url : activeUrls) scrapingUrlIds.add(url.getUrlId());
         List<RepositoryVO> oldDocFiles = repositoryDAO.selectDocFilePathsByUrlIds(scrapingUrlIds);
         for (RepositoryVO oldFile : oldDocFiles) {
             if (StringUtils.isNotBlank(oldFile.getFilePath())) {
-                Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(oldFile.getFilePath());
-                if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
-                    logger.warn("NCP 파일 삭제 실패 (무시 후 재수집 진행) - filePath={}, msg={}", oldFile.getFilePath(), ncpResult.get("returnMsg"));
+                Map<String, Object> s3Result = fileService.deleteStorageObjectByKey(oldFile.getFilePath());
+                if (s3Result != null && Boolean.FALSE.equals(s3Result.get("successYn"))) {
+                    logger.warn("S3 파일 삭제 실패 (무시 후 재수집 진행) - filePath={}, msg={}", oldFile.getFilePath(), s3Result.get("returnMsg"));
                 }
             }
         }
@@ -665,21 +665,21 @@ public class RepositoryServiceImpl extends EgovAbstractServiceImpl {
         emitter.onError((e) -> logger.warn("scraping SSE error: {}", e.getMessage()));
         emitter.onCompletion(() -> logger.info("scraping SSE complete"));
 
-        // 재수집 전 기존 NCP 오브젝트 스토리지 파일 삭제
+        // 재수집 전 기존 S3 오브젝트 스토리지 파일 삭제
         List<String> streamUrlIds = new ArrayList<>();
         for (RepositoryVO url : urls) streamUrlIds.add(url.getUrlId());
         try {
             List<RepositoryVO> oldDocFiles = repositoryDAO.selectDocFilePathsByUrlIds(streamUrlIds);
             for (RepositoryVO oldFile : oldDocFiles) {
                 if (StringUtils.isNotBlank(oldFile.getFilePath())) {
-                    Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(oldFile.getFilePath());
-                    if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
-                        logger.warn("NCP 파일 삭제 실패 (무시 후 재수집 진행) - filePath={}, msg={}", oldFile.getFilePath(), ncpResult.get("returnMsg"));
+                    Map<String, Object> s3Result = fileService.deleteStorageObjectByKey(oldFile.getFilePath());
+                    if (s3Result != null && Boolean.FALSE.equals(s3Result.get("successYn"))) {
+                        logger.warn("S3 파일 삭제 실패 (무시 후 재수집 진행) - filePath={}, msg={}", oldFile.getFilePath(), s3Result.get("returnMsg"));
                     }
                 }
             }
         } catch (Exception e) {
-            logger.warn("NCP 기존 파일 삭제 중 오류 (무시 후 재수집 진행) - {}", e.getMessage());
+            logger.warn("S3 기존 파일 삭제 중 오류 (무시 후 재수집 진행) - {}", e.getMessage());
         }
 
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));

@@ -864,7 +864,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * PT 파일 업로드 (TB_PT_FILE)
-     * NCP 업로드 후 TB_PT_FILE에 메타데이터 저장
+     * S3 업로드 후 TB_PT_FILE에 메타데이터 저장
      * @param file            업로드 파일 (MultipartFile)
      * @param ptProjectId     프로젝트 ID (null 허용 — 생성 전 업로드 시)
      * @param filePurposeCd   PT000011 코드값 (001=RFP원문, 002=평가표, 003=템플릿 ...)
@@ -876,11 +876,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         String originalFilename = file.getOriginalFilename();
         if (CommonUtil.isEmpty(originalFilename)) originalFilename = "file";
 
-        // NCP 오브젝트 키: pt-file/{ptProjectId}/{ptFileId}_{원본파일명}
+        // S3 오브젝트 키: pt-file/{ptProjectId}/{ptFileId}_{원본파일명}
         String projectPart = CommonUtil.isNotEmpty(ptProjectId) ? ptProjectId : "temp";
         String objectKey = "pt-file/" + projectPart + "/" + ptFileId + "_" + originalFilename;
 
-        String bucket = kr.teamagent.common.util.PropertyUtil.getProperty("ncp.storage.bucket");
+        String bucket = kr.teamagent.common.util.PropertyUtil.getProperty("aws.s3.bucket");
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(file.getSize());
         if (CommonUtil.isNotEmpty(file.getContentType())) {
@@ -922,7 +922,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * PT 파일 메타 저장 (NCP 업로드 완료 후 TB_PT_FILE INSERT)
+     * PT 파일 메타 저장 (S3 업로드 완료 후 TB_PT_FILE INSERT)
      */
     public java.util.Map<String, Object> savePtFile(ProposalVO.PtFileVO vo) throws Exception {
         java.util.Map<String, Object> resultMap = new java.util.HashMap<>();
@@ -6811,9 +6811,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     return;
                 }
 
-                // ── 10. NCP 업로드 ────────────────────────────────────────────
+                // ── 10. S3 업로드 ────────────────────────────────────────────
                 byte[] imageBytes   = Base64.getDecoder().decode(base64Image);
-                String renderedPath = uploadSlideImageToNcp(ptProjectId, slideId, imageBytes);
+                String renderedPath = uploadSlideImageToS3(ptProjectId, slideId, imageBytes);
 
                 // ── 11. DB 저장 (IMAGE_GEN_HINT, RENDERED_IMAGE_PATH, 완료) ───
                 ProposalVO.SlideVO doneVO = new ProposalVO.SlideVO();
@@ -6826,10 +6826,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 try {
                     ProposalVO.PtTemplateVO tmpl = proposalDAO.selectPtTemplate(ptProjectId);
                     if (tmpl != null && tmpl.getFrameImagePath() != null) {
-                        byte[] frameBytes   = downloadNcpObject(tmpl.getFrameImagePath());
+                        byte[] frameBytes   = downloadS3Object(tmpl.getFrameImagePath());
                         byte[] composite    = stackFrameWithContent(frameBytes, imageBytes);
                         String compositeKey = "proposal/" + ptProjectId + "/slide-images/" + slideId + "_composite.png";
-                        uploadNcpObject(compositeKey, composite);
+                        uploadS3Object(compositeKey, composite);
                         doneVO.setCompositeImagePath(compositeKey);
                         logger.info("[PT Img-Gen SSE] 합성 이미지 저장 완료 (slideId={}, key={})", slideId, compositeKey);
                     }
@@ -6893,11 +6893,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 슬라이드 단건 이미지 생성 (D-5)
-     * IMAGE_GEN_HINT를 image API에 전달해 base64 이미지를 받고, NCP에 업로드 후 URL을 반환한다.
+     * IMAGE_GEN_HINT를 image API에 전달해 base64 이미지를 받고, S3에 업로드 후 URL을 반환한다.
      * IMAGE_GEN_HINT는 온디맨드 이미지 생성 시점에 조립되어 저장된다.
      *
      * @param slide 슬라이드 VO (imageGenHint 필드 필요)
-     * @return 렌더링된 이미지 NCP URL (실패 시 null)
+     * @return 렌더링된 이미지 S3 URL (실패 시 null)
      */
     private String doImageRender(ProposalVO.SlideVO slide) {
         if (CommonUtil.isEmpty(slide.getImageGenHint())) {
@@ -6919,9 +6919,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             doneVO.setSlideId(slide.getSlideId());
 
             if (base64Image != null && !base64Image.isEmpty()) {
-                // base64 → NCP 업로드 (원본 인포그래픽, PPTX 내보내기용)
+                // base64 → S3 업로드 (원본 인포그래픽, PPTX 내보내기용)
                 byte[] imageBytes = Base64.getDecoder().decode(base64Image);
-                String renderedPath = uploadSlideImageToNcp(slide.getPtProjectId(), slide.getSlideId(), imageBytes);
+                String renderedPath = uploadSlideImageToS3(slide.getPtProjectId(), slide.getSlideId(), imageBytes);
 
                 doneVO.setRenderedImagePath(renderedPath);
                 doneVO.setRenderStatusCd("003");
@@ -6930,10 +6930,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 try {
                     ProposalVO.PtTemplateVO tmpl = proposalDAO.selectPtTemplate(slide.getPtProjectId());
                     if (tmpl != null && tmpl.getFrameImagePath() != null) {
-                        byte[] frameBytes   = downloadNcpObject(tmpl.getFrameImagePath());
+                        byte[] frameBytes   = downloadS3Object(tmpl.getFrameImagePath());
                         byte[] composite    = stackFrameWithContent(frameBytes, imageBytes);
                         String compositeKey = "proposal/" + slide.getPtProjectId() + "/slide-images/" + slide.getSlideId() + "_composite.png";
-                        uploadNcpObject(compositeKey, composite);
+                        uploadS3Object(compositeKey, composite);
                         doneVO.setCompositeImagePath(compositeKey);
                         logger.info("[PT Image] 합성 이미지 저장 완료 (slideId={}, key={})", slide.getSlideId(), compositeKey);
                     } else {
@@ -7118,11 +7118,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * base64 이미지를 NCP 오브젝트 스토리지에 업로드 후 공개 URL 반환.
+     * base64 이미지를 S3 오브젝트 스토리지에 업로드 후 공개 URL 반환.
      * 저장 경로: proposal/{ptProjectId}/slide-images/{slideId}.png
      */
-    private String uploadSlideImageToNcp(String ptProjectId, String slideId, byte[] imageBytes) {
-        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+    private String uploadSlideImageToS3(String ptProjectId, String slideId, byte[] imageBytes) {
+        String bucket = PropertyUtil.getProperty("aws.s3.bucket");
         String objectKey = "proposal/" + ptProjectId + "/slide-images/" + slideId + ".png";
 
         ObjectMetadata metadata = new ObjectMetadata();
@@ -7130,7 +7130,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         metadata.setContentType("image/png");
 
         amazonS3.putObject(bucket, objectKey, new ByteArrayInputStream(imageBytes), metadata);
-        logger.info("[PT Image] NCP 업로드 완료 (slideId={}, key={})", slideId, objectKey);
+        logger.info("[PT Image] S3 업로드 완료 (slideId={}, key={})", slideId, objectKey);
 
         return objectKey;
     }
@@ -7139,7 +7139,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * Step E 확정 직후 비동기 실행.
-     * 템플릿 헤더/푸터 디자인을 LLM 이미지 API로 생성한 뒤 NCP에 저장하고
+     * 템플릿 헤더/푸터 디자인을 LLM 이미지 API로 생성한 뒤 S3에 저장하고
      * TB_PT_TEMPLATE.FRAME_IMAGE_PATH를 업데이트한다.
      */
     private void generateTemplateFrame(ProposalVO.PtTemplateVO template) {
@@ -7168,10 +7168,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             return;
         }
 
-        // 3. NCP 업로드
+        // 3. S3 업로드
         byte[] imageBytes = Base64.getDecoder().decode(base64Image);
         String objectKey  = "proposal/" + ptProjectId + "/template-images/frame.png";
-        uploadNcpObject(objectKey, imageBytes);
+        uploadS3Object(objectKey, imageBytes);
 
         // 4. FRAME_IMAGE_PATH DB 저장
         ProposalVO.PtTemplateVO patch = new ProposalVO.PtTemplateVO();
@@ -7488,14 +7488,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 표지 배경 이미지를 생성하고 NCP에 업로드한 뒤 DB를 갱신한다.
+     * 표지 배경 이미지를 생성하고 S3에 업로드한 뒤 DB를 갱신한다.
      *
      * <p>처리 흐름:
      * <ol>
      *   <li>COVER_GEN_STATUS_CD = '002' (생성중) 설정</li>
      *   <li>buildCoverPrompt → callPtImageApi 호출</li>
      *   <li>실패: COVER_GEN_STATUS_CD = '004', 기존 이미지 경로 보존, return</li>
-     *   <li>성공: NCP 업로드 → COVER_IMAGE_PATH + COVER_GEN_STATUS_CD = '003' 갱신</li>
+     *   <li>성공: S3 업로드 → COVER_IMAGE_PATH + COVER_GEN_STATUS_CD = '003' 갱신</li>
      * </ol>
      */
     private void generateCoverImage(String ptProjectId, String agentId, String requestType, String message) {
@@ -7531,10 +7531,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             return;
         }
 
-        // 4. Base64 디코딩 → NCP 업로드
+        // 4. Base64 디코딩 → S3 업로드
         byte[] imageBytes = Base64.getDecoder().decode(base64Image);
         String objectKey  = "proposal/" + ptProjectId + "/cover-images/cover.png";
-        uploadNcpObject(objectKey, imageBytes);
+        uploadS3Object(objectKey, imageBytes);
 
         // 5. COVER_IMAGE_PATH + 완료(003) 상태 갱신
         ProposalVO.PtTemplateVO pathVO = new ProposalVO.PtTemplateVO();
@@ -7548,7 +7548,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 간지 재사용 배경 이미지를 생성하고 NCP에 업로드한 뒤 TB_PT_TEMPLATE을 갱신한다.
+     * 간지 재사용 배경 이미지를 생성하고 S3에 업로드한 뒤 TB_PT_TEMPLATE을 갱신한다.
      *
      * <p>본문형 FRAME_IMAGE_PATH와 동일하게 프로젝트당 1장을 저장한다.
      * 대목차 텍스트는 문서 빌드 시 플레이스홀더 치환으로 오버레이한다.
@@ -7558,7 +7558,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      *   <li>DIVIDER_GEN_STATUS_CD = '002' (생성중) 설정</li>
      *   <li>buildDividerPrompt → callPtImageApi 호출</li>
      *   <li>실패: DIVIDER_GEN_STATUS_CD = '004', return</li>
-     *   <li>성공: NCP 업로드 → DIVIDER_IMAGE_PATH + DIVIDER_GEN_STATUS_CD = '003' 갱신</li>
+     *   <li>성공: S3 업로드 → DIVIDER_IMAGE_PATH + DIVIDER_GEN_STATUS_CD = '003' 갱신</li>
      * </ol>
      */
     private void generateDividerImage(String ptProjectId, String agentId, String requestType, String message) {
@@ -7594,10 +7594,10 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             return;
         }
 
-        // 4. Base64 디코딩 → NCP 업로드
+        // 4. Base64 디코딩 → S3 업로드
         byte[] imageBytes = Base64.getDecoder().decode(base64Image);
         String objectKey  = "proposal/" + ptProjectId + "/divider-images/divider.png";
-        uploadNcpObject(objectKey, imageBytes);
+        uploadS3Object(objectKey, imageBytes);
 
         // 5. TB_PT_TEMPLATE.DIVIDER_IMAGE_PATH + 완료(003) 상태 갱신
         ProposalVO.PtTemplateVO pathVO = new ProposalVO.PtTemplateVO();
@@ -7623,7 +7623,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      *  └──────────────────────────┘  ← 프레임 하단 5% (푸터 스트립)
      * </pre>
      *
-     * @param frameBytes   템플릿 프레임 PNG (NCP 저장본)
+     * @param frameBytes   템플릿 프레임 PNG (S3 저장본)
      * @param contentBytes 인포그래픽 PNG (API 생성 원본)
      */
     private byte[] stackFrameWithContent(byte[] frameBytes, byte[] contentBytes) throws Exception {
@@ -7689,11 +7689,11 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return baos.toByteArray();
     }
 
-    // ── NCP 유틸 ─────────────────────────────────────────────────────────────────
+    // ── S3 유틸 ─────────────────────────────────────────────────────────────────
 
-    /** NCP 오브젝트 스토리지에서 바이트 배열로 다운로드 */
-    private byte[] downloadNcpObject(String objectKey) throws Exception {
-        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+    /** S3 오브젝트 스토리지에서 바이트 배열로 다운로드 */
+    private byte[] downloadS3Object(String objectKey) throws Exception {
+        String bucket = PropertyUtil.getProperty("aws.s3.bucket");
         try (S3Object s3obj = amazonS3.getObject(bucket, objectKey);
              InputStream is = s3obj.getObjectContent()) {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -7704,14 +7704,14 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** NCP 오브젝트 스토리지에 objectKey 경로로 PNG 업로드 */
-    private void uploadNcpObject(String objectKey, byte[] imageBytes) {
-        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+    /** S3 오브젝트 스토리지에 objectKey 경로로 PNG 업로드 */
+    private void uploadS3Object(String objectKey, byte[] imageBytes) {
+        String bucket = PropertyUtil.getProperty("aws.s3.bucket");
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(imageBytes.length);
         metadata.setContentType("image/png");
         amazonS3.putObject(bucket, objectKey, new ByteArrayInputStream(imageBytes), metadata);
-        logger.info("[PT NCP] 업로드 완료 (key={})", objectKey);
+        logger.info("[PT S3] 업로드 완료 (key={})", objectKey);
     }
 
     /**
@@ -8330,7 +8330,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * TB_PT_FILE NCP 경로를 TB_CHAT_FILE 임시 행으로 브릿지 (실파일 복사 없음).
+     * TB_PT_FILE S3 경로를 TB_CHAT_FILE 임시 행으로 브릿지 (실파일 복사 없음).
      * @return chatFileId, 실패 시 null
      */
     private Long bridgePtFileToChatFile(ProposalVO.PtFileVO templateFile) {
@@ -8355,7 +8355,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** 임시 TB_CHAT_FILE 행만 삭제 (NCP 원본 유지) */
+    /** 임시 TB_CHAT_FILE 행만 삭제 (S3 원본 유지) */
     private void cleanupTempChatFile(Long chatFileId) {
         if (chatFileId == null) return;
         try {
@@ -8718,7 +8718,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * F — 출력 시작
      * 1. forceRebuild=true 이면 캐시 무시하고 신규 빌드
      * 2. 캐시 재사용 판단: 최근 완료(004) 빌드의 INPUT_FINGERPRINT vs 현재 빌드 입력 지문
-     *    → 일치하고 NCP 파일이 있으면 presigned URL 발급 후 즉시 반환 (cacheReused=true)
+     *    → 일치하고 S3 파일이 있으면 presigned URL 발급 후 즉시 반환 (cacheReused=true)
      * 3. 신규 빌드: TB_PT_EXPORT row 생성 → 비동기 빌드 시작 → exportId 즉시 반환
      *
      * @param vo ptProjectId, agentId, forceRebuild
@@ -8773,9 +8773,9 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         ProposalVO.ExportVO cached = proposalDAO.selectLatestCompletedExport(ptProjectId, exportTypeCd);
         if (cached == null || CommonUtil.isEmpty(cached.getFilePath())) return null;
         try {
-            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
             if (!amazonS3.doesObjectExist(bucket, cached.getFilePath())) {
-                logger.warn("[PT F] 이전 파일 NCP 없음 (key={})", cached.getFilePath());
+                logger.warn("[PT F] 이전 파일 S3 없음 (key={})", cached.getFilePath());
                 return null;
             }
             String downloadUrl = fileService.createDownloadPresignedUrlStr(
@@ -8790,7 +8790,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 최근 완료 export의 INPUT_FINGERPRINT가 현재 빌드 입력과 같고 NCP 파일이 있으면
+     * 최근 완료 export의 INPUT_FINGERPRINT가 현재 빌드 입력과 같고 S3 파일이 있으면
      * presigned URL을 붙여 반환. 아니면 null.
      */
     private ProposalVO.ExportVO tryReuseCachedExport(String ptProjectId, String exportTypeCd, String outputMode) {
@@ -8807,13 +8807,13 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         }
 
         try {
-            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
             if (!amazonS3.doesObjectExist(bucket, cached.getFilePath())) {
-                logger.warn("[PT F] 캐시 파일 NCP 없음 (key={})", cached.getFilePath());
+                logger.warn("[PT F] 캐시 파일 S3 없음 (key={})", cached.getFilePath());
                 return null;
             }
         } catch (Exception e) {
-            logger.warn("[PT F] 캐시 NCP 존재 확인 실패: {}", e.getMessage());
+            logger.warn("[PT F] 캐시 S3 존재 확인 실패: {}", e.getMessage());
             return null;
         }
 
@@ -9072,7 +9072,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         && "003".equals(ptTemplate.getCoverGenStatusCd())
                         && CommonUtil.isNotEmpty(ptTemplate.getCoverImagePath())) {
                     try {
-                        byte[] coverBytes = downloadNcpObject(ptTemplate.getCoverImagePath());
+                        byte[] coverBytes = downloadS3Object(ptTemplate.getCoverImagePath());
                         if (coverBytes != null && coverBytes.length > 0) {
                             compPages.add(new kr.teamagent.common.util.ProposalPptxUtil.ComponentPageInfo(
                                     coverBytes, "", "", "", projectNm, orgNm, submitterNmFinal, "001", ""));
@@ -9088,7 +9088,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                         && "003".equals(ptTemplate.getDividerGenStatusCd())
                         && CommonUtil.isNotEmpty(ptTemplate.getDividerImagePath())) {
                     try {
-                        dividerBytes = downloadNcpObject(ptTemplate.getDividerImagePath());
+                        dividerBytes = downloadS3Object(ptTemplate.getDividerImagePath());
                         if (dividerBytes != null && dividerBytes.length == 0) dividerBytes = null;
                     } catch (Exception e) {
                         logger.warn("[PT F-C] 간지 이미지 다운로드 실패: {}", e.getMessage());
@@ -9182,7 +9182,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     if ("003".equals(ptTemplate.getCoverGenStatusCd())
                             && CommonUtil.isNotEmpty(ptTemplate.getCoverImagePath())) {
                         try {
-                            byte[] coverBytes = downloadNcpObject(ptTemplate.getCoverImagePath());
+                            byte[] coverBytes = downloadS3Object(ptTemplate.getCoverImagePath());
                             if (coverBytes != null && coverBytes.length > 0) {
                                 pages.add(new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
                                         coverBytes, "", "", "", projectNm, orgNm, submitterNmFinal, "001"));
@@ -9198,7 +9198,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                     if ("003".equals(ptTemplate.getDividerGenStatusCd())
                             && CommonUtil.isNotEmpty(ptTemplate.getDividerImagePath())) {
                         try {
-                            dividerBytes = downloadNcpObject(ptTemplate.getDividerImagePath());
+                            dividerBytes = downloadS3Object(ptTemplate.getDividerImagePath());
                             if (dividerBytes != null && dividerBytes.length == 0) dividerBytes = null;
                             else if (dividerBytes != null) logger.info("[PT F] 간지 재사용 배경 로드 (path={})", ptTemplate.getDividerImagePath());
                         } catch (Exception e) {
@@ -9227,7 +9227,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                                 String pageLabel = roman + "-" + slideNoInCh;
                                 byte[] imageBytes = null;
                                 if (CommonUtil.isNotEmpty(s.getRenderedImagePath())) {
-                                    try { imageBytes = downloadNcpObject(s.getRenderedImagePath()); }
+                                    try { imageBytes = downloadS3Object(s.getRenderedImagePath()); }
                                     catch (Exception e) { logger.warn("[PT F] 이미지 다운로드 실패 (slideId={}): {}", s.getSlideId(), e.getMessage()); }
                                 }
                                 return new kr.teamagent.common.util.ProposalPptxUtil.PageInfo(
@@ -9275,7 +9275,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
                 }
             }
 
-            // ── 5. NCP 업로드 및 형식별 처리 ────────────────────────────────
+            // ── 5. S3 업로드 및 형식별 처리 ────────────────────────────────
             String objectKey;
             byte[] uploadBytes;
             String contentType;
@@ -9298,7 +9298,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
             }
 
             fileService.uploadBytes(objectKey, uploadBytes, contentType);
-            logger.info("[PT F] NCP 업로드 완료 (exportId={}, key={}, size={})", exportId, objectKey, uploadBytes.length);
+            logger.info("[PT F] S3 업로드 완료 (exportId={}, key={}, size={})", exportId, objectKey, uploadBytes.length);
 
             // ── 6. TB_PT_EXPORT 완료 업데이트 ──────────────────────────────
             ProposalVO.ExportVO doneVO = new ProposalVO.ExportVO();
@@ -9364,7 +9364,7 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
      * 표지 이미지 생성 · 재생성 (동기, 사용자 명시적 트리거).
      *
      * <p>이미지 생성 완료 후 현재 템플릿 레코드를 반환한다.
-     * 프론트에서는 응답의 {@code coverImagePath}로 NCP 이미지를 렌더링하면 된다.
+     * 프론트에서는 응답의 {@code coverImagePath}로 S3 이미지를 렌더링하면 된다.
      *
      * @param ptProjectId 프로젝트 ID
      * @param agentId     TB_PROMPT_APPLY_AGT 조회 키 (STAGE_CD='S3_COVER_TEMPLATE')
@@ -9872,6 +9872,51 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return upd;
     }
 
+
+    /** Generate a reviewable revision without changing the persisted outline. */
+    public ProposalVO.TocVO previewTocOutline(Map<String, String> params) throws Exception {
+        String tocId = params.get("tocId");
+        ProposalVO.TocVO current = proposalDAO.selectTocOutline(tocId);
+        if (current == null) throw new RuntimeException("목차를 찾을 수 없습니다.");
+        String original = current.getContentOutlineTxt();
+        if (CommonUtil.isEmpty(original)) throw new RuntimeException("먼저 개요를 생성해주세요.");
+        if (!original.equals(params.get("originalText")))
+            throw new RuntimeException("개요가 변경되었습니다. 목차를 다시 선택한 뒤 요청해주세요.");
+        String message = params.get("message");
+        if (CommonUtil.isEmpty(message)) throw new RuntimeException("보완 내용을 입력해주세요.");
+        int start = params.get("targetStart") == null ? 0 : Integer.parseInt(params.get("targetStart"));
+        int end = params.get("targetEnd") == null ? original.length() : Integer.parseInt(params.get("targetEnd"));
+        if (start < 0 || end <= start || end > original.length()) throw new RuntimeException("보완 대상이 올바르지 않습니다.");
+        String target = original.substring(start, end);
+        String instruction = message + "\n제공된 개요와 사용자 입력에 없는 고객 조건, 실적, 수치, 회사 강점을 사실처럼 만들지 마세요. 확인이 필요하면 명시하세요."
+                + "\n제공된 대상 부분만 수정하고 원래 제목 번호와 마크다운 구조를 유지하세요. 설명이나 코드 펜스 없이 수정한 개요만 출력하세요.";
+        String response = callLlmWithRetry(buildOutlineChatPrompt(target, instruction),
+                params.get("modelId"), params.get("agentId"), "[PT Outline Preview]");
+        if (CommonUtil.isEmpty(response)) throw new RuntimeException("AI 응답이 비어 있습니다. 다시 요청해주세요.");
+        String replacement = response.trim();
+        String whitespace = target.substring(target.stripTrailing().length());
+        ProposalVO.TocVO result = new ProposalVO.TocVO();
+        result.setTocId(tocId);
+        result.setContentOutlineTxt(original.substring(0, start) + replacement + whitespace + original.substring(end));
+        result.setOutlineStatusCd(current.getOutlineStatusCd());
+        return result;
+    }
+
+    /** Apply an explicitly accepted revision as a draft, keeping confirmation separate. */
+    @Transactional(rollbackFor = Exception.class)
+    public void applyTocOutlineRevision(Map<String, String> params) throws Exception {
+        ProposalVO.TocVO current = proposalDAO.selectTocOutline(params.get("tocId"));
+        if (current == null || !java.util.Objects.equals(current.getContentOutlineTxt(), params.get("originalText")))
+            throw new RuntimeException("개요가 변경되어 수정안을 반영하지 않았습니다. 목차를 다시 선택해주세요.");
+        if (CommonUtil.isEmpty(params.get("outlineTxt"))) throw new RuntimeException("수정안이 비어 있습니다.");
+        ProposalVO.TocVO update = new ProposalVO.TocVO();
+        update.setTocId(params.get("tocId"));
+        update.setContentOutlineTxt(params.get("outlineTxt"));
+        update.setOutlineStatusCd("002");
+        update.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateTocOutline(update);
+    }
+
     /**
      * 콘텐츠 개요 확정 (OUTLINE_STATUS_CD = '003')
      */
@@ -10010,58 +10055,58 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // 프로젝트 삭제 — NCP 파일 전체 삭제 후 DB 데이터 전체 삭제
+    // 프로젝트 삭제 — S3 파일 전체 삭제 후 DB 데이터 전체 삭제
     // ══════════════════════════════════════════════════════════════════════════
 
     /**
      * PT 프로젝트 삭제.
      * <ol>
-     *   <li>NCP 파일 수집: TB_PT_FILE, TB_PT_SLIDE(이미지), TB_PT_TEMPLATE(이미지), TB_PT_EXPORT</li>
-     *   <li>NCP 오브젝트 삭제 (실패 건은 warn 로그 후 진행)</li>
+     *   <li>S3 파일 수집: TB_PT_FILE, TB_PT_SLIDE(이미지), TB_PT_TEMPLATE(이미지), TB_PT_EXPORT</li>
+     *   <li>S3 오브젝트 삭제 (실패 건은 warn 로그 후 진행)</li>
      *   <li>DB 레코드 전체 삭제 (자식 → 부모 순서)</li>
      * </ol>
      */
     public void deleteProject(String ptProjectId) {
         logger.info("[PT Delete] 프로젝트 삭제 시작 (ptProjectId={})", ptProjectId);
 
-        // 1. NCP 삭제 대상 경로 수집
-        List<String> ncpPaths = new ArrayList<>();
+        // 1. S3 삭제 대상 경로 수집
+        List<String> s3Paths = new ArrayList<>();
 
         // TB_PT_FILE 경로
         List<String> filePaths = proposalDAO.selectPtFilePathsByProject(ptProjectId);
-        if (filePaths != null) ncpPaths.addAll(filePaths);
+        if (filePaths != null) s3Paths.addAll(filePaths);
 
         // TB_PT_SLIDE 이미지 경로
         List<String> slidePaths = proposalDAO.selectSlideImagePathsByProject(ptProjectId);
-        if (slidePaths != null) ncpPaths.addAll(slidePaths);
+        if (slidePaths != null) s3Paths.addAll(slidePaths);
 
         // TB_PT_TEMPLATE 이미지 경로 (frame, cover, divider)
         ProposalVO.PtTemplateVO template = proposalDAO.selectPtTemplate(ptProjectId);
         if (template != null) {
-            if (CommonUtil.isNotEmpty(template.getFrameImagePath()))   ncpPaths.add(template.getFrameImagePath());
-            if (CommonUtil.isNotEmpty(template.getCoverImagePath()))   ncpPaths.add(template.getCoverImagePath());
-            if (CommonUtil.isNotEmpty(template.getDividerImagePath())) ncpPaths.add(template.getDividerImagePath());
+            if (CommonUtil.isNotEmpty(template.getFrameImagePath()))   s3Paths.add(template.getFrameImagePath());
+            if (CommonUtil.isNotEmpty(template.getCoverImagePath()))   s3Paths.add(template.getCoverImagePath());
+            if (CommonUtil.isNotEmpty(template.getDividerImagePath())) s3Paths.add(template.getDividerImagePath());
         }
 
         // TB_PT_EXPORT 출력 파일 경로
         List<String> exportPaths = proposalDAO.selectExportFilePathsByProject(ptProjectId);
-        if (exportPaths != null) ncpPaths.addAll(exportPaths);
+        if (exportPaths != null) s3Paths.addAll(exportPaths);
 
-        logger.info("[PT Delete] NCP 삭제 대상 {}건 (ptProjectId={})", ncpPaths.size(), ptProjectId);
+        logger.info("[PT Delete] S3 삭제 대상 {}건 (ptProjectId={})", s3Paths.size(), ptProjectId);
 
-        // 2. NCP 오브젝트 삭제 (실패해도 DB 삭제 진행)
-        int ncpSuccess = 0, ncpFail = 0;
-        for (String path : ncpPaths) {
+        // 2. S3 오브젝트 삭제 (실패해도 DB 삭제 진행)
+        int s3Success = 0, s3Fail = 0;
+        for (String path : s3Paths) {
             if (CommonUtil.isEmpty(path)) continue;
             Map<String, Object> result = fileService.deleteStorageObjectByKey(path);
             if (Boolean.TRUE.equals(result.get("successYn"))) {
-                ncpSuccess++;
+                s3Success++;
             } else {
-                ncpFail++;
-                logger.warn("[PT Delete] NCP 삭제 실패 (ptProjectId={}, path={}): {}", ptProjectId, path, result.get("returnMsg"));
+                s3Fail++;
+                logger.warn("[PT Delete] S3 삭제 실패 (ptProjectId={}, path={}): {}", ptProjectId, path, result.get("returnMsg"));
             }
         }
-        logger.info("[PT Delete] NCP 삭제 완료 — 성공={}, 실패={} (ptProjectId={})", ncpSuccess, ncpFail, ptProjectId);
+        logger.info("[PT Delete] S3 삭제 완료 — 성공={}, 실패={} (ptProjectId={})", s3Success, s3Fail, ptProjectId);
 
         // 3. DB 레코드 전체 삭제 (자식 → 부모)
         proposalDAO.deleteSlidesByProject(ptProjectId);

@@ -91,7 +91,7 @@ public class ProposalPptxUtil {
      * 헤더·푸터 구성에 필요한 메타데이터를 함께 담는다.
      */
     public static class PageInfo {
-        /** NCP에서 다운로드한 슬라이드 렌더링 이미지 bytes (null 허용 → 플레이스홀더 표시) */
+        /** S3에서 다운로드한 슬라이드 렌더링 이미지 bytes (null 허용 → 플레이스홀더 표시) */
         public final byte[] imageBytes;
         /** 챕터 번호 ("Ⅱ" 또는 SECTION_NO) — {chapter_no} 치환용 */
         public final String chapterRoman;

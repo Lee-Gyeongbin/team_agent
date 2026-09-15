@@ -76,7 +76,9 @@
 			<list>
 				<value>classpath:/egovframework/egovProps/globals.properties</value>
 				<value>classpath:/egovframework/egovProps/globals-secret.properties</value>
+				<!-- 서버에서는 레포 밖의 파일로 시크릿을 관리한다 (뒤에 오는 파일이 앞을 덮어씀) -->
 				<value>file:/home/teamagent/secrets/globals-secret.properties</value>
+				<value>file:/home/ec2-user/secrets/globals-secret.properties</value>
 			</list>
 		</property>
 		<property name="ignoreResourceNotFound" value="true"/>

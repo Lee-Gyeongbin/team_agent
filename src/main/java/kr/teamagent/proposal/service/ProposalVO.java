@@ -117,7 +117,7 @@ public class ProposalVO {
         private String ptProjectId;
         /** 파일 용도 코드 (PT000011: 001=RFP원문, 002=평가표, 003=템플릿, 004=기타참고자료, 005=자사정보, 006=경쟁사정보) */
         private String filePurposeCd;
-        /** NCP 오브젝트 경로 (pt-file/{ptProjectId}/{ptFileId}_{원본파일명}) */
+        /** S3 오브젝트 경로 (pt-file/{ptProjectId}/{ptFileId}_{원본파일명}) */
         private String filePath;
         /** 원본 파일명 */
         @JsonProperty("fileName")
@@ -652,9 +652,9 @@ public class ProposalVO {
         private String imageGenHint;
         /** 정렬 순서 (SORT_ORD) */
         private Integer sortOrd;
-        /** 렌더링된 이미지 NCP 경로 (PPTX 내보내기용 원본) */
+        /** 렌더링된 이미지 S3 경로 (PPTX 내보내기용 원본) */
         private String renderedImagePath;
-        /** 템플릿 프레임 합성 이미지 NCP 경로 (Step D 미리보기용) */
+        /** 템플릿 프레임 합성 이미지 S3 경로 (Step D 미리보기용) */
         private String compositeImagePath;
         /** 렌더 상태 코드 (001=대기, 002=생성중, 003=완료, 004=실패) */
         private String renderStatusCd;
@@ -746,7 +746,7 @@ public class ProposalVO {
      *     TOTAL_SLIDE_CNT    INT           NOT NULL DEFAULT 0,
      *     RENDERED_SLIDE_CNT INT           NOT NULL DEFAULT 0,     -- 진행률 표시용
      *     FILE_NM            VARCHAR(200)  NULL,                   -- 완성된 파일명
-     *     FILE_PATH          VARCHAR(500)  NULL,                   -- NCP 오브젝트 경로
+     *     FILE_PATH          VARCHAR(500)  NULL,                   -- S3 오브젝트 경로
      *     FILE_SIZE          BIGINT        NULL,
      *     EXPORT_TYPE_CD     CHAR(3)       NOT NULL DEFAULT '001', -- PT_EXPORT_TYPE: 001=PPTX 002=PDF
      *     INPUT_FINGERPRINT  VARCHAR(64)   NULL,                   -- 빌드 입력 SHA-256 (캐시 재사용 판단용)
@@ -774,7 +774,7 @@ public class ProposalVO {
         private Integer renderedSlideCnt;
         /** 완성된 파일명 */
         private String fileNm;
-        /** NCP 오브젝트 경로 */
+        /** S3 오브젝트 경로 */
         private String filePath;
         /** 파일 크기 (bytes) */
         private Long fileSize;
@@ -845,13 +845,13 @@ public class ProposalVO {
         private String modifyUserId;
         /** 수정일시 */
         private String modifyDt;
-        /** 템플릿 프레임 이미지 NCP 경로 (Step E 확정 후 비동기 생성) */
+        /** 템플릿 프레임 이미지 S3 경로 (Step E 확정 후 비동기 생성) */
         private String frameImagePath;
-        /** 표지 배경 이미지 NCP 경로 (사용자 트리거 시 동기 생성) */
+        /** 표지 배경 이미지 S3 경로 (사용자 트리거 시 동기 생성) */
         private String coverImagePath;
         /** 표지 이미지 생성 상태 코드 (PT000007 재사용: 001=대기, 002=생성중, 003=완료, 004=실패) */
         private String coverGenStatusCd;
-        /** 간지 배경 이미지 NCP 경로 (사용자 트리거 시 동기 생성) */
+        /** 간지 배경 이미지 S3 경로 (사용자 트리거 시 동기 생성) */
         private String dividerImagePath;
         /** 간지 이미지 생성 상태 코드 (001=대기, 002=생성중, 003=완료, 004=실패) */
         private String dividerGenStatusCd;

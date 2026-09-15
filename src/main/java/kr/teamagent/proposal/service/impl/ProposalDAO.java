@@ -706,19 +706,19 @@ public class ProposalDAO extends EgovComAbstractDAO {
 
     // ── 프로젝트 삭제 ────────────────────────────────────────────────────────
 
-    /** TB_PT_FILE 경로 목록 조회 (NCP 삭제용) */
+    /** TB_PT_FILE 경로 목록 조회 (S3 삭제용) */
     @SuppressWarnings("unchecked")
     public List<String> selectPtFilePathsByProject(String ptProjectId) {
         return selectList("proposal.selectPtFilePathsByProject", ptProjectId);
     }
 
-    /** TB_PT_SLIDE 이미지 경로 목록 조회 (NCP 삭제용) */
+    /** TB_PT_SLIDE 이미지 경로 목록 조회 (S3 삭제용) */
     @SuppressWarnings("unchecked")
     public List<String> selectSlideImagePathsByProject(String ptProjectId) {
         return selectList("proposal.selectSlideImagePathsByProject", ptProjectId);
     }
 
-    /** TB_PT_EXPORT 파일 경로 목록 조회 (NCP 삭제용) */
+    /** TB_PT_EXPORT 파일 경로 목록 조회 (S3 삭제용) */
     @SuppressWarnings("unchecked")
     public List<String> selectExportFilePathsByProject(String ptProjectId) {
         return selectList("proposal.selectExportFilePathsByProject", ptProjectId);

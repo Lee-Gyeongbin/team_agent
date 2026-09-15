@@ -30,7 +30,7 @@ import kr.teamagent.mypage.service.MyPageVO;
 @Service
 public class MyPageServiceImpl extends EgovAbstractServiceImpl {
 
-    /** NCP 객체 키: profiles/{userId}/파일명 */
+    /** S3 객체 키: profiles/{userId}/파일명 */
     private static final String PROFILE_STORAGE_PREFIX = "profiles";
     private static final long PROFILE_UPLOAD_EXPIRE_MILLIS = 60 * 60 * 1000L;
 
@@ -412,7 +412,7 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     private String getBucketName() {
-        return PropertyUtil.getProperty("ncp.storage.bucket");
+        return PropertyUtil.getProperty("aws.s3.bucket");
     }
 
 }
