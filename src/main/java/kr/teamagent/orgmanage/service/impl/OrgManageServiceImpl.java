@@ -91,7 +91,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     public List<OrgManageVO> selectOrgList(OrgManageVO searchVO) throws Exception {
-        return orgManageDAO.selectOrgList(searchVO);
+        return orderOrgListByTree(orgManageDAO.selectOrgList(searchVO));
     }
 
     /**
@@ -207,7 +207,7 @@ public class OrgManageServiceImpl extends EgovAbstractServiceImpl {
      * @throws Exception
      */
     public void downloadOrgExcel(HttpServletResponse response) throws Exception {
-        List<OrgManageVO> list = orderOrgListByTree(selectOrgList(new OrgManageVO()));
+        List<OrgManageVO> list = selectOrgList(new OrgManageVO());
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             XSSFSheet sheet = createOrgExcelSheet(workbook, list);
             applyOrgExcelSheetOptions(sheet);

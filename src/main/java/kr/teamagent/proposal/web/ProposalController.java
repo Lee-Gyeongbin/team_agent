@@ -1441,6 +1441,38 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
+
+    @RequestMapping(value = "/ai/proposal/previewTocOutline.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView previewTocOutline(@RequestBody Map<String, String> params) {
+        HashMap<String, Object> result = new HashMap<>();
+        try {
+            ProposalVO.TocVO data = proposalService.previewTocOutline(params);
+            result.put("result", "OK");
+            result.put("contentOutlineTxt", data.getContentOutlineTxt());
+        } catch (Exception e) {
+            logger.error("[PT Outline] preview failed", e);
+            result.put("result", "FAIL");
+            result.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", result);
+    }
+
+    @RequestMapping(value = "/ai/proposal/applyTocOutlineRevision.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView applyTocOutlineRevision(@RequestBody Map<String, String> params) {
+        HashMap<String, Object> result = new HashMap<>();
+        try {
+            proposalService.applyTocOutlineRevision(params);
+            result.put("result", "OK");
+        } catch (Exception e) {
+            logger.error("[PT Outline] apply revision failed", e);
+            result.put("result", "FAIL");
+            result.put("msg", e.getMessage());
+        }
+        return new ModelAndView("jsonView", result);
+    }
+
     /** 콘텐츠 개요 확정 */
     @RequestMapping(value = "/ai/proposal/confirmTocOutline.do", method = RequestMethod.POST)
     @ResponseBody
