@@ -290,6 +290,15 @@
         WHERE SPEAKER_ID = #{speakerId}
     </update>
 
+    <update id="updateSpeakerLabelAndUtterances" parameterType="meetingVO">
+        /* 화자 레이블/발화 수정 (참석자 매핑 유지) ai.meeting.updateSpeakerLabelAndUtterances */
+        UPDATE TB_MEETING_SPEAKER SET
+            SPEAKER_LABEL = #{speakerLabel}
+            , UTTERANCES  = #{utterances}
+            , MODIFY_DT   = NOW()
+        WHERE SPEAKER_ID = #{speakerId}
+    </update>
+
     <delete id="deleteSpeaker" parameterType="meetingVO">
         /* 화자 행 삭제 (머지 후 중복 제거) ai.meeting.deleteSpeaker */
         DELETE FROM TB_MEETING_SPEAKER
@@ -469,4 +478,96 @@
         )
         </foreach>
     </insert>
+
+    <insert id="insertMeetingVoiceEnrollment" parameterType="meetingVO">
+        /* 회의 음성 등록 ai.meeting.insertMeetingVoiceEnrollment */
+        INSERT INTO TB_MEETING_VOICE_ENROLLMENT
+            (
+                MEETING_ID,
+                SPEAKER_ID,
+                SPEAKER_NM,
+                FILE_PATH,
+                ORIGINAL_FILENAME,
+                FILE_EXT,
+                FILE_SIZE,
+                DURATION_SEC,
+                STATUS,
+                ERROR_MSG,
+                CREATE_DT,
+                MODIFY_DT
+            )
+        Values
+            (
+                #{meetingId},
+                #{speakerId},
+                #{speakerNm},
+                #{filePath},
+                #{originalFilename},
+                #{fileExt},
+                #{fileSize},
+                #{durationSec},
+                #{status},
+                #{errorMsg},
+                NOW(),
+                NOW()
+            )
+    </insert>
+
+    <select id="selectMeetingVoiceEnrollment" parameterType="meetingVO" resultType="meetingVO">
+        /* 회의 음성 등록 조회 ai.meeting.selectMeetingVoiceEnrollment */
+        SELECT
+            MEETING_ID          AS MEETING_ID
+            , SPEAKER_ID        AS SPEAKER_ID
+            , SPEAKER_NM        AS SPEAKER_NM
+            , FILE_PATH         AS FILE_PATH
+            , ORIGINAL_FILENAME AS ORIGINAL_FILENAME
+            , FILE_EXT          AS FILE_EXT
+            , FILE_SIZE         AS FILE_SIZE
+            , DURATION_SEC      AS DURATION_SEC
+            , STATUS            AS STATUS
+            , ERROR_MSG         AS ERROR_MSG
+        FROM TB_MEETING_VOICE_ENROLLMENT
+        WHERE MEETING_ID = #{meetingId}
+          AND SPEAKER_ID = #{speakerId}
+        ORDER BY CREATE_DT DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectMeetingVoiceEnrollmentList" parameterType="meetingVO" resultType="meetingVO">
+        /* 회의별 Voice Enrollment 목록 조회 ai.meeting.selectMeetingVoiceEnrollmentList */
+        SELECT
+            MEETING_ID          AS MEETING_ID
+            , SPEAKER_ID        AS SPEAKER_ID
+            , SPEAKER_NM        AS SPEAKER_NM
+            , FILE_PATH         AS FILE_PATH
+            , ORIGINAL_FILENAME AS ORIGINAL_FILENAME
+            , FILE_EXT          AS FILE_EXT
+            , FILE_SIZE         AS FILE_SIZE
+            , DURATION_SEC      AS DURATION_SEC
+            , STATUS            AS STATUS
+            , ERROR_MSG         AS ERROR_MSG
+            , CREATE_DT         AS CREATE_DT
+            , MODIFY_DT         AS MODIFY_DT
+        FROM TB_MEETING_VOICE_ENROLLMENT
+        WHERE MEETING_ID = #{meetingId}
+        ORDER BY SPEAKER_ID ASC
+    </select>
+
+    <delete id="deleteMeetingVoiceEnrollment" parameterType="meetingVO">
+        /* 회의 음성 등록 삭제 ai.meeting.deleteMeetingVoiceEnrollment */
+        DELETE FROM TB_MEETING_VOICE_ENROLLMENT
+        WHERE MEETING_ID = #{meetingId}
+          AND SPEAKER_ID = #{speakerId}
+    </delete>
+
+    <update id="updateMeetingVoiceEnrollmentStatus" parameterType="meetingVO">
+        /* 회의 음성 상태 수정 ai.meeting.updateMeetingVoiceEnrollmentStatus */
+        UPDATE TB_MEETING_VOICE_ENROLLMENT SET
+            STATUS = #{status}
+            <if test="errorMsg != null">, ERROR_MSG = #{errorMsg}</if>
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+          AND SPEAKER_ID = #{speakerId}
+    </update>
+
 </mapper>

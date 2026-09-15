@@ -97,4 +97,6 @@ public class MeetingVO extends CommonVO {
     private String sortOrder;          // 정렬 방향 (ASC | DESC)
     private String hasMeetingMinutes;  // 회의록 존재 여부 필터 (Y: 있는 것만, 빈 문자열: 전체)
     // integrateYn 은 기존 필드 재사용
+
+    
 }

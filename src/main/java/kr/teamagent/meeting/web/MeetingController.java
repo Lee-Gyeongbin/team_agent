@@ -8,7 +8,6 @@ import javax.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -54,6 +53,15 @@ public class MeetingController extends BaseController {
     public ModelAndView selectMeetingList(MeetingVO searchVO) throws Exception {
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("list", meetingService.selectMeetingList(searchVO));
+        return new ModelAndView("jsonView", resultMap);
+    }
+
+    /** 회의별 Voice Enrollment 목록 조회 */
+    @RequestMapping("/ai/meeting/selectMeetingVoiceEnrollmentList.do")
+    @ResponseBody
+    public ModelAndView selectMeetingVoiceEnrollmentList(MeetingVO searchVO) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("list", meetingService.selectMeetingVoiceEnrollmentList(searchVO));
         return new ModelAndView("jsonView", resultMap);
     }
 
@@ -400,6 +408,37 @@ public class MeetingController extends BaseController {
             resultMap = meetingService.integrateMeetingMinutes(dataVO);
         } catch (Exception e) {
             log.error("integrateMeetingMinutes error", e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 참석자 Voice Enrollment
+     * - multipart/form-data: meetingId, speakerId(USER_ID 또는 SPEAKER_ID), speakerNm, audioFile
+     */
+    @RequestMapping("/ai/meeting/voiceEnroll.do")
+    @ResponseBody
+    public Map<String, Object> voiceEnroll(
+            @RequestParam("meetingId") Long meetingId,
+            @RequestParam("speakerId") Long speakerId,
+            @RequestParam("speakerNm") String speakerNm,
+            @RequestParam("audioFile") MultipartFile audioFile) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            if (audioFile == null || audioFile.isEmpty()) {
+                resultMap.put("successYn", false);
+                resultMap.put("returnMsg", "오디오 파일이 없습니다.");
+                return resultMap;
+            }
+            MeetingVO dataVO = new MeetingVO();
+            dataVO.setMeetingId(meetingId);
+            dataVO.setSpeakerId(speakerId);
+            dataVO.setSpeakerNm(speakerNm);
+            resultMap = meetingService.voiceEnroll(dataVO, audioFile);
+        } catch (Exception e) {
+            log.error("voiceEnroll error", e);
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }
