@@ -9872,6 +9872,51 @@ public class ProposalServiceImpl extends EgovAbstractServiceImpl {
         return upd;
     }
 
+
+    /** Generate a reviewable revision without changing the persisted outline. */
+    public ProposalVO.TocVO previewTocOutline(Map<String, String> params) throws Exception {
+        String tocId = params.get("tocId");
+        ProposalVO.TocVO current = proposalDAO.selectTocOutline(tocId);
+        if (current == null) throw new RuntimeException("목차를 찾을 수 없습니다.");
+        String original = current.getContentOutlineTxt();
+        if (CommonUtil.isEmpty(original)) throw new RuntimeException("먼저 개요를 생성해주세요.");
+        if (!original.equals(params.get("originalText")))
+            throw new RuntimeException("개요가 변경되었습니다. 목차를 다시 선택한 뒤 요청해주세요.");
+        String message = params.get("message");
+        if (CommonUtil.isEmpty(message)) throw new RuntimeException("보완 내용을 입력해주세요.");
+        int start = params.get("targetStart") == null ? 0 : Integer.parseInt(params.get("targetStart"));
+        int end = params.get("targetEnd") == null ? original.length() : Integer.parseInt(params.get("targetEnd"));
+        if (start < 0 || end <= start || end > original.length()) throw new RuntimeException("보완 대상이 올바르지 않습니다.");
+        String target = original.substring(start, end);
+        String instruction = message + "\n제공된 개요와 사용자 입력에 없는 고객 조건, 실적, 수치, 회사 강점을 사실처럼 만들지 마세요. 확인이 필요하면 명시하세요."
+                + "\n제공된 대상 부분만 수정하고 원래 제목 번호와 마크다운 구조를 유지하세요. 설명이나 코드 펜스 없이 수정한 개요만 출력하세요.";
+        String response = callLlmWithRetry(buildOutlineChatPrompt(target, instruction),
+                params.get("modelId"), params.get("agentId"), "[PT Outline Preview]");
+        if (CommonUtil.isEmpty(response)) throw new RuntimeException("AI 응답이 비어 있습니다. 다시 요청해주세요.");
+        String replacement = response.trim();
+        String whitespace = target.substring(target.stripTrailing().length());
+        ProposalVO.TocVO result = new ProposalVO.TocVO();
+        result.setTocId(tocId);
+        result.setContentOutlineTxt(original.substring(0, start) + replacement + whitespace + original.substring(end));
+        result.setOutlineStatusCd(current.getOutlineStatusCd());
+        return result;
+    }
+
+    /** Apply an explicitly accepted revision as a draft, keeping confirmation separate. */
+    @Transactional(rollbackFor = Exception.class)
+    public void applyTocOutlineRevision(Map<String, String> params) throws Exception {
+        ProposalVO.TocVO current = proposalDAO.selectTocOutline(params.get("tocId"));
+        if (current == null || !java.util.Objects.equals(current.getContentOutlineTxt(), params.get("originalText")))
+            throw new RuntimeException("개요가 변경되어 수정안을 반영하지 않았습니다. 목차를 다시 선택해주세요.");
+        if (CommonUtil.isEmpty(params.get("outlineTxt"))) throw new RuntimeException("수정안이 비어 있습니다.");
+        ProposalVO.TocVO update = new ProposalVO.TocVO();
+        update.setTocId(params.get("tocId"));
+        update.setContentOutlineTxt(params.get("outlineTxt"));
+        update.setOutlineStatusCd("002");
+        update.setModifyUserId(SessionUtil.getUserId());
+        proposalDAO.updateTocOutline(update);
+    }
+
     /**
      * 콘텐츠 개요 확정 (OUTLINE_STATUS_CD = '003')
      */
