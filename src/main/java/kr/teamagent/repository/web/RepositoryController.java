@@ -56,7 +56,7 @@ public class RepositoryController extends BaseController {
     }
 
     /**
-     * 문서 등록 시와 동일 — NCP PUT presigned URL 발급 (프론트가 /repository 경로로 호출할 때)
+     * 문서 등록 시와 동일 — S3 PUT presigned URL 발급 (프론트가 /repository 경로로 호출할 때)
      */
     @RequestMapping(value = "/saveDocumentFile.do")
     @ResponseBody

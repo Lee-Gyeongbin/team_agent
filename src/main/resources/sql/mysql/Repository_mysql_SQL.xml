@@ -306,7 +306,7 @@
     <!-- ===== URL ===== -->
 
     <select id="selectDocFilePathsByUrlIds" parameterType="list" resultType="repositoryVO">
-        /* URL ID 목록으로 연결된 TB_DOC_FILE FILE_PATH 조회 (재수집 전 NCP 파일 삭제용) repository.selectDocFilePathsByUrlIds */
+        /* URL ID 목록으로 연결된 TB_DOC_FILE FILE_PATH 조회 (재수집 전 S3 파일 삭제용) repository.selectDocFilePathsByUrlIds */
         SELECT
             DOC_FILE_ID
             , FILE_PATH

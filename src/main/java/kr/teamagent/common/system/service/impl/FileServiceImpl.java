@@ -57,11 +57,11 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     protected AmazonS3 s3Client;
 
     private String getBucketName() {
-        return PropertyUtil.getProperty("ncp.storage.bucket");
+        return PropertyUtil.getProperty("aws.s3.bucket");
     }
 
     /**
-     * NCP 업로드용 PUT presigned URL 발급 (uploadUrl, filePath).
+     * S3 업로드용 PUT presigned URL 발급 (uploadUrl, filePath).
      */
     public Map<String, Object> createUploadPresignedUrl(FileVO req) {
         String key = resolveStorageKey(req);
@@ -138,7 +138,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
             s3Client.deleteObject(getBucketName(), filePath.trim());
             result.put("successYn", true);
         } catch (Exception e) {
-            log.warn("NCP 객체 삭제 실패. key={}", filePath, e);
+            log.warn("[S3] 객체 삭제 실패. key={}", filePath, e);
             result.put("successYn", false);
             result.put("returnMsg", e.getMessage());
         }
@@ -591,7 +591,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * NCP에 바이트 배열을 업로드한다.
+     * S3에 바이트 배열을 업로드한다.
      *
      * @param key         스토리지 키 (파일 경로)
      * @param bytes       업로드할 바이트 배열
@@ -607,7 +607,7 @@ public class FileServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * NCP 스토리지 키에 대한 다운로드용 presigned URL 문자열을 반환한다.
+     * S3 스토리지 키에 대한 다운로드용 presigned URL 문자열을 반환한다.
      *
      * @param key      스토리지 키
      * @param fileName 다운로드 시 표시될 파일명

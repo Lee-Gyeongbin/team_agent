@@ -117,7 +117,7 @@ public class RepositoryDAO extends EgovComAbstractDAO {
     // ===== URL =====
 
     /**
-     * URL ID 목록으로 연결된 TB_DOC_FILE FILE_PATH 조회 (재수집 전 NCP 파일 삭제용)
+     * URL ID 목록으로 연결된 TB_DOC_FILE FILE_PATH 조회 (재수집 전 S3 파일 삭제용)
      */
     public List<RepositoryVO> selectDocFilePathsByUrlIds(List<String> urlIdList) throws Exception {
         return selectList("repository.selectDocFilePathsByUrlIds", urlIdList);

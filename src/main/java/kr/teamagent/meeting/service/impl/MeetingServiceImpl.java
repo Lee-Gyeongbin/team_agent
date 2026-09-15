@@ -197,7 +197,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 회의 종료 (오디오 파일 전사 버전)
-     * 1. 오디오 파일 → NCP 오브젝트 스토리지 업로드
+     * 1. 오디오 파일 → S3 오브젝트 스토리지 업로드
      * 2. TB_MEETING_AUDIO 저장 (status: 001 대기) 후 즉시 반환
      * → step 3-5(전사·화자분리·회의록생성·저장)는 streamMeetingProcessing SSE에서 비동기 처리
      */
@@ -207,7 +207,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         // 0. 기존 데이터 정리 (재첨부 시 이전 오디오·회의록·인포그래픽 삭제)
         cleanupPreviousProcessingData(dataVO);
 
-        // 1. NCP 스토리지에 오디오 업로드
+        // 1. S3 스토리지에 오디오 업로드
         String objectKey;
         try {
             objectKey = uploadAudioToStorage(audioFile, dataVO.getMeetingId(), "N");
@@ -242,12 +242,12 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * NCP backup/ 경로의 백업 파일 전체 삭제
+     * S3 backup/ 경로의 백업 파일 전체 삭제
      * 정상 종료 시(finishMeetingWithAudio 성공) 호출
      */
     private void deleteBackupFiles(Long meetingId) {
         try {
-            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
             String prefix = "meeting-audio/" + meetingId + "/backup/";
             ObjectListing listing = amazonS3.listObjects(bucket, prefix);
             List<S3ObjectSummary> summaries = listing.getObjectSummaries();
@@ -267,7 +267,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 오디오 재첨부 시 이전 처리 데이터 정리
-     * - NCP S3 기존 오디오 파일 삭제
+     * - S3 기존 오디오 파일 삭제
      * - TB_MEETING_AUDIO, TB_MEETING_MINUTES, TB_MEETING_INFOGRAPHIC 삭제
      * - TB_MEETING_SPEAKER는 유지 (createMeeting에서 사전등록한 화자 보존)
      */
@@ -278,7 +278,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
             logger.info("[cleanupPreviousProcessingData] 기존 데이터 정리 시작 - meetingId: {}", dataVO.getMeetingId());
 
-            // 1. NCP S3 기존 오디오 파일 삭제 (메인 + 백업 전체)
+            // 1. S3 기존 오디오 파일 삭제 (메인 + 백업 전체)
             deleteMeetingAudioFiles(dataVO.getMeetingId());
 
             // 2. TB_MEETING_AUDIO 삭제
@@ -422,7 +422,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * NCP 오브젝트 스토리지에 오디오 파일 업로드 후 오브젝트 키 반환
+     * S3 오브젝트 스토리지에 오디오 파일 업로드 후 오브젝트 키 반환
      */
     private String uploadAudioToStorage(MultipartFile audioFile, Long meetingId, String enrollYn) throws Exception {
         String originalFilename = audioFile.getOriginalFilename();
@@ -437,7 +437,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         } else {
             objectKey = "meeting-audio/" + meetingId + "/" + UUID.randomUUID() + ext;
         }
-        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+        String bucket = PropertyUtil.getProperty("aws.s3.bucket");
 
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(audioFile.getSize());
@@ -932,7 +932,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 회의 물리삭제
-     * 1. NCP 오디오 파일 삭제
+     * 1. S3 오디오 파일 삭제
      * 2. TB_MEETING_INTEGRATION 연결 삭제 (원본/통합 회의록 양방향)
      * 3. 연관 테이블 물리삭제 (AUDIO, SPEAKER, MINUTES, INFOGRAPHIC)
      * 4. TB_MEETING 물리삭제
@@ -940,7 +940,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> deleteMeeting(MeetingVO dataVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
 
-        // 1. NCP 오디오 파일 삭제 (메인 오디오 + 백업 파일 전체)
+        // 1. S3 오디오 파일 삭제 (메인 오디오 + 백업 파일 전체)
         deleteMeetingAudioFiles(dataVO.getMeetingId());
 
         // 2. 통합 연결 삭제 (이 회의가 원본이거나 통합 결과인 경우 모두 정리)
@@ -961,13 +961,13 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * NCP meeting-audio/{meetingId}/ 경로의 모든 파일 삭제
+     * S3 meeting-audio/{meetingId}/ 경로의 모든 파일 삭제
      * 회의 삭제 시 메인 오디오(meeting-audio/{id}/*.webm)와 백업 파일(backup/*.webm) 모두 정리
      */
     private void deleteMeetingAudioFiles(Long meetingId) {
         if (meetingId == null) return;
         try {
-            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
             String prefix = "meeting-audio/" + meetingId + "/";
             ObjectListing listing = amazonS3.listObjects(bucket, prefix);
             List<S3ObjectSummary> summaries = listing.getObjectSummaries();
@@ -1773,7 +1773,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      */
     public int getBackupFileCount(Long meetingId) {
         try {
-            String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
             String prefix = "meeting-audio/" + meetingId + "/backup/";
             ObjectListing listing = amazonS3.listObjects(bucket, prefix);
             return (int) listing.getObjectSummaries().stream()
@@ -1786,7 +1786,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 백업 오디오 파일 NCP 업로드
+     * 백업 오디오 파일 S3 업로드
      * meeting-audio/{meetingId}/backup/{originalFilename} 경로에 저장
      */
     public Map<String, Object> uploadBackupAudio(Long meetingId, MultipartFile file) throws Exception {
@@ -1801,7 +1801,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         }
         String filename = Optional.ofNullable(file.getOriginalFilename()).orElse("backup.webm");
         String objectKey = "meeting-audio/" + meetingId + "/backup/" + filename;
-        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+        String bucket = PropertyUtil.getProperty("aws.s3.bucket");
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(file.getSize());
         metadata.setContentType(Optional.ofNullable(file.getContentType()).orElse("audio/webm"));
@@ -1813,16 +1813,16 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 백업 파일 병합 복구
-     * 1. NCP backup/ 경로 파일 목록 조회 및 정렬
+     * 1. S3 backup/ 경로 파일 목록 조회 및 정렬
      * 2. 파일 다운로드 → ffmpeg -f concat merge
-     * 3. 병합 파일 NCP 업로드
+     * 3. 병합 파일 S3 업로드
      * 4. TB_MEETING_AUDIO insert (STATUS='001')
      * 5. TB_MEETING: ABNORMAL_YN='N', STATUS='002'
      * @return audioId (이후 SSE 흐름에 전달)
      */
     public Map<String, Object> recoverMeeting(Long meetingId) throws Exception {
         Map<String, Object> result = new HashMap<>();
-        String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+        String bucket = PropertyUtil.getProperty("aws.s3.bucket");
         String prefix = "meeting-audio/" + meetingId + "/backup/";
 
         // 소유권 검증
@@ -1902,7 +1902,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             }
             logger.info("[recoverMeeting] ffmpeg 병합 완료 - meetingId: {}, size: {}bytes", meetingId, outputFile.length());
 
-            // 병합 파일 NCP 업로드
+            // 병합 파일 S3 업로드
             String uuid = UUID.randomUUID().toString();
             mergedKey = "meeting-audio/" + meetingId + "/" + uuid + ".webm";
             ObjectMetadata metadata = new ObjectMetadata();
@@ -2086,13 +2086,13 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         try {
 
             // =====================================================
-            // 0. 기존 Enrollment 있으면 NCP 파일 + DB 행 삭제 후 재등록
+            // 0. 기존 Enrollment 있으면 S3 파일 + DB 행 삭제 후 재등록
             // =====================================================
 
             deleteExistingVoiceEnrollment(dataVO);
 
             // =====================================================
-            // 1. NCP 스토리지에 Enrollment 음성 업로드
+            // 1. S3 스토리지에 Enrollment 음성 업로드
             // =====================================================
 
             objectKey = uploadAudioToStorage(
@@ -2271,7 +2271,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     /**
      * 동일 회의·화자의 기존 Voice Enrollment 삭제.
-     * NCP 오브젝트(FILE_PATH)를 먼저 지운 뒤 TB_MEETING_VOICE_ENROLLMENT 행을 삭제한다.
+     * S3 오브젝트(FILE_PATH)를 먼저 지운 뒤 TB_MEETING_VOICE_ENROLLMENT 행을 삭제한다.
      */
     private void deleteExistingVoiceEnrollment(MeetingVO dataVO) throws Exception {
         if (dataVO.getMeetingId() == null || dataVO.getSpeakerId() == null) {
@@ -2283,12 +2283,12 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         }
         if (!CommonUtil.isEmpty(existing.getFilePath())) {
             try {
-                String bucket = PropertyUtil.getProperty("ncp.storage.bucket");
+                String bucket = PropertyUtil.getProperty("aws.s3.bucket");
                 amazonS3.deleteObject(bucket, existing.getFilePath());
-                logger.info("[voiceEnroll] 기존 NCP 파일 삭제 완료 - meetingId: {}, speakerId: {}, key: {}",
+                logger.info("[voiceEnroll] 기존 S3 파일 삭제 완료 - meetingId: {}, speakerId: {}, key: {}",
                     dataVO.getMeetingId(), dataVO.getSpeakerId(), existing.getFilePath());
             } catch (Exception e) {
-                logger.warn("[voiceEnroll] 기존 NCP 파일 삭제 실패 - meetingId: {}, speakerId: {}, key: {}",
+                logger.warn("[voiceEnroll] 기존 S3 파일 삭제 실패 - meetingId: {}, speakerId: {}, key: {}",
                     dataVO.getMeetingId(), dataVO.getSpeakerId(), existing.getFilePath(), e);
             }
         }

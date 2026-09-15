@@ -573,7 +573,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** NCP 스토리지 객체 삭제 */
+    /** S3 스토리지 객체 삭제 */
     private void deleteFileStorageObject(MarketingVO.FileVO row) {
         if (row == null || CommonUtil.isEmpty(row.getFilePath())) {
             return;

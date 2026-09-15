@@ -1550,11 +1550,11 @@
     </update>
 
     <!-- ================================================================== -->
-    <!-- 프로젝트 삭제 — NCP 경로 수집용 쿼리                                  -->
+    <!-- 프로젝트 삭제 — S3 경로 수집용 쿼리                                  -->
     <!-- ================================================================== -->
 
     <select id="selectPtFilePathsByProject" parameterType="String" resultType="String">
-        /* 프로젝트 NCP 파일 경로 목록 조회 (TB_PT_FILE) proposal.selectPtFilePathsByProject */
+        /* 프로젝트 S3 파일 경로 목록 조회 (TB_PT_FILE) proposal.selectPtFilePathsByProject */
         SELECT FILE_PATH
         FROM TB_PT_FILE
         WHERE PT_PROJECT_ID = #{ptProjectId}

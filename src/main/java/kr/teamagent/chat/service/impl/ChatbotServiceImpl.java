@@ -2959,11 +2959,11 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             for (ChatbotVO target : targetList) {
 
                 try {
-                    // ncp 삭제
-                    Map<String, Object> ncpResult = fileService.deleteStorageObjectByKey(target.getFilePath());
-                    if (ncpResult != null && Boolean.FALSE.equals(ncpResult.get("successYn"))) {
-                        logger.warn("자동 배치 NCP 삭제 실패 - chatFileId: {}, filePath: {}, returnMsg: {}",
-                                target.getChatFileId(), target.getFilePath(), ncpResult.get("returnMsg"));
+                    // S3 삭제
+                    Map<String, Object> s3Result = fileService.deleteStorageObjectByKey(target.getFilePath());
+                    if (s3Result != null && Boolean.FALSE.equals(s3Result.get("successYn"))) {
+                        logger.warn("자동 배치 S3 삭제 실패 - chatFileId: {}, filePath: {}, returnMsg: {}",
+                                target.getChatFileId(), target.getFilePath(), s3Result.get("returnMsg"));
                         continue;
                     }
 

@@ -64,7 +64,7 @@ public class ProposalController extends BaseController {
     }
 
     /**
-     * PT 파일 메타 저장 (NCP 업로드 완료 후 TB_PT_FILE INSERT)
+     * PT 파일 메타 저장 (S3 업로드 완료 후 TB_PT_FILE INSERT)
      */
     @RequestMapping(value = "/ai/proposal/savePtFile.do", method = RequestMethod.POST)
     public @ResponseBody Map<String, Object> savePtFile(@RequestBody ProposalVO.PtFileVO dataVO) {
@@ -1329,7 +1329,7 @@ public class ProposalController extends BaseController {
         return new ModelAndView("jsonView", resultMap);
     }
 
-    /** PT 프로젝트 삭제 (NCP 파일 포함 전체 삭제) */
+    /** PT 프로젝트 삭제 (S3 파일 포함 전체 삭제) */
     @RequestMapping(value = "/ai/proposal/deletePtProject.do", method = RequestMethod.POST)
     @ResponseBody
     public ModelAndView deletePtProject(@RequestBody ProposalVO.ProjectVO vo) {

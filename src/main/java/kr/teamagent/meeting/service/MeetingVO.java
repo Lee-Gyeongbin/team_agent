@@ -61,7 +61,7 @@ public class MeetingVO extends CommonVO {
 
     // TB_MEETING_AUDIO - 오디오 파일
     private Long    audioId;
-    private String  filePath;           // NCP 오브젝트 키
+    private String  filePath;           // S3 오브젝트 키
     private String  originalFilename;
     private String  fileExt;
     private Long    fileSize;
