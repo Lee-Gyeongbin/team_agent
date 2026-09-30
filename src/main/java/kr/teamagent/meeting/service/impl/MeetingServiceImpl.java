@@ -1567,22 +1567,37 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * gpt-4o-transcribe-diarize 결과 세그먼트를 화자별로 그룹화해 TB_MEETING_SPEAKER 저장
-     * - segments: [{speaker: "SPEAKER_0", text: "...", start: 0.0, end: 1.5}, ...]
-     * - 화자 등장 순서 기준으로 "화자1", "화자2" ... 레이블 부여
-     * - 회의 생성 시 선등록된 참석자 화자가 있으면 SPEAKER_ID·이름·USER_ID를 유지하고 레이블/발화만 갱신
+     * AI 서버 /diarize 결과 세그먼트를 화자별로 그룹화해 TB_MEETING_SPEAKER 저장
+     * - segments: [{speaker: "SPEAKER_00", speakerId: 12, matchStatus: "CONFIRMED", text, start, end}, ...]
+     * - "화자N" 레이블은 replaceSpeakerLabels()와 동일하게 pyannote 라벨 첫 등장 순서로 부여
+     * - 음성 등록(Voice Enrollment) 기반 화자 식별 결과가 있으면
+     *   matchStatus=CONFIRMED 세그먼트는 speakerId(TB_MEETING_SPEAKER PK) 기준으로 해당 참석자에 매핑
+     *   · 여러 pyannote 라벨이 같은 참석자로 식별되면 발화를 합쳐 한 행에 저장
+     *   · 식별되지 않은(UNKNOWN) 라벨은 이름 없는 신규 화자 행으로 저장 → 화자 매핑 화면에서 수동 지정
+     *   · 발화가 없는 참석자는 레이블/발화만 비움 (이름·USER_ID 유지)
+     * - 화자 식별 결과가 전혀 없으면(음성 미등록 회의) 기존처럼 등장 순서대로 선등록 화자에 반영
      */
     @SuppressWarnings("unchecked")
     private void saveAudioDiarizedSpeakers(MeetingVO dataVO, JSONArray segments) {
         try {
             List<MeetingVO> existingSpeakers = meetingDAO.selectSpeakerList(dataVO);
 
-            // 화자 등장 순서 유지 LinkedHashMap: speakerKey → utterances JSONArray
-            java.util.LinkedHashMap<String, JSONArray> speakerMap = new java.util.LinkedHashMap<>();
+            // pyannote 라벨 → 화자N (replaceSpeakerLabels와 동일 규칙)
+            Map<String, String> labelMap = new LinkedHashMap<>();
+            // pyannote 라벨 → 발화 목록 (등장 순서 유지)
+            Map<String, JSONArray> speakerMap = new LinkedHashMap<>();
+            // pyannote 라벨 → 식별된 참석자 SPEAKER_ID (CONFIRMED만)
+            Map<String, Long> matchedIdByLabel = new HashMap<>();
+            boolean hasIdentification = false;
+
             for (Object obj : segments) {
                 JSONObject seg = (JSONObject) obj;
                 String speakerKey = stringValue(seg.get("speaker"));
                 if (speakerKey.isEmpty()) speakerKey = "UNKNOWN";
+
+                if (!labelMap.containsKey(speakerKey)) {
+                    labelMap.put(speakerKey, "화자" + (labelMap.size() + 1));
+                }
 
                 JSONArray utterances = speakerMap.computeIfAbsent(speakerKey, k -> new JSONArray());
                 JSONObject utterance = new JSONObject();
@@ -1590,52 +1605,129 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 utterance.put("start", seg.get("start"));
                 utterance.put("end", seg.get("end"));
                 utterances.add(utterance);
+
+                if (seg.containsKey("matchStatus")) {
+                    hasIdentification = true;
+                }
+                Long matchedId = toLong(seg.get("speakerId"));
+                if ("CONFIRMED".equals(stringValue(seg.get("matchStatus"))) && matchedId != null) {
+                    matchedIdByLabel.putIfAbsent(speakerKey, matchedId);
+                }
             }
 
             if (existingSpeakers == null || existingSpeakers.isEmpty()) {
                 // 선등록 화자가 없으면 기존처럼 삭제 후 신규 저장
                 meetingDAO.deleteSpeakersByMeetingId(dataVO);
-                int num = 1;
-                for (java.util.Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
-                    MeetingVO speakerVO = new MeetingVO();
-                    speakerVO.setMeetingId(dataVO.getMeetingId());
-                    speakerVO.setSpeakerLabel("화자" + num);
-                    speakerVO.setUtterances(entry.getValue().toJSONString());
-                    meetingDAO.insertSpeaker(speakerVO);
-                    num++;
+                for (Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
+                    insertDiarizedSpeaker(dataVO.getMeetingId(), labelMap.get(entry.getKey()), entry.getValue());
                 }
-            } else {
-                // 선등록 화자(참석자)는 유지하고 등장 순서대로 레이블/발화만 반영
-                int num = 1;
+            } else if (!hasIdentification) {
+                // 음성 등록 기반 식별 결과가 없는 회의: 기존 방식(등장 순서) 유지
                 int existingIdx = 0;
-                for (java.util.Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
+                for (Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
+                    String label = labelMap.get(entry.getKey());
                     if (existingIdx < existingSpeakers.size()) {
-                        MeetingVO existing = existingSpeakers.get(existingIdx);
-                        existing.setSpeakerLabel("화자" + num);
+                        MeetingVO existing = existingSpeakers.get(existingIdx++);
+                        existing.setSpeakerLabel(label);
                         existing.setUtterances(entry.getValue().toJSONString());
                         meetingDAO.updateSpeakerLabelAndUtterances(existing);
-                        existingIdx++;
                     } else {
-                        MeetingVO speakerVO = new MeetingVO();
-                        speakerVO.setMeetingId(dataVO.getMeetingId());
-                        speakerVO.setSpeakerLabel("화자" + num);
-                        speakerVO.setUtterances(entry.getValue().toJSONString());
-                        meetingDAO.insertSpeaker(speakerVO);
+                        insertDiarizedSpeaker(dataVO.getMeetingId(), label, entry.getValue());
                     }
-                    num++;
                 }
-                // 발화에 등장하지 않은 선등록 화자는 레이블/발화만 비움 (이름·USER_ID 유지)
                 for (int i = existingIdx; i < existingSpeakers.size(); i++) {
-                    MeetingVO leftover = existingSpeakers.get(i);
-                    leftover.setSpeakerLabel(null);
-                    leftover.setUtterances(null);
-                    meetingDAO.updateSpeakerLabelAndUtterances(leftover);
+                    clearSpeakerDiarization(existingSpeakers.get(i));
                 }
+            } else {
+                // 음성 등록 기반 식별: speakerId 기준 매핑
+                Map<Long, MeetingVO> existingById = new LinkedHashMap<>();
+                for (MeetingVO sp : existingSpeakers) {
+                    existingById.put(sp.getSpeakerId(), sp);
+                }
+
+                // 참석자별로 식별된 라벨들의 발화 모으기 (첫 라벨의 화자N 사용)
+                Map<Long, String> labelBySpeakerId = new LinkedHashMap<>();
+                Map<Long, List<Map<String, Object>>> uttsBySpeakerId = new LinkedHashMap<>();
+                List<String> unknownLabels = new ArrayList<>();
+
+                for (Map.Entry<String, JSONArray> entry : speakerMap.entrySet()) {
+                    Long matchedId = matchedIdByLabel.get(entry.getKey());
+                    if (matchedId != null && existingById.containsKey(matchedId)) {
+                        labelBySpeakerId.putIfAbsent(matchedId, labelMap.get(entry.getKey()));
+                        List<Map<String, Object>> list = uttsBySpeakerId.computeIfAbsent(matchedId, k -> new ArrayList<>());
+                        for (Object u : entry.getValue()) {
+                            list.add((JSONObject) u);
+                        }
+                    } else {
+                        if (matchedId != null) {
+                            logger.warn("[saveAudioDiarizedSpeakers] 식별된 speakerId가 화자 목록에 없음 - meetingId: {}, label: {}, speakerId: {}",
+                                dataVO.getMeetingId(), entry.getKey(), matchedId);
+                        }
+                        unknownLabels.add(entry.getKey());
+                    }
+                }
+
+                for (MeetingVO existing : existingSpeakers) {
+                    List<Map<String, Object>> utts = uttsBySpeakerId.get(existing.getSpeakerId());
+                    if (utts == null || utts.isEmpty()) {
+                        clearSpeakerDiarization(existing);
+                        continue;
+                    }
+                    utts.sort((a, b) -> Double.compare(toDouble(a.get("start")), toDouble(b.get("start"))));
+                    JSONArray merged = new JSONArray();
+                    merged.addAll(utts);
+                    existing.setSpeakerLabel(labelBySpeakerId.get(existing.getSpeakerId()));
+                    existing.setUtterances(merged.toJSONString());
+                    meetingDAO.updateSpeakerLabelAndUtterances(existing);
+                }
+
+                for (String label : unknownLabels) {
+                    insertDiarizedSpeaker(dataVO.getMeetingId(), labelMap.get(label), speakerMap.get(label));
+                }
+
+                logger.info("[saveAudioDiarizedSpeakers] 음성 기반 화자 매핑 - meetingId: {}, 식별: {}, 미식별: {}",
+                    dataVO.getMeetingId(), matchedIdByLabel, unknownLabels);
             }
 
             logger.info("화자 저장 완료 (오디오 기반) - meetingId: {}, 화자 수: {}", dataVO.getMeetingId(), speakerMap.size());
         } catch (Exception e) {
             logger.error("화자 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+        }
+    }
+
+    /** 화자분리 결과로 이름 없는 신규 화자 행 저장 */
+    private void insertDiarizedSpeaker(Long meetingId, String label, JSONArray utterances) throws Exception {
+        MeetingVO speakerVO = new MeetingVO();
+        speakerVO.setMeetingId(meetingId);
+        speakerVO.setSpeakerLabel(label);
+        speakerVO.setUtterances(utterances.toJSONString());
+        meetingDAO.insertSpeaker(speakerVO);
+    }
+
+    /** 발화에 등장하지 않은 선등록 화자는 레이블/발화만 비움 (이름·USER_ID 유지) */
+    private void clearSpeakerDiarization(MeetingVO speaker) throws Exception {
+        speaker.setSpeakerLabel(null);
+        speaker.setUtterances(null);
+        meetingDAO.updateSpeakerLabelAndUtterances(speaker);
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number) return ((Number) value).longValue();
+        String v = stringValue(value);
+        if (v.isEmpty() || "null".equalsIgnoreCase(v)) return null;
+        try {
+            return Long.valueOf(v);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private double toDouble(Object value) {
+        if (value instanceof Number) return ((Number) value).doubleValue();
+        try {
+            return Double.parseDouble(stringValue(value));
+        } catch (NumberFormatException e) {
+            return 0.0;
         }
     }
 
