@@ -32,8 +32,9 @@
         ORDER BY U.CREATE_DT DESC
     </select>
 
+    <!-- 사용자 ID·이메일 조회 (엑셀 업로드 중복 검사용) -->
     <select id="selectUserIdEmailList" resultType="userManageVO">
-        /* 사용자 ID 이메일 조회 userManage.selectUserIdEmailList */
+        /* 사용자 ID·이메일 조회 */
         SELECT
             USER_ID,
             EMAIL
