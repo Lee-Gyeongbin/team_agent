@@ -44,6 +44,7 @@
         SET
             PASSWD = #{passwd},
             PWD_CHG_DT = NOW(),
+            PWD_CHG_REQ_YN = 'N',
             LOGIN_FAIL_CNT = 0,
             MODIFY_DT = NOW(),
             MDFR_ID = #{userId}

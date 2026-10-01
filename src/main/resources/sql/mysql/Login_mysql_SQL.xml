@@ -13,6 +13,7 @@
             U.USE_YN,
             U.LAST_LOGIN_DT,
             U.PWD_CHG_DT,
+            U.PWD_CHG_REQ_YN,
             U.LOGIN_FAIL_CNT,
             U.TWO_FA_YN,
             U.ACC_TP,

@@ -10,7 +10,6 @@ import java.util.regex.Pattern;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -66,6 +65,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     private static final String INVALID_EMAIL_MSG = "이메일 형식이 올바르지 않습니다.";
     private static final String INVALID_PHONE_MSG = "전화번호는 숫자 9~11자리만 입력 가능합니다.";
     private static final String USE_YN_REQUIRED_MSG = "사용여부는 필수값입니다.";
+    private static final String EXCEL_INITIAL_PASSWORD = "12345678";
     private static final String ACCT_STATUS_ACTIVE_CD = "001";
     private static final String ACCT_STATUS_INACTIVE_CD = "002";
     private static final Pattern EMAIL_PATTERN = Pattern.compile(
@@ -73,7 +73,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     private static final Pattern PHONE_PATTERN = Pattern.compile("^\\d{9,11}$");
     private static final String USER_EXCEL_GUIDE_TEXT =
             "※ * 표시된 항목은 필수 입력값입니다.\n"
-                    + "※ 사용자ID가 기존에 있으면 수정, 없으면 신규 등록됩니다. 신규 등록 시 임시 비밀번호가 자동 생성됩니다.\n"
+                    + "※ 사용자ID가 기존에 있으면 수정, 없으면 신규 등록됩니다. 신규 등록 시 초기 비밀번호는 12345678 입니다.\n"
                     + "  소속조직명(선택), 사용여부(Y/N) 만 입력하세요. 계정상태는 참고용입니다.";
 
     @Autowired
@@ -201,14 +201,12 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                String userIdKey = userId.toLowerCase();
-                if (!userIdsInFile.add(userIdKey)) {
+                if (!userIdsInFile.add(userId.toLowerCase())) {
                     failDetails.add(buildFailDetail(i + 1, userId, userId, FAIL_TYPE_DUPLICATE_USER_ID));
                     continue;
                 }
 
-                String emailKey = email.toLowerCase();
-                if (!emailsInFile.add(emailKey)) {
+                if (!emailsInFile.add(email.toLowerCase())) {
                     failDetails.add(buildFailDetail(i + 1, userId, email, FAIL_TYPE_DUPLICATE_EMAIL));
                     continue;
                 }
@@ -219,6 +217,11 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
         ActiveOrgMaps activeOrgs = buildActiveOrgMaps();
         String loginUserId = SessionUtil.getUserId();
+        Map<String, String> emailByUserId = new HashMap<>();
+        Map<String, String> userIdByEmail = new HashMap<>();
+        for (UserManageVO existing : userManageDAO.selectUserIdEmailList()) {
+            registerExcelUserKey(emailByUserId, userIdByEmail, existing.getUserId(), existing.getEmail());
+        }
 
         for (UserExcelRow excelRow : excelRows) {
             try {
@@ -229,11 +232,11 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
                     continue;
                 }
 
-                boolean updateRow = isDuplicateUserIdForInsert(excelRow.userId);
-                boolean duplicateEmail = updateRow
-                        ? isDuplicateEmailForUpdate(excelRow.userId, excelRow.email)
-                        : isDuplicateEmailForInsert(excelRow.email);
-                if (duplicateEmail) {
+                String userIdKey = excelRow.userId.toLowerCase();
+                String emailKey = excelRow.email.toLowerCase();
+                boolean updateRow = emailByUserId.containsKey(userIdKey);
+                String emailOwner = userIdByEmail.get(emailKey);
+                if (emailOwner != null && !emailOwner.equals(userIdKey)) {
                     failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.userId, excelRow.email,
                             FAIL_TYPE_DUPLICATE_EMAIL));
                     continue;
@@ -255,18 +258,13 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
                     saveUserExcelRow(vo, true);
                     updateCount++;
                 } else {
-                    String tempPassword = RandomStringUtils.randomAlphanumeric(10);
-                    vo.setPasswd(passwordEncoder.encode(tempPassword));
+                    vo.setPasswd(passwordEncoder.encode(EXCEL_INITIAL_PASSWORD));
+                    vo.setPwdChgReqYn("Y");
                     saveUserExcelRow(vo, false);
                     insertCount++;
                 }
+                registerExcelUserKey(emailByUserId, userIdByEmail, excelRow.userId, excelRow.email);
                 successCount++;
-            } catch (DuplicateUserIdException e) {
-                failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.userId, excelRow.userId,
-                        FAIL_TYPE_DUPLICATE_USER_ID));
-            } catch (DuplicateEmailException e) {
-                failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.userId, excelRow.email,
-                        FAIL_TYPE_DUPLICATE_EMAIL));
             } catch (Exception e) {
                 failDetails.add(buildFailDetail(excelRow.rowNum, excelRow.userId, CommonUtil.nullToBlank(e.getMessage()),
                         FAIL_TYPE_FORMAT));
@@ -283,9 +281,25 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             userManageVO.setOrgId(null);
         }
         if (updateRow) {
-            updateUser(userManageVO);
+            userManageDAO.updateUser(userManageVO);
         } else {
-            insertUser(userManageVO);
+            userManageDAO.insertUser(userManageVO);
+        }
+    }
+
+    private static void registerExcelUserKey(Map<String, String> emailByUserId, Map<String, String> userIdByEmail,
+            String userId, String email) {
+        String userIdKey = CommonUtil.nullToBlank(userId).toLowerCase();
+        if (userIdKey.isEmpty()) {
+            return;
+        }
+        String emailKey = CommonUtil.nullToBlank(email).toLowerCase();
+        String previousEmail = emailByUserId.put(userIdKey, emailKey);
+        if (previousEmail != null && !previousEmail.isEmpty() && !previousEmail.equals(emailKey)) {
+            userIdByEmail.remove(previousEmail);
+        }
+        if (!emailKey.isEmpty()) {
+            userIdByEmail.put(emailKey, userIdKey);
         }
     }
 
@@ -379,7 +393,13 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             throw new DuplicateEmailException();
         }
 
+        if (CommonUtil.nullToBlank(userManageVO.getUseYn()).isEmpty()) {
+            userManageVO.setUseYn("Y");
+        }
         validateAndApplyUserStatus(userManageVO);
+        if (CommonUtil.nullToBlank(userManageVO.getPwdChgReqYn()).isEmpty()) {
+            userManageVO.setPwdChgReqYn("Y");
+        }
         return userManageDAO.insertUser(userManageVO);
     }
 

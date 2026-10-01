@@ -151,6 +151,7 @@ public class ApiLoginController {
             userData.put("orgId", user.getOrgId());
             userData.put("orgNm", user.getOrgNm());
             userData.put("phone", user.getPhone());
+            userData.put("pwdChgReqYn", "Y".equals(user.getPwdChgReqYn()) ? "Y" : "N");
 
             result.put("success", true);
             result.put("user", userData);
@@ -204,6 +205,7 @@ public class ApiLoginController {
         userData.put("orgId", user.getOrgId());
         userData.put("orgNm", user.getOrgNm());
         userData.put("phone", user.getPhone());
+        userData.put("pwdChgReqYn", "Y".equals(user.getPwdChgReqYn()) ? "Y" : "N");
 
         result.put("success", true);
         result.put("user", userData);

@@ -136,6 +136,10 @@ public class MyPageServiceImpl extends EgovAbstractServiceImpl {
         resultMap.put("successYn", updatedRows > 0);
         if (updatedRows > 0) {
             resultMap.put("data", updatedRows);
+            UserVO loginUser = SessionUtil.getUserVO();
+            if (loginUser != null) {
+                loginUser.setPwdChgReqYn("N");
+            }
         } else {
             resultMap.put("returnMsg", "해당 userId의 사용자를 찾을 수 없습니다.");
         }

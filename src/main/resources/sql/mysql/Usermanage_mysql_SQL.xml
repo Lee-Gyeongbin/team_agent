@@ -32,6 +32,15 @@
         ORDER BY U.CREATE_DT DESC
     </select>
 
+    <!-- 사용자 ID·이메일 조회 (엑셀 업로드 중복 검사용) -->
+    <select id="selectUserIdEmailList" resultType="userManageVO">
+        /* 사용자 ID·이메일 조회 */
+        SELECT
+            USER_ID,
+            EMAIL
+        FROM TB_USER
+    </select>
+
     <!-- 사용자 ID 중복 여부 조회 -->
     <select id="countUserByUserId" parameterType="userManageVO" resultType="int">
         /* 사용자 ID 중복 여부 조회 */
@@ -68,6 +77,7 @@
       , PHONE
       , ORG_ID
       , USE_YN
+      , PWD_CHG_REQ_YN
       , LOGIN_FAIL_CNT
       , TWO_FA_YN
       , ACCT_STATUS_CD
@@ -83,6 +93,7 @@
       , #{phone}
       , #{orgId}
       , #{useYn}
+      , #{pwdChgReqYn}
       , 0
       , 'N'
       , #{acctStatusCd}
@@ -135,6 +146,7 @@
     SET
         PASSWD = #{passwd}
         , PWD_CHG_DT = NOW()
+        , PWD_CHG_REQ_YN = 'Y'
         , LOGIN_FAIL_CNT = 0
         , ACCT_STATUS_CD = '001'
         , LOCK_DT = NULL
