@@ -21,6 +21,15 @@ public class UserManageDAO extends EgovComAbstractDAO {
     }
 
     /**
+     * 사용자 ID·이메일 조회
+     * @return list
+     * @throws Exception
+     */
+    public List<UserManageVO> selectUserIdEmailList() throws Exception {
+        return selectList("userManage.selectUserIdEmailList");
+    }
+
+    /**
      * 사용자 ID 중복 여부 조회 (생성 시 사용)
      * @param userManageVO userId
      * @return 중복 건수

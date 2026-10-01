@@ -19,6 +19,7 @@ public class UserManageVO extends CommonVO {
     private String useYn;
     private String lastLoginDt;
     private String pwdChgDt;
+    private String pwdChgReqYn;
     private Integer loginFailCnt;
     private String twoFaYn;
     private String accTp;
