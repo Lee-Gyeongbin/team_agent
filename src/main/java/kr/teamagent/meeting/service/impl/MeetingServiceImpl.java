@@ -1735,15 +1735,21 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         Map<String, Object> result = new HashMap<>();
         try {
             String id = dataVO.getId();
-            if (id != null && !id.trim().isEmpty()) {
-                dataVO.setMinutesId(Long.valueOf(id.trim()));
-            } else {
-                dataVO.setMinutesId(null);
+            if (id == null || !id.trim().matches("\\d+")) {
+                // 프론트에서 String(undefined) 등 잘못된 ID가 넘어온 경우 — 저장하지 않고 실패 반환
+                logger.warn("회의록 수정 실패 - 잘못된 minutesId: {}", id);
+                result.put("successYn", false);
+                result.put("returnMsg", "회의록 정보가 올바르지 않습니다. 새로고침 후 다시 시도해주세요.");
+                return result;
             }
+            dataVO.setMinutesId(Long.valueOf(id.trim()));
             dataVO.setEditedContent(dataVO.getMinutesContent());
             meetingDAO.updateMeetingMinutes(dataVO);
+            result.put("successYn", true);
         } catch (Exception e) {
-            logger.error("회의록 수정 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+            logger.error("회의록 수정 실패 - minutesId: {}", dataVO.getId(), e);
+            result.put("successYn", false);
+            result.put("returnMsg", "회의록 저장에 실패했습니다.");
         }
         return result;
     }
