@@ -1,13 +1,15 @@
 package kr.teamagent.marketing.service.impl;
 
-import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
@@ -15,12 +17,13 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -28,14 +31,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
-
-import javax.imageio.ImageIO;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
-import org.json.simple.JSONArray;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,33 +43,32 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.util.HtmlUtils;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.reflect.TypeToken;
 
 import kr.teamagent.agent.service.AgentVO;
 import kr.teamagent.agent.service.impl.AgentDAO;
-import kr.teamagent.common.apilog.service.impl.ApiCallLogServiceImpl;
 import kr.teamagent.chat.service.ChatbotVO;
 import kr.teamagent.chat.service.impl.ChatbotAgentSupport;
 import kr.teamagent.chat.service.impl.ChatbotDAO;
 import kr.teamagent.chat.service.impl.ChatbotServiceImpl;
-import kr.teamagent.common.security.service.UserVO;
+import kr.teamagent.common.apilog.service.impl.ApiCallLogServiceImpl;
 import kr.teamagent.common.system.service.impl.FileServiceImpl;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.service.FileVO;
-import kr.teamagent.library.service.LibraryVO;
-import kr.teamagent.library.service.impl.LibraryDAO;
 import kr.teamagent.marketing.service.MarketingVO;
-import kr.teamagent.tmpl.service.impl.TmplHtmlRenderService;
-
+import kr.teamagent.prompt.service.impl.PromptServiceImpl;
+import kr.teamagent.tmpl.service.TmplVO;
+import kr.teamagent.tmpl.service.impl.TmplServiceImpl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -80,152 +78,71 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
 
     private static final Logger logger = LoggerFactory.getLogger(MarketingServiceImpl.class);
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
-    /** DB 컬럼 길이 (TB_MKT.TITLE, TB_MKT.CONTENT_TYPE, TB_MKT_CONTENT.CONTENT_LABEL) */
-    private static final int TITLE_MAX_LENGTH = 100;
-    private static final int CONTENT_TYPE_MAX_LENGTH = 20;
-    private static final int VARIANT_LABEL_MAX_LENGTH = 20;
+    /** DB 컬럼 길이 (TB_MKT_CONTENT.TITLE) */
+    private static final int TITLE_MAX_LENGTH = 200;
     private static final int VARIANT_COUNT_MAX = 5;
+    /** 콘텐츠 생성 참고파일 최대 개수 */
+    private static final int REFERENCE_FILE_MAX = 5;
     private static final long VARIANT_AI_TIMEOUT_SEC = 150L;
-    private static final long FILE_QUERY_TIMEOUT_SEC = 120L;
+    private static final long AI_HTTP_TIMEOUT_SEC = 120L;
     private static final long GENERATION_WAIT_TIMEOUT_MIN = 15L;
-    private static final String IMAGE_DATA_URI_PREFIX = "data:image/png;base64,";
-    /** /file_query 임시 TB_CHAT_FILE ROOM_ID */
-    private static final long FILE_ROOM_ID = 0L;
-    /** PT000007: 001=대기, 002=생성중, 003=완료, 004=실패 */
-    private static final String STATUS_WAIT = "001";
-    private static final String STATUS_GENERATING = "002";
-    private static final String STATUS_COMPLETE = "003";
-    private static final String STATUS_FAILED = "004";
     private static final String PART_TEXT = "TEXT";
     private static final String PART_IMAGE = "IMAGE";
+    private static final String IMAGE_DATA_URI_PREFIX = "data:image/png;base64,";
+    /** /file_query 임시 첨부 브릿지용 ROOM_ID */
+    private static final long FILE_ROOM_ID = 0L;
     /** 마케팅 콘텐츠 내보내기 문서템플릿 */
     private static final String MARKETING_EXPORT_TMPL_ID = "TM000009";
-    /** 렌더러가 버리는 빈 줄 대체 토큰 */
-    private static final String EXPORT_BLANK_LINE_TOKEN = "[[MKT_BLANK]]";
-    /** PT000002: 001작성중 002검수중 003완료 004보류 */
-    private static final Set<String> PROJECT_STATUS_CDS = Set.of("001", "002", "003", "004");
+    /** MK000001: 001작성중 002검수중(AI) 003승인필요 004승인완료 005예약 006발행완료 007발행실패 */
+    private static final String STATUS_WRITING = "001";
+    private static final String STATUS_REVIEWING = "002";
+    private static final String STATUS_APPROVAL_REQUIRED = "003";
+    private static final String STATUS_APPROVED = "004";
+    private static final String STATUS_SCHEDULED = "005";
+    private static final String STATUS_PUBLISHED = "006";
+    private static final Set<String> PROJECT_STATUS_CDS = Set.of("001", "002", "003", "004", "005", "006", "007");
+    /** AI 검수 판정/체크 상태/이슈 심각도 공통 3단계 — PASS: 발행 가능 REVIEW: 확인 후 승인 가능 FAIL: 승인·발행 차단 */
+    private static final String VERDICT_PASS = "PASS";
+    private static final String VERDICT_REVIEW = "REVIEW";
+    private static final String VERDICT_FAIL = "FAIL";
+    /** MK000002: 001대기 002생성중 003완료 004실패 — AI 생성 처리 상태(워크플로 STATUS_CD와 별개) */
+    private static final String AI_STATUS_WAITING = "001";
+    private static final String AI_STATUS_GENERATING = "002";
+    private static final String AI_STATUS_DONE = "003";
+    private static final String AI_STATUS_FAILED = "004";
+    /** TB_PROMPT.PROMPT_ID */
+    private static final String PROMPT_ID_PLAN = "PI000038";
+    private static final String PROMPT_ID_IMAGE = "PI000039";
+    private static final String PROMPT_ID_REVIEW = "PI000040";
+    private static final String PROMPT_ID_TITLE = "PI000041";
+    private static final String PROMPT_ID_LABEL = "PI000042";
+    private static final String PROMPT_ID_TEXT_REFINE = "PI000043";
+    private static final String PROMPT_ID_REF = "PI000044";
+    private static final String PROMPT_ID_IMAGE_REFINE = "PI000045";
+    private static final String PROMPT_ID_TEXT = "PI000046";
+    private static final String PROMPT_ID_PLAN_REFINE = "PI000047";
+    /** MK000003: 001콘텐츠 002브랜드 003이미지 */
+    private static final String FILE_PURPOSE_CONTENT = "001";
+    private static final String FILE_PURPOSE_BRAND = "002";
+    private static final String FILE_PURPOSE_IMAGE = "003";
+    private static final Set<String> FILE_PURPOSE_CDS = Set.of(
+            FILE_PURPOSE_CONTENT, FILE_PURPOSE_BRAND, FILE_PURPOSE_IMAGE);
+    private static final DateTimeFormatter PUBLISH_DT_FORMAT =
+            DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(ResolverStyle.STRICT);
+    /** 검수 체크 항목 key → 한글 라벨 */
+    private static final Map<String, String> CHECK_LABELS = Map.ofEntries(
+            Map.entry("fact", "사실·근거"),
+            Map.entry("brand", "브랜드 가이드"),
+            Map.entry("goal", "캠페인 목적·메시지"),
+            Map.entry("channel", "채널·발행 규격"),
+            Map.entry("legal", "법률·정책"),
+            Map.entry("complete", "콘텐츠 완결성"),
+            Map.entry("visual", "이미지·비주얼"));
 
-    private static final String MARKETING_TITLE_PROMPT = String.join("\n",
-            "## 작업",
-            "다음 마케팅 콘텐츠 요청의 핵심을 20자 이내의 한 줄 제목으로 만들어 주세요.",
-            "",
-            "## 응답 형식",
-            "- 항목명, 따옴표, 부연 설명 없이 제목만 출력하세요.");
-    private static final String MARKETING_LABEL_PROMPT = String.join("\n",
-            "## 작업",
-            "다음 마케팅 콘텐츠 요청으로 서로 다른 각도의 시안 %d개를 만들 예정입니다.",
-            "각 시안의 성격을 나타내는 형식 라벨을 %d개 만들어 주세요.",
-            "",
-            "## 작성 조건",
-            "- 라벨은 '감성형', '혜택강조형'처럼 10자 이내의 '~형' 한국어 명사로 작성하세요.",
-            "- 라벨은 서로 중복되지 않아야 합니다.",
-            "",
-            "## 응답 형식",
-            "- 설명, 번호, 글머리 없이 라벨만 한 줄에 하나씩 출력하세요.");
-    private static final String MARKETING_TEXT_PROMPT = String.join("\n",
-            "## 작업",
-            "다음 요청에 맞는 마케팅 문안을 작성해 주세요.",
-            "",
-            "## 응답 형식",
-            "- 완성 문안 본문 한 편만 출력하세요.",
-            "- '제목:', '도입부:', '소제목:', '본문:', '핵심 메시지:', '행동 유도 문구:', '키워드:' 등 구성 요소 라벨·항목명은 절대 출력하지 마세요.",
-            "- 각 구성 내용은 라벨 없이 자연스러운 문안 흐름으로만 작성하세요.",
-            "- 각 문장이 끝날 때 마다 줄바꿈을 사용하고, 문단 구분을 정확하게 하세요.");
-    private static final String MARKETING_IMAGE_RESPONSE_RULE =
-            String.join("\n",
-                    "## 응답 형식",
-                    "- 설명이나 안내 문구 없이 이미지만 생성하세요.");
-    private static final String MARKETING_IMAGE_PROMPT = String.join("\n",
-            "## 작업",
-            "다음 요청에 맞는 마케팅용 이미지를 생성해 주세요.",
-            "",
-            MARKETING_IMAGE_RESPONSE_RULE);
-    private static final String MARKETING_TEXT_REFINE_PROMPT = String.join("\n",
-            "## 작업",
-            "다음 마케팅 문안을 요청사항에 맞게 수정해 주세요.",
-            "- 기존 문안의 구조와 문체를 유지하되, 요청사항상 필요한 경우에만 바꾸세요.",
-            "",
-            "## 응답 형식",
-            "- 설명, 인사말, 변경 요약 없이 수정된 완성 문안만 출력하세요.",
-            "- '제목:', '도입부:', '소제목:' 등 구성 요소 라벨·항목명은 절대 출력하지 마세요.",
-            "- 각 문장이 끝날 때 마다 줄바꿈을 사용하고, 문단 구분을 정확하게 하세요.");
-    private static final String MARKETING_IMAGE_REFINE_PROMPT = String.join("\n",
-            "## 작업",
-            "다음 마케팅용 이미지를 수정 요청에 맞게 새로 생성해 주세요.",
-            "",
-            MARKETING_IMAGE_RESPONSE_RULE);
-    private static final String IMAGE_NO_TEXT_RULE =
-            "\n\n## 이미지 작성 조건\n- 글자, 문구, 숫자 등 텍스트를 넣지 말고 텍스트가 없는 이미지만 생성하세요.";
-    /** 이미지 사용처·유형·분위기 코드 라벨 */
-    private static final Map<String, String> IMAGE_USAGE_LABELS = Map.of(
-            "BANNER", "배너 이미지",
-            "THUMBNAIL", "썸네일",
-            "PRODUCT_DETAIL", "상품 상세 이미지",
-            "SNS_VISUAL", "SNS 게시물 이미지");
-    private static final Map<String, String> IMAGE_TYPE_LABELS = Map.of(
-            "REAL_PHOTO", "실사 사진",
-            "CHARACTER_ILLUST", "캐릭터 일러스트",
-            "GENERAL_ILLUST", "일반 일러스트",
-            "GRAPHIC_3D", "3D 그래픽",
-            "GRAPHIC_DESIGN", "그래픽 디자인",
-            "TYPOGRAPHY", "타이포그래피 중심");
-    private static final Map<String, String> IMAGE_ATMOSPHERE_LABELS = Map.ofEntries(
-            Map.entry("BRIGHT_CHEERFUL", "밝고 경쾌한"),
-            Map.entry("PROFESSIONAL", "전문적인"),
-            Map.entry("TRUSTWORTHY", "신뢰감 있는"),
-            Map.entry("LUXURIOUS", "고급스러운"),
-            Map.entry("EMOTIONAL", "감성적인"),
-            Map.entry("DYNAMIC", "역동적인"),
-            Map.entry("MINIMAL", "미니멀한"),
-            Map.entry("WARM", "따뜻한"));
-
-    /** 에이전트 ADDITIONAL_CONFIG 코드→라벨 */
-    private static final class AgentLabelSet {
-        final Map<String, String> contentType;
-        final Map<String, String> channel;
-        final Map<String, String> purpose;
-        final Map<String, String> audience;
-        final Map<String, String> tone;
-        final Map<String, String> length;
-        final Map<String, String> outputSection;
-
-        AgentLabelSet(Map<String, String> contentType, Map<String, String> channel, Map<String, String> purpose,
-                Map<String, String> audience, Map<String, String> tone, Map<String, String> length,
-                Map<String, String> outputSection) {
-            this.contentType = contentType;
-            this.channel = channel;
-            this.purpose = purpose;
-            this.audience = audience;
-            this.tone = tone;
-            this.length = length;
-            this.outputSection = outputSection;
-        }
-    }
-
-    /** [{value,label}, ...] → 코드→라벨 맵 */
+    /** 에이전트 ADDITIONAL_CONFIG.channelsByContentType → 채널 코드→라벨. 조회 실패 시 빈 맵 */
     @SuppressWarnings("unchecked")
-    private Map<String, String> toOptionLabelMap(Object rawOptionList) {
-        Map<String, String> map = new LinkedHashMap<>();
-        if (!(rawOptionList instanceof List)) {
-            return map;
-        }
-        for (Object item : (List<?>) rawOptionList) {
-            if (!(item instanceof Map)) {
-                continue;
-            }
-            Map<String, Object> row = (Map<String, Object>) item;
-            String value = stringValue(row.get("value"));
-            String label = stringValue(row.get("label"));
-            if (CommonUtil.isNotEmpty(value) && CommonUtil.isNotEmpty(label)) {
-                map.put(value, label);
-            }
-        }
-        return map;
-    }
-
-    /** 에이전트 ADDITIONAL_CONFIG로 라벨 세트를 만든다. 조회 실패 시 빈 맵. */
-    @SuppressWarnings("unchecked")
-    private AgentLabelSet resolveAgentLabelSet(String agentId) {
+    private Map<String, String> resolveChannelLabels(String agentId) {
+        Map<String, String> channelLabels = new LinkedHashMap<>();
         Map<String, Object> additionalConfig = null;
         try {
             ChatbotVO.AgtSubCfgVO subCfg = agentSupport.getAgentSubCfg(agentId);
@@ -233,32 +150,26 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         } catch (Exception e) {
             logger.warn("[MKT] 에이전트 라벨 설정 조회 실패 - agentId={}: {}", agentId, e.getMessage());
         }
-        if (additionalConfig == null) {
-            Map<String, String> empty = Collections.emptyMap();
-            return new AgentLabelSet(empty, empty, empty, empty, empty, empty, empty);
+        Object channelsByContentType = additionalConfig == null ? null : additionalConfig.get("channelsByContentType");
+        if (!(channelsByContentType instanceof Map)) {
+            return channelLabels;
         }
-
-        Object workflowRaw = additionalConfig.get("workflow");
-        Map<String, Object> workflow = (workflowRaw instanceof Map)
-                ? (Map<String, Object>) workflowRaw : Collections.<String, Object>emptyMap();
-
-        // 콘텐츠 유형별 채널 옵션을 하나의 맵으로 합친다
-        Map<String, String> channelLabels = new LinkedHashMap<>();
-        Object channelsByContentTypeRaw = additionalConfig.get("channelsByContentType");
-        if (channelsByContentTypeRaw instanceof Map) {
-            for (Object options : ((Map<String, Object>) channelsByContentTypeRaw).values()) {
-                channelLabels.putAll(toOptionLabelMap(options));
+        for (Object options : ((Map<String, Object>) channelsByContentType).values()) {
+            if (!(options instanceof List)) {
+                continue;
+            }
+            for (Object item : (List<?>) options) {
+                if (!(item instanceof Map)) {
+                    continue;
+                }
+                String value = stringValue(((Map<String, Object>) item).get("value"));
+                String label = stringValue(((Map<String, Object>) item).get("label"));
+                if (CommonUtil.isNotEmpty(value) && CommonUtil.isNotEmpty(label)) {
+                    channelLabels.put(value, label);
+                }
             }
         }
-
-        return new AgentLabelSet(
-                toOptionLabelMap(additionalConfig.get("contentTypes")),
-                channelLabels,
-                toOptionLabelMap(workflow.get("purposes")),
-                toOptionLabelMap(workflow.get("audiences")),
-                toOptionLabelMap(workflow.get("tones")),
-                toOptionLabelMap(workflow.get("lengths")),
-                toOptionLabelMap(workflow.get("outputSections")));
+        return channelLabels;
     }
 
     /** 상한이 있으면 fixed pool, 없으면 cachedThreadPool */
@@ -283,17 +194,17 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     private static final ExecutorService MARKETING_STREAM_EXECUTOR = daemonPool("marketing-sse", 0);
     private static final ConcurrentHashMap<String, CompletableFuture<Void>> ACTIVE_GENERATIONS =
             new ConcurrentHashMap<>();
-    /** 내보내기 HTML 캐시 (mktId, 프롬프트 해시) */
-    private static final int EXPORT_HTML_CACHE_MAX_SIZE = 200;
-    private static final Cache<String, ExportHtmlCacheEntry> EXPORT_HTML_CACHE =
-            CacheBuilder.newBuilder().maximumSize(EXPORT_HTML_CACHE_MAX_SIZE).build();
-    private static final OkHttpClient FILE_QUERY_HTTP_CLIENT = new OkHttpClient.Builder()
-            .readTimeout(FILE_QUERY_TIMEOUT_SEC, TimeUnit.SECONDS)
+    /** /file_query, 이미지 API 동기 호출 */
+    private static final OkHttpClient AI_HTTP_CLIENT = new OkHttpClient.Builder()
+            .readTimeout(AI_HTTP_TIMEOUT_SEC, TimeUnit.SECONDS)
             .connectTimeout(10, TimeUnit.SECONDS)
             .build();
 
     @Autowired
     private MarketingDAO marketingDAO;
+
+    @Autowired
+    private TmplServiceImpl tmplService;
 
     @Autowired
     private KeyGenerate keyGenerate;
@@ -315,13 +226,10 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     private FileServiceImpl fileService;
 
     @Autowired
-    private LibraryDAO libraryDAO;
+    private PromptServiceImpl promptService;
 
     @Autowired
     private ApiCallLogServiceImpl apiCallLogService;
-
-    @Autowired
-    private TmplHtmlRenderService tmplHtmlRenderService;
 
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────────
 
@@ -330,7 +238,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return value == null ? "" : String.valueOf(value).trim();
     }
 
-    /** AI 생성 TITLE/CONTENT_LABEL 등 DB 컬럼 길이 방어 */
+    /** AI 생성 TITLE 등 DB 컬럼 길이 방어 */
     private String truncate(String value, int maxLength) {
         if (value == null) {
             return "";
@@ -338,17 +246,6 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
-    /** List/스칼라를 중복 없는 콤마 문자열로 만든다 */
-    private String joinDistinct(Object raw, UnaryOperator<String> mapper) {
-        Set<String> items = new LinkedHashSet<>();
-        for (Object item : (raw instanceof List) ? (List<?>) raw : Collections.singletonList(raw)) {
-            String text = mapper.apply(stringValue(item));
-            if (CommonUtil.isNotEmpty(text)) {
-                items.add(text);
-            }
-        }
-        return String.join(", ", items);
-    }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> parseRequest(String json) {
@@ -364,14 +261,34 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** MKT_ID 조회용 VO */
-    private MarketingVO contentSearch(String mktId) {
+    /** REQUEST_JSON 저장값 — 별도 컬럼에 있는 값은 뺀다 */
+    private Map<String, Object> storedRequest(Map<String, Object> request) {
+        Map<String, Object> stored = new LinkedHashMap<>(request);
+        for (String key : List.of("outputs", "contentType", "variantCount", "marketingProjectId",
+                "textPrompts", "imagePrompts", "previousTextPrompts", "previousImagePrompts")) {
+            stored.remove(key);
+        }
+        return stored;
+    }
+
+    /** REQUEST_JSON + 콘텐츠 컬럼 → 생성 조건 */
+    private Map<String, Object> contentRequest(MarketingVO row) {
+        Map<String, Object> request = parseRequest(row.getRequestJson());
+        request.put("contentType", row.getContentType());
+        request.put("variantCount", row.getVariantCount());
+        request.put("outputs", "BOTH".equals(row.getOutputMode()) ? List.of(PART_TEXT, PART_IMAGE)
+                : List.of(row.getOutputMode()));
+        return request;
+    }
+
+    /** MKT_CONTENT_ID 조회용 VO */
+    private MarketingVO contentSearch(String mktContentId) {
         MarketingVO searchVO = new MarketingVO();
-        searchVO.setMktId(mktId);
+        searchVO.setMktContentId(mktContentId);
         return searchVO;
     }
 
-    /** MKT_PROJECT_ID 조회용 VO */
+    /** MKT_ID 조회용 VO */
     private MarketingVO.ProjectVO projectSearch(String marketingProjectId) {
         MarketingVO.ProjectVO searchVO = new MarketingVO.ProjectVO();
         searchVO.setMarketingProjectId(marketingProjectId);
@@ -382,6 +299,13 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     private MarketingVO.FileVO fileSearch(String marketingFileId) {
         MarketingVO.FileVO searchVO = new MarketingVO.FileVO();
         searchVO.setMarketingFileId(marketingFileId);
+        return searchVO;
+    }
+
+    /** MKT_ID 기획서 조회용 VO */
+    private MarketingVO.PlanVO planSearch(String marketingProjectId) {
+        MarketingVO.PlanVO searchVO = new MarketingVO.PlanVO();
+        searchVO.setMarketingProjectId(marketingProjectId);
         return searchVO;
     }
 
@@ -399,89 +323,271 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return resultMap;
     }
 
-    // ── 프로젝트 / 파일 ────────────────────────────────────────────────────────────
+    // ── 권한 / 승인 상태 ─────────────────────────────────────────────────────────
 
-    /** 마케팅 프로젝트 생성/수정 */
-    @Transactional
-    public String saveMarketingProject(MarketingVO.ProjectVO vo) throws Exception {
-        if (vo == null || CommonUtil.isEmpty(vo.getProjectNm())) {
-            throw new RuntimeException("프로젝트명은 필수입니다.");
-        }
-        String userId = SessionUtil.getUserId();
-        if (CommonUtil.isEmpty(vo.getDueDt())) {
-            vo.setDueDt(null);
-        }
-
-        String marketingProjectId = stringValue(vo.getMarketingProjectId());
-        if (CommonUtil.isNotEmpty(marketingProjectId)) {
-            vo.setCreateUserId(userId);
-            vo.setModifyUserId(userId);
-            vo.setStatusCd(vo.getStatusCd() != null && PROJECT_STATUS_CDS.contains(vo.getStatusCd())
-                    ? vo.getStatusCd() : null);
-            if (marketingDAO.updateMarketingProject(vo) != 1) {
-                throw new RuntimeException("마케팅 프로젝트를 찾을 수 없습니다.");
-            }
-            return marketingProjectId;
-        }
-
-        marketingProjectId = keyGenerate.generateTableKey("MP", "TB_MKT_PROJECT", "MKT_PROJECT_ID");
-        vo.setMarketingProjectId(marketingProjectId);
-        vo.setStatusCd("001");
-        vo.setCreateUserId(userId);
-        marketingDAO.insertMarketingProject(vo);
-        return marketingProjectId;
-    }
-
-    /** 마케팅 프로젝트 삭제 */
-    @Transactional
-    public void deleteMarketingProject(String marketingProjectId) throws Exception {
+    /** 프로젝트 존재 + 멤버 여부 확인 (해당 안 되면 찾을 수 없음과 동일한 메시지로 예외) */
+    private MarketingVO.ProjectVO requireProjectMember(String marketingProjectId, String userId) throws Exception {
         String projectId = stringValue(marketingProjectId);
         if (CommonUtil.isEmpty(projectId)) {
             throw new RuntimeException("marketingProjectId는 필수입니다.");
         }
-        MarketingVO.ProjectVO searchVO = projectSearch(projectId);
-        MarketingVO.FileVO fileSearchVO = new MarketingVO.FileVO();
-        fileSearchVO.setMarketingProjectId(projectId);
-        for (MarketingVO.FileVO fileRow : marketingDAO.selectMarketingFileList(fileSearchVO)) {
-            deleteFileStorageObject(fileRow);
-        }
-        marketingDAO.deleteMarketingContentsByProject(searchVO);
-        marketingDAO.deleteMarketingByProject(searchVO);
-        marketingDAO.deleteMarketingFilesByProject(searchVO);
-        if (marketingDAO.deleteMarketingProject(searchVO) != 1) {
+        MarketingVO.ProjectVO data = marketingDAO.selectMarketingProject(projectSearch(projectId));
+        if (data == null) {
             throw new RuntimeException("마케팅 프로젝트를 찾을 수 없습니다.");
         }
-    }
-
-    /** 마케팅 프로젝트 목록 조회 */
-    public List<MarketingVO.ProjectVO> selectMarketingProjectList(MarketingVO.ProjectVO searchVO) throws Exception {
-        if (searchVO == null) {
-            searchVO = new MarketingVO.ProjectVO();
-        }
-        return marketingDAO.selectMarketingProjectList(searchVO);
-    }
-
-    /** 마케팅 프로젝트 단건 조회 */
-    public MarketingVO.ProjectVO selectMarketingProject(String marketingProjectId) throws Exception {
-        MarketingVO.ProjectVO searchVO = projectSearch(stringValue(marketingProjectId));
-        MarketingVO.ProjectVO data = marketingDAO.selectMarketingProject(searchVO);
-        if (data == null) {
+        MarketingVO.ProjectVO memberSearchVO = projectSearch(projectId);
+        memberSearchVO.setUserId(userId);
+        if (marketingDAO.countMarketingProjectMember(memberSearchVO) <= 0) {
             throw new RuntimeException("마케팅 프로젝트를 찾을 수 없습니다.");
         }
         return data;
     }
 
-    /** 마케팅 프로젝트 존재 확인 */
+    /** 마케팅 프로젝트 존재 + 멤버 확인 */
     private void requireProject(String marketingProjectId) throws Exception {
-        String projectId = stringValue(marketingProjectId);
-        if (CommonUtil.isEmpty(projectId)) {
-            throw new RuntimeException("marketingProjectId는 필수입니다.");
+        requireProjectMember(marketingProjectId, SessionUtil.getUserId());
+    }
+
+    /** 콘텐츠 존재 + 프로젝트 멤버 확인 */
+    private MarketingVO requireMarketing(String mktContentId, String userId) throws Exception {
+        MarketingVO row = marketingDAO.selectMarketing(contentSearch(mktContentId));
+        if (row == null) {
+            throw new RuntimeException("마케팅 콘텐츠를 찾을 수 없습니다.");
         }
-        selectMarketingProject(projectId);
+        requireProjectMember(row.getMarketingProjectId(), userId);
+        return row;
+    }
+
+    /** 검수 결과가 현재 선택 시안·버전 대상인지 */
+    private boolean isCurrentReview(MarketingVO row, MarketingVO.ReviewVO review) {
+        return review != null && Objects.equals(row.getSelectedVariantNo(), review.getVariantNo())
+                && Objects.equals(row.getContentVersion(), review.getContentVersion());
+    }
+
+    /** 승인 이력이 현재 선택 시안·버전에 대한 지정 승인자 처리인지 */
+    private boolean isCurrentApproval(MarketingVO row, MarketingVO.ApprovalVO approval, String approverId) {
+        return approval != null && Objects.equals(row.getSelectedVariantNo(), approval.getVariantNo())
+                && Objects.equals(row.getContentVersion(), approval.getContentVersion())
+                && Objects.equals(approverId, approval.getCreateUserId());
+    }
+
+    /** 발행 설정 전 현재 선택 시안의 승인 완료 확인 */
+    private void requireApproved(MarketingVO row) throws Exception {
+        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(row.getMarketingProjectId()));
+        MarketingVO.ApprovalVO approval = marketingDAO.selectLatestApproval(row.getMktContentId());
+        if (!Set.of(STATUS_APPROVED, STATUS_SCHEDULED, STATUS_PUBLISHED).contains(row.getStatusCd())
+                || !isCurrentApproval(row, approval, project.getApproverUserId())
+                || !"Y".equals(approval.getApprovedYn())) {
+            throw new RuntimeException("선택한 시안의 승인 완료 후 발행 설정을 저장해 주세요.");
+        }
+    }
+
+    /** 예약·발행완료 콘텐츠는 승인 해제 대상에서 막는다 */
+    private void requireEditable(MarketingVO row) {
+        if (STATUS_SCHEDULED.equals(row.getStatusCd()) || STATUS_PUBLISHED.equals(row.getStatusCd())) {
+            throw new RuntimeException("예약·발행완료 콘텐츠는 수정할 수 없습니다. 발행 설정을 미발행 유지로 바꾼 후 다시 시도해 주세요.");
+        }
+    }
+
+    /** 콘텐츠 버전을 올려 기존 검수·승인과 발행 설정을 해제한다 */
+    private void invalidateApproval(MarketingVO row, Map<String, Object> request, String userId) throws Exception {
+        requireEditable(row);
+        row.setRequestJson(GSON.toJson(storedRequest(request)));
+        row.setModifyUserId(userId);
+        if (marketingDAO.invalidateMarketingApproval(row) != 1) {
+            throw new RuntimeException("마케팅 콘텐츠를 찾을 수 없습니다.");
+        }
+        row.setContentVersion(row.getContentVersion() + 1);
+        row.setStatusCd(STATUS_REVIEWING);
+        row.setPublishTypeCd("HOLD");
+        row.setPublishedYn("N");
+        row.setPublishScheduledDt(null);
+    }
+
+    // ── 프로젝트 / 파일 ────────────────────────────────────────────────────────────
+
+    /** 마케팅 프로젝트 생성/수정 */
+    @Transactional(rollbackFor = Exception.class)
+    public String saveMarketingProject(MarketingVO.ProjectVO vo) throws Exception {
+        if (vo == null || CommonUtil.isEmpty(vo.getProjectNm())) {
+            throw new RuntimeException("프로젝트명은 필수입니다.");
+        }
+        String userId = SessionUtil.getUserId();
+        if (CommonUtil.isEmpty(vo.getOrgNm())) {
+            vo.setOrgNm(null);
+        }
+        if (CommonUtil.isEmpty(vo.getDueDt())) {
+            vo.setDueDt(null);
+        }
+        if (CommonUtil.isNotEmpty(vo.getStatusCd()) && !PROJECT_STATUS_CDS.contains(vo.getStatusCd())) {
+            throw new RuntimeException("프로젝트 상태를 확인해 주세요.");
+        }
+
+        String projectId = stringValue(vo.getMarketingProjectId());
+        boolean creating = projectId.isEmpty();
+        MarketingVO.ProjectVO existing = null;
+        if (!creating) {
+            existing = requireProjectMember(projectId, userId);
+            if (vo.getMemberUserIds() == null) {
+                List<String> members = new ArrayList<>();
+                for (MarketingVO.MemberVO member : marketingDAO.selectMarketingProjectMemberList(existing)) {
+                    members.add(member.getUserId());
+                }
+                vo.setMemberUserIds(members);
+            }
+            if (vo.getApproverUserId() == null) {
+                vo.setApproverUserId(existing.getApproverUserId());
+            }
+            boolean owner = userId.equals(existing.getCreateUserId());
+            if (!owner && !Objects.equals(vo.getApproverUserId(), existing.getApproverUserId())) {
+                throw new RuntimeException("프로젝트 작성자만 승인자를 변경할 수 있습니다.");
+            }
+            if (!owner && vo.getManagerUserId() != null) {
+                throw new RuntimeException("프로젝트 작성자만 관리자를 변경할 수 있습니다.");
+            }
+            if (!owner && !userId.equals(existing.getManagerUserId())
+                    && CommonUtil.isNotEmpty(vo.getStatusCd()) && !Objects.equals(vo.getStatusCd(), existing.getStatusCd())) {
+                throw new RuntimeException("프로젝트 작성자와 관리자만 상태를 변경할 수 있습니다.");
+            }
+        }
+
+        String ownerId = creating ? userId : existing.getCreateUserId();
+        List<String> memberUserIds = vo.getMemberUserIds() == null ? Collections.emptyList() : vo.getMemberUserIds();
+        String approverId = stringValue(vo.getApproverUserId());
+        if (approverId.isEmpty()) {
+            throw new RuntimeException("프로젝트 승인자를 선택해 주세요.");
+        }
+        if (!approverId.equals(ownerId) && !memberUserIds.contains(approverId)) {
+            throw new RuntimeException("승인자는 프로젝트 멤버 중에서 선택해 주세요.");
+        }
+        vo.setApproverUserId(approverId);
+        String managerId = vo.getManagerUserId();
+        if (CommonUtil.isNotEmpty(managerId) && !managerId.equals(ownerId) && !memberUserIds.contains(managerId)) {
+            throw new RuntimeException("관리자는 프로젝트 멤버 중에서 선택해 주세요.");
+        }
+
+        vo.setCreateUserId(userId);
+        vo.setModifyUserId(userId);
+        if (creating) {
+            projectId = keyGenerate.generateTableKey("MP", "TB_MKT", "MKT_ID");
+            vo.setMarketingProjectId(projectId);
+            vo.setStatusCd(STATUS_WRITING);
+            marketingDAO.insertMarketingProject(vo);
+        } else {
+            if (marketingDAO.updateMarketingProject(vo) != 1) {
+                throw new RuntimeException("마케팅 프로젝트를 찾을 수 없습니다.");
+            }
+            // 기존 관리자를 멤버에서 빼는 요청이면 관리자 변경을 먼저 반영한다.
+            if (managerId != null) {
+                marketingDAO.updateMarketingManager(vo);
+            }
+        }
+        saveProjectMembers(projectId, userId, ownerId, vo.getMemberUserIds());
+        if (managerId != null) {
+            marketingDAO.updateMarketingManager(vo);
+        }
+
+        if (!creating && !Objects.equals(existing.getApproverUserId(), approverId)) {
+            MarketingVO search = new MarketingVO();
+            search.setMarketingProjectId(projectId);
+            for (MarketingVO content : marketingDAO.selectMarketingList(search)) {
+                if (!STATUS_SCHEDULED.equals(content.getStatusCd()) && !STATUS_PUBLISHED.equals(content.getStatusCd())) {
+                    invalidateApproval(content, contentRequest(content), userId);
+                }
+            }
+        }
+        return projectId;
+    }
+
+    /** 프로젝트 멤버 차이 반영 */
+    private void saveProjectMembers(String projectId, String userId, String ownerId, List<String> requested) throws Exception {
+        Set<String> members = new LinkedHashSet<>();
+        members.add(ownerId);
+        if (requested != null) {
+            for (String id : requested) {
+                if (CommonUtil.isEmpty(id)) {
+                    throw new RuntimeException("멤버 ID를 확인해 주세요.");
+                }
+                members.add(id);
+            }
+        }
+        for (MarketingVO.MemberVO member : marketingDAO.selectMarketingProjectMemberList(projectSearch(projectId))) {
+            if (members.remove(member.getUserId())) {
+                continue;
+            }
+            if ("Y".equals(member.getManageYn())) {
+                throw new RuntimeException("관리자를 해제한 후 멤버에서 제외해 주세요.");
+            }
+            marketingDAO.deleteMarketingProjectMember(member);
+        }
+        if (!members.isEmpty() && marketingDAO.countExistingUsers(new ArrayList<>(members)) != members.size()) {
+            throw new RuntimeException("존재하지 않는 프로젝트 멤버가 포함되어 있습니다.");
+        }
+        for (String id : members) {
+            MarketingVO.MemberVO member = new MarketingVO.MemberVO();
+            member.setMarketingMemberId(keyGenerate.generateTableKey("MM", "TB_MKT_MEMBER", "MKT_MEMBER_ID"));
+            member.setMarketingProjectId(projectId);
+            member.setUserId(id);
+            member.setCreateUserId(userId);
+            marketingDAO.insertMarketingProjectMember(member);
+        }
+    }
+
+    /** 마케팅 프로젝트 삭제 */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteMarketingProject(String marketingProjectId) throws Exception {
+        String userId = SessionUtil.getUserId();
+        if (!userId.equals(requireProjectMember(marketingProjectId, userId).getCreateUserId())) {
+            throw new RuntimeException("프로젝트 작성자만 삭제할 수 있습니다.");
+        }
+        MarketingVO.ProjectVO searchVO = projectSearch(marketingProjectId);
+        MarketingVO contentSearchVO = new MarketingVO();
+        contentSearchVO.setMarketingProjectId(marketingProjectId);
+        for (MarketingVO row : marketingDAO.selectMarketingList(contentSearchVO)) {
+            marketingDAO.deleteMarketingHistories(row);
+        }
+        MarketingVO.FileVO fileSearchVO = new MarketingVO.FileVO();
+        fileSearchVO.setMarketingProjectId(marketingProjectId);
+        List<MarketingVO.FileVO> files = marketingDAO.selectMarketingFileList(fileSearchVO);
+        marketingDAO.deleteMarketingContentsByProject(searchVO);
+        marketingDAO.deleteMarketingByProject(searchVO);
+        marketingDAO.deleteMarketingFilesByProject(searchVO);
+        marketingDAO.deleteMarketingPlanByProject(searchVO);
+        marketingDAO.deleteMarketingProjectMembersByProject(searchVO);
+        if (marketingDAO.deleteMarketingProject(searchVO) != 1) {
+            throw new RuntimeException("마케팅 프로젝트를 찾을 수 없습니다.");
+        }
+        for (MarketingVO.FileVO file : files) {
+            deleteFileStorageObject(file);
+        }
+    }
+
+    /** 마케팅 프로젝트 목록 조회 — 로그인 사용자가 멤버인 프로젝트만 */
+    public List<MarketingVO.ProjectVO> selectMarketingProjectList(MarketingVO.ProjectVO searchVO) throws Exception {
+        if (searchVO == null) {
+            searchVO = new MarketingVO.ProjectVO();
+        }
+        searchVO.setUserId(SessionUtil.getUserId());
+        return marketingDAO.selectMarketingProjectList(searchVO);
+    }
+
+    /** 마케팅 프로젝트 단건 조회 (멤버가 아니면 찾을 수 없음과 동일하게 처리) */
+    public MarketingVO.ProjectVO selectMarketingProject(String marketingProjectId) throws Exception {
+        return requireProjectMember(marketingProjectId, SessionUtil.getUserId());
+    }
+
+    /** 프로젝트 멤버(공개범위) 목록 조회 */
+    public List<MarketingVO.MemberVO> selectMarketingProjectMemberList(String marketingProjectId) throws Exception {
+        requireProject(marketingProjectId);
+        return marketingDAO.selectMarketingProjectMemberList(projectSearch(marketingProjectId));
     }
 
     /** 마케팅 파일 업로드 presigned URL */
-    public Map<String, Object> saveMarketingFileUploadUrl(MarketingVO.FileVO fileVO) {
+    public Map<String, Object> saveMarketingFileUploadUrl(MarketingVO.FileVO fileVO) throws Exception {
+        if (CommonUtil.isNotEmpty(fileVO.getMarketingProjectId()) && !"draft".equals(fileVO.getMarketingProjectId())) {
+            requireProject(fileVO.getMarketingProjectId());
+        }
+        requireMarketingUploadPath(fileVO.getFilePath(), fileVO.getMarketingProjectId());
         FileVO req = new FileVO();
         req.setFileName(fileVO.getFileNm());
         req.setFileType(fileVO.getFileType());
@@ -494,8 +600,16 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return fileService.createUploadPresignedUrl(req);
     }
 
+    /** 업로드는 로그인 사용자와 대상 프로젝트의 저장 경로로 제한한다. */
+    private void requireMarketingUploadPath(String path, String projectId) {
+        String prefix = "marketing/" + SessionUtil.getUserId() + "/" + (CommonUtil.isEmpty(projectId) ? "draft" : projectId) + "/";
+        if (path == null || !path.startsWith(prefix) || path.length() <= prefix.length()
+                || path.contains("..") || path.contains("\\")) {
+            throw new RuntimeException("마케팅 파일 저장 경로를 확인해 주세요.");
+        }
+    }
+
     /** 마케팅 파일 메타 저장 */
-    @Transactional
     public Map<String, Object> saveMarketingFile(MarketingVO.FileVO vo) throws Exception {
         if (CommonUtil.isEmpty(vo.getFilePath())) {
             throw new RuntimeException("filePath는 필수입니다.");
@@ -504,41 +618,49 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("fileName은 필수입니다.");
         }
 
-        String userId = SessionUtil.getUserId();
         String marketingProjectId = stringValue(vo.getMarketingProjectId());
-        if (CommonUtil.isNotEmpty(marketingProjectId)) {
+        boolean draft = marketingProjectId.isEmpty() || "draft".equals(marketingProjectId);
+        if (!draft) {
             requireProject(marketingProjectId);
         }
+        requireMarketingUploadPath(vo.getFilePath(), marketingProjectId);
+        String filePurposeCd = requireFilePurposeCd(vo.getFilePurposeCd());
         String fileType = CommonUtil.nvl(vo.getMimeType(), CommonUtil.nullToBlank(vo.getFileType()));
+        if (vo.getFileSize() == null || CommonUtil.isEmpty(fileType)) {
+            throw new RuntimeException("파일 크기와 MIME 타입은 필수입니다.");
+        }
 
-        String marketingFileId = keyGenerate.generateTableKey("MF", "TB_MKT_FILE", "MKT_FILE_ID");
         MarketingVO.FileVO fileVO = new MarketingVO.FileVO();
-        fileVO.setMarketingFileId(marketingFileId);
-        fileVO.setMarketingProjectId(CommonUtil.isNotEmpty(marketingProjectId) ? marketingProjectId : null);
+        fileVO.setMarketingFileId(keyGenerate.generateTableKey("MF", "TB_MKT_FILE", "MKT_FILE_ID"));
+        fileVO.setMarketingProjectId(draft ? null : marketingProjectId);
         fileVO.setFilePath(vo.getFilePath());
         fileVO.setFileNm(vo.getFileNm());
         fileVO.setFileSize(vo.getFileSize());
         fileVO.setFileType(fileType);
-        fileVO.setCreateUserId(userId);
+        fileVO.setFilePurposeCd(filePurposeCd);
+        fileVO.setCreateUserId(SessionUtil.getUserId());
         marketingDAO.insertMarketingFile(fileVO);
 
         Map<String, Object> resultMap = successResult();
-        resultMap.put("marketingFileId", marketingFileId);
+        resultMap.put("marketingFileId", fileVO.getMarketingFileId());
         resultMap.put("filePath", fileVO.getFilePath());
         resultMap.put("fileName", fileVO.getFileNm());
         return resultMap;
     }
 
     /** 마케팅 프로젝트 첨부파일 목록 */
-    public List<MarketingVO.FileVO> selectMarketingFileList(String marketingProjectId) throws Exception {
+    public List<MarketingVO.FileVO> selectMarketingFileList(String marketingProjectId, String filePurposeCd)
+            throws Exception {
         requireProject(marketingProjectId);
         MarketingVO.FileVO searchVO = new MarketingVO.FileVO();
         searchVO.setMarketingProjectId(marketingProjectId);
+        if (CommonUtil.isNotEmpty(stringValue(filePurposeCd))) {
+            searchVO.setFilePurposeCd(requireFilePurposeCd(filePurposeCd));
+        }
         return marketingDAO.selectMarketingFileList(searchVO);
     }
 
     /** 마케팅 프로젝트 첨부파일명 수정 */
-    @Transactional
     public void updateMarketingFileName(String marketingFileId, String fileName) throws Exception {
         String fileId = stringValue(marketingFileId);
         String trimmedName = stringValue(fileName);
@@ -548,28 +670,77 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (CommonUtil.isEmpty(trimmedName)) {
             throw new RuntimeException("파일명은 필수입니다.");
         }
+        requireFileAccess(marketingDAO.selectMarketingFileById(fileSearch(fileId)), SessionUtil.getUserId());
         MarketingVO.FileVO dataVO = fileSearch(fileId);
         dataVO.setFileNm(trimmedName);
+        dataVO.setModifyUserId(SessionUtil.getUserId());
         if (marketingDAO.updateMarketingFile(dataVO) != 1) {
             throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
         }
     }
 
-    /** 마케팅 첨부파일 삭제 */
+    /** 마케팅 첨부파일 삭제 — 참고파일로 쓰는 콘텐츠는 참조를 빼고 승인을 해제한다 */
+    @Transactional(rollbackFor = Exception.class)
     public void deleteMarketingFile(String marketingFileId) throws Exception {
-        String fileId = stringValue(marketingFileId);
-        if (CommonUtil.isEmpty(fileId)) {
-            throw new RuntimeException("marketingFileId는 필수입니다.");
+        String userId = SessionUtil.getUserId();
+        MarketingVO.FileVO row = marketingDAO.selectMarketingFileById(fileSearch(marketingFileId));
+        requireFileAccess(row, userId);
+        if (row.getMarketingProjectId() != null) {
+            MarketingVO search = new MarketingVO();
+            search.setMarketingProjectId(row.getMarketingProjectId());
+            for (MarketingVO content : marketingDAO.selectMarketingList(search)) {
+                Map<String, Object> request = contentRequest(content);
+                Object refs = request.get("referenceMarketingFileIds");
+                if (!(refs instanceof List) || !((List<?>) refs).contains(marketingFileId)) {
+                    continue;
+                }
+                if (STATUS_SCHEDULED.equals(content.getStatusCd()) || STATUS_PUBLISHED.equals(content.getStatusCd())) {
+                    throw new RuntimeException("예약·발행완료 콘텐츠에서 사용하는 파일은 삭제할 수 없습니다.");
+                }
+                List<Object> updated = new ArrayList<>((List<?>) refs);
+                updated.removeIf(marketingFileId::equals);
+                request.put("referenceMarketingFileIds", updated);
+                invalidateApproval(content, request, userId);
+            }
         }
-        MarketingVO.FileVO searchVO = fileSearch(fileId);
-        MarketingVO.FileVO row = marketingDAO.selectMarketingFileById(searchVO);
-        if (row == null) {
+        if (marketingDAO.deleteMarketingFile(fileSearch(marketingFileId)) != 1) {
             throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
         }
         deleteFileStorageObject(row);
+    }
 
-        if (marketingDAO.deleteMarketingFile(fileSearch(fileId)) != 1) {
+    /** 임시 파일은 등록자, 프로젝트 파일은 멤버만 접근 */
+    private void requireFileAccess(MarketingVO.FileVO row, String userId) throws Exception {
+        if (row == null) {
             throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
+        }
+        if (row.getMarketingProjectId() != null) {
+            requireProjectMember(row.getMarketingProjectId(), userId);
+        } else if (!Objects.equals(userId, row.getCreateUserId())) {
+            throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
+        }
+    }
+
+    /** 참고파일 확인 — 임시 파일은 대상 프로젝트로 연결한다 */
+    private void validateReferenceFiles(String projectId, Object raw, String userId) throws Exception {
+        if (raw == null) {
+            return;
+        }
+        if (!(raw instanceof List)) {
+            throw new RuntimeException("참고파일 목록을 확인해 주세요.");
+        }
+        for (Object id : (List<?>) raw) {
+            MarketingVO.FileVO file = marketingDAO.selectMarketingFileById(fileSearch(stringValue(id)));
+            requireFileAccess(file, userId);
+            if (file.getMarketingProjectId() == null) {
+                file.setMarketingProjectId(projectId);
+                file.setModifyUserId(userId);
+                if (marketingDAO.attachMarketingFile(file) != 1) {
+                    throw new RuntimeException("임시 파일 연결에 실패했습니다.");
+                }
+            } else if (!projectId.equals(file.getMarketingProjectId())) {
+                throw new RuntimeException("다른 프로젝트의 파일입니다.");
+            }
         }
     }
 
@@ -578,11 +749,10 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (row == null || CommonUtil.isEmpty(row.getFilePath())) {
             return;
         }
-        try {
-            fileService.deleteStorageObjectByKey(row.getFilePath());
-        } catch (Exception e) {
+        Map<String, Object> result = fileService.deleteStorageObjectByKey(row.getFilePath());
+        if (result != null && Boolean.FALSE.equals(result.get("successYn"))) {
             logger.warn("[MKT] 스토리지 객체 정리 실패 - marketingFileId={}, filePath={}: {}",
-                    row.getMarketingFileId(), row.getFilePath(), e.getMessage());
+                    row.getMarketingFileId(), row.getFilePath(), result.get("returnMsg"));
         }
     }
 
@@ -596,9 +766,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (row == null || CommonUtil.isEmpty(row.getFilePath())) {
             return downloadFallback("FILE_NOT_FOUND");
         }
-        if (CommonUtil.isNotEmpty(row.getMarketingProjectId())) {
-            requireProject(row.getMarketingProjectId());
-        }
+        requireFileAccess(row, SessionUtil.getUserId());
         FileVO fileVo = new FileVO();
         fileVo.setFilePath(row.getFilePath());
         fileVo.setFileName(row.getFileNm());
@@ -614,6 +782,237 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         result.put("fileName", "");
         result.put("downloadUrl", "");
         return result;
+    }
+
+    // ── 기획서 ─────────────────────────────────────────────────────────────────
+
+    /** 마케팅 기획서 조회 — 없으면 null. 프로젝트 목적은 포함하지 않는다 */
+    public MarketingVO.PlanVO selectMarketingPlan(String marketingProjectId) throws Exception {
+        requireProject(marketingProjectId);
+        return toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(marketingProjectId)));
+    }
+
+    /** 마케팅 기획서 생성/재생성 (동기). 이미 있으면 덮어쓴다 */
+    public MarketingVO.PlanVO generateMarketingPlan(MarketingVO.PlanVO req) throws Exception {
+        if (req == null) {
+            throw new RuntimeException("요청 본문이 없습니다.");
+        }
+        String projectId = stringValue(req.getMarketingProjectId());
+        MarketingVO.ProjectVO project = requireProjectMember(projectId, SessionUtil.getUserId());
+        String goal = stringValue(req.getGoal());
+        String productNm = stringValue(req.getProductNm());
+        if (CommonUtil.isEmpty(goal)) {
+            throw new RuntimeException("goal은 필수입니다.");
+        }
+        if (CommonUtil.isEmpty(productNm)) {
+            throw new RuntimeException("productNm은 필수입니다.");
+        }
+        String userId = SessionUtil.getUserId();
+        List<MarketingVO.FileVO> contentFiles = loadPlanFiles(projectId, req.getContentFileIds(), FILE_PURPOSE_CONTENT, userId);
+        List<MarketingVO.FileVO> brandFiles = loadPlanFiles(projectId, req.getBrandFileIds(), FILE_PURPOSE_BRAND, userId);
+        List<MarketingVO.FileVO> imageFiles = loadPlanFiles(projectId, req.getImageFileIds(), FILE_PURPOSE_IMAGE, userId);
+
+        StringBuilder referenceContext = new StringBuilder();
+        appendPlanSlot(referenceContext, "[콘텐츠 참고자료]", contentFiles);
+        appendPlanSlot(referenceContext, "[브랜드 참고자료]", brandFiles);
+        appendPlanSlot(referenceContext, "[이미지 참고자료]", imageFiles);
+        Map<String, String> markers = new LinkedHashMap<>();
+        markers.put("TODAY", LocalDate.now().toString());
+        markers.put("PROJECT_NM", stringValue(project.getProjectNm()));
+        markers.put("ORG_NM", stringValue(project.getOrgNm()));
+        markers.put("PROJECT_OVERVIEW", stringValue(project.getProjectOverview()));
+        markers.put("DUE_DT", stringValue(project.getDueDt()));
+        markers.put("GOAL", goal);
+        markers.put("PRODUCT_NM", productNm);
+        markers.put("REQUEST_TXT", stringValue(req.getRequestTxt()));
+        markers.put("TARGET_NM", stringValue(req.getTargetNm()));
+        markers.put("REFERENCE_CONTEXT", referenceContext.toString().trim());
+        MarketingVO.PlanVO parsed = generateMarketingPlanJson(PROMPT_ID_PLAN, markers);
+
+        MarketingVO.PlanVO saveVO = new MarketingVO.PlanVO();
+        saveVO.setMarketingProjectId(projectId);
+        saveVO.setGoal(goal);
+        saveVO.setProductNm(productNm);
+        saveVO.setRequestTxt(stringValue(req.getRequestTxt()));
+        saveVO.setTargetNm(stringValue(req.getTargetNm()));
+        saveVO.setKeyMessage(parsed.getKeyMessage());
+        saveVO.setRecommendChannels(parsed.getRecommendChannels());
+        saveVO.setVisualTxt(parsed.getVisualTxt());
+        saveVO.setSections(parsed.getSections());
+        saveMarketingPlan(saveVO);
+        return toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(projectId)));
+    }
+
+    /** 마케팅 기획서 대화/프롬프트 수정 (동기) */
+    public MarketingVO.PlanVO refineMarketingPlan(MarketingVO.PlanVO req) throws Exception {
+        if (req == null) {
+            throw new RuntimeException("요청 본문이 없습니다.");
+        }
+        String projectId = stringValue(req.getMarketingProjectId());
+        requireProject(projectId);
+        String message = stringValue(req.getMessage());
+        if (CommonUtil.isEmpty(message)) {
+            throw new RuntimeException("message는 필수입니다.");
+        }
+        MarketingVO.PlanVO current = toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(projectId)));
+        if (current == null) {
+            throw new RuntimeException("기획서가 없습니다.");
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("goal", current.getGoal());
+        payload.put("productNm", current.getProductNm());
+        payload.put("requestTxt", current.getRequestTxt());
+        payload.put("targetNm", current.getTargetNm());
+        payload.put("keyMessage", current.getKeyMessage());
+        payload.put("recommendChannels", current.getRecommendChannels());
+        payload.put("visualTxt", current.getVisualTxt());
+        payload.put("sections", current.getSections());
+        Map<String, String> markers = new LinkedHashMap<>();
+        markers.put("Q_CONTENT", message);
+        markers.put("R_CONTENT", GSON.toJson(payload));
+        markers.put("REFERENCE_CONTEXT", "");
+        MarketingVO.PlanVO parsed = generateMarketingPlanJson(PROMPT_ID_PLAN_REFINE, markers);
+
+        MarketingVO.PlanVO saveVO = new MarketingVO.PlanVO();
+        saveVO.setMarketingProjectId(projectId);
+        saveVO.setGoal(firstNonEmpty(parsed.getGoal(), current.getGoal()));
+        saveVO.setProductNm(firstNonEmpty(parsed.getProductNm(), current.getProductNm()));
+        saveVO.setRequestTxt(firstNonEmpty(parsed.getRequestTxt(), current.getRequestTxt()));
+        saveVO.setTargetNm(firstNonEmpty(parsed.getTargetNm(), current.getTargetNm()));
+        saveVO.setKeyMessage(firstNonEmpty(parsed.getKeyMessage(), current.getKeyMessage()));
+        saveVO.setRecommendChannels(firstNonEmpty(parsed.getRecommendChannels(), current.getRecommendChannels()));
+        saveVO.setVisualTxt(firstNonEmpty(parsed.getVisualTxt(), current.getVisualTxt()));
+        saveVO.setSections(parsed.getSections() != null ? parsed.getSections() : current.getSections());
+        saveMarketingPlan(saveVO);
+        return toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(projectId)));
+    }
+
+    /** 프로젝트 기획서 등록/수정 */
+    private void saveMarketingPlan(MarketingVO.PlanVO saveVO) throws Exception {
+        saveVO.setSectionsJson(GSON.toJson(saveVO.getSections()));
+        if (marketingDAO.selectMarketingPlan(planSearch(saveVO.getMarketingProjectId())) == null) {
+            saveVO.setMarketingPlanId(keyGenerate.generateTableKey("ML", "TB_MKT_PLAN", "MKT_PLAN_ID"));
+            saveVO.setCreateUserId(SessionUtil.getUserId());
+            marketingDAO.insertMarketingPlan(saveVO);
+        } else {
+            saveVO.setModifyUserId(SessionUtil.getUserId());
+            if (marketingDAO.updateMarketingPlan(saveVO) != 1) {
+                throw new RuntimeException("기획서를 찾을 수 없습니다.");
+            }
+        }
+    }
+
+    private String requireFilePurposeCd(String filePurposeCd) {
+        String value = stringValue(filePurposeCd);
+        if (CommonUtil.isEmpty(value)) {
+            throw new RuntimeException("filePurposeCd는 필수입니다.");
+        }
+        if (!FILE_PURPOSE_CDS.contains(value)) {
+            throw new RuntimeException("filePurposeCd는 001, 002, 003만 허용됩니다.");
+        }
+        return value;
+    }
+
+    /** 기획서 칸별 참고파일 확인 — 접근·용도 확인 후 임시 파일은 프로젝트로 연결한다 */
+    private List<MarketingVO.FileVO> loadPlanFiles(String projectId, List<String> ids, String purposeCd, String userId)
+            throws Exception {
+        List<MarketingVO.FileVO> files = new ArrayList<>();
+        if (ids == null) {
+            return files;
+        }
+        for (String id : ids) {
+            MarketingVO.FileVO file = marketingDAO.selectMarketingFileById(fileSearch(stringValue(id)));
+            requireFileAccess(file, userId);
+            if (!purposeCd.equals(file.getFilePurposeCd())
+                    || (file.getMarketingProjectId() != null && !projectId.equals(file.getMarketingProjectId()))) {
+                throw new RuntimeException("참고파일이 올바르지 않습니다.");
+            }
+            if (file.getMarketingProjectId() == null) {
+                file.setMarketingProjectId(projectId);
+                file.setModifyUserId(userId);
+                if (marketingDAO.attachMarketingFile(file) != 1) {
+                    throw new RuntimeException("임시 파일 연결에 실패했습니다.");
+                }
+            }
+            files.add(file);
+        }
+        return files;
+    }
+
+    private void appendPlanSlot(StringBuilder labeled, String label, List<MarketingVO.FileVO> files) throws Exception {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        String extracted = queryReferenceFiles(files, "", resolveMarketingPrompt(PROMPT_ID_REF), SessionUtil.getUserId());
+        if (CommonUtil.isEmpty(extracted)) {
+            return;
+        }
+        if (labeled.length() > 0) {
+            labeled.append("\n\n");
+        }
+        labeled.append(label).append("\n").append(extracted);
+    }
+
+    /** DB 프롬프트로 기획서를 생성하고 JSON 계약 검증 */
+    private MarketingVO.PlanVO generateMarketingPlanJson(String promptId, Map<String, String> markers) throws Exception {
+        String prompt = replacePromptMarkers(resolveMarketingPrompt(promptId), markers);
+        JsonObject json = JsonParser.parseString(stripJsonFence(chatbotService.callAiSummary(prompt, "marketing_plan", null))).getAsJsonObject();
+        for (String key : List.of("goal", "productNm", "requestTxt", "targetNm", "keyMessage", "recommendChannels", "visualTxt")) {
+            if (!json.has(key) || !json.get(key).isJsonPrimitive() || !json.get(key).getAsJsonPrimitive().isString()) {
+                throw new RuntimeException("기획서 응답 항목을 확인해 주세요: " + key);
+            }
+        }
+        if (!json.has("sections") || !json.get("sections").isJsonArray() || json.getAsJsonArray("sections").size() != 7) {
+            throw new RuntimeException("기획서 본문 7개 항목이 필요합니다.");
+        }
+        MarketingVO.PlanVO plan = GSON.fromJson(json, MarketingVO.PlanVO.class);
+        for (MarketingVO.PlanSectionVO section : plan.getSections()) {
+            if (section == null || CommonUtil.isEmpty(section.getTitle()) || CommonUtil.isEmpty(section.getBody())) {
+                throw new RuntimeException("기획서 본문이 비어 있습니다.");
+            }
+        }
+        return plan;
+    }
+
+    /** 프롬프트의 {{MARKER}}를 값으로 치환한다. 값이 없는 마커는 예외 */
+    private String replacePromptMarkers(String template, Map<String, String> values) {
+        Matcher matcher = Pattern.compile("\\{\\{([A-Z_]+)\\}\\}").matcher(template);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            if (!values.containsKey(matcher.group(1))) {
+                throw new RuntimeException("프롬프트 마커를 확인해 주세요: " + matcher.group(1));
+            }
+            matcher.appendReplacement(result, Matcher.quoteReplacement(CommonUtil.nullToBlank(values.get(matcher.group(1)))));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private MarketingVO.PlanVO toPlanResponse(MarketingVO.PlanVO raw) {
+        if (raw == null) {
+            return null;
+        }
+        raw.setSections(parseStoredPlanSections(raw.getSectionsJson()));
+        return raw;
+    }
+
+    private List<MarketingVO.PlanSectionVO> parseStoredPlanSections(String sectionsJson) {
+        if (CommonUtil.isEmpty(sectionsJson)) {
+            return new ArrayList<>();
+        }
+        try {
+            List<MarketingVO.PlanSectionVO> sections = GSON.fromJson(
+                    sectionsJson, new TypeToken<List<MarketingVO.PlanSectionVO>>() { }.getType());
+            return sections != null ? sections : new ArrayList<>();
+        } catch (Exception e) {
+            logger.warn("[MKT] 기획서 SECTIONS_JSON 파싱 실패", e);
+            return new ArrayList<>();
+        }
+    }
+
+    private String firstNonEmpty(String primary, String fallback) {
+        return CommonUtil.isNotEmpty(stringValue(primary)) ? stringValue(primary) : stringValue(fallback);
     }
 
     // ── 조회 ───────────────────────────────────────────────────────────────────
@@ -647,25 +1046,38 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             resultMap.put("list", list);
             return resultMap;
         }
+        requireProject(searchVO.getMarketingProjectId());
         for (MarketingVO row : marketingDAO.selectMarketingList(searchVO)) {
-            list.add(toSummary(row, parseRequest(row.getRequestJson())));
+            list.add(toSummary(row, contentRequest(row)));
         }
         resultMap.put("list", list);
         return resultMap;
     }
 
     /** 마케팅 콘텐츠 상세 조회 */
-    public Map<String, Object> selectMarketing(String mktId) throws Exception {
-        MarketingVO searchVO = contentSearch(mktId);
-        MarketingVO marketing = marketingDAO.selectMarketing(searchVO);
-        if (marketing == null) {
-            return failResult("마케팅 콘텐츠를 찾을 수 없습니다");
-        }
-        Map<String, Object> request = parseRequest(marketing.getRequestJson());
+    public Map<String, Object> selectMarketing(String mktContentId) throws Exception {
+        String userId = SessionUtil.getUserId();
+        MarketingVO marketing = requireMarketing(mktContentId, userId);
+        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(marketing.getMarketingProjectId()));
+        MarketingVO.ReviewVO review = marketingDAO.selectLatestReview(mktContentId);
+        MarketingVO.ApprovalVO approval = marketingDAO.selectLatestApproval(mktContentId);
+        boolean currentReview = isCurrentReview(marketing, review);
+
+        Map<String, Object> request = contentRequest(marketing);
         Map<String, Object> detail = toSummary(marketing, request);
         detail.putAll(successResult());
         detail.put("request", request);
-        detail.put("result", toResult(marketing, marketingDAO.selectMarketingContents(searchVO)));
+        detail.put("selectedVariantId", marketing.getSelectedVariantNo());
+        detail.put("contentVersion", marketing.getContentVersion());
+        detail.put("review", currentReview ? toReviewResponse(review) : null);
+        detail.put("approval", isCurrentApproval(marketing, approval, project.getApproverUserId()) ? approval : null);
+        detail.put("approverUserId", project.getApproverUserId());
+        detail.put("approverUserNm", project.getApproverUserNm());
+        detail.put("canApprove", userId.equals(project.getApproverUserId())
+                && currentReview && !VERDICT_FAIL.equals(review.getVerdict())
+                && STATUS_APPROVAL_REQUIRED.equals(marketing.getStatusCd()));
+        detail.put("schedule", toSchedule(marketing));
+        detail.put("result", toResult(marketing, marketingDAO.selectMarketingContents(contentSearch(mktContentId))));
         return detail;
     }
 
@@ -681,12 +1093,15 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("contentId", row.getMktId());
+        result.put("contentId", row.getMktContentId());
         result.put("agentId", row.getAgentId());
         result.put("marketingProjectId", row.getMarketingProjectId());
         result.put("title", row.getTitle());
         result.put("outputMode", row.getOutputMode());
         result.put("statusCd", row.getStatusCd());
+        result.put("statusNm", row.getStatusNm());
+        result.put("aiStatusCd", row.getAiStatusCd());
+        result.put("aiStatusNm", row.getAiStatusNm());
         result.put("publishScheduledDt", CommonUtil.nullToBlank(row.getPublishScheduledDt()));
         result.put("publishedYn", CommonUtil.nvl(row.getPublishedYn(), "N"));
         result.put("summaryLabels", summaryLabels);
@@ -703,23 +1118,32 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             boolean recommended = "Y".equals(content.getRecommendYn());
             boolean canRestore = "Y".equals(content.getHasPreviousYn());
             String label = CommonUtil.nullToBlank(content.getContentLabel());
+            int variantNo = content.getVariantNo();
             if (!imageOnly) {
                 String text = CommonUtil.nullToBlank(content.getTextContent());
                 Map<String, Object> variant = new LinkedHashMap<>();
-                variant.put("id", content.getContentNo());
+                variant.put("id", variantNo);
                 variant.put("label", label);
                 variant.put("recommended", recommended);
                 variant.put("content", text);
                 variant.put("canRestore", canRestore);
+                String prompt = stringValue(parseRequest(content.getTextPromptJson()).get("prompt"));
+                if (CommonUtil.isNotEmpty(prompt)) {
+                    variant.put("prompt", prompt);
+                }
                 variants.add(variant);
             }
             if (CommonUtil.isNotEmpty(content.getImageFile())) {
                 Map<String, Object> image = new LinkedHashMap<>();
-                image.put("id", content.getContentNo());
+                image.put("id", variantNo);
                 image.put("url", content.getImageFile());
                 image.put("label", label);
                 image.put("recommended", recommended);
                 image.put("canRestore", canRestore);
+                String prompt = stringValue(parseRequest(content.getImagePromptJson()).get("prompt"));
+                if (CommonUtil.isNotEmpty(prompt)) {
+                    image.put("prompt", prompt);
+                }
                 images.add(image);
             }
         }
@@ -735,488 +1159,98 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     // ── 내보내기 ───────────────────────────────────────────────────────────────
 
     /** 마케팅 콘텐츠 내보내기 HTML 조회 */
-    public String exportMarketingContentHtml(String mktId) throws Exception {
-        MarketingVO searchVO = contentSearch(mktId);
-        MarketingVO marketing = marketingDAO.selectMarketing(searchVO);
-        if (marketing == null) {
-            throw new RuntimeException("마케팅 콘텐츠를 찾을 수 없습니다.");
-        }
-        List<MarketingVO> contents = marketingDAO.selectMarketingContents(searchVO);
-        if (CommonUtil.isEmpty(contents)) {
-            throw new RuntimeException("내보낼 시안이 없습니다.");
-        }
+    public String exportMarketingContentHtml(String mktContentId) throws Exception {
+        MarketingVO marketing = requireMarketing(mktContentId, SessionUtil.getUserId());
+        List<MarketingVO> contents = marketingDAO.selectMarketingContents(contentSearch(mktContentId));
         boolean hasText = contents.stream().anyMatch(c -> CommonUtil.isNotEmpty(c.getTextContent()));
         boolean hasImage = contents.stream().anyMatch(c -> CommonUtil.isNotEmpty(c.getImageFile()));
         if (!hasText && !hasImage) {
             throw new RuntimeException("내보낼 시안이 없습니다.");
         }
-        Map<String, Object> request = parseRequest(marketing.getRequestJson());
-        return buildMarketingExportHtml(marketing, request, contents);
+        return buildMarketingExportHtml(marketing, contentRequest(marketing), contents);
     }
 
-    /** 문서템플릿 LLM 렌더링으로 내보내기 HTML을 만든다 */
-    private String buildMarketingExportHtml(
-            MarketingVO marketing, Map<String, Object> request, List<MarketingVO> contents)
-            throws Exception {
-        LibraryVO tmplSearchVO = new LibraryVO();
-        tmplSearchVO.setTmplId(MARKETING_EXPORT_TMPL_ID);
-        LibraryVO.TmplItem tmpl = libraryDAO.selectTmpl(tmplSearchVO);
-        if (tmpl == null || CommonUtil.isEmpty(tmpl.getTmplHtml())) {
-            throw new RuntimeException("내보내기 문서 템플릿을 찾을 수 없습니다.");
+    /** 저장된 템플릿에 콘텐츠 결과를 직접 채운다 */
+    private String buildMarketingExportHtml(MarketingVO marketing, Map<String, Object> request,
+            List<MarketingVO> contents) throws Exception {
+        TmplVO template = tmplService.selectTmplList().stream()
+                .filter(t -> MARKETING_EXPORT_TMPL_ID.equals(t.getTmplId())).findFirst()
+                .orElseThrow(() -> new RuntimeException("내보내기 템플릿을 찾을 수 없습니다."));
+        if (CommonUtil.isEmpty(template.getTmplHtml()) || template.getFields() == null) {
+            throw new RuntimeException("내보내기 템플릿 설정을 확인해 주세요.");
         }
-        String promptTemplate = CommonUtil.nullToBlank(tmpl.getLlmPrompt());
-        if (CommonUtil.isEmpty(promptTemplate)) {
-            throw new RuntimeException("내보내기 문서 템플릿 프롬프트가 없습니다.");
+        Set<String> fields = new LinkedHashSet<>();
+        for (TmplVO.TmplFieldVO field : template.getFields()) {
+            fields.add(field.getJsonKey());
         }
-        List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(tmplSearchVO);
-
-        Map<Integer, String> imageDataUrisByToken = new LinkedHashMap<>();
-        AgentLabelSet labelSet = resolveAgentLabelSet(marketing.getAgentId());
-        String qContent = buildExportPromptQuestion(marketing, request, labelSet);
-        String rContent = buildExportPromptAnswer(contents, imageDataUrisByToken);
-        String prompt = buildExportLlmPrompt(promptTemplate, tmplFieldList, qContent, rContent,
-                imageDataUrisByToken.size());
-
-        String fingerprint = sha256Hex(prompt);
-        ExportHtmlCacheEntry cached = EXPORT_HTML_CACHE.getIfPresent(marketing.getMktId());
-        if (cached != null && cached.fingerprint.equals(fingerprint)) {
-            logger.info("[MKT] 내보내기 HTML 캐시 재사용 (mktId={}) — LLM 재호출 생략", marketing.getMktId());
-            return cached.html;
-        }
-
-        logger.info("[MKT] 내보내기 LLM 호출 시작 (tmplId={})", MARKETING_EXPORT_TMPL_ID);
-        String res = chatbotService.callAiSummary(prompt, "marketingExport", null);
-        if (CommonUtil.isEmpty(res)) {
-            throw new RuntimeException("내보내기 문서 생성에 실패했습니다.");
-        }
-        JSONObject aiJson = parseExportTemplateJson(res);
-        if (aiJson == null) {
-            throw new RuntimeException("내보내기 문서 생성 결과를 해석하지 못했습니다.");
-        }
-        if (!imageDataUrisByToken.isEmpty()) {
-            tmplHtmlRenderService.dedupeCreateDocImageTokens(aiJson, tmplFieldList);
-        }
-        markExportBlankLines(aiJson);
-        String html = tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), aiJson, tmplFieldList)
-                .replace(EXPORT_BLANK_LINE_TOKEN, "");
-        String resolvedHtml = resolveMarketingExportImages(html, imageDataUrisByToken);
-        EXPORT_HTML_CACHE.put(marketing.getMktId(), new ExportHtmlCacheEntry(fingerprint, resolvedHtml));
-        return resolvedHtml;
-    }
-
-    /** 내보내기 HTML 캐시 엔트리 */
-    private static final class ExportHtmlCacheEntry {
-        private final String fingerprint;
-        private final String html;
-
-        private ExportHtmlCacheEntry(String fingerprint, String html) {
-            this.fingerprint = fingerprint;
-            this.html = html;
-        }
-    }
-
-    /** 프롬프트 문자열 SHA-256 — 실패 시 hashCode로 대체 */
-    private String sha256Hex(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return String.valueOf(value.hashCode());
-        }
-    }
-
-    /** JSON 문자열 빈 줄을 토큰으로 치환한다 */
-    @SuppressWarnings("unchecked")
-    private void markExportBlankLines(Object node) {
-        if (node instanceof JSONObject) {
-            JSONObject obj = (JSONObject) node;
-            for (Object key : new ArrayList<Object>(obj.keySet())) {
-                Object value = obj.get(key);
-                if (value instanceof String) {
-                    obj.put(key, markExportBlankLinesInText((String) value));
-                } else {
-                    markExportBlankLines(value);
-                }
-            }
-        } else if (node instanceof JSONArray) {
-            JSONArray arr = (JSONArray) node;
-            for (int i = 0; i < arr.size(); i++) {
-                Object value = arr.get(i);
-                if (value instanceof String) {
-                    arr.set(i, markExportBlankLinesInText((String) value));
-                } else {
-                    markExportBlankLines(value);
-                }
-            }
-        }
-    }
-
-    private String markExportBlankLinesInText(String text) {
-        if (text == null || text.isEmpty() || text.toLowerCase().contains("<table")) {
-            return text;
-        }
-        String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
-        if (normalized.indexOf('\n') < 0) {
-            return text;
-        }
-        String[] lines = normalized.split("\n", -1);
-        StringBuilder sb = new StringBuilder(normalized.length());
-        for (int i = 0; i < lines.length; i++) {
-            if (i > 0) {
-                sb.append('\n');
-            }
-            sb.append(lines[i].isEmpty() ? EXPORT_BLANK_LINE_TOKEN : lines[i]);
-        }
-        return sb.toString();
-    }
-
-    /** 문서템플릿 플레이스홀더를 치환한다 */
-    private String buildExportLlmPrompt(
-            String promptTemplate, List<LibraryVO.TmplFieldItem> tmplFieldList,
-            String qContent, String rContent, int imageCount) {
-        List<String> multilineJsonKeys = new ArrayList<>();
-        StringBuilder fieldList = new StringBuilder();
-        if (tmplFieldList != null) {
-            for (LibraryVO.TmplFieldItem fieldItem : tmplFieldList) {
-                if (fieldItem == null || CommonUtil.isEmpty(fieldItem.getJsonKey())) {
-                    continue;
-                }
-                String jsonKey = fieldItem.getJsonKey();
-                String fieldNm = CommonUtil.isEmpty(fieldItem.getFieldNm()) ? jsonKey : fieldItem.getFieldNm();
-                fieldList.append("\nkey : ").append(jsonKey).append("_label (고정값: \"").append(fieldNm)
-                        .append("\". 반드시 이 문자열만 사용. 내용 요약 금지)");
-                if ("Y".equals(fieldItem.getMultilineYn())) {
-                    multilineJsonKeys.add(jsonKey);
-                    fieldList.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm)
-                            .append(") (JSON 문자열 배열로 응답. 예: [\"항목1\", \"항목2\"])");
-                } else {
-                    fieldList.append("\nkey : ").append(jsonKey).append(" (").append(fieldNm).append(")");
-                }
-            }
-        }
-
-        String htmlFieldInstruction = "";
-        if (!multilineJsonKeys.isEmpty()) {
-            htmlFieldInstruction = "key가 다음인 필드의 value는 HTML이 아닌 일반 텍스트 기반 JSON 문자열 배열이어야 합니다: "
-                    + String.join(", ", multilineJsonKeys)
-                    + ". 예: [\"항목1\", \"항목2\"]."
-                    + " HTML 태그(<p>, <li> 등)는 포함하지 말 것."
-                    + " 응답 JSON의 키(key) 순서는 본 프롬프트에 제시된 필드 목록에 나온 key 나열 순서와 동일하게 유지할 것."
-                    + " 요청·명세에 정의된 필드 순서를 바꾸거나 뒤섞지 말고, 동일한 순서로 출력할 것.";
-        }
-        if (TmplHtmlRenderService.containsMarkdownPipeTable(qContent)
-                || TmplHtmlRenderService.containsMarkdownPipeTable(rContent)) {
-            htmlFieldInstruction += " 단, 원문에 마크다운 파이프 표가 있으면 표 구간만 HTML <table>로 변환해 넣을 것."
-                    + " 그 외 HTML은 포함하지 말고 <table> 관련 태그만 예외로 허용.";
-        }
-
-        UserVO userVO = SessionUtil.getUserVO();
-        String userNm = userVO != null ? CommonUtil.nullToBlank(userVO.getUserNm()) : "";
-        String today = LocalDate.now().toString();
-        String prompt = promptTemplate
-                .replace("{{Q_CONTENT}}", qContent)
-                .replace("{{R_CONTENT}}", rContent)
-                .replace("{{TODAY}}", today)
-                .replace("{{USER_NM}}", userNm)
-                .replace("{{HTML_FIELD_INSTRUCTION}}", htmlFieldInstruction)
-                .replace("{{FIELD_LIST}}", fieldList.toString());
-        if (!promptTemplate.contains("{{Q_CONTENT}}") || !promptTemplate.contains("{{R_CONTENT}}")) {
-            prompt = prompt + "\n\n## 요청(Q_CONTENT)\n" + qContent + "\n\n## 결과(R_CONTENT)\n" + rContent;
-        }
-        if (!promptTemplate.contains("{{FIELD_LIST}}")) {
-            prompt = prompt + "\n\n## FIELD_LIST" + fieldList + "\n" + htmlFieldInstruction;
-        }
-        String imageInstruction = buildExportImageTokenInstruction(imageCount, multilineJsonKeys);
-        if (CommonUtil.isNotEmpty(imageInstruction)) {
-            prompt = prompt + "\n\n" + imageInstruction;
-        }
-        return prompt;
-    }
-
-    /** 이미지 토큰을 응답 JSON에 넣도록 지시한다 */
-    private String buildExportImageTokenInstruction(int imageCount, List<String> multilineJsonKeys) {
-        if (imageCount <= 0) {
-            return "";
-        }
-        String token = TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN;
-        String fieldHint = multilineJsonKeys.isEmpty()
-                ? "FIELD_LIST에 정의된 적절한 필드"
-                : String.join(", ", multilineJsonKeys);
-        StringBuilder requiredTokens = new StringBuilder();
-        for (int i = 0; i < imageCount; i++) {
-            if (i > 0) {
-                requiredTokens.append(", ");
-            }
-            requiredTokens.append("[[").append(token).append(":").append(i).append("]]");
-        }
-        return "【필수·이미지 포함】 결과(R_CONTENT)에 인라인 이미지 " + imageCount + "개가 있습니다. "
-                + "응답 JSON 전체에 아래 " + imageCount + "개 토큰을 반드시 모두 포함할 것. "
-                + "필수 토큰(이미지 1개당 응답 전체에서 정확히 1회만): " + requiredTokens + ". "
-                + "이미지 토큰은 " + fieldHint + " 필드의 관련 배열 항목에 원문 그대로 넣을 것. "
-                + "data:image/...;base64,... 데이터를 응답에 직접 출력하지 말 것.";
-    }
-
-    /** 내보내기 요청 조건 */
-    private String buildExportPromptQuestion(MarketingVO marketing, Map<String, Object> request, AgentLabelSet labelSet) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("콘텐츠 제목: ").append(CommonUtil.nullToBlank(marketing.getTitle())).append("\n");
-        String metaLine = buildExportMetaLine(marketing, request, labelSet);
-        if (CommonUtil.isNotEmpty(metaLine)) {
-            sb.append("생성 정보: ").append(metaLine).append("\n");
-        }
-        List<String[]> rows = collectRequestConditions(request, labelSet);
-        if (!rows.isEmpty()) {
-            sb.append("\n## 제작조건\n");
-            for (String[] row : rows) {
-                sb.append(row[0]).append(": ").append(row[1]).append("\n");
-            }
-            String tableHtml = buildConditionSummaryTableHtml(rows);
-            if (CommonUtil.isNotEmpty(tableHtml)) {
-                sb.append("\n## 제작조건 표 HTML (conditionTableHtml)\n").append(tableHtml).append("\n");
-            }
-        }
-        return sb.toString();
-    }
-
-    /** 내보내기 시안 본문 */
-    private String buildExportPromptAnswer(
-            List<MarketingVO> contents, Map<Integer, String> imageDataUrisByToken) {
-        StringBuilder sb = new StringBuilder();
-        int tokenIdx = 0;
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("title", HtmlUtils.htmlEscape(CommonUtil.nullToBlank(marketing.getTitle())));
+        values.put("metaLine", HtmlUtils.htmlEscape(buildExportMetaLine(marketing, request)));
+        values.put("conditionTableHtml", buildConditionTableHtml(request));
+        StringBuilder variants = new StringBuilder();
         for (MarketingVO content : contents) {
-            boolean hasText = CommonUtil.isNotEmpty(content.getTextContent());
-            boolean hasImage = CommonUtil.isNotEmpty(content.getImageFile());
-            if (!hasText && !hasImage) {
+            variants.append("<section><h3>시안 ").append(content.getVariantNo()).append(" · ")
+                    .append(HtmlUtils.htmlEscape(CommonUtil.nullToBlank(content.getContentLabel()))).append("</h3><p>")
+                    .append(HtmlUtils.htmlEscape(CommonUtil.nullToBlank(content.getTextContent())).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>"))
+                    .append("</p>");
+            if (CommonUtil.isNotEmpty(content.getImageFile())) {
+                variants.append("<img src=\"").append(HtmlUtils.htmlEscape(content.getImageFile())).append("\" alt=\"시안 이미지\" />");
+            }
+            variants.append("</section>");
+        }
+        values.put("variants", variants.toString());
+        for (String key : values.keySet()) {
+            if (!fields.contains(key) || !template.getTmplHtml().contains("{{" + key + "}}")) {
+                throw new RuntimeException("내보내기 템플릿 항목이 없습니다: " + key);
+            }
+        }
+        Matcher matcher = Pattern.compile("\\{\\{(title|metaLine|conditionTableHtml|variants)\\}\\}").matcher(template.getTmplHtml());
+        StringBuffer html = new StringBuffer();
+        while (matcher.find()) {
+            matcher.appendReplacement(html, Matcher.quoteReplacement(values.get(matcher.group(1))));
+        }
+        matcher.appendTail(html);
+        return html.toString();
+    }
+
+    /** 생성 조건 요약 표 */
+    private String buildConditionTableHtml(Map<String, Object> request) {
+        Map<String, String> conditionLabels = Map.ofEntries(
+                Map.entry("contentType", "콘텐츠 유형"), Map.entry("channel", "게시 채널"), Map.entry("customChannel", "직접 입력 채널"),
+                Map.entry("purpose", "목적"), Map.entry("audience", "대상 고객"), Map.entry("keyMessage", "핵심 메시지"),
+                Map.entry("additionalRequirements", "추가 요청사항"), Map.entry("variantCount", "시안 수"), Map.entry("tones", "톤앤매너"),
+                Map.entry("length", "분량"), Map.entry("customCallToAction", "유도할 행동"), Map.entry("visualStyle", "비주얼 방향"),
+                Map.entry("aspectRatio", "화면 비율"), Map.entry("brandColors", "브랜드 컬러"), Map.entry("promotionInformation", "홍보 정보"),
+                Map.entry("customPurpose", "직접 입력 목적"), Map.entry("customAudience", "직접 입력 대상 고객"),
+                Map.entry("customTone", "직접 입력 어조"), Map.entry("customLength", "직접 입력 분량"),
+                Map.entry("outputSections", "문안 구성"), Map.entry("includeHashtags", "해시태그 포함"), Map.entry("allowEmoji", "이모지 허용"),
+                Map.entry("imageUsage", "이미지 용도"), Map.entry("snsPlatform", "SNS 채널"), Map.entry("imageType", "이미지 스타일"),
+                Map.entry("customAspectRatio", "직접 입력 화면 비율"), Map.entry("imageText", "이미지 문구"), Map.entry("outputs", "출력 유형"));
+        StringBuilder conditions = new StringBuilder("<table><tbody>");
+        for (Map.Entry<String, Object> entry : request.entrySet()) {
+            if (!conditionLabels.containsKey(entry.getKey())) {
                 continue;
             }
-            if (sb.length() > 0) {
-                sb.append("\n\n");
-            }
-            sb.append("시안 ").append(content.getContentNo());
-            String label = CommonUtil.nullToBlank(content.getContentLabel());
-            if (CommonUtil.isNotEmpty(label)) {
-                sb.append(" · ").append(label);
-            }
-            if ("Y".equals(content.getRecommendYn())) {
-                sb.append("  [추천]");
-            }
-            if (hasText) {
-                sb.append("\n\n").append(content.getTextContent());
-            }
-            if (hasImage) {
-                int token = tokenIdx++;
-                imageDataUrisByToken.put(token, content.getImageFile());
-                sb.append("\n\n[[").append(TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN).append(':').append(token)
-                        .append("]]");
-            }
+            conditions.append("<tr><th>").append(HtmlUtils.htmlEscape(conditionLabels.get(entry.getKey()))).append("</th><td>")
+                    .append(HtmlUtils.htmlEscape(stringValue(entry.getValue()))).append("</td></tr>");
         }
-        return sb.toString();
-    }
-
-    /** 내보내기 LLM 응답 JSON 추출 */
-    private JSONObject parseExportTemplateJson(String answer) {
-        if (CommonUtil.isEmpty(answer)) {
-            return null;
-        }
-        String jsonStr = answer
-                .replace("```json", "")
-                .replace("```", "")
-                .trim();
-        if (jsonStr.isEmpty()) {
-            return null;
-        }
-        int start = jsonStr.indexOf('{');
-        int end = jsonStr.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            jsonStr = jsonStr.substring(start, end + 1);
-        }
-        try {
-            Object parsed = new JSONParser().parse(jsonStr);
-            if (!(parsed instanceof JSONObject)) {
-                return null;
-            }
-            JSONObject json = (JSONObject) parsed;
-            if (json.size() == 1) {
-                Object onlyVal = json.values().iterator().next();
-                if (onlyVal instanceof JSONObject) {
-                    return (JSONObject) onlyVal;
-                }
-            }
-            return json;
-        } catch (Exception e) {
-            logger.warn("[MKT] 내보내기 JSON 파싱 실패: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    /** CDOC_IMG 토큰·플레이스홀더를 실제 base64 이미지로 되돌린다 */
-    private String resolveMarketingExportImages(String html, Map<Integer, String> imageDataUrisByToken) {
-        if (imageDataUrisByToken.isEmpty()) {
-            return html;
-        }
-        String result = html;
-        for (Map.Entry<Integer, String> entry : imageDataUrisByToken.entrySet()) {
-            String imgTag = buildExportImageTag(entry.getValue());
-            String placeholderTag = "<img " + TmplHtmlRenderService.CREATE_DOC_IMG_ATTR + "=\"" + entry.getKey() + "\">";
-            String token = "[[" + TmplHtmlRenderService.CREATE_DOC_IMG_TOKEN + ":" + entry.getKey() + "]]";
-            result = result.replace(placeholderTag, imgTag).replace(token, imgTag);
-        }
-        return result;
-    }
-
-    /** 내보내기 이미지 태그 — 원본 픽셀을 읽어 가로 폭을 제한한다 */
-    private static final int EXPORT_IMAGE_MAX_WIDTH_PX = 640;
-
-    private String buildExportImageTag(String dataUri) {
-        int[] pixelSize = resolveImagePixelSize(dataUri);
-        if (pixelSize == null || pixelSize[0] <= 0) {
-            return "<img src=\"" + dataUri + "\">";
-        }
-        int nativeWidth = pixelSize[0];
-        int nativeHeight = pixelSize[1];
-        int targetWidth = Math.min(nativeWidth, EXPORT_IMAGE_MAX_WIDTH_PX);
-        int targetHeight = Math.round((float) targetWidth * nativeHeight / nativeWidth);
-        return "<img src=\"" + dataUri + "\" width=\"" + targetWidth + "\" height=\"" + targetHeight + "\">";
-    }
-
-    /** data URI를 디코딩해 실제 픽셀 가로/세로를 읽는다. 읽기 실패 시 null. */
-    private int[] resolveImagePixelSize(String dataUri) {
-        try {
-            byte[] bytes = decodeImageDataUri(dataUri);
-            if (bytes == null) {
-                return null;
-            }
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
-            if (image == null) {
-                return null;
-            }
-            return new int[]{image.getWidth(), image.getHeight()};
-        } catch (Exception e) {
-            logger.warn("[MKT] 내보내기 이미지 크기 확인 실패: {}", e.getMessage());
-            return null;
-        }
+        conditions.append("</tbody></table>");
+        return conditions.toString();
     }
 
     /** 표지 메타줄 */
-    private String buildExportMetaLine(MarketingVO marketing, Map<String, Object> request, AgentLabelSet labelSet) {
+    private String buildExportMetaLine(MarketingVO marketing, Map<String, Object> request) {
         List<String> metaParts = new ArrayList<>();
         if (CommonUtil.isNotEmpty(marketing.getCreateDt())) {
             metaParts.add("생성일시 " + marketing.getCreateDt());
         }
-        String channelLabel = resolveChannelValue(request, labelSet.channel);
+        String channelLabel = resolveChannelValue(request, resolveChannelLabels(marketing.getAgentId()));
         if (CommonUtil.isNotEmpty(channelLabel)) {
-            metaParts.add("사용 채널 " + channelLabel);
+            metaParts.add("게시 채널 " + channelLabel);
         }
-        metaParts.add("콘텐츠 유형 " + resolveOutputModeLabel(marketing.getOutputMode()));
+        String outputMode = marketing.getOutputMode();
+        metaParts.add("콘텐츠 유형 " + (PART_TEXT.equals(outputMode) ? "문구" : PART_IMAGE.equals(outputMode) ? "이미지" : "통합"));
         return String.join("   ·   ", metaParts);
-    }
-
-    private String resolveOutputModeLabel(String outputMode) {
-        if (PART_TEXT.equals(outputMode)) {
-            return "문구";
-        }
-        if (PART_IMAGE.equals(outputMode)) {
-            return "이미지";
-        }
-        return "통합";
-    }
-
-    /** OTHER면 직접입력값, 아니면 라벨(없으면 코드 그대로) */
-    private String resolveLabeledChoice(Map<String, String> labels, String code, String custom) {
-        String value = resolveChoice(code, custom);
-        return isPlaceholderCode(code) || CommonUtil.isEmpty(value)
-                ? value
-                : labels.getOrDefault(value, value);
-    }
-
-    /** 요청 조건을 (표시명, 값)으로 푼다 */
-    private List<String[]> collectRequestConditions(Map<String, Object> request, AgentLabelSet labels) {
-        if (request == null) {
-            return Collections.emptyList();
-        }
-        boolean export = labels != null;
-        List<String[]> items = new ArrayList<>();
-        addConditionRow(items, export ? "콘텐츠 분류" : "콘텐츠 유형",
-                codesOrLabels(request.get("contentType"), export ? labels.contentType : null));
-        if (!export) {
-            addConditionRow(items, "채널", resolveChannelValue(request, null));
-        }
-        addConditionRow(items, export ? "제작 목적" : "목적",
-                choiceOrLabeled(request, "purpose", "customPurpose", export ? labels.purpose : null));
-        addConditionRow(items, export ? "대상 고객" : "대상",
-                choiceOrLabeled(request, "audience", "customAudience", export ? labels.audience : null));
-        addConditionRow(items, export ? "홍보 상품·서비스" : "홍보할 상품·서비스",
-                stringValue(request.get("promotionInformation")));
-        addConditionRow(items, "핵심 메시지", stringValue(request.get("keyMessage")));
-        addConditionRow(items, "유도할 행동", stringValue(request.get("customCallToAction")));
-        String customTone = stringValue(request.get("customTone"));
-        addConditionRow(items, export ? "톤앤매너" : "톤",
-                joinDistinct(request.get("tones"),
-                        code -> choiceOrLabeledValue(code, customTone, export ? labels.tone : null)));
-        addConditionRow(items, "분량",
-                choiceOrLabeled(request, "length", "customLength", export ? labels.length : null));
-        addConditionRow(items, "추가 요청", stringValue(request.get("additionalRequirements")));
-        addConditionRow(items, "이미지 사용처",
-                codesOrLabels(request.get("imageUsage"), export ? IMAGE_USAGE_LABELS : null));
-        if (!export) {
-            addConditionRow(items, "SNS 플랫폼", joinCodes(request.get("snsPlatform")));
-        }
-        addConditionRow(items, "이미지 분위기",
-                codesOrLabels(request.get("visualStyle"), export ? IMAGE_ATMOSPHERE_LABELS : null));
-        addConditionRow(items, export ? "표현 방식" : "이미지 유형",
-                codesOrLabels(request.get("imageType"), export ? IMAGE_TYPE_LABELS : null));
-        addConditionRow(items, export ? "화면 비율" : "이미지 비율", resolveAspectRatio(request));
-        addConditionRow(items, "이미지 문구", stringValue(request.get("imageText")));
-        addConditionRow(items, "브랜드 컬러", stringValue(request.get("brandColors")));
-        return items;
-    }
-
-    private String codesOrLabels(Object raw, Map<String, String> labels) {
-        return labels == null ? joinCodes(raw) : joinDistinct(raw, code -> labels.getOrDefault(code, code));
-    }
-
-    private String choiceOrLabeled(Map<String, Object> request, String codeKey, String customKey,
-            Map<String, String> labels) {
-        return choiceOrLabeledValue(stringValue(request.get(codeKey)), stringValue(request.get(customKey)), labels);
-    }
-
-    private String choiceOrLabeledValue(String code, String custom, Map<String, String> labels) {
-        return labels == null ? resolveChoice(code, custom) : resolveLabeledChoice(labels, code, custom);
-    }
-
-    private void addConditionRow(List<String[]> rows, String label, String value) {
-        String trimmed = CommonUtil.nullToBlank(value).trim();
-        if (CommonUtil.isNotEmpty(trimmed)) {
-            rows.add(new String[] { label, trimmed });
-        }
-    }
-
-    /** 제작조건 표 HTML */
-    private String buildConditionSummaryTableHtml(List<String[]> rows) {
-        if (rows.isEmpty()) {
-            return "";
-        }
-        StringBuilder html = new StringBuilder();
-        html.append("<table><tbody>");
-        for (String[] row : rows) {
-            html.append("<tr><th>").append(escapeExportHtml(row[0])).append("</th><td>")
-                    .append(escapeExportHtml(row[1])).append("</td></tr>");
-        }
-        html.append("</tbody></table>");
-        return html.toString();
-    }
-
-    private String escapeExportHtml(String value) {
-        return CommonUtil.nullToBlank(value)
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;");
     }
 
     /** IMAGE_FILE data URI를 디코딩한다 */
@@ -1232,7 +1266,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         try {
             return Base64.getDecoder().decode(base64);
         } catch (IllegalArgumentException e) {
-            logger.warn("[MKT] 내보내기 이미지 base64 디코딩 실패: {}", e.getMessage());
+            logger.warn("[MKT] 이미지 base64 디코딩 실패: {}", e.getMessage());
             return null;
         }
     }
@@ -1240,41 +1274,50 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     // ── 생성 · 수정 · 삭제 ─────────────────────────────────────────────────────────
 
     /** 마케팅 콘텐츠 생성 */
-    @Transactional
-    public Map<String, Object> createMarketing(Map<String, Object> request) throws Exception {
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> createMarketing(Map<String, Object> input) throws Exception {
+        if (input == null) {
+            throw new RuntimeException("요청 본문이 없습니다.");
+        }
+        Map<String, Object> request = new LinkedHashMap<>(input);
+        String projectId = stringValue(request.remove("marketingProjectId"));
         String userId = SessionUtil.getUserId();
-        if (request == null) {
-            request = new HashMap<>();
-        }
-
-        String marketingProjectId = stringValue(request.remove("marketingProjectId"));
-        if (CommonUtil.isEmpty(marketingProjectId)) {
-            return failResult("marketingProjectId는 필수입니다");
-        }
-        try {
-            requireProject(marketingProjectId);
-        } catch (RuntimeException e) {
-            return failResult(e.getMessage());
-        }
+        requireProject(projectId);
 
         MarketingVO marketing = new MarketingVO();
-        marketing.setMktId(keyGenerate.generateTableKey("MK", "TB_MKT", "MKT_ID"));
-        marketing.setUserId(userId);
-        marketing.setMarketingProjectId(marketingProjectId);
+        marketing.setMktContentId(keyGenerate.generateTableKey("MK", "TB_MKT_CONTENT", "MKT_CONTENT_ID"));
+        marketing.setMarketingProjectId(projectId);
         marketing.setCreateUserId(userId);
         marketing.setModifyUserId(userId);
         marketing.setAgentId(stringValue(request.remove("agentId")));
+        if (CommonUtil.isEmpty(marketing.getAgentId())) {
+            throw new RuntimeException("에이전트 ID는 필수입니다.");
+        }
+        AgentVO agentSearch = new AgentVO();
+        agentSearch.setAgentId(marketing.getAgentId());
+        AgentVO agent = agentDAO.selectAgent(agentSearch);
+        if (agent == null || !"K".equals(agent.getSvcTy())) {
+            throw new RuntimeException("마케팅 에이전트를 확인해 주세요.");
+        }
+        marketing.setContentType(stringValue(request.get("contentType")));
+        if (CommonUtil.isEmpty(marketing.getContentType())) {
+            throw new RuntimeException("콘텐츠 유형은 필수입니다.");
+        }
         marketing.setTitle(buildFallbackTitle(request));
-        marketing.setContentType(
-                truncate(CommonUtil.nvl(stringValue(request.get("contentType")), "ETC"), CONTENT_TYPE_MAX_LENGTH));
         marketing.setOutputMode(resolveOutputMode(request.get("outputs")));
-        marketing.setStatusCd(STATUS_WAIT);
-        marketing.setRequestJson(GSON.toJson(request));
-
+        marketing.setVariantCount(parseVariantCount(request.get("variantCount")));
+        marketing.setStatusCd(STATUS_WRITING);
+        marketing.setAiStatusCd(AI_STATUS_WAITING);
+        Object referenceFileIds = request.get("referenceMarketingFileIds");
+        if (referenceFileIds instanceof List && ((List<?>) referenceFileIds).size() > REFERENCE_FILE_MAX) {
+            throw new RuntimeException("참고파일은 최대 " + REFERENCE_FILE_MAX + "개까지 선택할 수 있습니다.");
+        }
+        validateReferenceFiles(projectId, request.get("referenceMarketingFileIds"), userId);
+        marketing.setRequestJson(GSON.toJson(storedRequest(request)));
         marketingDAO.insertMarketing(marketing);
 
         Map<String, Object> resultMap = successResult();
-        resultMap.put("contentId", marketing.getMktId());
+        resultMap.put("contentId", marketing.getMktContentId());
         return resultMap;
     }
 
@@ -1292,79 +1335,134 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /** 마케팅 콘텐츠 제목 수정 */
-    public Map<String, Object> updateTitle(String mktId, String title) throws Exception {
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateTitle(String mktContentId, String title) throws Exception {
+        String userId = SessionUtil.getUserId();
+        MarketingVO row = requireMarketing(mktContentId, userId);
         String trimmed = truncate(stringValue(title), TITLE_MAX_LENGTH);
         if (CommonUtil.isEmpty(trimmed)) {
             return failResult("제목을 입력해 주세요");
         }
-        if (saveTitle(mktId, SessionUtil.getUserId(), trimmed) != 1) {
+        if (saveTitle(mktContentId, userId, trimmed) != 1) {
             return failResult("제목 저장에 실패했습니다");
         }
+        invalidateApproval(row, contentRequest(row), userId);
         return successResult();
     }
 
     /** TITLE 저장 */
-    private int saveTitle(String mktId, String userId, String title) throws Exception {
-        MarketingVO dataVO = contentSearch(mktId);
+    private int saveTitle(String mktContentId, String userId, String title) throws Exception {
+        MarketingVO dataVO = contentSearch(mktContentId);
         dataVO.setTitle(title);
         dataVO.setModifyUserId(userId);
         return marketingDAO.updateMarketingTitle(dataVO);
     }
 
-    /** 발행 예정일 지정/변경 */
-    public Map<String, Object> updateSchedule(String mktId, String publishScheduledDt) throws Exception {
-        if (marketingDAO.selectMarketing(contentSearch(mktId)) == null) {
-            return failResult("마케팅 콘텐츠를 찾을 수 없습니다");
+    /** 발행 설정 응답 */
+    private Map<String, Object> toSchedule(MarketingVO row) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("contentId", row.getMktContentId());
+        result.put("publishType", row.getPublishTypeCd());
+        result.put("publishScheduledDt", CommonUtil.nullToBlank(row.getPublishScheduledDt()));
+        result.put("alertHour", row.getAlertHour());
+        result.put("scheduleStateCd", STATUS_PUBLISHED.equals(row.getStatusCd()) ? "DONE"
+                : STATUS_SCHEDULED.equals(row.getStatusCd()) ? "QUEUED" : "007".equals(row.getStatusCd()) ? "FAILED" : "WAITING");
+        return result;
+    }
+
+    /**
+     * 발행 설정 저장 — publishScheduledDt/publishType(NOW|SCHEDULE|HOLD)/alertHour.
+     * 현재 선택 시안의 승인 상태와 예약 일시를 검증한다.
+     */
+    public Map<String, Object> updateSchedule(String mktContentId, Map<String, Object> request) throws Exception {
+        MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
+        String type = stringValue(request.get("publishType"));
+        if (!Set.of("NOW", "SCHEDULE", "HOLD").contains(type)) {
+            throw new RuntimeException("발행 방식을 확인해 주세요.");
         }
-        MarketingVO dataVO = contentSearch(mktId);
-        dataVO.setPublishScheduledDt(CommonUtil.isEmpty(publishScheduledDt) ? null : publishScheduledDt.trim());
-        dataVO.setModifyUserId(SessionUtil.getUserId());
-        if (marketingDAO.updateMarketingSchedule(dataVO) != 1) {
-            return failResult("발행 예정일 저장에 실패했습니다");
+        String date = stringValue(request.get("publishScheduledDt"));
+        if ("SCHEDULE".equals(type)) {
+            LocalDateTime at = parsePublishScheduledDt(date);
+            if (at == null || !at.isAfter(LocalDateTime.now())) {
+                throw new RuntimeException("예약 일시는 현재보다 이후로 지정해 주세요.");
+            }
+            if (at.getMinute() != 0 || at.getSecond() != 0) {
+                throw new RuntimeException("예약은 시간 단위로만 가능합니다. 분·초는 00으로 지정해 주세요.");
+            }
         }
-        return successResult();
+        Object alert = request.get("alertHour");
+        if (!(alert instanceof Number) || ((Number) alert).intValue() < 0 || ((Number) alert).intValue() > 168) {
+            throw new RuntimeException("알림 시간을 0~168 사이의 정수로 입력해 주세요.");
+        }
+        if (!"HOLD".equals(type)) {
+            requireApproved(row);
+        }
+
+        String currentStatusCd = row.getStatusCd();
+        row.setPublishTypeCd(type);
+        row.setPublishScheduledDt("SCHEDULE".equals(type) ? date : null);
+        row.setAlertHour(((Number) alert).intValue());
+        row.setPublishedYn("NOW".equals(type) ? "Y" : "N");
+        if ("NOW".equals(type)) {
+            row.setStatusCd(STATUS_PUBLISHED);
+        } else if ("SCHEDULE".equals(type)) {
+            row.setStatusCd(STATUS_SCHEDULED);
+        } else if (Set.of(STATUS_APPROVED, STATUS_SCHEDULED, STATUS_PUBLISHED).contains(currentStatusCd)) {
+            row.setStatusCd(STATUS_APPROVED);
+        }
+        row.setModifyUserId(SessionUtil.getUserId());
+        if (marketingDAO.updateMarketingSchedule(row) != 1) {
+            return failResult("발행 설정 저장에 실패했습니다");
+        }
+        Map<String, Object> result = successResult();
+        result.put("data", toSchedule(row));
+        return result;
     }
 
     /** 발행 완료 표시/해제 */
-    public Map<String, Object> updatePublished(String mktId, String publishedYn) throws Exception {
+    public Map<String, Object> updatePublished(String mktContentId, String publishedYn) throws Exception {
         if (!"Y".equals(publishedYn) && !"N".equals(publishedYn)) {
             return failResult("publishedYn은 Y 또는 N이어야 합니다");
         }
-        if (marketingDAO.selectMarketing(contentSearch(mktId)) == null) {
-            return failResult("마케팅 콘텐츠를 찾을 수 없습니다");
-        }
-        MarketingVO dataVO = contentSearch(mktId);
-        dataVO.setPublishedYn(publishedYn);
-        dataVO.setModifyUserId(SessionUtil.getUserId());
-        if (marketingDAO.updateMarketingPublished(dataVO) != 1) {
-            return failResult("발행 완료 표시 저장에 실패했습니다");
-        }
-        return successResult();
+        MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("publishType", "Y".equals(publishedYn) ? "NOW" : "HOLD");
+        request.put("publishScheduledDt", "");
+        request.put("alertHour", row.getAlertHour() == null ? 0 : row.getAlertHour());
+        return updateSchedule(mktContentId, request);
     }
 
     /** 마케팅 콘텐츠 삭제 */
-    @Transactional
-    public Map<String, Object> deleteMarketing(String mktId) throws Exception {
-        MarketingVO dataVO = contentSearch(mktId);
-        if (marketingDAO.selectMarketing(dataVO) == null) {
-            return failResult("마케팅 콘텐츠를 찾을 수 없습니다");
-        }
-        marketingDAO.deleteMarketingContents(dataVO);
-        if (marketingDAO.deleteMarketing(dataVO) != 1) {
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> deleteMarketing(String mktContentId) throws Exception {
+        MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
+        marketingDAO.deleteMarketingHistories(row);
+        marketingDAO.deleteMarketingContents(row);
+        if (marketingDAO.deleteMarketing(row) != 1) {
             return failResult("삭제에 실패했습니다");
         }
         return successResult();
     }
 
-    /** 마케팅 시안 문안 직접 수정 */
-    @Transactional
-    public Map<String, Object> updateVariantText(String mktId, int contentNo, Map<String, Object> request)
-            throws Exception {
-        String userId = SessionUtil.getUserId();
-        if (marketingDAO.selectMarketing(contentSearch(mktId)) == null) {
-            return failResult("마케팅 콘텐츠를 찾을 수 없습니다");
+    /** 사용할 시안 선택 — 선택 변경도 새 검수·승인 대상으로 처리한다 */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> selectVariant(String mktContentId, int variantNo) throws Exception {
+        MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
+        if (findVariant(mktContentId, variantNo) == null) {
+            return failResult("시안을 찾을 수 없습니다");
         }
-        MarketingVO previous = findVariant(mktId, contentNo);
+        if (!Objects.equals(row.getSelectedVariantNo(), variantNo)) {
+            row.setSelectedVariantNo(variantNo);
+            invalidateApproval(row, contentRequest(row), SessionUtil.getUserId());
+        }
+        return successResult();
+    }
+
+    /** 마케팅 시안 문안 직접 수정 */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> updateVariantText(String mktContentId, int variantNo, Map<String, Object> request) throws Exception {
+        MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
+        MarketingVO previous = findVariant(mktContentId, variantNo);
         if (previous == null) {
             return failResult("수정할 시안을 찾을 수 없습니다");
         }
@@ -1372,124 +1470,431 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (CommonUtil.isEmpty(textContent)) {
             return failResult("저장할 문안이 없습니다");
         }
-        return saveVariant(mktId, userId, previous.getMktContentId(), textContent, null);
+        return saveVariant(row, previous, textContent, null, null);
     }
 
     /** 마케팅 시안 보완 */
-    public Map<String, Object> refineMarketing(String mktId, int contentNo, Map<String, Object> request)
-            throws Exception {
+    public Map<String, Object> refineMarketing(String mktContentId, int variantNo, Map<String, Object> request) throws Exception {
         String userId = SessionUtil.getUserId();
-        MarketingVO marketing = marketingDAO.selectMarketing(contentSearch(mktId));
-        if (marketing == null) {
-            return failResult("마케팅 콘텐츠를 찾을 수 없습니다");
-        }
-        MarketingVO previous = findVariant(mktId, contentNo);
+        MarketingVO row = requireMarketing(mktContentId, userId);
+        MarketingVO previous = findVariant(mktContentId, variantNo);
         if (previous == null) {
             return failResult("수정할 시안을 찾을 수 없습니다");
         }
-
         String instruction = stringValue(request.get("request"));
         if (CommonUtil.isEmpty(instruction)) {
             return failResult("수정 요청사항을 입력해 주세요");
         }
+        requireEditable(row);
+        boolean image = PART_IMAGE.equals(stringValue(request.get("type")));
+        if (CommonUtil.isEmpty(image ? previous.getImageFile() : previous.getTextContent())) {
+            return failResult("보완할 시안이 없습니다");
+        }
 
-        Map<String, Object> storedRequest = parseRequest(marketing.getRequestJson());
-        String originalText = CommonUtil.nullToBlank(previous.getTextContent()).trim();
-        String referenceContext = resolveReferenceContext(
-                marketing.getMarketingProjectId(),
-                marketing.getAgentId(),
-                storedRequest.get("referenceMarketingFileIds"));
-
-        if (PART_IMAGE.equals(stringValue(request.get("type")))) {
-            String rawImage = CommonUtil.nullToBlank(generateVariantImage(
-                    buildImagePrompt(MARKETING_IMAGE_REFINE_PROMPT, storedRequest, referenceContext, originalText, instruction),
-                    marketing.getAgentId())).trim();
-            if (CommonUtil.isEmpty(rawImage)) {
+        Map<String, Object> stored = contentRequest(row);
+        String reference = resolveReferenceContext(row.getMarketingProjectId(), row.getAgentId(),
+                stored.get("referenceMarketingFileIds"), userId);
+        if (image) {
+            String prompt = buildGenerationPrompt(PROMPT_ID_IMAGE_REFINE, row.getAgentId(), stored, reference,
+                    previous.getTextContent(), instruction);
+            String refined = refineVariantImage(prompt, row.getAgentId(), previous.getImageFile(), imageAspectRatio(stored), userId);
+            if (CommonUtil.isEmpty(refined)) {
                 return failResult("이미지 재생성에 실패했습니다");
             }
-            return saveVariant(mktId, userId, previous.getMktContentId(), null, IMAGE_DATA_URI_PREFIX + rawImage);
+            return saveVariant(row, previous, null, refined, prompt);
         }
-
-        if (CommonUtil.isEmpty(originalText)) {
-            return failResult("수정할 시안 문안이 없습니다");
-        }
-        Map<String, String> outputSectionLabels = resolveAgentLabelSet(marketing.getAgentId()).outputSection;
-        String refined = generateVariantText(
-                buildTextPrompt(MARKETING_TEXT_REFINE_PROMPT, storedRequest, referenceContext, originalText, instruction, outputSectionLabels),
-                "marketing_refine");
+        String prompt = buildGenerationPrompt(PROMPT_ID_TEXT_REFINE, row.getAgentId(), stored, reference,
+                previous.getTextContent(), instruction);
+        String refined = generateVariantText(prompt, "marketing_refine");
         if (CommonUtil.isEmpty(refined)) {
             return failResult("글 수정에 실패했습니다");
         }
-        return saveVariant(mktId, userId, previous.getMktContentId(), refined, null);
+        return saveVariant(row, previous, refined, null, prompt);
     }
 
-    private MarketingVO findVariant(String mktId, int contentNo) throws Exception {
+    private MarketingVO findVariant(String mktContentId, int variantNo) throws Exception {
         MarketingVO searchVO = new MarketingVO();
-        searchVO.setMktId(mktId);
-        searchVO.setContentNo(contentNo);
+        searchVO.setMktContentId(mktContentId);
+        searchVO.setVariantNo(variantNo);
         return marketingDAO.selectMarketingContent(searchVO);
     }
 
-    /** 시안 부분 갱신 */
-    private Map<String, Object> saveVariant(
-            String mktId, String userId, String mktContentId, String textContent, String imageFile) throws Exception {
+    /** 시안 부분 갱신 후 승인 해제 */
+    private Map<String, Object> saveVariant(MarketingVO row, MarketingVO previous,
+            String textContent, String imageFile, String prompt) throws Exception {
         MarketingVO content = new MarketingVO();
-        content.setMktContentId(mktContentId);
-        content.setMktId(mktId);
+        content.setMktContentVariantId(previous.getMktContentVariantId());
+        content.setMktContentId(row.getMktContentId());
         content.setTextContent(textContent);
         content.setImageFile(imageFile);
-        content.setModifyUserId(userId);
+        if (textContent != null && prompt != null) {
+            content.setTextPromptJson(GSON.toJson(Map.of("promptId", PROMPT_ID_TEXT_REFINE, "prompt", prompt)));
+        }
+        if (imageFile != null && prompt != null) {
+            content.setImagePromptJson(GSON.toJson(Map.of("promptId", PROMPT_ID_IMAGE_REFINE, "prompt", prompt)));
+        }
+        content.setModifyUserId(SessionUtil.getUserId());
         if (marketingDAO.updateMarketingContent(content) != 1) {
             return failResult("시안 저장에 실패했습니다");
         }
-        touchMarketing(mktId, userId);
+        invalidateApproval(row, contentRequest(row), SessionUtil.getUserId());
         return successResult();
     }
 
     /** 시안 직전 버전으로 되돌리기 */
-    @Transactional
-    public Map<String, Object> restoreVariant(String mktId, int contentNo) throws Exception {
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> restoreVariant(String mktContentId, int variantNo) throws Exception {
         String userId = SessionUtil.getUserId();
-        if (marketingDAO.selectMarketing(contentSearch(mktId)) == null) {
-            return failResult("마케팅 콘텐츠를 찾을 수 없습니다");
-        }
-        MarketingVO previous = findVariant(mktId, contentNo);
+        MarketingVO row = requireMarketing(mktContentId, userId);
+        MarketingVO previous = findVariant(mktContentId, variantNo);
         if (previous == null) {
             return failResult("시안을 찾을 수 없습니다");
         }
-
         MarketingVO restoreVO = new MarketingVO();
-        restoreVO.setMktContentId(previous.getMktContentId());
-        restoreVO.setMktId(mktId);
+        restoreVO.setMktContentVariantId(previous.getMktContentVariantId());
+        restoreVO.setMktContentId(mktContentId);
         restoreVO.setModifyUserId(userId);
         if (marketingDAO.restoreMarketingContentPrevious(restoreVO) != 1) {
             return failResult("되돌릴 이전 버전이 없습니다");
         }
-        touchMarketing(mktId, userId);
+        invalidateApproval(row, contentRequest(row), userId);
         return successResult();
     }
 
-    /** 콘텐츠 수정일 갱신 */
-    private void touchMarketing(String mktId, String userId) throws Exception {
-        MarketingVO touchVO = contentSearch(mktId);
-        touchVO.setModifyUserId(userId);
-        marketingDAO.touchMarketing(touchVO);
+    // ── AI 검수 / 승인 / 캘린더 ─────────────────────────────────────────────────
+
+    /** 선택 시안의 실제 문구·이미지 검수 */
+    public Map<String, Object> runReview(String mktContentId) throws Exception {
+        String userId = SessionUtil.getUserId();
+        MarketingVO row = requireMarketing(mktContentId, userId);
+        if (!AI_STATUS_DONE.equals(row.getAiStatusCd()) || row.getSelectedVariantNo() == null) {
+            return failResult("시안 생성·선택 후 검수해 주세요");
+        }
+        requireEditable(row);
+        MarketingVO target = findVariant(mktContentId, row.getSelectedVariantNo());
+        boolean needText = !PART_IMAGE.equals(row.getOutputMode());
+        boolean needImage = !PART_TEXT.equals(row.getOutputMode());
+        if (target == null || (needText && CommonUtil.isEmpty(target.getTextContent()))
+                || (needImage && CommonUtil.isEmpty(target.getImageFile()))) {
+            return failResult("검수할 시안이 완성되지 않았습니다");
+        }
+
+        Map<String, Object> request = contentRequest(row);
+        String reference = resolveReferenceContext(row.getMarketingProjectId(), row.getAgentId(),
+                request.get("referenceMarketingFileIds"), userId);
+        String prompt = buildGenerationPrompt(PROMPT_ID_REVIEW, row.getAgentId(), request, reference, target.getTextContent(), null);
+        String response = needImage ? reviewMarketingImage(row, target, prompt, userId)
+                : chatbotService.callAiSummary(prompt, "marketing_review", null);
+        ParsedReview parsed = parseReviewResponse(mktContentId, response, row.getOutputMode());
+
+        // 새 검수는 이전 승인을 무효화하고 올라간 버전 기준으로 저장한다.
+        invalidateApproval(row, request, userId);
+        MarketingVO.ReviewVO review = new MarketingVO.ReviewVO();
+        review.setReviewId(keyGenerate.generateTableKey("MH", "TB_MKT_WORKFLOW_HIST", "MKT_HIST_ID"));
+        review.setContentId(mktContentId);
+        review.setVariantNo(row.getSelectedVariantNo());
+        review.setContentVersion(row.getContentVersion());
+        review.setOutputMode(row.getOutputMode());
+        review.setScore(parsed.score);
+        review.setVerdict(parsed.verdict);
+        review.setChecksJson(GSON.toJson(parsed.checks));
+        review.setIssuesJson(GSON.toJson(parsed.issues));
+        review.setCreateUserId(userId);
+        marketingDAO.insertReviewHistory(review);
+        marketingDAO.pruneReviewHistory(mktContentId);
+
+        MarketingVO statusVO = contentSearch(mktContentId);
+        statusVO.setStatusCd(VERDICT_FAIL.equals(parsed.verdict) ? STATUS_REVIEWING : STATUS_APPROVAL_REQUIRED);
+        statusVO.setModifyUserId(userId);
+        marketingDAO.updateMarketingStatus(statusVO);
+
+        Map<String, Object> result = successResult();
+        result.put("data", toReviewResponse(marketingDAO.selectLatestReview(mktContentId)));
+        return result;
     }
 
-    private void updateMarketingStatus(String mktId, String userId, String statusCd) {
+    /** 이미지 시안은 임시 스토리지 파일로 올려 /file_query로 검수한다 */
+    private String reviewMarketingImage(MarketingVO row, MarketingVO target, String prompt, String userId) {
+        byte[] bytes = decodeImageDataUri(target.getImageFile());
+        if (bytes == null || bytes.length == 0) {
+            throw new RuntimeException("검수할 이미지를 확인해 주세요.");
+        }
+        String mime = target.getImageFile().startsWith("data:") && target.getImageFile().contains(";")
+                ? target.getImageFile().substring(5, target.getImageFile().indexOf(';')) : "image/png";
+        String extension = mime.substring(mime.indexOf('/') + 1);
+        MarketingVO.FileVO file = new MarketingVO.FileVO();
+        file.setFilePath("marketing/" + userId + "/review/" + UUID.randomUUID() + "." + extension);
+        file.setFileNm("review." + extension);
+        file.setFileType(mime);
+        file.setFileSize((long) bytes.length);
         try {
-            MarketingVO updateVO = contentSearch(mktId);
-            updateVO.setStatusCd(statusCd);
-            updateVO.setModifyUserId(userId);
-            marketingDAO.updateMarketingStatus(updateVO);
-        } catch (Exception e) {
-            logger.warn("마케팅 STATUS 갱신 실패 - mktId={}, status={}: {}", mktId, statusCd, e.getMessage());
+            fileService.uploadBytes(file.getFilePath(), bytes, mime);
+            return queryReferenceFiles(List.of(file), row.getAgentId(), prompt, userId);
+        } finally {
+            deleteFileStorageObject(file);
         }
     }
 
-    /** 마감일이 지난 작성중(001) 프로젝트를 검수중(002)으로 일괄 전환 */
-    public int advanceOverdueProjectsToReview() throws Exception {
-        return marketingDAO.advanceOverdueProjectsToReview();
+    /** 검수 이슈 수정안 적용 — issueId 또는 "ALL". 새로 적용되는 건만 실제 문안에 반영한다 */
+    public Map<String, Object> applyFix(String mktContentId, String issueId) throws Exception {
+        String userId = SessionUtil.getUserId();
+        MarketingVO row = requireMarketing(mktContentId, userId);
+        MarketingVO.ReviewVO review = marketingDAO.selectLatestReview(mktContentId);
+        if (!isCurrentReview(row, review)) {
+            return failResult("현재 시안을 먼저 검수해 주세요");
+        }
+        requireEditable(row);
+        List<MarketingVO.IssueVO> issues = parseStoredIssues(review.getIssuesJson());
+        List<String> textFixes = new ArrayList<>();
+        List<String> imageFixes = new ArrayList<>();
+        for (MarketingVO.IssueVO issue : issues) {
+            if ("Y".equals(issue.getFixAppliedYn()) || !("ALL".equals(issueId) || Objects.equals(issueId, issue.getIssueId()))) {
+                continue;
+            }
+            if (PART_IMAGE.equals(issue.getTargetType())) {
+                imageFixes.add(issue.getFixSuggestion());
+            } else {
+                textFixes.add(issue.getFixSuggestion());
+            }
+            issue.setFixAppliedYn("Y");
+        }
+        if (textFixes.isEmpty() && imageFixes.isEmpty()) {
+            return failResult("적용할 수정안이 없습니다");
+        }
+        MarketingVO target = findVariant(mktContentId, row.getSelectedVariantNo());
+        if (target == null) {
+            return failResult("시안을 찾을 수 없습니다");
+        }
+
+        Map<String, Object> request = contentRequest(row);
+        String reference = resolveReferenceContext(row.getMarketingProjectId(), row.getAgentId(),
+                request.get("referenceMarketingFileIds"), userId);
+        MarketingVO content = new MarketingVO();
+        content.setMktContentId(mktContentId);
+        content.setMktContentVariantId(target.getMktContentVariantId());
+        content.setModifyUserId(userId);
+        if (!textFixes.isEmpty()) {
+            String prompt = buildGenerationPrompt(PROMPT_ID_TEXT_REFINE, row.getAgentId(), request, reference,
+                    target.getTextContent(), String.join("\n", textFixes));
+            String text = generateVariantText(prompt, "marketing_refine");
+            if (CommonUtil.isEmpty(text)) {
+                return failResult("문구 수정안 적용에 실패했습니다");
+            }
+            content.setTextContent(text);
+            content.setTextPromptJson(GSON.toJson(Map.of("promptId", PROMPT_ID_TEXT_REFINE, "prompt", prompt)));
+        }
+        if (!imageFixes.isEmpty()) {
+            String prompt = buildGenerationPrompt(PROMPT_ID_IMAGE_REFINE, row.getAgentId(), request, reference,
+                    target.getTextContent(), String.join("\n", imageFixes));
+            String image = refineVariantImage(prompt, row.getAgentId(), target.getImageFile(), imageAspectRatio(request), userId);
+            if (CommonUtil.isEmpty(image)) {
+                return failResult("이미지 수정안 적용에 실패했습니다");
+            }
+            content.setImageFile(image);
+            content.setImagePromptJson(GSON.toJson(Map.of("promptId", PROMPT_ID_IMAGE_REFINE, "prompt", prompt)));
+        }
+
+        if (marketingDAO.updateMarketingContent(content) != 1) {
+            return failResult("수정안 저장에 실패했습니다");
+        }
+        invalidateApproval(row, request, userId);
+        review.setIssuesJson(GSON.toJson(issues));
+        marketingDAO.updateReviewIssues(review);
+        Map<String, Object> result = successResult();
+        result.put("data", toReviewResponse(review));
+        return result;
+    }
+
+    private static final class ParsedReview {
+        List<MarketingVO.CheckItemVO> checks;
+        List<MarketingVO.IssueVO> issues;
+        int score;
+        String verdict;
+    }
+
+    /** 검수 응답이 계약을 지키지 않으면 저장하지 않는다. */
+    private ParsedReview parseReviewResponse(String mktContentId, String raw, String outputMode) {
+        try {
+            JsonObject root = JsonParser.parseString(stripJsonFence(raw)).getAsJsonObject();
+            List<MarketingVO.CheckItemVO> checks = new ArrayList<>();
+            List<MarketingVO.IssueVO> issues = new ArrayList<>();
+            Set<String> keys = new LinkedHashSet<>();
+            Set<String> requiredKeys = new LinkedHashSet<>(Set.of("fact", "brand", "goal", "channel", "legal", "complete"));
+            if (!PART_TEXT.equals(outputMode)) {
+                requiredKeys.add("visual");
+            }
+            for (JsonElement element : root.getAsJsonArray("checks")) {
+                JsonObject item = element.getAsJsonObject();
+                String key = jsonString(item, "key");
+                String status = jsonString(item, "status");
+                double score = item.get("score").getAsDouble();
+                if (!requiredKeys.contains(key) || !keys.add(key) || !Set.of(VERDICT_PASS, VERDICT_REVIEW, VERDICT_FAIL).contains(status)
+                        || score < 0 || score > 100 || score != Math.floor(score)) {
+                    throw new IllegalArgumentException("잘못된 검수 항목");
+                }
+                MarketingVO.CheckItemVO check = new MarketingVO.CheckItemVO();
+                check.setKey(key);
+                check.setLabel(CHECK_LABELS.get(key));
+                check.setScore((int) score);
+                check.setStatus(status);
+                checks.add(check);
+            }
+            if (!keys.equals(requiredKeys)) {
+                throw new IllegalArgumentException("검수 항목 누락");
+            }
+            int index = 0;
+            for (JsonElement element : root.getAsJsonArray("issues")) {
+                JsonObject item = element.getAsJsonObject();
+                String severity = jsonString(item, "severity");
+                String targetType = jsonString(item, "targetType");
+                String title = jsonString(item, "title");
+                String suggestion = jsonString(item, "fixSuggestion");
+                if (!Set.of(VERDICT_REVIEW, VERDICT_FAIL).contains(severity) || title.isEmpty() || suggestion.isEmpty()
+                        || !Set.of(PART_TEXT, PART_IMAGE).contains(targetType)
+                        || (PART_TEXT.equals(outputMode) && PART_IMAGE.equals(targetType))
+                        || (PART_IMAGE.equals(outputMode) && PART_TEXT.equals(targetType))) {
+                    throw new IllegalArgumentException("잘못된 검수 이슈");
+                }
+                MarketingVO.IssueVO issue = new MarketingVO.IssueVO();
+                issue.setTargetType(targetType);
+                issue.setIssueId(mktContentId + "-issue-" + (++index));
+                issue.setSeverity(severity);
+                issue.setTitle(title);
+                issue.setDescription(jsonString(item, "description"));
+                issue.setFixSuggestion(suggestion);
+                issue.setFixAppliedYn("N");
+                issues.add(issue);
+            }
+            ParsedReview result = new ParsedReview();
+            result.checks = checks;
+            result.issues = issues;
+            result.score = Math.round((float) checks.stream().mapToInt(MarketingVO.CheckItemVO::getScore).sum() / checks.size());
+            boolean fail = checks.stream().anyMatch(c -> VERDICT_FAIL.equals(c.getStatus()))
+                    || issues.stream().anyMatch(i -> VERDICT_FAIL.equals(i.getSeverity()));
+            boolean review = checks.stream().anyMatch(c -> VERDICT_REVIEW.equals(c.getStatus()))
+                    || issues.stream().anyMatch(i -> VERDICT_REVIEW.equals(i.getSeverity()));
+            result.verdict = fail ? VERDICT_FAIL : review ? VERDICT_REVIEW : VERDICT_PASS;
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException("AI 검수 응답 형식이 올바르지 않습니다. 다시 검수해 주세요.", e);
+        }
+    }
+
+    private String jsonString(JsonObject o, String key) {
+        return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : "";
+    }
+
+    /** ```json 코드펜스 등 LLM이 덧붙이는 장식을 걷어내고 {...} 본문만 남긴다 */
+    private String stripJsonFence(String raw) {
+        String text = CommonUtil.nullToBlank(raw).trim();
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        return (start >= 0 && end > start) ? text.substring(start, end + 1) : text;
+    }
+
+    private List<MarketingVO.CheckItemVO> parseStoredChecks(String checksJson) {
+        if (CommonUtil.isEmpty(checksJson)) {
+            return new ArrayList<>();
+        }
+        List<MarketingVO.CheckItemVO> checks = GSON.fromJson(
+                checksJson, new TypeToken<List<MarketingVO.CheckItemVO>>() { }.getType());
+        return checks != null ? checks : new ArrayList<>();
+    }
+
+    private List<MarketingVO.IssueVO> parseStoredIssues(String issuesJson) {
+        if (CommonUtil.isEmpty(issuesJson)) {
+            return new ArrayList<>();
+        }
+        List<MarketingVO.IssueVO> issues = GSON.fromJson(
+                issuesJson, new TypeToken<List<MarketingVO.IssueVO>>() { }.getType());
+        return issues != null ? issues : new ArrayList<>();
+    }
+
+    private MarketingVO.ReviewVO toReviewResponse(MarketingVO.ReviewVO raw) {
+        if (raw == null) {
+            return null;
+        }
+        raw.setChecks(parseStoredChecks(raw.getChecksJson()));
+        raw.setIssues(parseStoredIssues(raw.getIssuesJson()));
+        raw.setVerdictLabel(resolveVerdictLabel(raw.getVerdict()));
+        return raw;
+    }
+
+    private String resolveVerdictLabel(String verdict) {
+        if (VERDICT_PASS.equals(verdict)) {
+            return "PASS";
+        }
+        return VERDICT_FAIL.equals(verdict) ? "수정 필요" : "검토 필요";
+    }
+
+    /** 콘텐츠 승인/반려 저장. 처리자는 CREATE_USER_ID에 세션 사용자 ID를 넣는다. */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> saveApproval(String mktContentId, String memo, String approvedYn) throws Exception {
+        if (!"Y".equals(approvedYn) && !"N".equals(approvedYn)) {
+            return failResult("approvedYn은 Y 또는 N이어야 합니다");
+        }
+        String userId = SessionUtil.getUserId();
+        MarketingVO row = requireMarketing(mktContentId, userId);
+        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(row.getMarketingProjectId()));
+        if (!userId.equals(project.getApproverUserId())) {
+            return failResult("프로젝트의 지정 승인자만 승인·반려할 수 있습니다");
+        }
+        MarketingVO.ReviewVO review = marketingDAO.selectLatestReview(mktContentId);
+        if (!STATUS_APPROVAL_REQUIRED.equals(row.getStatusCd()) || !isCurrentReview(row, review)) {
+            return failResult("현재 시안의 검수 완료 후 승인·반려해 주세요");
+        }
+        if ("Y".equals(approvedYn) && VERDICT_FAIL.equals(review.getVerdict())) {
+            return failResult("검수 결과가 FAIL입니다. 수정 후 다시 검수해 주세요");
+        }
+
+        MarketingVO.ApprovalVO approval = new MarketingVO.ApprovalVO();
+        approval.setApprovalId(keyGenerate.generateTableKey("MH", "TB_MKT_WORKFLOW_HIST", "MKT_HIST_ID"));
+        approval.setContentId(mktContentId);
+        approval.setVariantNo(row.getSelectedVariantNo());
+        approval.setContentVersion(row.getContentVersion());
+        approval.setMemo(memo);
+        approval.setReviewHistId(review.getReviewId());
+        approval.setOutputMode(row.getOutputMode());
+        approval.setScore(review.getScore());
+        approval.setVerdict(review.getVerdict());
+        approval.setResultJson(GSON.toJson(Map.of("checks", JsonParser.parseString(review.getChecksJson()),
+                "issues", JsonParser.parseString(review.getIssuesJson()))));
+        approval.setApprovedYn(approvedYn);
+        approval.setCreateUserId(userId);
+        marketingDAO.insertApprovalHistory(approval);
+        marketingDAO.pruneApprovalHistory(mktContentId);
+
+        MarketingVO statusVO = contentSearch(mktContentId);
+        statusVO.setStatusCd("Y".equals(approvedYn) ? STATUS_APPROVED : STATUS_REVIEWING);
+        statusVO.setModifyUserId(userId);
+        marketingDAO.updateMarketingStatus(statusVO);
+
+        Map<String, Object> result = successResult();
+        result.put("data", marketingDAO.selectLatestApproval(mktContentId));
+        return result;
+    }
+
+    /** 로그인 사용자가 멤버로 속한 프로젝트의 콘텐츠 발행 일정 전체 */
+    public Map<String, Object> selectCalendarEvents() throws Exception {
+        Map<String, Object> resultMap = successResult();
+        resultMap.put("list", marketingDAO.selectCalendarEvents(SessionUtil.getUserId()));
+        return resultMap;
+    }
+
+    /** 예약 시각이 지난 콘텐츠를 발행완료(006)로 일괄 전환 */
+    public int advanceScheduledMarketingToPublished() throws Exception {
+        return marketingDAO.advanceScheduledMarketingToPublished();
+    }
+
+    private LocalDateTime parsePublishScheduledDt(String publishScheduledDt) {
+        if (CommonUtil.isEmpty(publishScheduledDt)) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(publishScheduledDt.trim(), PUBLISH_DT_FORMAT);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     // ── 생성 SSE ───────────────────────────────────────────────────────────────
@@ -1497,166 +1902,162 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     /** 마케팅 생성 SSE */
     public SseEmitter streamMarketingEvents(String contentId) {
         SseEmitter emitter = new SseEmitter(0L);
-        String mktId = stringValue(contentId);
-        if (CommonUtil.isEmpty(mktId)) {
+        String mktContentId = stringValue(contentId);
+        if (CommonUtil.isEmpty(mktContentId)) {
             sendSseError(emitter, "contentId가 없습니다.");
             completeMarketingEmitter(emitter);
             return emitter;
         }
 
         emitter.onTimeout(() -> {
-            logger.warn("마케팅 SSE timeout - contentId={}", mktId);
+            logger.warn("마케팅 SSE timeout - contentId={}", mktContentId);
             completeMarketingEmitter(emitter);
         });
-        emitter.onError(e -> logger.warn("마케팅 SSE error - contentId={}, message={}", mktId, e.getMessage()));
-        emitter.onCompletion(() -> logger.info("마케팅 SSE complete - contentId={}", mktId));
+        emitter.onError(e -> logger.warn("마케팅 SSE error - contentId={}, message={}", mktContentId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("마케팅 SSE complete - contentId={}", mktContentId));
 
         String userId;
         try {
             userId = SessionUtil.getUserId();
+            requireMarketing(mktContentId, userId);
         } catch (Exception e) {
             sendSseError(emitter, "로그인 정보를 확인할 수 없습니다.");
             completeMarketingEmitter(emitter);
             return emitter;
         }
 
-        MARKETING_STREAM_EXECUTOR.execute(() -> runMarketingGenerationStream(emitter, mktId, userId));
+        MARKETING_STREAM_EXECUTOR.execute(() -> runMarketingGenerationStream(emitter, mktContentId, userId));
         return emitter;
     }
 
-    /** 마케팅 시안 생성 스트림 */
-    private void runMarketingGenerationStream(SseEmitter emitter, String mktId, String userId) {
+    /** 마케팅 시안 생성 스트림 — SSE 백그라운드 스레드라 SessionUtil 대신 인자로 받은 userId를 쓴다 */
+    private void runMarketingGenerationStream(SseEmitter emitter, String mktContentId, String userId) {
         CompletableFuture<Void> generationFuture = new CompletableFuture<>();
-        CompletableFuture<Void> existing = ACTIVE_GENERATIONS.putIfAbsent(mktId, generationFuture);
+        CompletableFuture<Void> existing = ACTIVE_GENERATIONS.putIfAbsent(mktContentId, generationFuture);
         if (existing != null) {
-            waitAndSendExistingResult(emitter, mktId, existing);
+            waitAndSendExistingResult(emitter, mktContentId, existing, userId);
             return;
         }
-
+        MarketingVO generating = null;
         try {
-            MarketingVO searchVO = contentSearch(mktId);
-            MarketingVO marketing = marketingDAO.selectMarketing(searchVO);
-            if (marketing == null) {
-                sendSseError(emitter, "콘텐츠를 찾을 수 없습니다.");
+            MarketingVO marketing = requireMarketing(mktContentId, userId);
+            if (AI_STATUS_DONE.equals(marketing.getAiStatusCd())) {
+                sendMarketingDone(emitter, marketing, marketingDAO.selectMarketingContents(contentSearch(mktContentId)));
                 return;
             }
-
-            List<MarketingVO> existingContents = marketingDAO.selectMarketingContents(searchVO);
-            if (CommonUtil.isNotEmpty(existingContents)) {
-                sendMarketingDone(emitter, marketing, existingContents);
-                return;
+            if (!AI_STATUS_WAITING.equals(marketing.getAiStatusCd())) {
+                invalidateApproval(marketing, contentRequest(marketing), userId);
             }
+            marketing.setAiStatusCd(AI_STATUS_GENERATING);
+            marketing.setModifyUserId(userId);
+            marketingDAO.updateMarketingAiStatus(marketing);
+            generating = marketing;
 
-            updateMarketingStatus(mktId, userId, STATUS_GENERATING);
-
-            Map<String, Object> request = parseRequest(marketing.getRequestJson());
-            final String agentId = marketing.getAgentId();
-            Future<String> referenceContextFuture = MARKETING_AI_EXECUTOR.submit(() -> resolveReferenceContext(
-                    marketing.getMarketingProjectId(), agentId, request.get("referenceMarketingFileIds")));
-
-            String title = buildMarketingTitle(request);
+            Map<String, Object> request = contentRequest(marketing);
+            String reference = resolveReferenceContext(marketing.getMarketingProjectId(), marketing.getAgentId(),
+                    request.get("referenceMarketingFileIds"), userId);
+            String title = buildMarketingTitle(request, marketing.getAgentId());
             marketing.setTitle(title);
-            saveTitle(mktId, userId, title);
             sendProgress(emitter, "title", "title", title);
-
-            int variantCount = parseVariantCount(request.get("variantCount"));
-            List<String> variantLabels = buildVariantLabels(request, variantCount);
-            sendProgress(emitter, "labels", "variantCount", variantCount);
-
+            List<String> labels = buildVariantLabels(marketing.getVariantCount(), request, marketing.getAgentId(), reference);
+            List<MarketingVO> contents = buildVariantShells(mktContentId, marketing.getVariantCount(), labels);
             boolean needText = !PART_IMAGE.equals(marketing.getOutputMode());
             boolean needImage = !PART_TEXT.equals(marketing.getOutputMode());
-            String referenceContext = referenceContextFuture.get();
-            AgentLabelSet labelSet = resolveAgentLabelSet(agentId);
-            final String textPrompt = needText
-                    ? buildTextPrompt(MARKETING_TEXT_PROMPT, request, referenceContext, null, null, labelSet.outputSection) : "";
-            final String imagePrompt = needImage
-                    ? buildImagePrompt(MARKETING_IMAGE_PROMPT, request, referenceContext, null, null) : "";
-
-            List<MarketingVO> contents = buildVariantShells(mktId, variantCount, variantLabels);
-            List<CompletableFuture<Void>> partWaiters = new ArrayList<>();
+            String aspectRatio = imageAspectRatio(request);
+            List<CompletableFuture<Void>> jobs = new ArrayList<>();
             for (MarketingVO content : contents) {
-                final int contentNo = content.getContentNo();
-                final String label = CommonUtil.nullToBlank(content.getContentLabel());
+                Map<String, Object> variantRequest = new LinkedHashMap<>(request);
+                variantRequest.put("_variantLabel", content.getContentLabel());
                 if (needText) {
-                    final String prompt = appendVariantAngle(textPrompt, contentNo, label, PART_TEXT);
-                    partWaiters.add(submitVariantPart(
-                            emitter, content, () -> generateVariantText(prompt, "marketing"), PART_TEXT));
+                    String prompt = buildGenerationPrompt(PROMPT_ID_TEXT, marketing.getAgentId(), variantRequest, reference, null, null);
+                    content.setTextPromptJson(GSON.toJson(Map.of("promptId", PROMPT_ID_TEXT, "prompt", prompt)));
+                    jobs.add(submitVariantPart(emitter, content, () -> generateVariantText(prompt, "marketing"), PART_TEXT));
                 }
                 if (needImage) {
-                    final String prompt = appendVariantAngle(imagePrompt, contentNo, label, PART_IMAGE);
-                    partWaiters.add(submitVariantPart(
-                            emitter, content, () -> generateVariantImage(prompt, agentId), PART_IMAGE));
+                    String prompt = buildGenerationPrompt(PROMPT_ID_IMAGE, marketing.getAgentId(), variantRequest, reference, null, null);
+                    content.setImagePromptJson(GSON.toJson(Map.of("promptId", PROMPT_ID_IMAGE, "prompt", prompt)));
+                    jobs.add(submitVariantPart(emitter, content,
+                            () -> callImageApiSync(prompt, marketing.getAgentId(), aspectRatio, null, userId), PART_IMAGE));
                 }
             }
-            if (!partWaiters.isEmpty()) {
-                CompletableFuture.allOf(partWaiters.toArray(new CompletableFuture[0])).join();
-            }
+            CompletableFuture.allOf(jobs.toArray(new CompletableFuture[0])).join();
+            boolean complete = contents.stream().allMatch(c -> (!needText || CommonUtil.isNotEmpty(c.getTextContent()))
+                    && (!needImage || CommonUtil.isNotEmpty(c.getImageFile())));
 
-            List<MarketingVO> savedContents = new ArrayList<>();
+            marketingDAO.deleteMarketingContents(contentSearch(mktContentId));
             for (MarketingVO content : contents) {
-                if (CommonUtil.isNotEmpty(content.getTextContent())
-                        || CommonUtil.isNotEmpty(content.getImageFile())) {
-                    content.setCreateUserId(userId);
-                    marketingDAO.insertMarketingContent(content);
-                    savedContents.add(content);
-                }
+                content.setMktContentVariantId(keyGenerate.generateTableKey("MC", "TB_MKT_CONTENT_VARIANT", "MKT_CONTENT_VARIANT_ID"));
+                content.setCreateUserId(userId);
+                marketingDAO.insertMarketingContent(content);
             }
-            if (savedContents.isEmpty()) {
-                updateMarketingStatus(mktId, userId, STATUS_FAILED);
-                sendSseError(emitter, "생성된 시안이 없습니다.");
-                return;
-            }
+            marketing.setRequestJson(GSON.toJson(storedRequest(request)));
+            marketing.setGenerationSnapshotJson(GSON.toJson(Map.of("request", storedRequest(request),
+                    "referenceContext", reference, "labels", labels)));
+            marketingDAO.updateMarketingRequestJson(marketing);
+            saveTitle(mktContentId, userId, title);
+            marketing.setAiStatusCd(complete ? AI_STATUS_DONE : AI_STATUS_FAILED);
+            marketing.setStatusCd(complete ? STATUS_REVIEWING : STATUS_WRITING);
+            marketing.setSelectedVariantNo(complete ? 1 : null);
+            marketingDAO.completeMarketingGeneration(marketing);
 
-            updateMarketingStatus(mktId, userId, STATUS_COMPLETE);
-            sendMarketingDone(emitter, marketing, savedContents);
+            if (complete) {
+                sendMarketingDone(emitter, marketing, contents);
+            } else {
+                sendSseError(emitter, "일부 시안을 생성하지 못했습니다. 다시 시도해 주세요.");
+            }
         } catch (Exception e) {
-            logger.error("마케팅 생성 스트림 오류 - contentId: {}", mktId, e);
-            updateMarketingStatus(mktId, userId, STATUS_FAILED);
-            sendSseError(emitter, "콘텐츠 생성 중 오류가 발생했습니다.");
+            logger.error("마케팅 생성 실패 - contentId={}", mktContentId, e);
+            if (generating != null) {
+                markGenerationFailed(generating, userId);
+            }
+            sendSseError(emitter, e.getMessage());
         } finally {
             generationFuture.complete(null);
-            ACTIVE_GENERATIONS.remove(mktId, generationFuture);
+            ACTIVE_GENERATIONS.remove(mktContentId, generationFuture);
             completeMarketingEmitter(emitter);
+        }
+    }
+
+    /** 생성 중 예외 시 생성중 상태가 남지 않도록 실패로 되돌린다 */
+    private void markGenerationFailed(MarketingVO marketing, String userId) {
+        try {
+            marketing.setAiStatusCd(AI_STATUS_FAILED);
+            marketing.setStatusCd(STATUS_WRITING);
+            marketing.setModifyUserId(userId);
+            marketingDAO.completeMarketingGeneration(marketing);
+        } catch (Exception e) {
+            logger.warn("마케팅 생성 실패 상태 저장 실패 - contentId={}: {}", marketing.getMktContentId(), e.getMessage());
         }
     }
 
     /** 진행 중인 생성 완료 후 결과만 전송 */
     private void waitAndSendExistingResult(
-            SseEmitter emitter, String mktId, CompletableFuture<Void> existing) {
+            SseEmitter emitter, String mktContentId, CompletableFuture<Void> existing, String userId) {
         try {
             existing.get(GENERATION_WAIT_TIMEOUT_MIN, TimeUnit.MINUTES);
-            MarketingVO searchVO = contentSearch(mktId);
-            MarketingVO marketing = marketingDAO.selectMarketing(searchVO);
-            List<MarketingVO> contents = marketing == null
-                    ? null : marketingDAO.selectMarketingContents(searchVO);
-            if (CommonUtil.isEmpty(contents)) {
+            MarketingVO marketing = requireMarketing(mktContentId, userId);
+            List<MarketingVO> contents = marketingDAO.selectMarketingContents(contentSearch(mktContentId));
+            if (!AI_STATUS_DONE.equals(marketing.getAiStatusCd()) || CommonUtil.isEmpty(contents)) {
                 sendSseError(emitter, "생성 결과를 찾을 수 없습니다.");
                 return;
             }
             sendMarketingDone(emitter, marketing, contents);
         } catch (Exception e) {
-            logger.warn("마케팅 SSE 대기 실패 - contentId: {}, msg: {}", mktId, e.getMessage());
+            logger.warn("마케팅 SSE 대기 실패 - contentId: {}, msg: {}", mktContentId, e.getMessage());
             sendSseError(emitter, "콘텐츠 생성 대기 중 오류가 발생했습니다.");
         } finally {
             completeMarketingEmitter(emitter);
         }
     }
 
-    private List<MarketingVO> buildVariantShells(String mktId, int variantCount, List<String> variantLabels)
-            throws Exception {
+    private List<MarketingVO> buildVariantShells(String mktContentId, int variantCount, List<String> labels) {
         List<MarketingVO> contents = new ArrayList<>();
-        String contentId = keyGenerate.generateTableKey("MC", "TB_MKT_CONTENT", "MKT_CONTENT_ID");
-        for (int contentNo = 1; contentNo <= variantCount; contentNo++) {
-            if (contentNo > 1) {
-                contentId = CommonUtil.generateTableKey("MC", contentId);
-            }
-            String label = (contentNo - 1 < variantLabels.size()) ? variantLabels.get(contentNo - 1) : "";
+        for (int no = 1; no <= variantCount; no++) {
             MarketingVO content = new MarketingVO();
-            content.setMktContentId(contentId);
-            content.setMktId(mktId);
-            content.setContentNo(contentNo);
-            content.setRecommendYn(contentNo == 1 ? "Y" : "N");
-            content.setContentLabel(CommonUtil.isEmpty(label) ? null : label);
+            content.setMktContentId(mktContentId);
+            content.setVariantNo(no);
+            content.setRecommendYn(no == 1 ? "Y" : "N");
+            content.setContentLabel(labels.get(no - 1));
             contents.add(content);
         }
         return contents;
@@ -1666,14 +2067,14 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     private CompletableFuture<Void> submitVariantPart(
             SseEmitter emitter, MarketingVO content, Supplier<String> generator, String part) {
         boolean isText = PART_TEXT.equals(part);
-        int contentNo = content.getContentNo();
+        int variantNo = content.getVariantNo();
         CompletableFuture<String> aiFuture = CompletableFuture.supplyAsync(generator, MARKETING_AI_EXECUTOR);
         BiFunction<String, Throwable, Void> handleResult = (raw, error) -> {
             if (error != null) {
                 if (error instanceof TimeoutException) {
-                    logger.warn("마케팅 시안 {} AI 타임아웃 - contentNo: {}", part, contentNo);
+                    logger.warn("마케팅 시안 {} AI 타임아웃 - variantNo: {}", part, variantNo);
                 } else {
-                    logger.warn("마케팅 시안 {} AI 실패 - contentNo: {}, msg: {}", part, contentNo, error.getMessage());
+                    logger.warn("마케팅 시안 {} AI 실패 - variantNo: {}, msg: {}", part, variantNo, error.getMessage());
                 }
                 return null;
             }
@@ -1688,7 +2089,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
                 return null;
             }
             sendProgress(emitter, "variant",
-                    "contentNo", contentNo,
+                    "variantNo", variantNo,
                     "label", CommonUtil.nullToBlank(content.getContentLabel()),
                     "recommended", "Y".equals(content.getRecommendYn()),
                     "part", part,
@@ -1754,70 +2155,152 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return CommonUtil.nullToBlank(chatbotService.callAiSummary(prompt, aiType, null)).trim();
     }
 
-    /** IMAGE 생성 */
-    private String generateVariantImage(String prompt, String agentId) {
-        return CommonUtil.nullToBlank(chatbotService.callAiImageApi(prompt, agentId)).trim();
+    /**
+     * 기존 이미지 기준 IMAGE 보완 — 이미지 API가 room_id의 최신 이미지를 참고하므로
+     * 임시 채팅방에 기존 이미지를 넣고 호출 후 정리한다.
+     */
+    private String refineVariantImage(String prompt, String agentId, String imageFile, String aspectRatio, String userId)
+            throws Exception {
+        AgentVO agentSearch = new AgentVO();
+        agentSearch.setAgentId(agentId);
+        AgentVO agent = agentDAO.selectAgent(agentSearch);
+        if (agent == null) {
+            throw new RuntimeException("에이전트를 찾을 수 없습니다.");
+        }
+        ChatbotVO room = new ChatbotVO();
+        room.setUserId(userId);
+        room.setRoomTitle("마케팅 이미지 보완");
+        chatbotDAO.insertChatRoom(room);
+        try {
+            room.setAgentId(agentId);
+            room.setSvcTy(agent.getSvcTy());
+            room.setModelId(resolveFileQueryModelId());
+            room.setQContent("");
+            room.setRContent(imageFile);
+            chatbotDAO.insertChatLog(room);
+            String image = callImageApiSync(prompt, agentId, aspectRatio, room.getRoomId(), userId);
+            return CommonUtil.isEmpty(image) ? null : IMAGE_DATA_URI_PREFIX + image;
+        } finally {
+            try {
+                chatbotDAO.deleteChatRef(room);
+                chatbotDAO.deleteChatLog(room);
+                chatbotDAO.deleteChatRoom(room);
+            } catch (Exception e) {
+                logger.warn("[MKT] 이미지 보완 임시 채팅방 정리 실패 - roomId={}: {}", room.getRoomId(), e.getMessage());
+            }
+        }
+    }
+
+    /** 이미지 API 동기 호출. 성공 시 data URI 접두사 없는 base64, 실패 시 null */
+    private String callImageApiSync(String query, String agentId, String aspectRatio, Long roomId, String userId) {
+        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.image.apiUrl");
+        if (CommonUtil.isEmpty(apiUrl)) {
+            logger.warn("[MKT] 이미지 API URL 미설정");
+            return null;
+        }
+        String modelId = "gpt";
+        Map<String, Object> params = new HashMap<>();
+        params.put("query", query);
+        params.put("room_id", roomId == null ? "" : String.valueOf(roomId));
+        params.put("model", modelId);
+        params.put("aspect_ratio", aspectRatio);
+        String reqJson = GSON.toJson(params);
+        long startMs = System.currentTimeMillis();
+
+        try {
+            RequestBody body = RequestBody.create(reqJson, okhttp3.MediaType.get("application/json; charset=utf-8"));
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .post(body)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .build();
+
+            try (okhttp3.Response response = AI_HTTP_CLIENT.newCall(request).execute()) {
+                int respTimeMs = (int) (System.currentTimeMillis() - startMs);
+                if (!response.isSuccessful() || response.body() == null) {
+                    logger.warn("[MKT] 이미지 API 응답 오류: {}", response.code());
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "marketing_image", reqJson,
+                            0, 0, respTimeMs, "N", "HTTP " + response.code(), userId);
+                    return null;
+                }
+                String jsonStr = CommonUtil.nullToBlank(response.body().string()).trim();
+                if (jsonStr.startsWith("data: ")) {
+                    jsonStr = jsonStr.substring(6).trim();
+                    int nl = jsonStr.indexOf('\n');
+                    if (nl >= 0) {
+                        jsonStr = jsonStr.substring(0, nl).trim();
+                    }
+                }
+                JsonObject data = JsonParser.parseString(jsonStr).getAsJsonObject();
+                String errorCode = jsonString(data, "errorCode");
+                if (!errorCode.isEmpty() && !"None".equalsIgnoreCase(errorCode)) {
+                    logger.warn("[MKT] 이미지 API 오류: {} - {}", errorCode, jsonString(data, "errorContent"));
+                    apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "marketing_image", reqJson,
+                            0, 0, respTimeMs, "N", errorCode, userId);
+                    return null;
+                }
+                String image = jsonString(data, "image").trim();
+                int marker = image.indexOf("base64,");
+                if (image.startsWith("data:") && marker >= 0) {
+                    image = image.substring(marker + "base64,".length());
+                }
+                apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "marketing_image", reqJson,
+                        0, 0, respTimeMs, image.isEmpty() ? "N" : "Y", image.isEmpty() ? "이미지 값 없음" : null, userId);
+                return image.isEmpty() ? null : image;
+            }
+        } catch (Exception e) {
+            int respTimeMs = (int) (System.currentTimeMillis() - startMs);
+            logger.warn("[MKT] 이미지 API 호출 실패 ({}ms 경과): {}", respTimeMs, e.getMessage());
+            apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "marketing_image", reqJson,
+                    0, 0, respTimeMs, "N", e.getMessage(), userId);
+            return null;
+        }
     }
 
     // ── 참고 자료 ────────────────────────────────────────────────────────────────
 
     /** 선택 첨부파일을 /file_query로 정리한다 */
-    private String resolveReferenceContext(String marketingProjectId, String agentId, Object selectedFileIds) {
-        List<MarketingVO.FileVO> files;
-        try {
-            MarketingVO.FileVO fileSearchVO = new MarketingVO.FileVO();
-            fileSearchVO.setMarketingProjectId(marketingProjectId);
-            files = marketingDAO.selectMarketingFileList(fileSearchVO);
-        } catch (Exception e) {
-            logger.warn("[MKT] 참고파일 목록 조회 실패 - marketingProjectId={}: {}", marketingProjectId, e.getMessage());
-            return "";
+    private String resolveReferenceContext(String projectId, String agentId, Object selectedFileIds, String userId) throws Exception {
+        MarketingVO.FileVO fileSearchVO = new MarketingVO.FileVO();
+        fileSearchVO.setMarketingProjectId(projectId);
+        List<MarketingVO.FileVO> files = filterReferenceFiles(marketingDAO.selectMarketingFileList(fileSearchVO), selectedFileIds);
+        if (selectedFileIds instanceof List && files.size() != new LinkedHashSet<>((List<?>) selectedFileIds).size()) {
+            throw new RuntimeException("선택한 참고파일을 찾을 수 없습니다. 파일 목록을 확인해 주세요.");
         }
-        files = filterReferenceFiles(files, selectedFileIds);
         if (files.isEmpty()) {
             return "";
         }
+        return queryReferenceFiles(files, agentId, resolveMarketingPrompt(PROMPT_ID_REF), userId);
+    }
 
-        List<Long> tempChatFileIds = new ArrayList<>();
+    /** 임시 첨부 브릿지로 기존 파일 분석 API 호출 */
+    private String queryReferenceFiles(List<MarketingVO.FileVO> files, String agentId, String query, String userId) {
+        List<ChatbotVO> tempChatFiles = new ArrayList<>();
         try {
-            String userId = CommonUtil.nullToBlank(SessionUtil.getUserId());
-            for (MarketingVO.FileVO fileVO : files) {
-                if (CommonUtil.isEmpty(fileVO.getFilePath())) {
-                    continue;
-                }
-                try {
-                    ChatbotVO tempChatFile = new ChatbotVO();
-                    tempChatFile.setRoomId(FILE_ROOM_ID);
-                    tempChatFile.setFileName(fileVO.getFileNm());
-                    tempChatFile.setStoreFileName(fileVO.getFileNm());
-                    tempChatFile.setFilePath(fileVO.getFilePath());
-                    tempChatFile.setFileSize(fileVO.getFileSize());
-                    tempChatFile.setFileType(fileVO.getFileType());
-                    tempChatFile.setUserId(userId);
-                    chatbotDAO.saveChatFile(tempChatFile);
-                    tempChatFileIds.add(tempChatFile.getChatFileId());
-                } catch (Exception e) {
-                    logger.warn("[MKT] 임시 참고파일 브릿지 생성 실패 - marketingFileId={}: {}",
-                            fileVO.getMarketingFileId(), e.getMessage());
-                }
-            }
-            if (tempChatFileIds.isEmpty()) {
-                return "";
-            }
             List<String> attachmentFileIds = new ArrayList<>();
-            for (Long chatFileId : tempChatFileIds) {
-                attachmentFileIds.add(String.valueOf(chatFileId));
+            for (MarketingVO.FileVO fileVO : files) {
+                ChatbotVO tempChatFile = new ChatbotVO();
+                tempChatFile.setRoomId(FILE_ROOM_ID);
+                tempChatFile.setFileName(fileVO.getFileNm());
+                tempChatFile.setStoreFileName(fileVO.getFileNm());
+                tempChatFile.setFilePath(fileVO.getFilePath());
+                tempChatFile.setFileSize(fileVO.getFileSize());
+                tempChatFile.setFileType(fileVO.getFileType());
+                tempChatFile.setUserId(userId);
+                chatbotDAO.saveChatFile(tempChatFile);
+                tempChatFiles.add(tempChatFile);
+                attachmentFileIds.add(String.valueOf(tempChatFile.getChatFileId()));
             }
-            String query = "첨부된 참고 자료(문서, 이미지 등)의 핵심 내용을 마케팅 콘텐츠 제작에 참고할 수 있도록 정리해 주세요. "
-                    + "표·수치·브랜드 컬러 같은 텍스트 정보뿐 아니라, 이미지가 있다면 스타일·구도·분위기·색감 등 시각적 특징도 설명해 주세요.";
-            return callFileQuerySync(query, attachmentFileIds, agentId);
+            return callFileQuerySync(query, attachmentFileIds, agentId, userId);
+        } catch (Exception e) {
+            throw new RuntimeException("참고자료를 읽지 못했습니다. 파일을 확인하고 다시 시도해 주세요.", e);
         } finally {
-            for (Long chatFileId : tempChatFileIds) {
+            for (ChatbotVO tempChatFile : tempChatFiles) {
                 try {
-                    ChatbotVO tempChatFile = new ChatbotVO();
-                    tempChatFile.setChatFileId(chatFileId);
                     chatbotDAO.deleteChatFile(tempChatFile);
                 } catch (Exception e) {
-                    logger.warn("[MKT] 임시 참고파일 브릿지 정리 실패 - chatFileId={}: {}", chatFileId, e.getMessage());
+                    logger.warn("[MKT] 임시 참고파일 브릿지 정리 실패 - chatFileId={}: {}", tempChatFile.getChatFileId(), e.getMessage());
                 }
             }
         }
@@ -1860,15 +2343,14 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return filtered;
     }
 
-    /** /file_query 동기 호출. 실패 시 "". */
-    private String callFileQuerySync(String query, List<String> attachmentFileIds, String agentId) {
+    /** /file_query 동기 호출. 실패 시 예외 */
+    private String callFileQuerySync(String query, List<String> attachmentFileIds, String agentId, String userId) {
         String apiUrl = PropertyUtil.getProperty("Globals.chatbot.gpt.apiFileUrl");
         if (CommonUtil.isEmpty(apiUrl)) {
             logger.warn("[MKT] file_query API URL 미설정");
-            return "";
+            throw new RuntimeException("참고자료 추출에 실패했습니다.");
         }
 
-        String userId = CommonUtil.nullToBlank(SessionUtil.getUserId());
         String modelId = resolveFileQueryModelId();
         Map<String, Object> params = new HashMap<>();
         params.put("query", query);
@@ -1893,19 +2375,20 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
 
             logger.info("[MKT] 참고파일 file_query 호출 시작 - url={}, 첨부={}건", apiUrl, attachmentFileIds.size());
 
-            try (okhttp3.Response response = FILE_QUERY_HTTP_CLIENT.newCall(request).execute()) {
+            try (okhttp3.Response response = AI_HTTP_CLIENT.newCall(request).execute()) {
                 if (!response.isSuccessful() || response.body() == null) {
                     logger.warn("[MKT] file_query 응답 오류: {}", response.code());
                     apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "marketing_file_query", reqJson,
                             0, 0, (int) (System.currentTimeMillis() - startMs), "N",
                             "HTTP " + response.code(), userId);
-                    return "";
+                    throw new RuntimeException("참고자료 추출에 실패했습니다.");
                 }
                 try (okhttp3.ResponseBody responseBody = response.body()) {
                     BufferedReader reader = new BufferedReader(
                             new InputStreamReader(responseBody.byteStream(), StandardCharsets.UTF_8));
                     StringBuilder answerBuilder = new StringBuilder();
                     String doneAnswer = "";
+                    String streamError = "";
                     String line;
                     while ((line = reader.readLine()) != null) {
                         String jsonStr;
@@ -1921,6 +2404,10 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
                         }
                         try {
                             JsonObject data = JsonParser.parseString(jsonStr).getAsJsonObject();
+                            String errorCode = jsonString(data, "errorCode");
+                            if (!errorCode.isEmpty() && !"None".equalsIgnoreCase(errorCode)) {
+                                streamError = errorCode;
+                            }
                             if (data.has("text") && !data.get("text").isJsonNull()) {
                                 answerBuilder.append(data.get("text").getAsString());
                             }
@@ -1934,11 +2421,14 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
                         }
                     }
                     String result = CommonUtil.isNotEmpty(doneAnswer) ? doneAnswer : answerBuilder.toString();
+                    if (!streamError.isEmpty() || result.trim().isEmpty()) {
+                        throw new RuntimeException("참고자료 응답이 비어 있거나 오류가 발생했습니다.");
+                    }
                     int respTimeMs = (int) (System.currentTimeMillis() - startMs);
                     logger.info("[MKT] 참고파일 file_query 완료 - 응답 길이={}자, 소요={}ms", result.length(), respTimeMs);
                     apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "marketing_file_query", reqJson,
                             0, result.length(), respTimeMs, "Y", null, userId);
-                    return CommonUtil.nullToBlank(result).trim();
+                    return result.trim();
                 }
             }
         } catch (Exception e) {
@@ -1946,28 +2436,28 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             logger.warn("[MKT] file_query 호출 실패 ({}ms 경과): {}", respTimeMs, e.getMessage());
             apiCallLogService.insertSilently(agentId, null, apiUrl, modelId, "marketing_file_query", reqJson,
                     0, 0, respTimeMs, "N", e.getMessage(), userId);
-            return "";
+            throw new RuntimeException("참고자료 추출에 실패했습니다.");
         }
     }
 
     // ── 프롬프트 구성 ──────────────────────────────────────────────────────────────
 
-    private String buildMarketingTitle(Map<String, Object> request) {
-        try {
-            StringBuilder titlePrompt = new StringBuilder(MARKETING_TITLE_PROMPT);
-            for (String[] item : collectRequestConditions(request, null)) {
-                appendSection(titlePrompt, item[0], item[1]);
-            }
-            String result = CommonUtil.nullToBlank(chatbotService.callAiSummary(
-                    titlePrompt.toString(), "marketing_title", null)).trim();
-            result = result.replaceAll("^[\"'`]+|[\"'`]+$", "").trim();
-            if (CommonUtil.isNotEmpty(result)) {
-                return truncate(result, TITLE_MAX_LENGTH);
-            }
-        } catch (Exception e) {
-            logger.warn("마케팅 제목 생성 실패 - fallback 사용", e);
+    /** TB_PROMPT 본문 조회. 없으면 예외 — 폴백 상수는 두지 않는다 */
+    private String resolveMarketingPrompt(String promptId) throws Exception {
+        String content = promptService.getPrompt(promptId, null);
+        if (CommonUtil.isEmpty(content)) {
+            throw new RuntimeException("사용 가능한 마케팅 프롬프트가 없습니다. PROMPT_ID=" + promptId);
         }
-        return buildFallbackTitle(request);
+        return content;
+    }
+
+    private String buildMarketingTitle(Map<String, Object> request, String agentId) throws Exception {
+        String prompt = buildGenerationPrompt(PROMPT_ID_TITLE, agentId, request, null, null, null);
+        String title = generateVariantText(prompt, "marketing_title");
+        if (CommonUtil.isEmpty(title)) {
+            throw new RuntimeException("제목 생성에 실패했습니다.");
+        }
+        return truncate(title.replaceAll("^[\"'`]+|[\"'`]+$", "").trim(), TITLE_MAX_LENGTH);
     }
 
     private String buildFallbackTitle(Map<String, Object> request) {
@@ -1975,164 +2465,92 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return CommonUtil.isNotEmpty(keyMessage) ? truncate(keyMessage, TITLE_MAX_LENGTH) : "마케팅 콘텐츠";
     }
 
-    private List<String> buildVariantLabels(Map<String, Object> request, int variantCount) {
+    private List<String> buildVariantLabels(int variantCount, Map<String, Object> request, String agentId, String reference)
+            throws Exception {
+        String prompt = buildGenerationPrompt(PROMPT_ID_LABEL, agentId, request, reference, null, null);
+        String answer = generateVariantText(prompt, "marketing_label");
         List<String> labels = new ArrayList<>();
-        try {
-            StringBuilder labelPrompt = new StringBuilder(
-                    String.format(MARKETING_LABEL_PROMPT, variantCount, variantCount));
-            for (String[] item : collectRequestConditions(request, null)) {
-                appendSection(labelPrompt, item[0], item[1]);
+        for (String line : answer.split("\\R")) {
+            String label = line.trim();
+            if (label.isEmpty()) {
+                continue;
             }
-            String response = chatbotService.callAiSummary(labelPrompt.toString(), "marketing_label", null);
-            if (CommonUtil.isEmpty(response)) {
-                return labels;
+            if (label.length() > 10 || !label.endsWith("형") || labels.contains(label)) {
+                throw new RuntimeException("시안 라벨 형식을 확인해 주세요.");
             }
-            for (String line : response.split("\\r?\\n")) {
-                String label = line.replaceAll("^[\\s\\-*]*\\d*[.)]?\\s*", "").replaceAll("[\"'`]", "").trim();
-                if (CommonUtil.isEmpty(label) || labels.contains(label)) {
-                    continue;
-                }
-                labels.add(truncate(label, VARIANT_LABEL_MAX_LENGTH));
-                if (labels.size() >= variantCount) {
-                    break;
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("마케팅 시안 라벨 생성 실패 - 기본 표기로 대체", e);
+            labels.add(label);
+        }
+        if (labels.size() != variantCount) {
+            throw new RuntimeException("시안 라벨 개수가 맞지 않습니다.");
         }
         return labels;
     }
 
-    /** 문안 생성/보완 프롬프트 */
-    private String buildTextPrompt(
-            String basePrompt, Map<String, Object> request, String referenceContext,
-            String originalText, String instruction, Map<String, String> outputSectionLabels) {
-        StringBuilder prompt = new StringBuilder(basePrompt);
-        appendTextStyleRules(prompt, request, outputSectionLabels);
-        for (String[] item : collectRequestConditions(request, null)) {
-            appendSection(prompt, item[0], item[1]);
-        }
-        appendContextSections(prompt, referenceContext, "원문", originalText, instruction);
-        return prompt.toString();
+    /** DB 지시문에 요청값을 붙인다. 생성·보완·검수가 같은 요청 조건을 사용한다. */
+    private String buildGenerationPrompt(String promptId, String agentId, Map<String, Object> request,
+            String reference, String original, String instruction) throws Exception {
+        Map<String, Object> conditions = new LinkedHashMap<>(request);
+        conditions.remove("_variantLabel");
+        conditions.put("channelLabel", resolveChannelValue(request, resolveChannelLabels(agentId)));
+        Map<String, String> markers = new LinkedHashMap<>();
+        markers.put("REQUEST_JSON", GSON.toJson(conditions));
+        markers.put("REFERENCE_CONTEXT", CommonUtil.nullToBlank(reference));
+        markers.put("ORIGINAL_TEXT", CommonUtil.nullToBlank(original));
+        markers.put("INSTRUCTION", CommonUtil.nullToBlank(instruction));
+        markers.put("VARIANT_COUNT", stringValue(request.get("variantCount")));
+        markers.put("VARIANT_LABEL", stringValue(request.get("_variantLabel")));
+        markers.put("OUTPUT_MODE", resolveOutputMode(request.get("outputs")));
+        markers.put("VISUAL_TXT", stringValue(request.get("visualStyle")));
+        return replacePromptMarkers(resolveMarketingPrompt(promptId), markers);
     }
 
-    /** 이모지·해시태그·출력 구성 */
-    private void appendTextStyleRules(
-            StringBuilder prompt, Map<String, Object> request, Map<String, String> outputSectionLabels) {
-        if ("Y".equals(stringValue(request.get("allowEmoji")))) {
-            prompt.append("\n- 채널과 톤에 맞게 이모지를 적절히 활용하세요.");
-        } else {
-            prompt.append("\n- 이모지는 사용하지 마세요.");
+    /** 요청 화면 비율 — 이미지 API 지원 비율만 허용, 없으면 16:9 */
+    private String imageAspectRatio(Map<String, Object> request) {
+        String ratio = stringValue(request.get("aspectRatio"));
+        if ("OTHER".equals(ratio) || "CUSTOM".equals(ratio)) {
+            ratio = stringValue(request.get("customAspectRatio"));
         }
-        if ("Y".equals(stringValue(request.get("includeHashtags")))) {
-            prompt.append("\n- 해시태그를 포함하세요.");
-        } else {
-            prompt.append("\n- 해시태그는 넣지 마세요.");
+        if (ratio.isEmpty()) {
+            return "16:9";
         }
-        String sections = joinDistinct(request.get("outputSections"), code -> outputSectionLabels.getOrDefault(code, code));
-        if (CommonUtil.isNotEmpty(sections)) {
-            prompt.append("\n\n## 출력 구성\n다음 구성의 내용을 문안에 자연스럽게 반영하세요: ").append(sections)
-                    .append("\n- 구성 이름(제목, 도입부, 소제목 등)을 라벨로 붙이지 말고, 해당 내용만 이어서 작성하세요.");
+        if (!Arrays.asList("1:1", "2:3", "3:4", "4:5", "9:16", "3:2", "4:3", "16:9", "21:9",
+                "1:4", "4:1", "1:8", "8:1").contains(ratio)) {
+            throw new RuntimeException("이미지 API에서 지원하는 비율을 선택해 주세요.");
         }
-    }
-
-    /** 이미지 생성/보완 프롬프트 */
-    private String buildImagePrompt(
-            String basePrompt, Map<String, Object> request, String referenceContext,
-            String originalText, String instruction) {
-        StringBuilder prompt = new StringBuilder(basePrompt);
-        for (String[] item : collectRequestConditions(request, null)) {
-            appendSection(prompt, item[0], item[1]);
-        }
-        appendContextSections(prompt, referenceContext, "참고 시안 문안", originalText, instruction);
-        return CommonUtil.isEmpty(stringValue(request.get("imageText")))
-                ? prompt + IMAGE_NO_TEXT_RULE
-                : prompt.toString();
-    }
-
-    private void appendContextSections(
-            StringBuilder prompt, String referenceContext, String originalTitle, String originalText, String instruction) {
-        appendSection(prompt, "참고 자료", referenceContext);
-        appendSection(prompt, originalTitle, originalText);
-        appendSection(prompt, "수정 요청사항", instruction);
-    }
-
-    /** 시안별 각도 지시 */
-    private String appendVariantAngle(String basePrompt, int contentNo, String label, String part) {
-        StringBuilder prompt = new StringBuilder(basePrompt);
-        prompt.append("\n\n## 시안 작성 조건\n- 시안 ").append(contentNo).append("번");
-        if (CommonUtil.isNotEmpty(label)) {
-            prompt.append("(").append(label).append(" 각도)");
-        }
-        if (PART_TEXT.equals(part)) {
-            prompt.append("의 완성 문안만 한 편 작성하세요.\n")
-                    .append("- 다른 시안, 복수 버전, 대안 문구를 함께 출력하지 마세요.\n")
-                    .append("- 설명, 인사, 작성 가이드는 넣지 마세요.\n")
-                    .append("- '제목:', '도입부:', '소제목:' 등 구성 요소 라벨은 넣지 마세요.\n")
-                    .append("- 다른 시안과 표현이 겹치지 않게 작성하세요.");
-        } else {
-            prompt.append("의 이미지 한 장만 생성하세요.\n")
-                    .append("- 다른 시안과 구도·색감이 겹치지 않게 구성하세요.");
-        }
-        return prompt.toString();
-    }
-
-    private void appendSection(StringBuilder prompt, String title, String value) {
-        if (CommonUtil.isNotEmpty(value)) {
-            prompt.append("\n\n## ").append(title).append("\n").append(value);
-        }
-    }
-
-    /** OTHER면 사용자 입력, 코드만 있으면 그대로 사용 */
-    private String resolveChoice(String code, String custom) {
-        return isPlaceholderCode(code) ? custom : code;
+        return ratio;
     }
 
     /** 채널 코드/직접입력/SNS 플랫폼 순으로 해석한다 */
     private String resolveChannelValue(Map<String, Object> request, Map<String, String> labels) {
         String channel = stringValue(request.get("channel"));
-        if (isPlaceholderCode(channel)) {
+        if ("OTHER".equals(channel)) {
             String customChannel = stringValue(request.get("customChannel"));
             if (CommonUtil.isNotEmpty(customChannel)) {
                 return customChannel;
             }
         } else if (CommonUtil.isNotEmpty(channel)) {
-            return mapCodeLabel(channel, labels);
+            return labels == null ? channel : labels.getOrDefault(channel, channel);
         }
-        return joinDistinct(request.get("snsPlatform"), code -> mapCodeLabel(skipPlaceholderCode(code), labels));
-    }
-
-    private String mapCodeLabel(String code, Map<String, String> labels) {
-        if (CommonUtil.isEmpty(code)) {
-            return "";
+        Object platforms = request.get("snsPlatform");
+        Set<String> items = new LinkedHashSet<>();
+        for (Object item : (platforms instanceof List) ? (List<?>) platforms : Collections.singletonList(platforms)) {
+            String code = stringValue(item);
+            if (CommonUtil.isNotEmpty(code) && !"OTHER".equals(code)) {
+                items.add(labels == null ? code : labels.getOrDefault(code, code));
+            }
         }
-        return labels == null ? code : labels.getOrDefault(code, code);
+        return String.join(", ", items);
     }
 
-    private String resolveAspectRatio(Map<String, Object> request) {
-        String custom = stringValue(request.get("customAspectRatio"));
-        return CommonUtil.isNotEmpty(custom) ? custom : skipPlaceholderCode(stringValue(request.get("aspectRatio")));
-    }
-
-    private boolean isPlaceholderCode(String value) {
-        return "OTHER".equals(value);
-    }
-
-    private String skipPlaceholderCode(String value) {
-        return isPlaceholderCode(value) ? "" : value;
-    }
-
-    /** List/스칼라 코드 → 콤마 문자열 (OTHER 제외) */
-    private String joinCodes(Object value) {
-        return joinDistinct(value, this::skipPlaceholderCode);
-    }
-
-    /** REQUEST_JSON의 variantCount — Gson이 Map으로 역직렬화하면 JSON 숫자는 항상 Double이다. 필드 없으면(null) 1 */
+    /** 요청 variantCount — Gson이 Map으로 역직렬화하면 JSON 숫자는 Double이다 */
     private int parseVariantCount(Object raw) {
         if (!(raw instanceof Number)) {
-            return 1;
+            throw new RuntimeException("시안 수는 필수입니다.");
         }
         double count = ((Number) raw).doubleValue();
-        return Math.max(1, Math.min(VARIANT_COUNT_MAX, (int) Math.floor(count)));
+        if (count != Math.rint(count) || count < 1 || count > VARIANT_COUNT_MAX) {
+            throw new RuntimeException("시안 수는 1~" + VARIANT_COUNT_MAX + " 사이의 정수여야 합니다.");
+        }
+        return (int) count;
     }
 }
