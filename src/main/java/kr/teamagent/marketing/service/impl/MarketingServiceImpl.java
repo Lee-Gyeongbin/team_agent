@@ -28,7 +28,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -83,7 +82,6 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     private static final int VARIANT_COUNT_MAX = 5;
     /** 콘텐츠 생성 참고파일 최대 개수 */
     private static final int REFERENCE_FILE_MAX = 5;
-    private static final long VARIANT_AI_TIMEOUT_SEC = 150L;
     private static final long AI_HTTP_TIMEOUT_SEC = 120L;
     private static final long GENERATION_WAIT_TIMEOUT_MIN = 15L;
     private static final String PART_TEXT = "TEXT";
@@ -2071,11 +2069,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         CompletableFuture<String> aiFuture = CompletableFuture.supplyAsync(generator, MARKETING_AI_EXECUTOR);
         BiFunction<String, Throwable, Void> handleResult = (raw, error) -> {
             if (error != null) {
-                if (error instanceof TimeoutException) {
-                    logger.warn("마케팅 시안 {} AI 타임아웃 - variantNo: {}", part, variantNo);
-                } else {
-                    logger.warn("마케팅 시안 {} AI 실패 - variantNo: {}, msg: {}", part, variantNo, error.getMessage());
-                }
+                logger.warn("마케팅 시안 {} AI 실패 - variantNo: {}, msg: {}", part, variantNo, error.getMessage());
                 return null;
             }
 
@@ -2096,8 +2090,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
                     isText ? "text" : "imageUrl", value);
             return null;
         };
-        return aiFuture.orTimeout(VARIANT_AI_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .handleAsync(handleResult, MARKETING_STREAM_EXECUTOR);
+        return aiFuture.handleAsync(handleResult, MARKETING_STREAM_EXECUTOR);
     }
 
     private void sendMarketingDone(SseEmitter emitter, MarketingVO marketing, List<MarketingVO> contents) {
