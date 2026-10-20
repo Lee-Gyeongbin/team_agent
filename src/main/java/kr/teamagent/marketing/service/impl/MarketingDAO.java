@@ -95,11 +95,6 @@ public class MarketingDAO extends EgovComAbstractDAO {
         return insert("marketing.insertMarketingFile", dataVO);
     }
 
-    /** 마케팅 첨부파일명 수정 */
-    public int updateMarketingFile(MarketingVO.FileVO dataVO) throws Exception {
-        return update("marketing.updateMarketingFile", dataVO);
-    }
-
     /** 마케팅 첨부파일 삭제 */
     public int deleteMarketingFile(MarketingVO.FileVO dataVO) throws Exception {
         return delete("marketing.deleteMarketingFile", dataVO);
@@ -138,6 +133,16 @@ public class MarketingDAO extends EgovComAbstractDAO {
     /** 마케팅 콘텐츠 등록 */
     public int insertMarketing(MarketingVO dataVO) throws Exception {
         return insert("marketing.insertMarketing", dataVO);
+    }
+
+    /** 프로젝트 채널별 콘텐츠 조회 */
+    public MarketingVO selectMarketingByChannel(MarketingVO searchVO) throws Exception {
+        return selectOne("marketing.selectMarketingByChannel", searchVO);
+    }
+
+    /** 같은 채널 콘텐츠를 새 생성 대기로 초기화 */
+    public int resetMarketingForRegeneration(MarketingVO dataVO) throws Exception {
+        return update("marketing.resetMarketingForRegeneration", dataVO);
     }
 
     /** 마케팅 콘텐츠 시안 등록 */
@@ -247,11 +252,6 @@ public class MarketingDAO extends EgovComAbstractDAO {
     /** 프로젝트 멤버 삭제 */
     public int deleteMarketingProjectMember(MarketingVO.MemberVO dataVO) throws Exception {
         return delete("marketing.deleteMarketingProjectMember", dataVO);
-    }
-
-    /** 프로젝트 관리자 지정 */
-    public int updateMarketingManager(MarketingVO.ProjectVO dataVO) throws Exception {
-        return update("marketing.updateMarketingManager", dataVO);
     }
 
     /** 임시 파일 프로젝트 연결 */

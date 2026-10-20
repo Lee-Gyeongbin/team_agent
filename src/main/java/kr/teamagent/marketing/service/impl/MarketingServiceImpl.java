@@ -262,7 +262,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     /** REQUEST_JSON 저장값 — 별도 컬럼에 있는 값은 뺀다 */
     private Map<String, Object> storedRequest(Map<String, Object> request) {
         Map<String, Object> stored = new LinkedHashMap<>(request);
-        for (String key : List.of("outputs", "contentType", "variantCount", "marketingProjectId",
+        for (String key : List.of("outputs", "contentType", "variantCount", "mktId",
                 "textPrompts", "imagePrompts", "previousTextPrompts", "previousImagePrompts")) {
             stored.remove(key);
         }
@@ -287,23 +287,23 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /** MKT_ID 조회용 VO */
-    private MarketingVO.ProjectVO projectSearch(String marketingProjectId) {
+    private MarketingVO.ProjectVO projectSearch(String mktId) {
         MarketingVO.ProjectVO searchVO = new MarketingVO.ProjectVO();
-        searchVO.setMarketingProjectId(marketingProjectId);
+        searchVO.setMktId(mktId);
         return searchVO;
     }
 
     /** MKT_FILE_ID 조회용 VO */
-    private MarketingVO.FileVO fileSearch(String marketingFileId) {
+    private MarketingVO.FileVO fileSearch(String mktFileId) {
         MarketingVO.FileVO searchVO = new MarketingVO.FileVO();
-        searchVO.setMarketingFileId(marketingFileId);
+        searchVO.setMktFileId(mktFileId);
         return searchVO;
     }
 
     /** MKT_ID 기획서 조회용 VO */
-    private MarketingVO.PlanVO planSearch(String marketingProjectId) {
+    private MarketingVO.PlanVO planSearch(String mktId) {
         MarketingVO.PlanVO searchVO = new MarketingVO.PlanVO();
-        searchVO.setMarketingProjectId(marketingProjectId);
+        searchVO.setMktId(mktId);
         return searchVO;
     }
 
@@ -324,8 +324,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     // ── 권한 / 승인 상태 ─────────────────────────────────────────────────────────
 
     /** 프로젝트 존재 + 멤버 여부 확인 (해당 안 되면 찾을 수 없음과 동일한 메시지로 예외) */
-    private MarketingVO.ProjectVO requireProjectMember(String marketingProjectId, String userId) throws Exception {
-        String projectId = stringValue(marketingProjectId);
+    private MarketingVO.ProjectVO requireProjectMember(String mktId, String userId) throws Exception {
+        String projectId = stringValue(mktId);
         if (CommonUtil.isEmpty(projectId)) {
             throw new RuntimeException("marketingProjectId는 필수입니다.");
         }
@@ -342,8 +342,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /** 마케팅 프로젝트 존재 + 멤버 확인 */
-    private void requireProject(String marketingProjectId) throws Exception {
-        requireProjectMember(marketingProjectId, SessionUtil.getUserId());
+    private void requireProject(String mktId) throws Exception {
+        requireProjectMember(mktId, SessionUtil.getUserId());
     }
 
     /** 콘텐츠 존재 + 프로젝트 멤버 확인 */
@@ -352,7 +352,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (row == null) {
             throw new RuntimeException("마케팅 콘텐츠를 찾을 수 없습니다.");
         }
-        requireProjectMember(row.getMarketingProjectId(), userId);
+        requireProjectMember(row.getMktId(), userId);
         return row;
     }
 
@@ -362,32 +362,43 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
                 && Objects.equals(row.getContentVersion(), review.getContentVersion());
     }
 
-    /** 승인 이력이 현재 선택 시안·버전에 대한 지정 승인자 처리인지 */
-    private boolean isCurrentApproval(MarketingVO row, MarketingVO.ApprovalVO approval, String approverId) {
+    /**
+     * 승인 이력이 현재 선택 시안·버전에 대한 것인지.
+     * 처리자는 비교하지 않는다 — 승인자가 바뀌어도 승인 완료 이후 콘텐츠는 기존 승인을 유지한다(권한 검사는 saveApproval에서만)
+     */
+    private boolean isCurrentApproval(MarketingVO row, MarketingVO.ApprovalVO approval) {
         return approval != null && Objects.equals(row.getSelectedVariantNo(), approval.getVariantNo())
-                && Objects.equals(row.getContentVersion(), approval.getContentVersion())
-                && Objects.equals(approverId, approval.getCreateUserId());
+                && Objects.equals(row.getContentVersion(), approval.getContentVersion());
     }
 
     /** 발행 설정 전 현재 선택 시안의 승인 완료 확인 */
     private void requireApproved(MarketingVO row) throws Exception {
-        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(row.getMarketingProjectId()));
         MarketingVO.ApprovalVO approval = marketingDAO.selectLatestApproval(row.getMktContentId());
         if (!Set.of(STATUS_APPROVED, STATUS_SCHEDULED, STATUS_PUBLISHED).contains(row.getStatusCd())
-                || !isCurrentApproval(row, approval, project.getApproverUserId())
+                || !isCurrentApproval(row, approval)
                 || !"Y".equals(approval.getApprovedYn())) {
             throw new RuntimeException("선택한 시안의 승인 완료 후 발행 설정을 저장해 주세요.");
         }
     }
 
-    /** 예약·발행완료 콘텐츠는 승인 해제 대상에서 막는다 */
-    private void requireEditable(MarketingVO row) {
-        if (STATUS_SCHEDULED.equals(row.getStatusCd()) || STATUS_PUBLISHED.equals(row.getStatusCd())) {
-            throw new RuntimeException("예약·발행완료 콘텐츠는 수정할 수 없습니다. 발행 설정을 미발행 유지로 바꾼 후 다시 시도해 주세요.");
-        }
+    /** 승인 단계에 진입한 콘텐츠는 반려 전까지 수정·재검수할 수 없다 (프론트 contentEditLock과 같은 기준) */
+    private boolean isEditLocked(MarketingVO row) throws Exception {
+        return Set.of(STATUS_APPROVAL_REQUIRED, STATUS_APPROVED, STATUS_SCHEDULED, STATUS_PUBLISHED, "007")
+                .contains(row.getStatusCd());
     }
 
-    /** 콘텐츠 버전을 올려 기존 검수·승인과 발행 설정을 해제한다 */
+    /** 수정·이름 변경·재검수·수정안 적용·덮어쓰기 공통 잠금 검사 */
+    private void requireEditable(MarketingVO row) throws Exception {
+        if (!isEditLocked(row)) {
+            return;
+        }
+        if (STATUS_APPROVAL_REQUIRED.equals(row.getStatusCd())) {
+            throw new RuntimeException("승인 진행 중인 콘텐츠는 수정할 수 없습니다. 검토자가 반려하면 다시 수정할 수 있습니다.");
+        }
+        throw new RuntimeException("승인 완료·예약·발행완료 콘텐츠는 수정할 수 없습니다.");
+    }
+
+    /** 콘텐츠 버전을 올려 기존 검수·승인과 발행 설정을 해제한다. 검수 전(작성 중) 콘텐츠는 상태를 유지한다 */
     private void invalidateApproval(MarketingVO row, Map<String, Object> request, String userId) throws Exception {
         requireEditable(row);
         row.setRequestJson(GSON.toJson(storedRequest(request)));
@@ -396,7 +407,9 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("마케팅 콘텐츠를 찾을 수 없습니다.");
         }
         row.setContentVersion(row.getContentVersion() + 1);
-        row.setStatusCd(STATUS_REVIEWING);
+        if (!STATUS_WRITING.equals(row.getStatusCd())) {
+            row.setStatusCd(STATUS_REVIEWING);
+        }
         row.setPublishTypeCd("HOLD");
         row.setPublishedYn("N");
         row.setPublishScheduledDt(null);
@@ -421,7 +434,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("프로젝트 상태를 확인해 주세요.");
         }
 
-        String projectId = stringValue(vo.getMarketingProjectId());
+        String projectId = stringValue(vo.getMktId());
         boolean creating = projectId.isEmpty();
         MarketingVO.ProjectVO existing = null;
         if (!creating) {
@@ -440,12 +453,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             if (!owner && !Objects.equals(vo.getApproverUserId(), existing.getApproverUserId())) {
                 throw new RuntimeException("프로젝트 작성자만 승인자를 변경할 수 있습니다.");
             }
-            if (!owner && vo.getManagerUserId() != null) {
-                throw new RuntimeException("프로젝트 작성자만 관리자를 변경할 수 있습니다.");
-            }
-            if (!owner && !userId.equals(existing.getManagerUserId())
-                    && CommonUtil.isNotEmpty(vo.getStatusCd()) && !Objects.equals(vo.getStatusCd(), existing.getStatusCd())) {
-                throw new RuntimeException("프로젝트 작성자와 관리자만 상태를 변경할 수 있습니다.");
+            if (!owner && CommonUtil.isNotEmpty(vo.getStatusCd()) && !Objects.equals(vo.getStatusCd(), existing.getStatusCd())) {
+                throw new RuntimeException("프로젝트 작성자만 상태를 변경할 수 있습니다.");
             }
         }
 
@@ -459,37 +468,27 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("승인자는 프로젝트 멤버 중에서 선택해 주세요.");
         }
         vo.setApproverUserId(approverId);
-        String managerId = vo.getManagerUserId();
-        if (CommonUtil.isNotEmpty(managerId) && !managerId.equals(ownerId) && !memberUserIds.contains(managerId)) {
-            throw new RuntimeException("관리자는 프로젝트 멤버 중에서 선택해 주세요.");
-        }
 
         vo.setCreateUserId(userId);
         vo.setModifyUserId(userId);
         if (creating) {
             projectId = keyGenerate.generateTableKey("MP", "TB_MKT", "MKT_ID");
-            vo.setMarketingProjectId(projectId);
+            vo.setMktId(projectId);
             vo.setStatusCd(STATUS_WRITING);
             marketingDAO.insertMarketingProject(vo);
         } else {
             if (marketingDAO.updateMarketingProject(vo) != 1) {
                 throw new RuntimeException("마케팅 프로젝트를 찾을 수 없습니다.");
             }
-            // 기존 관리자를 멤버에서 빼는 요청이면 관리자 변경을 먼저 반영한다.
-            if (managerId != null) {
-                marketingDAO.updateMarketingManager(vo);
-            }
         }
         saveProjectMembers(projectId, userId, ownerId, vo.getMemberUserIds());
-        if (managerId != null) {
-            marketingDAO.updateMarketingManager(vo);
-        }
 
         if (!creating && !Objects.equals(existing.getApproverUserId(), approverId)) {
             MarketingVO search = new MarketingVO();
-            search.setMarketingProjectId(projectId);
+            search.setMktId(projectId);
+            // 승인 진행 중은 새 승인자에게 넘기고, 승인 완료 이후 콘텐츠는 기존 승인을 유지한다
             for (MarketingVO content : marketingDAO.selectMarketingList(search)) {
-                if (!STATUS_SCHEDULED.equals(content.getStatusCd()) && !STATUS_PUBLISHED.equals(content.getStatusCd())) {
+                if (!Set.of(STATUS_APPROVAL_REQUIRED, STATUS_APPROVED, STATUS_SCHEDULED, STATUS_PUBLISHED).contains(content.getStatusCd())) {
                     invalidateApproval(content, contentRequest(content), userId);
                 }
             }
@@ -513,9 +512,6 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             if (members.remove(member.getUserId())) {
                 continue;
             }
-            if ("Y".equals(member.getManageYn())) {
-                throw new RuntimeException("관리자를 해제한 후 멤버에서 제외해 주세요.");
-            }
             marketingDAO.deleteMarketingProjectMember(member);
         }
         if (!members.isEmpty() && marketingDAO.countExistingUsers(new ArrayList<>(members)) != members.size()) {
@@ -523,8 +519,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
         for (String id : members) {
             MarketingVO.MemberVO member = new MarketingVO.MemberVO();
-            member.setMarketingMemberId(keyGenerate.generateTableKey("MM", "TB_MKT_MEMBER", "MKT_MEMBER_ID"));
-            member.setMarketingProjectId(projectId);
+            member.setMktMemberId(keyGenerate.generateTableKey("MM", "TB_MKT_MEMBER", "MKT_MEMBER_ID"));
+            member.setMktId(projectId);
             member.setUserId(id);
             member.setCreateUserId(userId);
             marketingDAO.insertMarketingProjectMember(member);
@@ -533,19 +529,26 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
 
     /** 마케팅 프로젝트 삭제 */
     @Transactional(rollbackFor = Exception.class)
-    public void deleteMarketingProject(String marketingProjectId) throws Exception {
+    public void deleteMarketingProject(String mktId) throws Exception {
         String userId = SessionUtil.getUserId();
-        if (!userId.equals(requireProjectMember(marketingProjectId, userId).getCreateUserId())) {
+        if (!userId.equals(requireProjectMember(mktId, userId).getCreateUserId())) {
             throw new RuntimeException("프로젝트 작성자만 삭제할 수 있습니다.");
         }
-        MarketingVO.ProjectVO searchVO = projectSearch(marketingProjectId);
+        MarketingVO.ProjectVO searchVO = projectSearch(mktId);
         MarketingVO contentSearchVO = new MarketingVO();
-        contentSearchVO.setMarketingProjectId(marketingProjectId);
-        for (MarketingVO row : marketingDAO.selectMarketingList(contentSearchVO)) {
+        contentSearchVO.setMktId(mktId);
+        List<MarketingVO> contents = marketingDAO.selectMarketingList(contentSearchVO);
+        // 생성 스레드가 삭제 뒤 시안을 다시 넣지 않도록, 생성 중인 콘텐츠가 있으면 삭제하지 않는다
+        for (MarketingVO row : contents) {
+            if (ACTIVE_GENERATIONS.containsKey(row.getMktContentId())) {
+                throw new RuntimeException("생성 중인 콘텐츠가 있어 프로젝트를 삭제할 수 없습니다. 생성이 끝난 뒤 다시 시도해 주세요.");
+            }
+        }
+        for (MarketingVO row : contents) {
             marketingDAO.deleteMarketingHistories(row);
         }
         MarketingVO.FileVO fileSearchVO = new MarketingVO.FileVO();
-        fileSearchVO.setMarketingProjectId(marketingProjectId);
+        fileSearchVO.setMktId(mktId);
         List<MarketingVO.FileVO> files = marketingDAO.selectMarketingFileList(fileSearchVO);
         marketingDAO.deleteMarketingContentsByProject(searchVO);
         marketingDAO.deleteMarketingByProject(searchVO);
@@ -570,22 +573,22 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /** 마케팅 프로젝트 단건 조회 (멤버가 아니면 찾을 수 없음과 동일하게 처리) */
-    public MarketingVO.ProjectVO selectMarketingProject(String marketingProjectId) throws Exception {
-        return requireProjectMember(marketingProjectId, SessionUtil.getUserId());
+    public MarketingVO.ProjectVO selectMarketingProject(String mktId) throws Exception {
+        return requireProjectMember(mktId, SessionUtil.getUserId());
     }
 
     /** 프로젝트 멤버(공개범위) 목록 조회 */
-    public List<MarketingVO.MemberVO> selectMarketingProjectMemberList(String marketingProjectId) throws Exception {
-        requireProject(marketingProjectId);
-        return marketingDAO.selectMarketingProjectMemberList(projectSearch(marketingProjectId));
+    public List<MarketingVO.MemberVO> selectMarketingProjectMemberList(String mktId) throws Exception {
+        requireProject(mktId);
+        return marketingDAO.selectMarketingProjectMemberList(projectSearch(mktId));
     }
 
     /** 마케팅 파일 업로드 presigned URL */
     public Map<String, Object> saveMarketingFileUploadUrl(MarketingVO.FileVO fileVO) throws Exception {
-        if (CommonUtil.isNotEmpty(fileVO.getMarketingProjectId()) && !"draft".equals(fileVO.getMarketingProjectId())) {
-            requireProject(fileVO.getMarketingProjectId());
+        if (CommonUtil.isNotEmpty(fileVO.getMktId()) && !"draft".equals(fileVO.getMktId())) {
+            requireProject(fileVO.getMktId());
         }
-        requireMarketingUploadPath(fileVO.getFilePath(), fileVO.getMarketingProjectId());
+        requireMarketingUploadPath(fileVO.getFilePath(), fileVO.getMktId());
         FileVO req = new FileVO();
         req.setFileName(fileVO.getFileNm());
         req.setFileType(fileVO.getFileType());
@@ -616,12 +619,12 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("fileName은 필수입니다.");
         }
 
-        String marketingProjectId = stringValue(vo.getMarketingProjectId());
-        boolean draft = marketingProjectId.isEmpty() || "draft".equals(marketingProjectId);
+        String mktId = stringValue(vo.getMktId());
+        boolean draft = mktId.isEmpty() || "draft".equals(mktId);
         if (!draft) {
-            requireProject(marketingProjectId);
+            requireProject(mktId);
         }
-        requireMarketingUploadPath(vo.getFilePath(), marketingProjectId);
+        requireMarketingUploadPath(vo.getFilePath(), mktId);
         String filePurposeCd = requireFilePurposeCd(vo.getFilePurposeCd());
         String fileType = CommonUtil.nvl(vo.getMimeType(), CommonUtil.nullToBlank(vo.getFileType()));
         if (vo.getFileSize() == null || CommonUtil.isEmpty(fileType)) {
@@ -629,8 +632,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
 
         MarketingVO.FileVO fileVO = new MarketingVO.FileVO();
-        fileVO.setMarketingFileId(keyGenerate.generateTableKey("MF", "TB_MKT_FILE", "MKT_FILE_ID"));
-        fileVO.setMarketingProjectId(draft ? null : marketingProjectId);
+        fileVO.setMktFileId(keyGenerate.generateTableKey("MF", "TB_MKT_FILE", "MKT_FILE_ID"));
+        fileVO.setMktId(draft ? null : mktId);
         fileVO.setFilePath(vo.getFilePath());
         fileVO.setFileNm(vo.getFileNm());
         fileVO.setFileSize(vo.getFileSize());
@@ -640,68 +643,49 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         marketingDAO.insertMarketingFile(fileVO);
 
         Map<String, Object> resultMap = successResult();
-        resultMap.put("marketingFileId", fileVO.getMarketingFileId());
+        resultMap.put("mktFileId", fileVO.getMktFileId());
         resultMap.put("filePath", fileVO.getFilePath());
         resultMap.put("fileName", fileVO.getFileNm());
         return resultMap;
     }
 
     /** 마케팅 프로젝트 첨부파일 목록 */
-    public List<MarketingVO.FileVO> selectMarketingFileList(String marketingProjectId, String filePurposeCd)
+    public List<MarketingVO.FileVO> selectMarketingFileList(String mktId, String filePurposeCd)
             throws Exception {
-        requireProject(marketingProjectId);
+        requireProject(mktId);
         MarketingVO.FileVO searchVO = new MarketingVO.FileVO();
-        searchVO.setMarketingProjectId(marketingProjectId);
+        searchVO.setMktId(mktId);
         if (CommonUtil.isNotEmpty(stringValue(filePurposeCd))) {
             searchVO.setFilePurposeCd(requireFilePurposeCd(filePurposeCd));
         }
         return marketingDAO.selectMarketingFileList(searchVO);
     }
 
-    /** 마케팅 프로젝트 첨부파일명 수정 */
-    public void updateMarketingFileName(String marketingFileId, String fileName) throws Exception {
-        String fileId = stringValue(marketingFileId);
-        String trimmedName = stringValue(fileName);
-        if (CommonUtil.isEmpty(fileId)) {
-            throw new RuntimeException("marketingFileId는 필수입니다.");
-        }
-        if (CommonUtil.isEmpty(trimmedName)) {
-            throw new RuntimeException("파일명은 필수입니다.");
-        }
-        requireFileAccess(marketingDAO.selectMarketingFileById(fileSearch(fileId)), SessionUtil.getUserId());
-        MarketingVO.FileVO dataVO = fileSearch(fileId);
-        dataVO.setFileNm(trimmedName);
-        dataVO.setModifyUserId(SessionUtil.getUserId());
-        if (marketingDAO.updateMarketingFile(dataVO) != 1) {
-            throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
-        }
-    }
-
     /** 마케팅 첨부파일 삭제 — 참고파일로 쓰는 콘텐츠는 참조를 빼고 승인을 해제한다 */
     @Transactional(rollbackFor = Exception.class)
-    public void deleteMarketingFile(String marketingFileId) throws Exception {
+    public void deleteMarketingFile(String mktFileId) throws Exception {
         String userId = SessionUtil.getUserId();
-        MarketingVO.FileVO row = marketingDAO.selectMarketingFileById(fileSearch(marketingFileId));
+        MarketingVO.FileVO row = marketingDAO.selectMarketingFileById(fileSearch(mktFileId));
         requireFileAccess(row, userId);
-        if (row.getMarketingProjectId() != null) {
+        if (row.getMktId() != null) {
             MarketingVO search = new MarketingVO();
-            search.setMarketingProjectId(row.getMarketingProjectId());
+            search.setMktId(row.getMktId());
             for (MarketingVO content : marketingDAO.selectMarketingList(search)) {
                 Map<String, Object> request = contentRequest(content);
                 Object refs = request.get("referenceMarketingFileIds");
-                if (!(refs instanceof List) || !((List<?>) refs).contains(marketingFileId)) {
+                if (!(refs instanceof List) || !((List<?>) refs).contains(mktFileId)) {
                     continue;
                 }
-                if (STATUS_SCHEDULED.equals(content.getStatusCd()) || STATUS_PUBLISHED.equals(content.getStatusCd())) {
-                    throw new RuntimeException("예약·발행완료 콘텐츠에서 사용하는 파일은 삭제할 수 없습니다.");
+                if (isEditLocked(content)) {
+                    throw new RuntimeException("승인 진행 중·승인 완료·예약·발행완료 콘텐츠에서 사용하는 파일은 삭제할 수 없습니다.");
                 }
                 List<Object> updated = new ArrayList<>((List<?>) refs);
-                updated.removeIf(marketingFileId::equals);
+                updated.removeIf(mktFileId::equals);
                 request.put("referenceMarketingFileIds", updated);
                 invalidateApproval(content, request, userId);
             }
         }
-        if (marketingDAO.deleteMarketingFile(fileSearch(marketingFileId)) != 1) {
+        if (marketingDAO.deleteMarketingFile(fileSearch(mktFileId)) != 1) {
             throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
         }
         deleteFileStorageObject(row);
@@ -712,8 +696,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (row == null) {
             throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
         }
-        if (row.getMarketingProjectId() != null) {
-            requireProjectMember(row.getMarketingProjectId(), userId);
+        if (row.getMktId() != null) {
+            requireProjectMember(row.getMktId(), userId);
         } else if (!Objects.equals(userId, row.getCreateUserId())) {
             throw new RuntimeException("첨부파일을 찾을 수 없습니다.");
         }
@@ -730,13 +714,13 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         for (Object id : (List<?>) raw) {
             MarketingVO.FileVO file = marketingDAO.selectMarketingFileById(fileSearch(stringValue(id)));
             requireFileAccess(file, userId);
-            if (file.getMarketingProjectId() == null) {
-                file.setMarketingProjectId(projectId);
+            if (file.getMktId() == null) {
+                file.setMktId(projectId);
                 file.setModifyUserId(userId);
                 if (marketingDAO.attachMarketingFile(file) != 1) {
                     throw new RuntimeException("임시 파일 연결에 실패했습니다.");
                 }
-            } else if (!projectId.equals(file.getMarketingProjectId())) {
+            } else if (!projectId.equals(file.getMktId())) {
                 throw new RuntimeException("다른 프로젝트의 파일입니다.");
             }
         }
@@ -749,14 +733,14 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
         Map<String, Object> result = fileService.deleteStorageObjectByKey(row.getFilePath());
         if (result != null && Boolean.FALSE.equals(result.get("successYn"))) {
-            logger.warn("[MKT] 스토리지 객체 정리 실패 - marketingFileId={}, filePath={}: {}",
-                    row.getMarketingFileId(), row.getFilePath(), result.get("returnMsg"));
+            logger.warn("[MKT] 스토리지 객체 정리 실패 - mktFileId={}, filePath={}: {}",
+                    row.getMktFileId(), row.getFilePath(), result.get("returnMsg"));
         }
     }
 
     /** 마케팅 첨부파일 미리보기/다운로드 URL 발급 */
-    public Map<String, Object> viewMarketingFile(String marketingFileId) throws Exception {
-        String fileId = stringValue(marketingFileId);
+    public Map<String, Object> viewMarketingFile(String mktFileId) throws Exception {
+        String fileId = stringValue(mktFileId);
         if (CommonUtil.isEmpty(fileId)) {
             return downloadFallback("MISSING_MARKETING_FILE_ID");
         }
@@ -785,9 +769,9 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     // ── 기획서 ─────────────────────────────────────────────────────────────────
 
     /** 마케팅 기획서 조회 — 없으면 null. 프로젝트 목적은 포함하지 않는다 */
-    public MarketingVO.PlanVO selectMarketingPlan(String marketingProjectId) throws Exception {
-        requireProject(marketingProjectId);
-        return toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(marketingProjectId)));
+    public MarketingVO.PlanVO selectMarketingPlan(String mktId) throws Exception {
+        requireProject(mktId);
+        return toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(mktId)));
     }
 
     /** 마케팅 기획서 생성/재생성 (동기). 이미 있으면 덮어쓴다 */
@@ -795,7 +779,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (req == null) {
             throw new RuntimeException("요청 본문이 없습니다.");
         }
-        String projectId = stringValue(req.getMarketingProjectId());
+        String projectId = stringValue(req.getMktId());
         MarketingVO.ProjectVO project = requireProjectMember(projectId, SessionUtil.getUserId());
         String goal = stringValue(req.getGoal());
         String productNm = stringValue(req.getProductNm());
@@ -828,7 +812,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         MarketingVO.PlanVO parsed = generateMarketingPlanJson(PROMPT_ID_PLAN, markers);
 
         MarketingVO.PlanVO saveVO = new MarketingVO.PlanVO();
-        saveVO.setMarketingProjectId(projectId);
+        saveVO.setMktId(projectId);
         saveVO.setGoal(goal);
         saveVO.setProductNm(productNm);
         saveVO.setRequestTxt(stringValue(req.getRequestTxt()));
@@ -846,7 +830,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (req == null) {
             throw new RuntimeException("요청 본문이 없습니다.");
         }
-        String projectId = stringValue(req.getMarketingProjectId());
+        String projectId = stringValue(req.getMktId());
         requireProject(projectId);
         String message = stringValue(req.getMessage());
         if (CommonUtil.isEmpty(message)) {
@@ -873,7 +857,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         MarketingVO.PlanVO parsed = generateMarketingPlanJson(PROMPT_ID_PLAN_REFINE, markers);
 
         MarketingVO.PlanVO saveVO = new MarketingVO.PlanVO();
-        saveVO.setMarketingProjectId(projectId);
+        saveVO.setMktId(projectId);
         saveVO.setGoal(firstNonEmpty(parsed.getGoal(), current.getGoal()));
         saveVO.setProductNm(firstNonEmpty(parsed.getProductNm(), current.getProductNm()));
         saveVO.setRequestTxt(firstNonEmpty(parsed.getRequestTxt(), current.getRequestTxt()));
@@ -886,11 +870,49 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(projectId)));
     }
 
+    /** 마케팅 기획서 직접 수정 — 화면에서 고친 섹션 제목·내용만 반영하고 나머지 필드는 기존 값을 유지한다 (AI 호출 없음) */
+    public MarketingVO.PlanVO updateMarketingPlan(MarketingVO.PlanVO req) throws Exception {
+        if (req == null) {
+            throw new RuntimeException("요청 본문이 없습니다.");
+        }
+        String projectId = stringValue(req.getMktId());
+        requireProject(projectId);
+        MarketingVO.PlanVO current = toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(projectId)));
+        if (current == null) {
+            throw new RuntimeException("기획서가 없습니다.");
+        }
+        List<MarketingVO.PlanSectionVO> sections = req.getSections();
+        if (sections == null || sections.isEmpty()) {
+            throw new RuntimeException("기획서 내용을 입력해 주세요.");
+        }
+        for (MarketingVO.PlanSectionVO section : sections) {
+            if (section == null || CommonUtil.isEmpty(stringValue(section.getTitle()))
+                    || CommonUtil.isEmpty(stringValue(section.getBody()))) {
+                throw new RuntimeException("각 항목의 제목과 내용을 입력해 주세요.");
+            }
+            section.setTitle(stringValue(section.getTitle()));
+            section.setBody(stringValue(section.getBody()));
+        }
+
+        MarketingVO.PlanVO saveVO = new MarketingVO.PlanVO();
+        saveVO.setMktId(projectId);
+        saveVO.setGoal(current.getGoal());
+        saveVO.setProductNm(current.getProductNm());
+        saveVO.setRequestTxt(current.getRequestTxt());
+        saveVO.setTargetNm(current.getTargetNm());
+        saveVO.setKeyMessage(current.getKeyMessage());
+        saveVO.setRecommendChannels(current.getRecommendChannels());
+        saveVO.setVisualTxt(current.getVisualTxt());
+        saveVO.setSections(sections);
+        saveMarketingPlan(saveVO);
+        return toPlanResponse(marketingDAO.selectMarketingPlan(planSearch(projectId)));
+    }
+
     /** 프로젝트 기획서 등록/수정 */
     private void saveMarketingPlan(MarketingVO.PlanVO saveVO) throws Exception {
         saveVO.setSectionsJson(GSON.toJson(saveVO.getSections()));
-        if (marketingDAO.selectMarketingPlan(planSearch(saveVO.getMarketingProjectId())) == null) {
-            saveVO.setMarketingPlanId(keyGenerate.generateTableKey("ML", "TB_MKT_PLAN", "MKT_PLAN_ID"));
+        if (marketingDAO.selectMarketingPlan(planSearch(saveVO.getMktId())) == null) {
+            saveVO.setMktPlanId(keyGenerate.generateTableKey("ML", "TB_MKT_PLAN", "MKT_PLAN_ID"));
             saveVO.setCreateUserId(SessionUtil.getUserId());
             marketingDAO.insertMarketingPlan(saveVO);
         } else {
@@ -923,11 +945,11 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             MarketingVO.FileVO file = marketingDAO.selectMarketingFileById(fileSearch(stringValue(id)));
             requireFileAccess(file, userId);
             if (!purposeCd.equals(file.getFilePurposeCd())
-                    || (file.getMarketingProjectId() != null && !projectId.equals(file.getMarketingProjectId()))) {
+                    || (file.getMktId() != null && !projectId.equals(file.getMktId()))) {
                 throw new RuntimeException("참고파일이 올바르지 않습니다.");
             }
-            if (file.getMarketingProjectId() == null) {
-                file.setMarketingProjectId(projectId);
+            if (file.getMktId() == null) {
+                file.setMktId(projectId);
                 file.setModifyUserId(userId);
                 if (marketingDAO.attachMarketingFile(file) != 1) {
                     throw new RuntimeException("임시 파일 연결에 실패했습니다.");
@@ -1040,11 +1062,11 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> selectMarketingList(MarketingVO searchVO) throws Exception {
         Map<String, Object> resultMap = successResult();
         List<Map<String, Object>> list = new ArrayList<>();
-        if (searchVO == null || CommonUtil.isEmpty(searchVO.getMarketingProjectId())) {
+        if (searchVO == null || CommonUtil.isEmpty(searchVO.getMktId())) {
             resultMap.put("list", list);
             return resultMap;
         }
-        requireProject(searchVO.getMarketingProjectId());
+        requireProject(searchVO.getMktId());
         for (MarketingVO row : marketingDAO.selectMarketingList(searchVO)) {
             list.add(toSummary(row, contentRequest(row)));
         }
@@ -1056,7 +1078,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> selectMarketing(String mktContentId) throws Exception {
         String userId = SessionUtil.getUserId();
         MarketingVO marketing = requireMarketing(mktContentId, userId);
-        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(marketing.getMarketingProjectId()));
+        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(marketing.getMktId()));
         MarketingVO.ReviewVO review = marketingDAO.selectLatestReview(mktContentId);
         MarketingVO.ApprovalVO approval = marketingDAO.selectLatestApproval(mktContentId);
         boolean currentReview = isCurrentReview(marketing, review);
@@ -1068,7 +1090,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         detail.put("selectedVariantId", marketing.getSelectedVariantNo());
         detail.put("contentVersion", marketing.getContentVersion());
         detail.put("review", currentReview ? toReviewResponse(review) : null);
-        detail.put("approval", isCurrentApproval(marketing, approval, project.getApproverUserId()) ? approval : null);
+        detail.put("approval", isCurrentApproval(marketing, approval) ? approval : null);
         detail.put("approverUserId", project.getApproverUserId());
         detail.put("approverUserNm", project.getApproverUserNm());
         detail.put("canApprove", userId.equals(project.getApproverUserId())
@@ -1091,16 +1113,18 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("contentId", row.getMktContentId());
+        result.put("mktContentId", row.getMktContentId());
         result.put("agentId", row.getAgentId());
-        result.put("marketingProjectId", row.getMarketingProjectId());
+        result.put("mktId", row.getMktId());
         result.put("title", row.getTitle());
         result.put("outputMode", row.getOutputMode());
+        result.put("channelCd", CommonUtil.nullToBlank(row.getChannelCd()));
         result.put("statusCd", row.getStatusCd());
         result.put("statusNm", row.getStatusNm());
         result.put("aiStatusCd", row.getAiStatusCd());
         result.put("aiStatusNm", row.getAiStatusNm());
-        result.put("publishScheduledDt", CommonUtil.nullToBlank(row.getPublishScheduledDt()));
+        result.put("publishScheduledDt", CommonUtil.nullToBlank(
+                STATUS_PUBLISHED.equals(row.getStatusCd()) ? row.getPublishCompletedDt() : row.getPublishScheduledDt()));
         result.put("publishedYn", CommonUtil.nvl(row.getPublishedYn(), "N"));
         result.put("summaryLabels", summaryLabels);
         result.put("createUserNm", row.getCreateUserNm());
@@ -1271,20 +1295,22 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
 
     // ── 생성 · 수정 · 삭제 ─────────────────────────────────────────────────────────
 
-    /** 마케팅 콘텐츠 생성 */
+    /** 마케팅 콘텐츠 생성 — 같은 프로젝트·채널 콘텐츠가 있으면 overwriteYn=Y일 때만 그 행을 덮어쓴다 */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> createMarketing(Map<String, Object> input) throws Exception {
         if (input == null) {
             throw new RuntimeException("요청 본문이 없습니다.");
         }
         Map<String, Object> request = new LinkedHashMap<>(input);
-        String projectId = stringValue(request.remove("marketingProjectId"));
+        String projectId = stringValue(request.remove("mktId"));
+        boolean overwrite = "Y".equals(stringValue(request.remove("overwriteYn")));
         String userId = SessionUtil.getUserId();
         requireProject(projectId);
 
         MarketingVO marketing = new MarketingVO();
-        marketing.setMktContentId(keyGenerate.generateTableKey("MK", "TB_MKT_CONTENT", "MKT_CONTENT_ID"));
-        marketing.setMarketingProjectId(projectId);
+        marketing.setMktId(projectId);
+        String channel = stringValue(request.get("channel"));
+        marketing.setChannelCd(CommonUtil.isEmpty(channel) || "OTHER".equals(channel) ? null : channel);
         marketing.setCreateUserId(userId);
         marketing.setModifyUserId(userId);
         marketing.setAgentId(stringValue(request.remove("agentId")));
@@ -1312,10 +1338,35 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
         validateReferenceFiles(projectId, request.get("referenceMarketingFileIds"), userId);
         marketing.setRequestJson(GSON.toJson(storedRequest(request)));
-        marketingDAO.insertMarketing(marketing);
+
+        MarketingVO existing = marketing.getChannelCd() == null ? null : marketingDAO.selectMarketingByChannel(marketing);
+        if (existing == null) {
+            marketing.setMktContentId(keyGenerate.generateTableKey("MK", "TB_MKT_CONTENT", "MKT_CONTENT_ID"));
+            marketingDAO.insertMarketing(marketing);
+        } else {
+            String channelNm = resolveChannelValue(request, resolveChannelLabels(marketing.getAgentId()));
+            if (!overwrite) {
+                throw new RuntimeException(channelNm + " 채널에는 이미 생성된 콘텐츠가 있습니다.");
+            }
+            // 덮어쓰기는 검수 판정과 관계없이 승인 진행 중이면 막는다
+            if (STATUS_APPROVAL_REQUIRED.equals(existing.getStatusCd())) {
+                throw new RuntimeException("승인 진행 중·승인 완료·예약·발행완료 콘텐츠는 덮어쓸 수 없습니다.");
+            }
+            requireEditable(existing);
+            if (ACTIVE_GENERATIONS.containsKey(existing.getMktContentId())) {
+                throw new RuntimeException(channelNm + " 채널 콘텐츠를 생성 중입니다. 완료 후 다시 시도해 주세요.");
+            }
+            // 자식(이력·시안)을 먼저 지우고 부모 행을 생성 대기 상태로 되돌린다
+            marketing.setMktContentId(existing.getMktContentId());
+            marketingDAO.deleteMarketingHistories(marketing);
+            marketingDAO.deleteMarketingContents(marketing);
+            if (marketingDAO.resetMarketingForRegeneration(marketing) != 1) {
+                throw new RuntimeException("승인 진행 중·승인 완료·예약·발행완료 콘텐츠는 덮어쓸 수 없습니다.");
+            }
+        }
 
         Map<String, Object> resultMap = successResult();
-        resultMap.put("contentId", marketing.getMktContentId());
+        resultMap.put("mktContentId", marketing.getMktContentId());
         return resultMap;
     }
 
@@ -1336,7 +1387,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> updateTitle(String mktContentId, String title) throws Exception {
         String userId = SessionUtil.getUserId();
-        MarketingVO row = requireMarketing(mktContentId, userId);
+        requireEditable(requireMarketing(mktContentId, userId));
         String trimmed = truncate(stringValue(title), TITLE_MAX_LENGTH);
         if (CommonUtil.isEmpty(trimmed)) {
             return failResult("제목을 입력해 주세요");
@@ -1344,7 +1395,6 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         if (saveTitle(mktContentId, userId, trimmed) != 1) {
             return failResult("제목 저장에 실패했습니다");
         }
-        invalidateApproval(row, contentRequest(row), userId);
         return successResult();
     }
 
@@ -1359,9 +1409,10 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     /** 발행 설정 응답 */
     private Map<String, Object> toSchedule(MarketingVO row) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("contentId", row.getMktContentId());
+        result.put("mktContentId", row.getMktContentId());
         result.put("publishType", row.getPublishTypeCd());
-        result.put("publishScheduledDt", CommonUtil.nullToBlank(row.getPublishScheduledDt()));
+        result.put("publishScheduledDt", CommonUtil.nullToBlank(
+                "NOW".equals(row.getPublishTypeCd()) ? row.getPublishCompletedDt() : row.getPublishScheduledDt()));
         result.put("alertHour", row.getAlertHour());
         result.put("scheduleStateCd", STATUS_PUBLISHED.equals(row.getStatusCd()) ? "DONE"
                 : STATUS_SCHEDULED.equals(row.getStatusCd()) ? "QUEUED" : "007".equals(row.getStatusCd()) ? "FAILED" : "WAITING");
@@ -1374,19 +1425,27 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
      */
     public Map<String, Object> updateSchedule(String mktContentId, Map<String, Object> request) throws Exception {
         MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
+        if (STATUS_PUBLISHED.equals(row.getStatusCd())) {
+            throw new RuntimeException("발행이 완료된 콘텐츠는 발행 설정을 바꿀 수 없습니다.");
+        }
         String type = stringValue(request.get("publishType"));
         if (!Set.of("NOW", "SCHEDULE", "HOLD").contains(type)) {
             throw new RuntimeException("발행 방식을 확인해 주세요.");
         }
         String date = stringValue(request.get("publishScheduledDt"));
+        LocalDateTime at = parsePublishScheduledDt(date);
+        if (!date.isEmpty() && at == null) {
+            throw new RuntimeException("발행 일시 형식을 확인해 주세요.");
+        }
         if ("SCHEDULE".equals(type)) {
-            LocalDateTime at = parsePublishScheduledDt(date);
             if (at == null || !at.isAfter(LocalDateTime.now())) {
                 throw new RuntimeException("예약 일시는 현재보다 이후로 지정해 주세요.");
             }
             if (at.getMinute() != 0 || at.getSecond() != 0) {
                 throw new RuntimeException("예약은 시간 단위로만 가능합니다. 분·초는 00으로 지정해 주세요.");
             }
+        } else if ("NOW".equals(type) && at != null && at.isAfter(LocalDateTime.now())) {
+            throw new RuntimeException("미래 일시는 예약 발행을 선택해 주세요.");
         }
         Object alert = request.get("alertHour");
         if (!(alert instanceof Number) || ((Number) alert).intValue() < 0 || ((Number) alert).intValue() > 168) {
@@ -1398,7 +1457,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
 
         String currentStatusCd = row.getStatusCd();
         row.setPublishTypeCd(type);
-        row.setPublishScheduledDt("SCHEDULE".equals(type) ? date : null);
+        row.setPublishScheduledDt("NOW".equals(type) || date.isEmpty() ? null : date);
+        row.setPublishCompletedDt("NOW".equals(type) ? (date.isEmpty() ? LocalDateTime.now().format(PUBLISH_DT_FORMAT) : date) : null);
         row.setAlertHour(((Number) alert).intValue());
         row.setPublishedYn("NOW".equals(type) ? "Y" : "N");
         if ("NOW".equals(type)) {
@@ -1417,27 +1477,18 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
-    /** 발행 완료 표시/해제 */
-    public Map<String, Object> updatePublished(String mktContentId, String publishedYn) throws Exception {
-        if (!"Y".equals(publishedYn) && !"N".equals(publishedYn)) {
-            return failResult("publishedYn은 Y 또는 N이어야 합니다");
-        }
-        MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
-        Map<String, Object> request = new LinkedHashMap<>();
-        request.put("publishType", "Y".equals(publishedYn) ? "NOW" : "HOLD");
-        request.put("publishScheduledDt", "");
-        request.put("alertHour", row.getAlertHour() == null ? 0 : row.getAlertHour());
-        return updateSchedule(mktContentId, request);
-    }
 
     /** 마케팅 콘텐츠 삭제 */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> deleteMarketing(String mktContentId) throws Exception {
         MarketingVO row = requireMarketing(mktContentId, SessionUtil.getUserId());
+        if (ACTIVE_GENERATIONS.containsKey(mktContentId)) {
+            return failResult("생성 중인 콘텐츠는 삭제할 수 없습니다. 생성이 끝난 뒤 다시 시도해 주세요.");
+        }
         marketingDAO.deleteMarketingHistories(row);
         marketingDAO.deleteMarketingContents(row);
         if (marketingDAO.deleteMarketing(row) != 1) {
-            return failResult("삭제에 실패했습니다");
+            throw new RuntimeException("삭제에 실패했습니다");
         }
         return successResult();
     }
@@ -1490,7 +1541,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
 
         Map<String, Object> stored = contentRequest(row);
-        String reference = resolveReferenceContext(row.getMarketingProjectId(), row.getAgentId(),
+        String reference = resolveReferenceContext(row.getMktId(), row.getAgentId(),
                 stored.get("referenceMarketingFileIds"), userId);
         if (image) {
             String prompt = buildGenerationPrompt(PROMPT_ID_IMAGE_REFINE, row.getAgentId(), stored, reference,
@@ -1565,6 +1616,9 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> runReview(String mktContentId) throws Exception {
         String userId = SessionUtil.getUserId();
         MarketingVO row = requireMarketing(mktContentId, userId);
+        if (isEditLocked(row)) {
+            return failResult("승인 단계에 진입한 콘텐츠는 AI 검수로 돌아갈 수 없습니다. 반려 후 다시 검수해 주세요.");
+        }
         if (!AI_STATUS_DONE.equals(row.getAiStatusCd()) || row.getSelectedVariantNo() == null) {
             return failResult("시안 생성·선택 후 검수해 주세요");
         }
@@ -1578,9 +1632,12 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
 
         Map<String, Object> request = contentRequest(row);
-        String reference = resolveReferenceContext(row.getMarketingProjectId(), row.getAgentId(),
+        String reference = resolveReferenceContext(row.getMktId(), row.getAgentId(),
                 request.get("referenceMarketingFileIds"), userId);
-        String prompt = buildGenerationPrompt(PROMPT_ID_REVIEW, row.getAgentId(), request, reference, target.getTextContent(), null);
+        // 검수는 선택한 시안 1개만 보므로 생성 개수(variantCount)는 검수 조건으로 넘기지 않는다
+        Map<String, Object> reviewRequest = new LinkedHashMap<>(request);
+        reviewRequest.remove("variantCount");
+        String prompt = buildGenerationPrompt(PROMPT_ID_REVIEW, row.getAgentId(), reviewRequest, reference, target.getTextContent(), null);
         String response = needImage ? reviewMarketingImage(row, target, prompt, userId)
                 : chatbotService.callAiSummary(prompt, "marketing_review", null);
         ParsedReview parsed = parseReviewResponse(mktContentId, response, row.getOutputMode());
@@ -1589,7 +1646,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         invalidateApproval(row, request, userId);
         MarketingVO.ReviewVO review = new MarketingVO.ReviewVO();
         review.setReviewId(keyGenerate.generateTableKey("MH", "TB_MKT_WORKFLOW_HIST", "MKT_HIST_ID"));
-        review.setContentId(mktContentId);
+        review.setMktContentId(mktContentId);
         review.setVariantNo(row.getSelectedVariantNo());
         review.setContentVersion(row.getContentVersion());
         review.setOutputMode(row.getOutputMode());
@@ -1665,7 +1722,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
 
         Map<String, Object> request = contentRequest(row);
-        String reference = resolveReferenceContext(row.getMarketingProjectId(), row.getAgentId(),
+        String reference = resolveReferenceContext(row.getMktId(), row.getAgentId(),
                 request.get("referenceMarketingFileIds"), userId);
         MarketingVO content = new MarketingVO();
         content.setMktContentId(mktContentId);
@@ -1833,7 +1890,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
         String userId = SessionUtil.getUserId();
         MarketingVO row = requireMarketing(mktContentId, userId);
-        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(row.getMarketingProjectId()));
+        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(row.getMktId()));
         if (!userId.equals(project.getApproverUserId())) {
             return failResult("프로젝트의 지정 승인자만 승인·반려할 수 있습니다");
         }
@@ -1845,9 +1902,56 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             return failResult("검수 결과가 FAIL입니다. 수정 후 다시 검수해 주세요");
         }
 
+        insertApprovalHistory(row, review, approvedYn, memo, userId);
+
+        MarketingVO statusVO = contentSearch(mktContentId);
+        statusVO.setStatusCd("Y".equals(approvedYn) ? STATUS_APPROVED : STATUS_REVIEWING);
+        statusVO.setModifyUserId(userId);
+        marketingDAO.updateMarketingStatus(statusVO);
+
+        Map<String, Object> result = successResult();
+        result.put("data", marketingDAO.selectLatestApproval(mktContentId));
+        return result;
+    }
+
+    /**
+     * 승인 취소 — 지정 승인자만, 승인 완료·예약 상태에서만 가능하다(발행 완료는 불가).
+     * 검수 중(002)으로 되돌려 작성자가 다시 수정·재검수하게 하고, 예약 일시도 함께 푼다. 이력은 반려(N)로 남긴다.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> cancelApproval(String mktContentId) throws Exception {
+        String userId = SessionUtil.getUserId();
+        MarketingVO row = requireMarketing(mktContentId, userId);
+        MarketingVO.ProjectVO project = marketingDAO.selectMarketingProject(projectSearch(row.getMktId()));
+        if (!userId.equals(project.getApproverUserId())) {
+            return failResult("프로젝트의 지정 승인자만 승인을 취소할 수 있습니다");
+        }
+        if (!STATUS_APPROVED.equals(row.getStatusCd()) && !STATUS_SCHEDULED.equals(row.getStatusCd())) {
+            return failResult("승인 완료·예약 상태에서만 승인을 취소할 수 있습니다");
+        }
+        MarketingVO.ApprovalVO approval = marketingDAO.selectLatestApproval(mktContentId);
+        MarketingVO.ReviewVO review = marketingDAO.selectLatestReview(mktContentId);
+        if (!isCurrentApproval(row, approval) || !"Y".equals(approval.getApprovedYn()) || !isCurrentReview(row, review)) {
+            return failResult("취소할 승인 이력을 찾을 수 없습니다");
+        }
+
+        insertApprovalHistory(row, review, "N", "승인 취소", userId);
+
+        row.setStatusCd(STATUS_REVIEWING);
+        row.setPublishScheduledDt(null);
+        row.setModifyUserId(userId);
+        if (marketingDAO.updateMarketingSchedule(row) != 1) {
+            throw new RuntimeException("승인 취소에 실패했습니다.");
+        }
+        return successResult();
+    }
+
+    /** 승인·반려·승인 취소 이력 저장 — 검수 결과를 함께 남기고 최신 이력만 유지한다 */
+    private void insertApprovalHistory(MarketingVO row, MarketingVO.ReviewVO review, String approvedYn, String memo,
+            String userId) throws Exception {
         MarketingVO.ApprovalVO approval = new MarketingVO.ApprovalVO();
         approval.setApprovalId(keyGenerate.generateTableKey("MH", "TB_MKT_WORKFLOW_HIST", "MKT_HIST_ID"));
-        approval.setContentId(mktContentId);
+        approval.setMktContentId(row.getMktContentId());
         approval.setVariantNo(row.getSelectedVariantNo());
         approval.setContentVersion(row.getContentVersion());
         approval.setMemo(memo);
@@ -1860,16 +1964,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         approval.setApprovedYn(approvedYn);
         approval.setCreateUserId(userId);
         marketingDAO.insertApprovalHistory(approval);
-        marketingDAO.pruneApprovalHistory(mktContentId);
-
-        MarketingVO statusVO = contentSearch(mktContentId);
-        statusVO.setStatusCd("Y".equals(approvedYn) ? STATUS_APPROVED : STATUS_REVIEWING);
-        statusVO.setModifyUserId(userId);
-        marketingDAO.updateMarketingStatus(statusVO);
-
-        Map<String, Object> result = successResult();
-        result.put("data", marketingDAO.selectLatestApproval(mktContentId));
-        return result;
+        marketingDAO.pruneApprovalHistory(row.getMktContentId());
     }
 
     /** 로그인 사용자가 멤버로 속한 프로젝트의 콘텐츠 발행 일정 전체 */
@@ -1898,21 +1993,21 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     // ── 생성 SSE ───────────────────────────────────────────────────────────────
 
     /** 마케팅 생성 SSE */
-    public SseEmitter streamMarketingEvents(String contentId) {
+    public SseEmitter streamMarketingEvents(String requestMktContentId) {
         SseEmitter emitter = new SseEmitter(0L);
-        String mktContentId = stringValue(contentId);
+        String mktContentId = stringValue(requestMktContentId);
         if (CommonUtil.isEmpty(mktContentId)) {
-            sendSseError(emitter, "contentId가 없습니다.");
+            sendSseError(emitter, "mktContentId가 없습니다.");
             completeMarketingEmitter(emitter);
             return emitter;
         }
 
         emitter.onTimeout(() -> {
-            logger.warn("마케팅 SSE timeout - contentId={}", mktContentId);
+            logger.warn("마케팅 SSE timeout - mktContentId={}", mktContentId);
             completeMarketingEmitter(emitter);
         });
-        emitter.onError(e -> logger.warn("마케팅 SSE error - contentId={}, message={}", mktContentId, e.getMessage()));
-        emitter.onCompletion(() -> logger.info("마케팅 SSE complete - contentId={}", mktContentId));
+        emitter.onError(e -> logger.warn("마케팅 SSE error - mktContentId={}, message={}", mktContentId, e.getMessage()));
+        emitter.onCompletion(() -> logger.info("마케팅 SSE complete - mktContentId={}", mktContentId));
 
         String userId;
         try {
@@ -1952,7 +2047,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             generating = marketing;
 
             Map<String, Object> request = contentRequest(marketing);
-            String reference = resolveReferenceContext(marketing.getMarketingProjectId(), marketing.getAgentId(),
+            String reference = resolveReferenceContext(marketing.getMktId(), marketing.getAgentId(),
                     request.get("referenceMarketingFileIds"), userId);
             String title = buildMarketingTitle(request, marketing.getAgentId());
             marketing.setTitle(title);
@@ -1994,7 +2089,8 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             marketingDAO.updateMarketingRequestJson(marketing);
             saveTitle(mktContentId, userId, title);
             marketing.setAiStatusCd(complete ? AI_STATUS_DONE : AI_STATUS_FAILED);
-            marketing.setStatusCd(complete ? STATUS_REVIEWING : STATUS_WRITING);
+            // 검수 중(002)은 AI 검수를 실행한 콘텐츠만 — 생성 직후는 작성 중으로 둔다
+            marketing.setStatusCd(STATUS_WRITING);
             marketing.setSelectedVariantNo(complete ? 1 : null);
             marketingDAO.completeMarketingGeneration(marketing);
 
@@ -2004,7 +2100,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
                 sendSseError(emitter, "일부 시안을 생성하지 못했습니다. 다시 시도해 주세요.");
             }
         } catch (Exception e) {
-            logger.error("마케팅 생성 실패 - contentId={}", mktContentId, e);
+            logger.error("마케팅 생성 실패 - mktContentId={}", mktContentId, e);
             if (generating != null) {
                 markGenerationFailed(generating, userId);
             }
@@ -2024,7 +2120,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             marketing.setModifyUserId(userId);
             marketingDAO.completeMarketingGeneration(marketing);
         } catch (Exception e) {
-            logger.warn("마케팅 생성 실패 상태 저장 실패 - contentId={}: {}", marketing.getMktContentId(), e.getMessage());
+            logger.warn("마케팅 생성 실패 상태 저장 실패 - mktContentId={}: {}", marketing.getMktContentId(), e.getMessage());
         }
     }
 
@@ -2041,7 +2137,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
             }
             sendMarketingDone(emitter, marketing, contents);
         } catch (Exception e) {
-            logger.warn("마케팅 SSE 대기 실패 - contentId: {}, msg: {}", mktContentId, e.getMessage());
+            logger.warn("마케팅 SSE 대기 실패 - mktContentId: {}, msg: {}", mktContentId, e.getMessage());
             sendSseError(emitter, "콘텐츠 생성 대기 중 오류가 발생했습니다.");
         } finally {
             completeMarketingEmitter(emitter);
@@ -2256,7 +2352,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
     /** 선택 첨부파일을 /file_query로 정리한다 */
     private String resolveReferenceContext(String projectId, String agentId, Object selectedFileIds, String userId) throws Exception {
         MarketingVO.FileVO fileSearchVO = new MarketingVO.FileVO();
-        fileSearchVO.setMarketingProjectId(projectId);
+        fileSearchVO.setMktId(projectId);
         List<MarketingVO.FileVO> files = filterReferenceFiles(marketingDAO.selectMarketingFileList(fileSearchVO), selectedFileIds);
         if (selectedFileIds instanceof List && files.size() != new LinkedHashSet<>((List<?>) selectedFileIds).size()) {
             throw new RuntimeException("선택한 참고파일을 찾을 수 없습니다. 파일 목록을 확인해 주세요.");
@@ -2329,7 +2425,7 @@ public class MarketingServiceImpl extends EgovAbstractServiceImpl {
         }
         List<MarketingVO.FileVO> filtered = new ArrayList<>();
         for (MarketingVO.FileVO fileVO : files) {
-            if (selected.contains(fileVO.getMarketingFileId())) {
+            if (selected.contains(fileVO.getMktFileId())) {
                 filtered.add(fileVO);
             }
         }
