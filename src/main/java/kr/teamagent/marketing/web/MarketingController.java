@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.marketing.service.MarketingVO;
 import kr.teamagent.marketing.service.impl.MarketingServiceImpl;
@@ -34,11 +35,11 @@ public class MarketingController extends BaseController {
     public Map<String, Object> saveMarketingProject(@RequestBody MarketingVO.ProjectVO dataVO) {
         try {
             Map<String, Object> resultMap = okResult();
-            resultMap.put("marketingProjectId", marketingService.saveMarketingProject(dataVO));
+            resultMap.put("mktId", marketingService.saveMarketingProject(dataVO));
             return resultMap;
         } catch (Exception e) {
             log.error("[MKT] saveMarketingProject 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -52,36 +53,36 @@ public class MarketingController extends BaseController {
             return resultMap;
         } catch (Exception e) {
             log.error("[MKT] selectMarketingProjectList 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 프로젝트 단건 조회 */
     @RequestMapping(value = "/ai/marketing/selectMarketingProject.do", method = RequestMethod.GET)
     @ResponseBody
-    public Map<String, Object> selectMarketingProject(@RequestParam String marketingProjectId) {
+    public Map<String, Object> selectMarketingProject(@RequestParam String mktId) {
         try {
             Map<String, Object> resultMap = okResult();
-            resultMap.put("data", marketingService.selectMarketingProject(marketingProjectId));
-            resultMap.put("members", marketingService.selectMarketingProjectMemberList(marketingProjectId));
-            resultMap.put("plan", marketingService.selectMarketingPlan(marketingProjectId));
+            resultMap.put("data", marketingService.selectMarketingProject(mktId));
+            resultMap.put("members", marketingService.selectMarketingProjectMemberList(mktId));
+            resultMap.put("plan", marketingService.selectMarketingPlan(mktId));
             return resultMap;
         } catch (Exception e) {
             log.error("[MKT] selectMarketingProject 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 프로젝트 삭제 */
     @RequestMapping(value = "/ai/marketing/deleteMarketingProject.do", method = RequestMethod.POST)
     @ResponseBody
-    public Map<String, Object> deleteMarketingProject(@RequestParam String marketingProjectId) {
+    public Map<String, Object> deleteMarketingProject(@RequestParam String mktId) {
         try {
-            marketingService.deleteMarketingProject(marketingProjectId);
+            marketingService.deleteMarketingProject(mktId);
             return okResult();
         } catch (Exception e) {
             log.error("[MKT] deleteMarketingProject 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -93,7 +94,7 @@ public class MarketingController extends BaseController {
             return marketingService.saveMarketingFileUploadUrl(dataVO);
         } catch (Exception e) {
             log.error("[MKT] saveMarketingFileUploadUrl 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -105,7 +106,7 @@ public class MarketingController extends BaseController {
             return marketingService.saveMarketingFile(dataVO);
         } catch (Exception e) {
             log.error("[MKT] saveMarketingFile 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -113,41 +114,28 @@ public class MarketingController extends BaseController {
     @RequestMapping(value = "/ai/marketing/selectMarketingFileList.do", method = RequestMethod.GET)
     @ResponseBody
     public Map<String, Object> selectMarketingFileList(
-            @RequestParam String marketingProjectId,
+            @RequestParam String mktId,
             @RequestParam(required = false) String filePurposeCd) {
         try {
             Map<String, Object> resultMap = okResult();
-            resultMap.put("list", marketingService.selectMarketingFileList(marketingProjectId, filePurposeCd));
+            resultMap.put("list", marketingService.selectMarketingFileList(mktId, filePurposeCd));
             return resultMap;
         } catch (Exception e) {
             log.error("[MKT] selectMarketingFileList 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
-        }
-    }
-
-    /** 마케팅 프로젝트 첨부파일명 수정 */
-    @RequestMapping(value = "/ai/marketing/updateMarketingFile.do", method = RequestMethod.POST)
-    @ResponseBody
-    public Map<String, Object> updateMarketingFile(@RequestBody MarketingVO.FileVO dataVO) {
-        try {
-            marketingService.updateMarketingFileName(dataVO.getMarketingFileId(), dataVO.getFileNm());
-            return okResult();
-        } catch (Exception e) {
-            log.error("[MKT] updateMarketingFile 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 프로젝트 첨부파일 삭제 */
     @RequestMapping(value = "/ai/marketing/deleteMarketingFile.do", method = RequestMethod.POST)
     @ResponseBody
-    public Map<String, Object> deleteMarketingFile(@RequestParam String marketingFileId) {
+    public Map<String, Object> deleteMarketingFile(@RequestParam String mktFileId) {
         try {
-            marketingService.deleteMarketingFile(marketingFileId);
+            marketingService.deleteMarketingFile(mktFileId);
             return okResult();
         } catch (Exception e) {
             log.error("[MKT] deleteMarketingFile 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -156,7 +144,7 @@ public class MarketingController extends BaseController {
     @ResponseBody
     public Map<String, Object> viewMarketingFile(@RequestBody MarketingVO.FileVO dataVO) {
         try {
-            return marketingService.viewMarketingFile(dataVO == null ? null : dataVO.getMarketingFileId());
+            return marketingService.viewMarketingFile(dataVO == null ? null : dataVO.getMktFileId());
         } catch (Exception e) {
             log.error("[MKT] viewMarketingFile 실패: {}", e.getMessage(), e);
             Map<String, Object> resultMap = new HashMap<>();
@@ -178,7 +166,7 @@ public class MarketingController extends BaseController {
             return resultMap;
         } catch (Exception e) {
             log.error("[MKT] generateMarketingPlan 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -192,7 +180,21 @@ public class MarketingController extends BaseController {
             return resultMap;
         } catch (Exception e) {
             log.error("[MKT] refineMarketingPlan 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
+        }
+    }
+
+    /** 마케팅 기획서 직접 수정 */
+    @RequestMapping(value = "/ai/marketing/updateMarketingPlan.do", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> updateMarketingPlan(@RequestBody MarketingVO.PlanVO dataVO) {
+        try {
+            Map<String, Object> resultMap = okResult();
+            resultMap.put("plan", marketingService.updateMarketingPlan(dataVO));
+            return resultMap;
+        } catch (Exception e) {
+            log.error("[MKT] updateMarketingPlan 실패: {}", e.getMessage(), e);
+            return failResult(e);
         }
     }
 
@@ -206,7 +208,7 @@ public class MarketingController extends BaseController {
             return marketingService.selectMarketingAgents();
         } catch (Exception e) {
             log.error("[MKT] agents 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -218,19 +220,19 @@ public class MarketingController extends BaseController {
             return marketingService.selectMarketingList(searchVO);
         } catch (Exception e) {
             log.error("[MKT] contents 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 콘텐츠 상세 조회 */
-    @RequestMapping(value = "/marketing/contents/{contentId}", method = RequestMethod.GET)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}", method = RequestMethod.GET)
     @ResponseBody
-    public Map<String, Object> content(@PathVariable("contentId") String contentId) {
+    public Map<String, Object> content(@PathVariable("mktContentId") String mktContentId) {
         try {
-            return marketingService.selectMarketing(contentId);
+            return marketingService.selectMarketing(mktContentId);
         } catch (Exception e) {
             log.error("[MKT] content 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -242,167 +244,164 @@ public class MarketingController extends BaseController {
             return marketingService.createMarketing(request);
         } catch (Exception e) {
             log.error("[MKT] create 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 콘텐츠 제목 수정 */
-    @RequestMapping(value = "/marketing/contents/{contentId}", method = RequestMethod.PUT)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}", method = RequestMethod.PUT)
     @ResponseBody
     public Map<String, Object> updateTitle(
-            @PathVariable("contentId") String contentId,
+            @PathVariable("mktContentId") String mktContentId,
             @RequestBody Map<String, Object> request) {
         try {
             Object title = request == null ? null : request.get("title");
-            return marketingService.updateTitle(contentId, title == null ? null : String.valueOf(title));
+            return marketingService.updateTitle(mktContentId, title == null ? null : String.valueOf(title));
         } catch (Exception e) {
             log.error("[MKT] updateTitle 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 콘텐츠 삭제 */
-    @RequestMapping(value = "/marketing/contents/{contentId}", method = RequestMethod.DELETE)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}", method = RequestMethod.DELETE)
     @ResponseBody
-    public Map<String, Object> delete(@PathVariable("contentId") String contentId) {
+    public Map<String, Object> delete(@PathVariable("mktContentId") String mktContentId) {
         try {
-            return marketingService.deleteMarketing(contentId);
+            return marketingService.deleteMarketing(mktContentId);
         } catch (Exception e) {
             log.error("[MKT] delete 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 콘텐츠 발행 설정 저장(예정일·방식·알림) */
-    @RequestMapping(value = "/marketing/contents/{contentId}/schedule", method = RequestMethod.PUT)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/schedule", method = RequestMethod.PUT)
     @ResponseBody
     public Map<String, Object> updateSchedule(
-            @PathVariable("contentId") String contentId,
+            @PathVariable("mktContentId") String mktContentId,
             @RequestBody Map<String, Object> request) {
         try {
-            return marketingService.updateSchedule(contentId, request);
+            return marketingService.updateSchedule(mktContentId, request);
         } catch (Exception e) {
             log.error("[MKT] updateSchedule 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
-        }
-    }
-
-    /** 마케팅 콘텐츠 발행 완료 표시/해제 */
-    @RequestMapping(value = "/marketing/contents/{contentId}/publish-status", method = RequestMethod.PUT)
-    @ResponseBody
-    public Map<String, Object> updatePublished(
-            @PathVariable("contentId") String contentId,
-            @RequestBody Map<String, Object> request) {
-        try {
-            Object publishedYn = request == null ? null : request.get("publishedYn");
-            return marketingService.updatePublished(contentId, publishedYn == null ? null : String.valueOf(publishedYn));
-        } catch (Exception e) {
-            log.error("[MKT] updatePublished 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 콘텐츠 시안 문안 직접 수정 */
-    @RequestMapping(value = "/marketing/contents/{contentId}/variants/{variantId}", method = RequestMethod.PUT)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/variants/{variantId}", method = RequestMethod.PUT)
     @ResponseBody
     public Map<String, Object> updateVariant(
-            @PathVariable("contentId") String contentId,
+            @PathVariable("mktContentId") String mktContentId,
             @PathVariable("variantId") int variantId,
             @RequestBody Map<String, Object> request) {
         try {
-            return marketingService.updateVariantText(contentId, variantId, request);
+            return marketingService.updateVariantText(mktContentId, variantId, request);
         } catch (Exception e) {
             log.error("[MKT] updateVariant 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 콘텐츠 시안 보완 */
-    @RequestMapping(value = "/marketing/contents/{contentId}/variants/{variantId}/refine", method = RequestMethod.POST)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/variants/{variantId}/refine", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> refine(
-            @PathVariable("contentId") String contentId,
+            @PathVariable("mktContentId") String mktContentId,
             @PathVariable("variantId") int variantId,
             @RequestBody Map<String, Object> request) {
         try {
-            return marketingService.refineMarketing(contentId, variantId, request);
+            return marketingService.refineMarketing(mktContentId, variantId, request);
         } catch (Exception e) {
             log.error("[MKT] refine 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 마케팅 시안을 직전 버전으로 되돌리기 */
-    @RequestMapping(value = "/marketing/contents/{contentId}/variants/{variantId}/restore", method = RequestMethod.POST)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/variants/{variantId}/restore", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> restoreVariant(
-            @PathVariable("contentId") String contentId,
+            @PathVariable("mktContentId") String mktContentId,
             @PathVariable("variantId") int variantId) {
         try {
-            return marketingService.restoreVariant(contentId, variantId);
+            return marketingService.restoreVariant(mktContentId, variantId);
         } catch (Exception e) {
             log.error("[MKT] restoreVariant 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 사용할 시안 선택 */
-    @RequestMapping(value = "/marketing/contents/{contentId}/variants/{variantId}/select", method = RequestMethod.PUT)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/variants/{variantId}/select", method = RequestMethod.PUT)
     @ResponseBody
-    public Map<String, Object> selectVariant(@PathVariable("contentId") String contentId,
+    public Map<String, Object> selectVariant(@PathVariable("mktContentId") String mktContentId,
             @PathVariable("variantId") int variantId) {
         try {
-            return marketingService.selectVariant(contentId, variantId);
+            return marketingService.selectVariant(mktContentId, variantId);
         } catch (Exception e) {
             log.error("[MKT] selectVariant 실패", e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     // ── AI 검수 / 승인 / 캘린더 ───────────────────────────────────────────────
 
     /** AI 검수 실행 */
-    @RequestMapping(value = "/marketing/contents/{contentId}/review", method = RequestMethod.POST)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/review", method = RequestMethod.POST)
     @ResponseBody
-    public Map<String, Object> runReview(@PathVariable("contentId") String contentId) {
+    public Map<String, Object> runReview(@PathVariable("mktContentId") String mktContentId) {
         try {
-            return marketingService.runReview(contentId);
+            return marketingService.runReview(mktContentId);
         } catch (Exception e) {
             log.error("[MKT] runReview 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** AI 검수 이슈 수정안 적용 — issueId 또는 "ALL" */
-    @RequestMapping(value = "/marketing/contents/{contentId}/review/apply-fix", method = RequestMethod.POST)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/review/apply-fix", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> applyReviewFix(
-            @PathVariable("contentId") String contentId,
+            @PathVariable("mktContentId") String mktContentId,
             @RequestBody Map<String, Object> request) {
         try {
             Object issueId = request == null ? null : request.get("issueId");
-            return marketingService.applyFix(contentId, issueId == null ? null : String.valueOf(issueId));
+            return marketingService.applyFix(mktContentId, issueId == null ? null : String.valueOf(issueId));
         } catch (Exception e) {
             log.error("[MKT] applyReviewFix 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
     /** 콘텐츠 승인/반려 저장 */
-    @RequestMapping(value = "/marketing/contents/{contentId}/approval", method = RequestMethod.POST)
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/approval", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> saveApproval(
-            @PathVariable("contentId") String contentId,
+            @PathVariable("mktContentId") String mktContentId,
             @RequestBody Map<String, Object> request) {
         try {
             Object memo = request == null ? null : request.get("memo");
             Object approvedYn = request == null ? null : request.get("approvedYn");
             return marketingService.saveApproval(
-                    contentId, memo == null ? null : String.valueOf(memo),
+                    mktContentId, memo == null ? null : String.valueOf(memo),
                     approvedYn == null ? null : String.valueOf(approvedYn));
         } catch (Exception e) {
             log.error("[MKT] saveApproval 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
+        }
+    }
+
+    /** 마케팅 콘텐츠 승인 취소 */
+    @RequestMapping(value = "/marketing/contents/{mktContentId}/approval/cancel", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> cancelApproval(@PathVariable("mktContentId") String mktContentId) {
+        try {
+            return marketingService.cancelApproval(mktContentId);
+        } catch (Exception e) {
+            log.error("[MKT] cancelApproval 실패: {}", e.getMessage(), e);
+            return failResult(e);
         }
     }
 
@@ -414,7 +413,7 @@ public class MarketingController extends BaseController {
             return marketingService.selectCalendarEvents();
         } catch (Exception e) {
             log.error("[MKT] calendar 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -422,22 +421,22 @@ public class MarketingController extends BaseController {
     @RequestMapping(value = "/ai/marketing/streamMarketingEvents.do", method = RequestMethod.GET,
             produces = "text/event-stream;charset=UTF-8")
     @ResponseBody
-    public SseEmitter events(@RequestParam("contentId") String contentId, HttpServletResponse response) {
+    public SseEmitter events(@RequestParam("mktContentId") String mktContentId, HttpServletResponse response) {
         response.setCharacterEncoding("UTF-8");
-        return marketingService.streamMarketingEvents(contentId);
+        return marketingService.streamMarketingEvents(mktContentId);
     }
 
     /** 마케팅 콘텐츠 내보내기 HTML 조회 */
     @RequestMapping(value = "/ai/marketing/exportMarketingContentHtml.do", method = RequestMethod.GET)
     @ResponseBody
-    public Map<String, Object> exportMarketingContentHtml(@RequestParam String contentId) {
+    public Map<String, Object> exportMarketingContentHtml(@RequestParam String mktContentId) {
         try {
             Map<String, Object> resultMap = okResult();
-            resultMap.put("html", marketingService.exportMarketingContentHtml(contentId));
+            resultMap.put("html", marketingService.exportMarketingContentHtml(mktContentId));
             return resultMap;
         } catch (Exception e) {
             log.error("[MKT] exportMarketingContentHtml 실패: {}", e.getMessage(), e);
-            return failResult(e.getMessage());
+            return failResult(e);
         }
     }
 
@@ -452,6 +451,17 @@ public class MarketingController extends BaseController {
         Map<String, Object> resultMap = new HashMap<>();
         resultMap.put("successYn", false);
         resultMap.put("returnMsg", message);
+        return resultMap;
+    }
+
+    /** DB 오류는 원문 대신 공용 실패 문구와 errorCode를 내려 프론트 공용 장애 안내(BaseController와 동일)가 처리하게 한다 */
+    private Map<String, Object> failResult(Exception e) {
+        if (!CommonUtil.isDbError(e)) {
+            return failResult(e.getMessage());
+        }
+        Map<String, Object> resultMap = failResult(egovMessageSource.getMessage(AJAX_FAIL_MSG_CODE));
+        resultMap.put("result", AJAX_FAIL);
+        resultMap.put("errorCode", CommonUtil.RESP_DB_ERROR);
         return resultMap;
     }
 }

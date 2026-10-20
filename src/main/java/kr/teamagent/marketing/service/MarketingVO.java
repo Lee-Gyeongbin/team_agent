@@ -16,9 +16,9 @@ public class MarketingVO extends CommonVO {
 
     private static final long serialVersionUID = 1L;
 
-    /** TB_MKT_CONTENT — 응답 키는 contentId */
+    /** TB_MKT_CONTENT — 응답 키는 mktContentId */
     private String mktContentId;
-    private String marketingProjectId;
+    private String mktId;
     private String agentId;
     private String title;
     private String outputMode;
@@ -29,6 +29,8 @@ public class MarketingVO extends CommonVO {
     private String aiStatusNm;
     /** 발행 예정일시 */
     private String publishScheduledDt;
+    /** 실제 발행 완료일시 */
+    private String publishCompletedDt;
     /** 발행 완료 표시 Y/N */
     private String publishedYn;
     /** 발행 방식 — NOW | SCHEDULE | HOLD */
@@ -36,6 +38,8 @@ public class MarketingVO extends CommonVO {
     /** 발행 몇 시간 전에 알릴지(시간 단위) */
     private Integer alertHour;
     private String contentType;
+    /** 채널 코드 — 프로젝트·채널당 1건. 사용자 지정 채널은 null */
+    private String channelCd;
     private String requestJson;
     private Integer variantCount;
     @JsonIgnore
@@ -72,11 +76,9 @@ public class MarketingVO extends CommonVO {
     @Setter
     public static class ProjectVO {
         /** MKT_ID */
-        private String marketingProjectId;
+        private String mktId;
         private String projectNm;
         private String approverUserId;
-        /** null은 유지, 빈 문자열은 관리자 해제 */
-        private String managerUserId;
         private String approverUserNm;
         private String orgNm;
         private String projectOverview;
@@ -105,11 +107,10 @@ public class MarketingVO extends CommonVO {
     @Getter
     @Setter
     public static class MemberVO {
-        private String marketingMemberId;
-        private String manageYn;
+        private String mktMemberId;
         @JsonIgnore
         private String createUserId;
-        private String marketingProjectId;
+        private String mktId;
         private String userId;
         private String userNm;
         private String email;
@@ -122,8 +123,8 @@ public class MarketingVO extends CommonVO {
         @JsonIgnore
         private String modifyUserId;
         /** MKT_FILE_ID */
-        private String marketingFileId;
-        private String marketingProjectId;
+        private String mktFileId;
+        private String mktId;
         private String filePath;
         /** 원본 파일명 */
         @JsonProperty("fileName")
@@ -143,8 +144,8 @@ public class MarketingVO extends CommonVO {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class PlanVO {
         @JsonIgnore
-        private String marketingPlanId;
-        private String marketingProjectId;
+        private String mktPlanId;
+        private String mktId;
         private String goal;
         private String productNm;
         private String requestTxt;
@@ -156,7 +157,7 @@ public class MarketingVO extends CommonVO {
         /** DB SECTIONS_JSON 원문 — 서비스가 sections와 상호 변환. 응답엔 안 실음 */
         @JsonIgnore
         private String sectionsJson;
-        /** 생성 요청 전용 — 칸별 marketingFileId */
+        /** 생성 요청 전용 — 칸별 mktFileId */
         @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
         private List<String> contentFileIds;
         @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
@@ -188,8 +189,8 @@ public class MarketingVO extends CommonVO {
         private String outputMode;
         /** MKT_HIST_ID → 프론트 reviewId */
         private String reviewId;
-        /** MKT_CONTENT_ID → 프론트 contentId */
-        private String contentId;
+        /** MKT_CONTENT_ID → 프론트 mktContentId */
+        private String mktContentId;
         private int score;
         /** PASS | REVIEW | FAIL */
         private String verdict;
@@ -252,8 +253,8 @@ public class MarketingVO extends CommonVO {
         private String resultJson;
         /** MKT_HIST_ID → 프론트 approvalId */
         private String approvalId;
-        /** MKT_CONTENT_ID → 프론트 contentId */
-        private String contentId;
+        /** MKT_CONTENT_ID → 프론트 mktContentId */
+        private String mktContentId;
         private String memo;
         /** Y | N */
         private String approvedYn;
@@ -270,9 +271,9 @@ public class MarketingVO extends CommonVO {
     public static class CalendarEventVO {
         /** 콘텐츠 ID를 이벤트 ID로 사용 */
         private String eventId;
-        private String marketingProjectId;
+        private String mktId;
         private String projectNm;
-        private String contentId;
+        private String mktContentId;
         private String title;
         private String statusCd;
         private String eventDt;
