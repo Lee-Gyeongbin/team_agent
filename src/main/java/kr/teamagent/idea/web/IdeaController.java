@@ -2,14 +2,15 @@ package kr.teamagent.idea.web;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
@@ -49,19 +50,21 @@ public class IdeaController extends BaseController<Object> {
         return makeSuccessJsonData(resultMap);
     }
 
-    /** 구분·진행상태 공통코드 + 에이전트 선택 목록 */
-    @RequestMapping(value = "/codeList.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/save.do", method = RequestMethod.POST, consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
-    public ModelAndView codeList() throws Exception {
-        return new ModelAndView("jsonView", new HashMap<>(ideaService.selectIdeaCodeList()));
+    public ModelAndView save(@RequestBody IdeaVO ideaVO) throws Exception {
+        return saveIdea(ideaVO, null);
     }
 
-    /** 등록·수정 (multipart: 폼 필드 + files[] + deleteFileIds[]) */
-    @RequestMapping(value = "/save.do", method = RequestMethod.POST)
+    @RequestMapping(value = "/save.do", method = RequestMethod.POST, consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseBody
-    public ModelAndView save(
-            @ModelAttribute IdeaVO ideaVO,
-            @RequestParam(value = "files", required = false) List<MultipartFile> files) throws Exception {
+    public ModelAndView saveWithFiles(
+            @RequestPart("idea") IdeaVO ideaVO,
+            @RequestPart(value = "files", required = false) List<MultipartFile> files) throws Exception {
+        return saveIdea(ideaVO, files);
+    }
+
+    private ModelAndView saveIdea(IdeaVO ideaVO, List<MultipartFile> files) throws Exception {
         try {
             HashMap<String, Object> resultMap = new HashMap<>();
             resultMap.put("ideaId", ideaService.saveIdea(ideaVO, files));
@@ -96,17 +99,11 @@ public class IdeaController extends BaseController<Object> {
         }
     }
 
-    /** 첨부파일 다운로드 URL */
-    @RequestMapping(value = "/fileDownloadUrl.do", method = RequestMethod.POST)
+    /** 첨부파일 미리보기 (화면 안 모달) */
+    @RequestMapping(value = "/filePreview.do", method = RequestMethod.POST)
     @ResponseBody
-    public ModelAndView fileDownloadUrl(@RequestBody IdeaVO.IdeaFileVO fileVO) throws Exception {
-        try {
-            HashMap<String, Object> resultMap = new HashMap<>();
-            resultMap.put("url", ideaService.selectIdeaFileDownloadUrl(fileVO.getIdeaFileId()));
-            return makeSuccessJsonData(resultMap);
-        } catch (IllegalArgumentException e) {
-            return makeFailJsonData(e.getMessage());
-        }
+    public Map<String, Object> filePreview(@RequestBody IdeaVO.IdeaFileVO file) throws Exception {
+        return ideaService.selectIdeaFilePreview(file.getIdeaFileId());
     }
 
     /* ===================== 아이디어 관리 (관리자) ===================== */
