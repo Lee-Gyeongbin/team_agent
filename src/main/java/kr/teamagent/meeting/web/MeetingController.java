@@ -246,6 +246,73 @@ public class MeetingController extends BaseController {
         return resultMap;
     }
 
+    /** 회의록 양식 목록 (TB_MEETING_TMPL) */
+    @RequestMapping("/ai/meeting/selectMeetingTmplList.do")
+    @ResponseBody
+    public Map<String, Object> selectMeetingTmplList() throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap.put("list", meetingService.selectMeetingTmplList());
+            resultMap.put("successYn", true);
+        } catch (Exception e) {
+            log.error("selectMeetingTmplList error", e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "회의록 양식을 불러오지 못했습니다.");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 회의록 생성 시작 — "회의록 생성" / "이 양식으로 다시 생성" (백그라운드, 바로 반환)
+     * 요청: meetingId, (선택) minutesTmplCd · minutesToneCd · minutesLengthCd
+     */
+    @RequestMapping("/ai/meeting/startMeetingMinutes.do")
+    @ResponseBody
+    public Map<String, Object> startMeetingMinutes(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.startMeetingMinutes(dataVO);
+        } catch (Exception e) {
+            log.error("startMeetingMinutes error - meetingId={}", dataVO.getMeetingId(), e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "회의록 생성을 시작하지 못했습니다.");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 화자 분리 재시도 — 이미 올라간 오디오를 대기 상태로 되돌림 (성공하면 화면이 streamMeetingProcessing 으로 다시 처리)
+     * 화자 분리 중 서버 재기동 · STT 오류로 "화자 분리가 중단되었습니다" 상태일 때 사용
+     */
+    @RequestMapping("/ai/meeting/retryDiarize.do")
+    @ResponseBody
+    public Map<String, Object> retryDiarize(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.retryDiarize(dataVO);
+        } catch (Exception e) {
+            log.error("retryDiarize error - meetingId={}", dataVO.getMeetingId(), e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "화자 분리를 다시 시작하지 못했습니다.");
+        }
+        return resultMap;
+    }
+
+    /** 회의록 생성 상태 — state: none / diarized / processing / done / error (done 이면 minutes · meeting 포함) */
+    @RequestMapping("/ai/meeting/selectMeetingMinutesStatus.do")
+    @ResponseBody
+    public Map<String, Object> selectMeetingMinutesStatus(@RequestBody MeetingVO dataVO, BindingResult bindingResult) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.selectMeetingMinutesStatus(dataVO);
+        } catch (Exception e) {
+            log.error("selectMeetingMinutesStatus error - meetingId={}", dataVO.getMeetingId(), e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "회의록 생성 상태를 확인하지 못했습니다.");
+        }
+        return resultMap;
+    }
+
     @RequestMapping(value = "/ai/meeting/downloadAudioFile.do")
     @ResponseBody
     public Map<String, Object> downloadAudioFile(@RequestBody MeetingVO req) throws Exception {
@@ -260,13 +327,14 @@ public class MeetingController extends BaseController {
         return meetingService.streamMeetingProcessing(meetingId);
     }
 
-    /** 인포그래픽 이미지 생성 SSE 스트림 */
-    @RequestMapping(value = "/ai/meeting/streamInfographic.do", produces = "text/event-stream;charset=UTF-8")
-    @ResponseBody
-    public SseEmitter streamInfographic(@RequestParam("meetingId") Long meetingId, HttpServletResponse response) {
-        response.setCharacterEncoding("UTF-8");
-        return meetingService.streamInfographicGeneration(meetingId);
-    }
+    // [인포그래픽 일시 중지 2026-11-19] 다시 쓰려면 이 블록 주석 해제
+    // /** 인포그래픽 이미지 생성 SSE 스트림 */
+    // @RequestMapping(value = "/ai/meeting/streamInfographic.do", produces = "text/event-stream;charset=UTF-8")
+    // @ResponseBody
+    // public SseEmitter streamInfographic(@RequestParam("meetingId") Long meetingId, HttpServletResponse response) {
+    //     response.setCharacterEncoding("UTF-8");
+    //     return meetingService.streamInfographicGeneration(meetingId);
+    // }
 
     @RequestMapping(value = "/ai/meeting/downloadMinutes.do")
     public void downloadMinutes(
@@ -302,7 +370,7 @@ public class MeetingController extends BaseController {
     }
 
     /**
-     * Cancel Beacon (beforeunload → sendBeacon)
+     * 녹음 중 페이지 이탈 → 비정상종료 표시 (탭 닫기는 pagehide sendBeacon, 화면 내 이동은 fetch)
      * POST /api/meeting/{meetingId}/cancel
      */
     @RequestMapping(value = "/meeting/{meetingId}/cancel", method = RequestMethod.POST)
@@ -315,23 +383,6 @@ public class MeetingController extends BaseController {
             log.error("cancelBeacon error - meetingId: {}", meetingId, e);
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
-        }
-        return resultMap;
-    }
-
-    /**
-     * 비정상종료 회의 목록 조회
-     * GET /api/meeting/abnormal
-     */
-    @RequestMapping(value = "/meeting/abnormal", method = RequestMethod.GET)
-    @ResponseBody
-    public Map<String, Object> selectAbnormalMeetingList() throws Exception {
-        Map<String, Object> resultMap = new HashMap<>();
-        try {
-            resultMap.put("list", meetingService.selectAbnormalMeetingList());
-        } catch (Exception e) {
-            log.error("selectAbnormalMeetingList error", e);
-            resultMap.put("list", new java.util.ArrayList<>());
         }
         return resultMap;
     }
@@ -355,35 +406,18 @@ public class MeetingController extends BaseController {
     }
 
     /**
-     * 백업 파일 개수 조회
-     * GET /api/meeting/{meetingId}/backup-file-count
-     * 이어서 녹음 시 기존 백업 파일 개수를 조회해 auto-save 인덱스를 이어서 시작하기 위해 사용
-     */
-    @RequestMapping(value = "/meeting/{meetingId}/backup-file-count", method = RequestMethod.GET)
-    @ResponseBody
-    public Map<String, Object> getBackupFileCount(@PathVariable("meetingId") Long meetingId) {
-        Map<String, Object> resultMap = new HashMap<>();
-        try {
-            resultMap.put("count", meetingService.getBackupFileCount(meetingId));
-            resultMap.put("successYn", true);
-        } catch (Exception e) {
-            log.error("getBackupFileCount error - meetingId: {}", meetingId, e);
-            resultMap.put("count", 0);
-            resultMap.put("successYn", false);
-        }
-        return resultMap;
-    }
-
-    /**
-     * 백업 오디오 파일 업로드
+     * 백업 오디오 파일 업로드 (녹음 중 10분 조각 / 페이지 이탈 직전 / 누락 구간 첨부)
      * POST /api/meeting/{meetingId}/backup-audio (multipart/form-data)
-     * 파일명은 originalFilename 그대로 사용 (backup_0.webm, backup_1.webm ...)
+     * - fileIndex: 조각 번호 → backup_{fileIndex}.webm (없으면 파일명 backup_N.webm 의 번호)
+     * - attachYn : Y 면 누락 구간 첨부 (heartbeat 갱신 안 함)
      */
     @RequestMapping(value = "/meeting/{meetingId}/backup-audio", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> uploadBackupAudio(
             @PathVariable("meetingId") Long meetingId,
-            @RequestParam("audioFile") MultipartFile audioFile) throws Exception {
+            @RequestParam("audioFile") MultipartFile audioFile,
+            @RequestParam(value = "fileIndex", required = false) Integer fileIndex,
+            @RequestParam(value = "attachYn", required = false) String attachYn) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
         try {
             if (audioFile == null || audioFile.isEmpty()) {
@@ -391,7 +425,7 @@ public class MeetingController extends BaseController {
                 resultMap.put("returnMsg", "오디오 파일이 없습니다.");
                 return resultMap;
             }
-            resultMap = meetingService.uploadBackupAudio(meetingId, audioFile);
+            resultMap = meetingService.uploadBackupAudio(meetingId, audioFile, fileIndex, attachYn);
         } catch (Exception e) {
             log.error("uploadBackupAudio error - meetingId: {}", meetingId, e);
             resultMap.put("successYn", false);

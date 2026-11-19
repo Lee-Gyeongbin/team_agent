@@ -27,6 +27,20 @@ public class MeetingVO extends CommonVO {
     private String isAutoTitle;
     private String integrateYn;
     private String showSpeakerYn;   // 결정사항 내 발언자 표시 여부 (Y: 표시, N: 숨김)
+    private String minutesTmplCd;     // 회의록 양식 코드 (TB_MEETING_TMPL) — NULL 이면 기본 양식
+    private String minutesToneCd;     // 문체 bullet(개조식) / plain(서술형) / polite(경어체) — NULL 이면 양식 기본 문체
+    private String minutesLengthCd;   // 분량 normal(표준) / long(상세) — NULL 이면 normal
+
+    // TB_MEETING_TMPL - 회의록 양식 매핑 (+ TB_TMPL 이름/설명)
+    private String tmplNm;
+    private String tmplDescription;
+    private String recommendTxt;
+    private String defaultToneCd;
+    private String defaultYn;
+    private List<String> fieldNmList; // 양식 구성 (TB_TMPL_FIELD.FIELD_NM, 정렬순)
+
+    /** 회의록 다시 생성 시 Y — 사용자 편집본(EDITED_CONTENT)을 비운다 */
+    private String clearEditedYn;
 
     // TB_MEETING_MINUTES - 회의록
     private Long   minutesId;
