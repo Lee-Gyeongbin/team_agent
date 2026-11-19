@@ -26,6 +26,7 @@
         <typeAlias alias="promptVO"                          type="kr.teamagent.prompt.service.PromptVO"/>
         <typeAlias alias="userManageVO"                      type="kr.teamagent.usermanage.service.UserManageVO"/>
         <typeAlias alias="menuManageVO"                      type="kr.teamagent.menumanage.service.MenuManageVO"/>
+        <typeAlias alias="roleManageVO"                      type="kr.teamagent.rolemanage.service.RoleManageVO"/>
         <typeAlias alias="chatGuideVO"                       type="kr.teamagent.chatguide.service.ChatGuideVO"/>
         <typeAlias alias="orgManageVO"                       type="kr.teamagent.orgmanage.service.OrgManageVO"/>
         <typeAlias alias="fileVO"                            type="kr.teamagent.common.util.service.FileVO"/>
