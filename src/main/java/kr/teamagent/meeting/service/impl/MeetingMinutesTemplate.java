@@ -72,12 +72,23 @@ final class MeetingMinutesTemplate {
      */
     static String buildSystemPrompt(String commonText, String templateText, String toneText, String lengthText,
                                     String speakerText, String length, boolean wantTitle, double durationMin) {
+        // DB 문구는 DBeaver(Windows) 입력 시 \r\n — 줄바꿈을 \n 으로 통일해야 아래 title 키 삽입이 동작하고 CMB 원문과 같아짐
+        commonText = lf(commonText);
+        templateText = lf(templateText);
+        toneText = lf(toneText);
+        lengthText = lf(lengthText);
+        speakerText = lf(speakerText);
         String tplText = templateText.replace(SUMMARY_RANGE_PLACEHOLDER, summaryRange(normalizeLength(length), durationMin));
         if (wantTitle) {
             tplText = tplText.replace("[응답 JSON 키]\n", "[응답 JSON 키]\n- title: 회의를 대표하는 제목 한 줄 (30자 이내)\n");
         }
         String option = "[작성 옵션]\n" + toneText.trim() + "\n" + lengthText.trim() + "\n" + speakerText.trim();
         return commonText.trim() + "\n\n" + tplText.trim() + "\n\n" + option;
+    }
+
+    /** 줄바꿈 통일 (\r\n, \r → \n) */
+    private static String lf(String s) {
+        return s == null ? "" : s.replace("\r\n", "\n").replace('\r', '\n');
     }
 
     /** 이 양식으로 만든 회의록 JSON 인지 — 이전(TB_TMPL 필드 기반) 회의록은 렌더러로 다시 그리면 비므로 구분한다 */
