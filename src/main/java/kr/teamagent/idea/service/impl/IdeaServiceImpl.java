@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.util.HtmlUtils;
 
 import com.amazonaws.SdkClientException;
 import com.amazonaws.services.s3.AmazonS3;
@@ -24,6 +26,7 @@ import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.idea.service.IdeaVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaCodeVO;
+import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaFileVO;
 
 /**
@@ -42,13 +45,15 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
 
     /** 목록 페이지 크기 (화면과 동일) */
     public static final int PAGE_SIZE = 15;
-    /** 첨부파일 1개당 최대 크기 50MB */
-    private static final long MAX_FILE_SIZE = 50L * 1024 * 1024;
+    private static final int MAX_TEXT_LENGTH = 8_000;
+    private static final Pattern HTML_TAG = Pattern.compile("<[/?]?[A-Za-z](?:[^<>\"']|\"[^\"]*\"|'[^']*')*+>");
+
+    /** 첨부파일 1개당 최대 크기 20MB */
+    private static final long MAX_FILE_SIZE = 20L * 1024 * 1024;
 
     public static final String CODE_GRP_STATUS = "ID000001";
     public static final String CODE_GRP_TYPE = "ID000002";
-    private static final String TYPE_NM_AGENT = "에이전트";
-    private static final String STATUS_NM_DEFAULT = "검토중";
+    private static final String TYPE_CD_AGENT = "001";
     private static final String STATUS_CD_DEFAULT = "001";
 
     @Autowired
@@ -80,7 +85,9 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
     }
 
     public List<IdeaVO> selectIdeaExcelList(IdeaVO searchVO) throws Exception {
-        return ideaDAO.selectIdeaExcelList(searchVO);
+        List<IdeaVO> rows = ideaDAO.selectIdeaExcelList(searchVO);
+        rows.forEach(this::sanitizeStoredContent);
+        return rows;
     }
 
     public IdeaVO selectIdeaDetail(IdeaVO searchVO) throws Exception {
@@ -90,24 +97,18 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
             return null;
         }
         List<IdeaFileVO> fileList = ideaDAO.selectIdeaFileList(detail.getIdeaId());
-        // 스토리지 경로는 화면에 내려주지 않음 (다운로드는 fileDownloadUrl.do로)
+        // 스토리지 경로는 화면에 내려주지 않음 (미리보기는 filePreview.do로)
         fileList.forEach((file) -> file.setFilePath(null));
         detail.setFileList(fileList);
+        sanitizeStoredContent(detail);
         return detail;
-    }
-
-    public Map<String, Object> selectIdeaCodeList() throws Exception {
-        Map<String, Object> result = new HashMap<>();
-        result.put("typeList", ideaDAO.selectIdeaCodeList(CODE_GRP_TYPE));
-        result.put("statusList", ideaDAO.selectIdeaCodeList(CODE_GRP_STATUS));
-        result.put("agentList", ideaDAO.selectIdeaAgentList());
-        return result;
     }
 
     /* ===================== 사용자: 등록·수정·삭제·추천 ===================== */
 
     public String saveIdea(IdeaVO ideaVO, List<MultipartFile> files) throws Exception {
         String userId = SessionUtil.getUserId();
+        ideaVO.setContent(IdeaRichTextSanitizer.clean(ideaVO.getContent()));
         validateIdeaForm(ideaVO);
         validateFiles(files);
         if (CommonUtil.isNotEmpty(ideaVO.getIdeaId())) {
@@ -120,7 +121,7 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
             inTransaction(() -> {
                 if (CommonUtil.isEmpty(ideaVO.getIdeaId())) {
                     ideaVO.setIdeaId(keyGenerate.generateTableKey("ID", "TB_IDEA", "IDEA_ID"));
-                    ideaVO.setStatusCd(resolveDefaultStatusCd());
+                    ideaVO.setStatusCd(STATUS_CD_DEFAULT);
                     ideaVO.setCreateId(userId);
                     ideaDAO.insertIdea(ideaVO);
                 } else {
@@ -180,7 +181,9 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
             throw new IllegalArgumentException("진행상태를 선택해주세요.");
         }
         String userId = SessionUtil.getUserId();
-        ideaVO.setCmtContent(CommonUtil.nullToBlank(ideaVO.getCmtContent()).trim());
+        String comment = CommonUtil.nullToBlank(ideaVO.getCmtContent()).trim();
+        validateTextLength(comment, "관리자 코멘트");
+        ideaVO.setCmtContent(IdeaRichTextSanitizer.clean(comment));
         ideaVO.setCmtUserId(userId);
         ideaVO.setModifyId(userId);
         ideaDAO.updateIdeaManage(ideaVO);
@@ -195,13 +198,21 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
 
     /* ===================== 첨부파일 ===================== */
 
-    /** 첨부파일 다운로드용 presigned URL */
-    public String selectIdeaFileDownloadUrl(String ideaFileId) throws Exception {
+    public Map<String, Object> selectIdeaFilePreview(String ideaFileId) throws Exception {
+        IdeaFileVO file = requireIdeaFile(ideaFileId);
+        FileVO preview = new FileVO();
+        preview.setFilePath(file.getFilePath());
+        preview.setFileName(file.getFileNm());
+        preview.setFileType(file.getFileType());
+        return fileService.createViewPresignedUrlForStorageObject(preview);
+    }
+
+    private IdeaFileVO requireIdeaFile(String ideaFileId) throws Exception {
         IdeaFileVO file = ideaDAO.selectIdeaFile(ideaFileId);
         if (file == null) {
             throw new IllegalArgumentException("첨부파일을 찾을 수 없습니다.");
         }
-        return fileService.createDownloadPresignedUrlStr(file.getFilePath(), file.getFileNm());
+        return file;
     }
 
     /* ===================== 내부 ===================== */
@@ -233,7 +244,7 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         if (type == null) {
             throw new IllegalArgumentException("구분을 선택해주세요.");
         }
-        if (TYPE_NM_AGENT.equals(type.getCodeNm())) {
+        if (TYPE_CD_AGENT.equals(type.getCodeId())) {
             if (CommonUtil.isEmpty(ideaVO.getAgentId())) {
                 throw new IllegalArgumentException("에이전트를 선택해주세요.");
             }
@@ -246,7 +257,20 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         if (CommonUtil.isEmpty(CommonUtil.nullToBlank(ideaVO.getContent()).trim())) {
             throw new IllegalArgumentException("내용을 입력해주세요.");
         }
+        validateTextLength(ideaVO.getContent(), "아이디어 내용");
         ideaVO.setTitle(ideaVO.getTitle().trim());
+    }
+
+    private void sanitizeStoredContent(IdeaVO idea) {
+        idea.setContent(IdeaRichTextSanitizer.cleanStored(idea.getContent()));
+        idea.setCmtContent(IdeaRichTextSanitizer.cleanStored(idea.getCmtContent()));
+    }
+
+    private void validateTextLength(String html, String fieldName) {
+        String text = HtmlUtils.htmlUnescape(HTML_TAG.matcher(html).replaceAll(""));
+        if (text.codePointCount(0, text.length()) > MAX_TEXT_LENGTH) {
+            throw new IllegalArgumentException(fieldName + " 입력은 최대 8,000자까지 입력할 수 있습니다.");
+        }
     }
 
     private void validateFiles(List<MultipartFile> files) {
@@ -255,18 +279,9 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         }
         for (MultipartFile file : files) {
             if (file.getSize() > MAX_FILE_SIZE) {
-                throw new IllegalArgumentException(file.getOriginalFilename() + ": 최대 50MB까지 첨부할 수 있습니다.");
+                throw new IllegalArgumentException(file.getOriginalFilename() + ": 최대 20MB까지 첨부할 수 있습니다.");
             }
         }
-    }
-
-    /** 진행상태 기본값 — 공통코드 '검토중', 없으면 001 */
-    private String resolveDefaultStatusCd() throws Exception {
-        return ideaDAO.selectIdeaCodeList(CODE_GRP_STATUS).stream()
-                .filter((code) -> STATUS_NM_DEFAULT.equals(code.getCodeNm()))
-                .map(IdeaCodeVO::getCodeId)
-                .findFirst()
-                .orElse(STATUS_CD_DEFAULT);
     }
 
     /** S3 업로드 후 TB_IDEA_FILE 저장 — 키: idea-file/{ideaId}/{ideaFileId}_{원본파일명}, 올린 키는 uploadedKeys에 기록 */

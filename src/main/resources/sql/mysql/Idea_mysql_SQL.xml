@@ -21,25 +21,22 @@
         </if>
     </sql>
 
+    <!-- 구분·진행상태 이름은 화면에서 공통코드(getCodes)로 채움 — 코드값만 조회 -->
     <sql id="fromIdea">
         FROM TB_IDEA I
-            LEFT JOIN TB_CODE TC ON TC.CODE_GRP_ID = 'ID000002' AND TC.CODE_ID = I.IDEA_TYPE_CD
-            LEFT JOIN TB_CODE SC ON SC.CODE_GRP_ID = 'ID000001' AND SC.CODE_ID = I.STATUS_CD
             LEFT JOIN TB_AGT A ON A.AGENT_ID = I.AGENT_ID
             LEFT JOIN TB_USER U ON U.USER_ID = I.CREATE_ID
     </sql>
 
-    <select id="selectIdeaList" parameterType="kr.teamagent.idea.service.IdeaVO" resultType="kr.teamagent.idea.service.IdeaVO">
+    <select id="selectIdeaList" parameterType="ideaVO" resultType="ideaVO">
         /* 아이디어 목록 조회 idea.selectIdeaList */
         SELECT
             I.IDEA_ID
             , I.IDEA_TYPE_CD
-            , TC.CODE_NM AS IDEA_TYPE_NM
             , I.AGENT_ID
             , A.AGENT_NM
             , I.TITLE
             , I.STATUS_CD
-            , SC.CODE_NM AS STATUS_NM
             , I.LIKE_CNT
             , CASE WHEN I.CMT_CONTENT IS NULL OR I.CMT_CONTENT = '' THEN 'N' ELSE 'Y' END AS CMT_YN
             , I.CREATE_ID
@@ -51,41 +48,42 @@
         LIMIT #{firstIndex}, #{recordCountPerPage}
     </select>
 
-    <select id="selectIdeaListCnt" parameterType="kr.teamagent.idea.service.IdeaVO" resultType="int">
+    <select id="selectIdeaListCnt" parameterType="ideaVO" resultType="int">
         /* 아이디어 목록 건수 idea.selectIdeaListCnt */
         SELECT COUNT(1)
         <include refid="fromIdea"/>
         <include refid="whereIdeaList"/>
     </select>
 
-    <select id="selectIdeaExcelList" parameterType="kr.teamagent.idea.service.IdeaVO" resultType="kr.teamagent.idea.service.IdeaVO">
+    <select id="selectIdeaExcelList" parameterType="ideaVO" resultType="ideaVO">
         /* 아이디어 엑셀용 전체 목록 (페이징 없음) idea.selectIdeaExcelList */
         SELECT
             I.IDEA_ID
-            , TC.CODE_NM AS IDEA_TYPE_NM
-            , A.AGENT_NM
+            , I.IDEA_TYPE_CD
+            , I.AGENT_ID
+            , I.STATUS_CD
             , I.TITLE
+            , I.CONTENT
             , U.USER_NM AS CREATE_NM
             , DATE_FORMAT(I.CREATE_DT, '%Y-%m-%d') AS CREATE_DT
             , I.LIKE_CNT
-            , SC.CODE_NM AS STATUS_NM
+            , I.CMT_CONTENT
+            , DATE_FORMAT(I.CMT_DT, '%Y-%m-%d %H:%i:%s') AS CMT_DT
         <include refid="fromIdea"/>
         <include refid="whereIdeaList"/>
         ORDER BY I.CREATE_DT DESC, I.IDEA_ID DESC
     </select>
 
-    <select id="selectIdeaDetail" parameterType="kr.teamagent.idea.service.IdeaVO" resultType="kr.teamagent.idea.service.IdeaVO">
+    <select id="selectIdeaDetail" parameterType="ideaVO" resultType="ideaVO">
         /* 아이디어 상세 조회 idea.selectIdeaDetail */
         SELECT
             I.IDEA_ID
             , I.IDEA_TYPE_CD
-            , TC.CODE_NM AS IDEA_TYPE_NM
             , I.AGENT_ID
             , A.AGENT_NM
             , I.TITLE
             , I.CONTENT
             , I.STATUS_CD
-            , SC.CODE_NM AS STATUS_NM
             , I.LIKE_CNT
             , CASE WHEN L.USER_ID IS NULL THEN 'N' ELSE 'Y' END AS LIKED_YN
             , I.CMT_CONTENT
@@ -103,7 +101,7 @@
             AND I.USE_YN = 'Y'
     </select>
 
-    <select id="selectIdeaFileList" parameterType="string" resultType="kr.teamagent.idea.service.IdeaVO$IdeaFileVO">
+    <select id="selectIdeaFileList" parameterType="string" resultType="ideaFileVO">
         /* 아이디어 첨부파일 목록 idea.selectIdeaFileList */
         SELECT
             IDEA_FILE_ID
@@ -117,7 +115,7 @@
         ORDER BY CREATE_DT ASC, IDEA_FILE_ID ASC
     </select>
 
-    <select id="selectIdeaFile" parameterType="string" resultType="kr.teamagent.idea.service.IdeaVO$IdeaFileVO">
+    <select id="selectIdeaFile" parameterType="string" resultType="ideaFileVO">
         /* 아이디어 첨부파일 단건 (삭제된 글의 파일은 제외) idea.selectIdeaFile */
         SELECT
             F.IDEA_FILE_ID
@@ -131,7 +129,7 @@
         WHERE F.IDEA_FILE_ID = #{ideaFileId}
     </select>
 
-    <select id="selectIdeaCodeList" parameterType="string" resultType="kr.teamagent.idea.service.IdeaVO$IdeaCodeVO">
+    <select id="selectIdeaCodeList" parameterType="string" resultType="ideaCodeVO">
         /* 아이디어 공통코드 목록 (ID000001 진행상태 / ID000002 구분) idea.selectIdeaCodeList */
         SELECT
             CODE_ID
@@ -142,17 +140,7 @@
         ORDER BY SORT_ORD ASC, CODE_ID ASC
     </select>
 
-    <select id="selectIdeaAgentList" resultType="kr.teamagent.idea.service.IdeaVO$IdeaAgentVO">
-        /* 아이디어 등록용 에이전트 목록 idea.selectIdeaAgentList */
-        SELECT
-            AGENT_ID
-            , AGENT_NM
-        FROM TB_AGT
-        WHERE USE_YN = 'Y'
-        ORDER BY SORT_ORD ASC, AGENT_NM ASC
-    </select>
-
-    <insert id="insertIdea" parameterType="kr.teamagent.idea.service.IdeaVO">
+    <insert id="insertIdea" parameterType="ideaVO">
         /* 아이디어 등록 idea.insertIdea */
         INSERT INTO TB_IDEA (
             IDEA_ID
@@ -179,7 +167,7 @@
         )
     </insert>
 
-    <update id="updateIdea" parameterType="kr.teamagent.idea.service.IdeaVO">
+    <update id="updateIdea" parameterType="ideaVO">
         /* 아이디어 수정 (본인 글 + 코멘트 전만 — 조건은 ServiceImpl에서 확인) idea.updateIdea */
         UPDATE TB_IDEA
         SET
@@ -193,7 +181,7 @@
             AND USE_YN = 'Y'
     </update>
 
-    <update id="updateIdeaManage" parameterType="kr.teamagent.idea.service.IdeaVO">
+    <update id="updateIdeaManage" parameterType="ideaVO">
         /* 관리자 진행상태·코멘트 저장 (코멘트를 비우면 삭제) idea.updateIdeaManage
            MySQL은 SET을 왼쪽부터 적용하므로 CMT_DT·CMT_USER_ID를 CMT_CONTENT보다 먼저 계산 (내용이 같으면 기존 값 유지) */
         UPDATE TB_IDEA
@@ -216,7 +204,7 @@
             AND USE_YN = 'Y'
     </update>
 
-    <update id="deleteIdea" parameterType="kr.teamagent.idea.service.IdeaVO">
+    <update id="deleteIdea" parameterType="ideaVO">
         /* 아이디어 삭제 — 논리 삭제(USE_YN = 'N'), 데이터·첨부·추천은 그대로 보관 idea.deleteIdea */
         UPDATE TB_IDEA
         SET
@@ -227,7 +215,7 @@
             AND USE_YN = 'Y'
     </update>
 
-    <insert id="insertIdeaFile" parameterType="kr.teamagent.idea.service.IdeaVO$IdeaFileVO">
+    <insert id="insertIdeaFile" parameterType="ideaFileVO">
         /* 아이디어 첨부파일 등록 idea.insertIdeaFile */
         INSERT INTO TB_IDEA_FILE (
             IDEA_FILE_ID
@@ -256,18 +244,18 @@
     </delete>
 
     <!-- 추천 (1인 1회 — TB_IDEA_LIKE 복합키) -->
-    <select id="selectIdeaLikeCnt" parameterType="kr.teamagent.idea.service.IdeaVO" resultType="int">
+    <select id="selectIdeaLikeCnt" parameterType="ideaVO" resultType="int">
         /* 추천 여부 idea.selectIdeaLikeCnt */
         SELECT COUNT(1) FROM TB_IDEA_LIKE WHERE IDEA_ID = #{ideaId} AND USER_ID = #{userId}
     </select>
 
-    <insert id="insertIdeaLike" parameterType="kr.teamagent.idea.service.IdeaVO">
+    <insert id="insertIdeaLike" parameterType="ideaVO">
         /* 추천 등록 idea.insertIdeaLike */
         INSERT INTO TB_IDEA_LIKE (IDEA_ID, USER_ID, CREATE_DT, CREATE_ID)
         VALUES (#{ideaId}, #{userId}, NOW(), #{userId})
     </insert>
 
-    <delete id="deleteIdeaLike" parameterType="kr.teamagent.idea.service.IdeaVO">
+    <delete id="deleteIdeaLike" parameterType="ideaVO">
         /* 추천 취소 idea.deleteIdeaLike */
         DELETE FROM TB_IDEA_LIKE WHERE IDEA_ID = #{ideaId} AND USER_ID = #{userId}
     </delete>

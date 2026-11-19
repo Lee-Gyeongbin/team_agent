@@ -17,13 +17,11 @@ public class IdeaVO extends CommonVO {
 
     private String ideaId;
     private String ideaTypeCd;
-    private String ideaTypeNm;
     private String agentId;
     private String agentNm;
     private String title;
     private String content;
     private String statusCd;
-    private String statusNm;
     private Integer likeCnt;
     /** 로그인 사용자의 추천 여부 (Y/N) */
     private String likedYn;
@@ -68,13 +66,5 @@ public class IdeaVO extends CommonVO {
     public static class IdeaCodeVO {
         private String codeId;
         private String codeNm;
-    }
-
-    /** 에이전트 선택 목록 (TB_AGT, USE_YN = 'Y') */
-    @Getter
-    @Setter
-    public static class IdeaAgentVO {
-        private String agentId;
-        private String agentNm;
     }
 }

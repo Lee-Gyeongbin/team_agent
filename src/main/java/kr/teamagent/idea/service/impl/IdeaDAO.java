@@ -6,7 +6,6 @@ import org.springframework.stereotype.Repository;
 
 import egovframework.com.cmm.service.impl.EgovComAbstractDAO;
 import kr.teamagent.idea.service.IdeaVO;
-import kr.teamagent.idea.service.IdeaVO.IdeaAgentVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaCodeVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaFileVO;
 
@@ -39,10 +38,6 @@ public class IdeaDAO extends EgovComAbstractDAO {
 
     public List<IdeaCodeVO> selectIdeaCodeList(String codeGrpId) throws Exception {
         return selectList("idea.selectIdeaCodeList", codeGrpId);
-    }
-
-    public List<IdeaAgentVO> selectIdeaAgentList() throws Exception {
-        return selectList("idea.selectIdeaAgentList");
     }
 
     public int insertIdea(IdeaVO ideaVO) throws Exception {
