@@ -130,6 +130,18 @@ public class CommonController extends BaseController {
 	}
 
 	/**
+	 * 로그인 사용자 메뉴 목록 조회 (조회 권한이 있는 메뉴만)
+	 * @return
+	 * @throws Exception
+	 */
+	@RequestMapping("/userMenuList.do")
+	public ModelAndView userMenuList() throws Exception {
+		HashMap<String, Object> resultMap = new LinkedHashMap<>();
+		resultMap.put("list", commonService.selectUserMenuTreeList());
+		return new ModelAndView("jsonView", resultMap);
+	}
+
+	/**
 	 * 테마 옵션 조회
 	 * @return
 	 * @throws Exception

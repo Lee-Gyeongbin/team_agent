@@ -1,0 +1,306 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="roleManage">
+
+    <!-- ===== TB_ROLE_GRP 권한 그룹 ===== -->
+    <select id="selectRoleList" resultType="roleManageVO">
+        /* 권한 그룹 목록 조회 roleManage.selectRoleList */
+        SELECT
+            ROLE_ID
+            , ROLE_NAME
+            , DESCRIPTION
+            , USE_YN
+            , DEFAULT_YN
+            , CREATE_DT
+            , MODIFY_DT
+        FROM TB_ROLE_GRP
+        ORDER BY CREATE_DT ASC, ROLE_ID ASC
+    </select>
+
+    <select id="selectRole" parameterType="String" resultType="roleManageVO">
+        /* 권한 그룹 단건 조회 roleManage.selectRole */
+        SELECT
+            ROLE_ID
+            , ROLE_NAME
+            , DESCRIPTION
+            , USE_YN
+            , DEFAULT_YN
+            , CREATE_DT
+            , MODIFY_DT
+        FROM TB_ROLE_GRP
+        WHERE ROLE_ID = #{roleId}
+    </select>
+
+    <select id="selectRoleCount" resultType="int">
+        /* 권한 그룹 건수 조회 roleManage.selectRoleCount */
+        SELECT COUNT(1)
+        FROM TB_ROLE_GRP
+    </select>
+
+    <select id="selectRoleNameCount" parameterType="roleManageVO" resultType="int">
+        /* 권한명 중복 건수 조회 (본인 제외) roleManage.selectRoleNameCount */
+        SELECT COUNT(1)
+        FROM TB_ROLE_GRP
+        WHERE ROLE_NAME = #{roleName}
+        <if test="roleId != null and roleId != ''">
+            AND ROLE_ID != #{roleId}
+        </if>
+    </select>
+
+    <select id="selectFallbackRoleId" parameterType="String" resultType="String">
+        /* 이동 대상 기본 권한 그룹 ID 조회 (기본 적용 그룹 우선, 없으면 사용 중인 그룹) roleManage.selectFallbackRoleId */
+        SELECT ROLE_ID
+        FROM TB_ROLE_GRP
+        WHERE USE_YN = 'Y'
+            AND ROLE_ID != #{roleId}
+        ORDER BY DEFAULT_YN DESC, CREATE_DT ASC, ROLE_ID ASC
+        LIMIT 1
+    </select>
+
+    <insert id="insertRole" parameterType="roleManageVO">
+        /* 권한 그룹 등록 roleManage.insertRole */
+        INSERT INTO TB_ROLE_GRP (
+            ROLE_ID
+            , ROLE_NAME
+            , DESCRIPTION
+            , USE_YN
+            , DEFAULT_YN
+            , CREATE_DT
+            , CREATE_ID
+        )
+        VALUES (
+            #{roleId}
+            , #{roleName}
+            , #{description}
+            , #{useYn}
+            , #{defaultYn}
+            , NOW()
+            , #{createId}
+        )
+    </insert>
+
+    <update id="updateRole" parameterType="roleManageVO">
+        /* 권한 그룹 수정 roleManage.updateRole */
+        UPDATE TB_ROLE_GRP
+        SET
+            ROLE_NAME = #{roleName}
+            , DESCRIPTION = #{description}
+            , USE_YN = #{useYn}
+            , DEFAULT_YN = #{defaultYn}
+            , MODIFY_DT = NOW()
+            , MODIFY_ID = #{modifyId}
+        WHERE ROLE_ID = #{roleId}
+    </update>
+
+    <update id="resetDefaultRole" parameterType="roleManageVO">
+        /* 다른 권한 그룹의 기본 적용 해제 roleManage.resetDefaultRole */
+        UPDATE TB_ROLE_GRP
+        SET
+            DEFAULT_YN = 'N'
+            , MODIFY_DT = NOW()
+            , MODIFY_ID = #{modifyId}
+        WHERE DEFAULT_YN = 'Y'
+            AND ROLE_ID != #{roleId}
+    </update>
+
+    <delete id="deleteRole" parameterType="String">
+        /* 권한 그룹 삭제 roleManage.deleteRole */
+        DELETE FROM TB_ROLE_GRP
+        WHERE ROLE_ID = #{roleId}
+    </delete>
+
+    <!-- ===== TB_ROLE_MENU 그룹별 메뉴 권한 ===== -->
+    <select id="selectRoleMenuList" parameterType="String" resultType="kr.teamagent.rolemanage.service.RoleManageVO$RoleMenuVO">
+        /* 그룹별 메뉴 권한 목록 조회 (전체 메뉴 + 부여 현황, 행 없으면 N) roleManage.selectRoleMenuList */
+        SELECT
+            M.MENU_ID
+            , M.MENU_NAME
+            , M.PARN_MENU_ID
+            , M.MENU_LEVEL
+            , M.SORT_ORD
+            , M.IS_LEAF
+            , IFNULL(RM.READ_YN, 'N') AS READ_YN
+            , IFNULL(RM.FUNC_YN, 'N') AS FUNC_YN
+        FROM TB_MENU M
+            LEFT JOIN TB_ROLE_MENU RM
+                ON RM.MENU_ID = M.MENU_ID
+                AND RM.ROLE_ID = #{roleId}
+        WHERE M.USE_YN = 'Y'
+        ORDER BY M.MENU_LEVEL ASC, M.SORT_ORD ASC, M.MENU_ID ASC
+    </select>
+
+    <delete id="deleteRoleMenuByRoleId" parameterType="String">
+        /* 그룹별 메뉴 권한 삭제 roleManage.deleteRoleMenuByRoleId */
+        DELETE FROM TB_ROLE_MENU
+        WHERE ROLE_ID = #{roleId}
+    </delete>
+
+    <insert id="insertRoleMenu" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleMenuVO">
+        /* 그룹별 메뉴 권한 등록 (사용 중인 최하위 메뉴만) roleManage.insertRoleMenu */
+        INSERT INTO TB_ROLE_MENU (
+            ROLE_ID
+            , MENU_ID
+            , READ_YN
+            , FUNC_YN
+            , CREATE_DT
+            , CREATE_ID
+        )
+        SELECT
+            #{roleId}
+            , M.MENU_ID
+            , #{readYn}
+            , #{funcYn}
+            , NOW()
+            , #{createId}
+        FROM TB_MENU M
+        WHERE M.MENU_ID = #{menuId}
+            AND M.IS_LEAF = 'Y'
+            AND M.USE_YN = 'Y'
+    </insert>
+
+    <!-- ===== TB_USER_ROLE 사용자-권한 지정 ===== -->
+    <select id="selectRoleUserList" parameterType="String" resultType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
+        /* 권한 그룹 사용자 목록 조회 roleManage.selectRoleUserList */
+        SELECT
+            U.USER_ID
+            , U.USER_NM
+            , U.EMAIL
+            , U.ORG_ID
+            , O.ORG_NM
+            , UR.ROLE_ID
+        FROM TB_USER_ROLE UR
+            INNER JOIN TB_USER U
+                ON U.USER_ID = UR.USER_ID
+            LEFT JOIN TB_ORG O
+                ON O.ORG_ID = U.ORG_ID
+        WHERE UR.ROLE_ID = #{roleId}
+            AND U.USE_YN = 'Y'
+        ORDER BY U.USER_NM ASC, U.USER_ID ASC
+    </select>
+
+    <select id="selectOrgUserList" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO" resultType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
+        /* 조직(하위 조직 포함) 사용자 목록 조회 roleManage.selectOrgUserList */
+        WITH RECURSIVE ORG_TREE AS (
+            SELECT
+                ORG_ID
+            FROM TB_ORG
+            WHERE ORG_ID = #{orgId}
+                AND USE_YN = 'Y'
+            UNION ALL
+            SELECT
+                C.ORG_ID
+            FROM TB_ORG C
+                INNER JOIN ORG_TREE P
+                    ON C.PARENT_ORG_ID = P.ORG_ID
+            WHERE C.USE_YN = 'Y'
+        )
+        SELECT
+            U.USER_ID
+            , U.USER_NM
+            , U.EMAIL
+            , U.ORG_ID
+            , O.ORG_NM
+        FROM TB_USER U
+            INNER JOIN ORG_TREE T
+                ON T.ORG_ID = U.ORG_ID
+            LEFT JOIN TB_ORG O
+                ON O.ORG_ID = U.ORG_ID
+        WHERE U.USE_YN = 'Y'
+        ORDER BY U.USER_NM ASC, U.USER_ID ASC
+    </select>
+
+    <select id="selectUserRoleList" resultType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
+        /* 사용자별 권한 지정 목록 조회 roleManage.selectUserRoleList */
+        SELECT
+            U.USER_ID
+            , U.USER_NM
+            , U.EMAIL
+            , U.ORG_ID
+            , O.ORG_NM
+            , UR.ROLE_ID
+            , R.ROLE_NAME
+        FROM TB_USER U
+            LEFT JOIN TB_ORG O
+                ON O.ORG_ID = U.ORG_ID
+            LEFT JOIN TB_USER_ROLE UR
+                ON UR.USER_ID = U.USER_ID
+            LEFT JOIN TB_ROLE_GRP R
+                ON R.ROLE_ID = UR.ROLE_ID
+        WHERE U.USE_YN = 'Y'
+        ORDER BY U.USER_NM ASC, U.USER_ID ASC
+    </select>
+
+    <delete id="deleteUserRoleByUserId" parameterType="String">
+        /* 사용자의 권한 지정 전체 삭제 roleManage.deleteUserRoleByUserId */
+        DELETE FROM TB_USER_ROLE
+        WHERE USER_ID = #{userId}
+    </delete>
+
+    <delete id="deleteUserRole" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
+        /* 사용자의 특정 권한 그룹 지정 삭제 roleManage.deleteUserRole */
+        DELETE FROM TB_USER_ROLE
+        WHERE USER_ID = #{userId}
+            AND ROLE_ID = #{roleId}
+    </delete>
+
+    <delete id="deleteUserRoleByRoleId" parameterType="String">
+        /* 권한 그룹 소속 사용자 지정 전체 삭제 roleManage.deleteUserRoleByRoleId */
+        DELETE FROM TB_USER_ROLE
+        WHERE ROLE_ID = #{roleId}
+    </delete>
+
+    <insert id="insertUserRole" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
+        /* 사용자 권한 지정 등록 (존재하는 사용자만) roleManage.insertUserRole */
+        INSERT INTO TB_USER_ROLE (
+            USER_ID
+            , ROLE_ID
+            , CREATE_DT
+            , CREATE_ID
+        )
+        SELECT
+            U.USER_ID
+            , #{roleId}
+            , NOW()
+            , #{createId}
+        FROM TB_USER U
+        WHERE U.USER_ID = #{userId}
+    </insert>
+
+    <insert id="insertDefaultUserRole" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
+        /* 신규 사용자에게 기본 적용 권한 그룹 지정 roleManage.insertDefaultUserRole */
+        INSERT INTO TB_USER_ROLE (
+            USER_ID
+            , ROLE_ID
+            , CREATE_DT
+            , CREATE_ID
+        )
+        SELECT
+            #{userId}
+            , R.ROLE_ID
+            , NOW()
+            , #{createId}
+        FROM TB_ROLE_GRP R
+        WHERE R.DEFAULT_YN = 'Y'
+            AND R.USE_YN = 'Y'
+        ORDER BY R.CREATE_DT ASC, R.ROLE_ID ASC
+        LIMIT 1
+    </insert>
+
+    <insert id="insertUserRoleFromRole" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
+        /* 한 권한 그룹의 사용자를 다른 그룹으로 복사 지정 (이미 지정된 사용자는 제외) roleManage.insertUserRoleFromRole */
+        INSERT IGNORE INTO TB_USER_ROLE (
+            USER_ID
+            , ROLE_ID
+            , CREATE_DT
+            , CREATE_ID
+        )
+        SELECT
+            UR.USER_ID
+            , #{roleId}
+            , NOW()
+            , #{createId}
+        FROM TB_USER_ROLE UR
+        WHERE UR.ROLE_ID = #{fromRoleId}
+    </insert>
+
+</mapper>

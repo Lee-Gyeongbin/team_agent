@@ -26,9 +26,7 @@
         <typeAlias alias="promptVO"                          type="kr.teamagent.prompt.service.PromptVO"/>
         <typeAlias alias="userManageVO"                      type="kr.teamagent.usermanage.service.UserManageVO"/>
         <typeAlias alias="menuManageVO"                      type="kr.teamagent.menumanage.service.MenuManageVO"/>
-        <!-- [로컬 임시 주석 2026-11-19] RoleManageVO 클래스 미커밋으로 기동 실패 — 클래스 반영되면 되돌릴 것
         <typeAlias alias="roleManageVO"                      type="kr.teamagent.rolemanage.service.RoleManageVO"/>
-        -->
         <typeAlias alias="chatGuideVO"                       type="kr.teamagent.chatguide.service.ChatGuideVO"/>
         <typeAlias alias="orgManageVO"                       type="kr.teamagent.orgmanage.service.OrgManageVO"/>
         <typeAlias alias="fileVO"                            type="kr.teamagent.common.util.service.FileVO"/>

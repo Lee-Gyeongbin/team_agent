@@ -40,6 +40,27 @@
         AND USER_ID = #{userId}
     </select>
 
+    <!-- 사용자의 메뉴별 권한 (권한그룹이 여러 개면 하나라도 Y이면 Y) -->
+    <select id="selectUserMenuPermList" parameterType="string" resultType="kr.teamagent.common.CommonVO$MenuPermVO">
+        /* 사용자 메뉴별 권한 목록 조회 common.selectUserMenuPermList */
+        SELECT
+            M.MENU_ID
+            , M.SRC_PATH
+            , MAX(RM.READ_YN) AS READ_YN
+            , MAX(RM.FUNC_YN) AS FUNC_YN
+        FROM TB_USER_ROLE UR
+            INNER JOIN TB_ROLE_GRP G
+                ON G.ROLE_ID = UR.ROLE_ID
+                AND G.USE_YN = 'Y'
+            INNER JOIN TB_ROLE_MENU RM
+                ON RM.ROLE_ID = UR.ROLE_ID
+            INNER JOIN TB_MENU M
+                ON M.MENU_ID = RM.MENU_ID
+                AND M.USE_YN = 'Y'
+        WHERE UR.USER_ID = #{userId}
+        GROUP BY M.MENU_ID, M.SRC_PATH
+    </select>
+
     <!-- TB_MENU 메뉴 트리 목록 조회 (재귀 CTE) -->
     <select id="selectMenuTreeList" resultType="egovMap">
         /* 메뉴 트리 목록 조회 common.selectMenuTreeList */
