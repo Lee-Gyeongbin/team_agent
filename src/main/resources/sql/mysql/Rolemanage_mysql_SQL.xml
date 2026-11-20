@@ -227,7 +227,14 @@
             LEFT JOIN TB_ROLE_GRP R
                 ON R.ROLE_ID = UR.ROLE_ID
         WHERE U.USE_YN = 'Y'
-        ORDER BY U.USER_NM ASC, U.USER_ID ASC
+        ORDER BY U.USER_NM ASC, U.USER_ID ASC, R.ROLE_NAME ASC
+    </select>
+
+    <select id="selectUserRoleCount" parameterType="String" resultType="int">
+        /* 사용자의 권한 그룹 지정 건수 조회 roleManage.selectUserRoleCount */
+        SELECT COUNT(1)
+        FROM TB_USER_ROLE
+        WHERE USER_ID = #{userId}
     </select>
 
     <delete id="deleteUserRoleByUserId" parameterType="String">
@@ -287,7 +294,7 @@
     </insert>
 
     <insert id="insertUserRoleFromRole" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
-        /* 한 권한 그룹의 사용자를 다른 그룹으로 복사 지정 (이미 지정된 사용자는 제외) roleManage.insertUserRoleFromRole */
+        /* 한 권한 그룹의 사용자를 다른 그룹으로 복사 지정 (다른 그룹이 있거나 이미 지정된 사용자는 제외) roleManage.insertUserRoleFromRole */
         INSERT IGNORE INTO TB_USER_ROLE (
             USER_ID
             , ROLE_ID
@@ -301,6 +308,12 @@
             , #{createId}
         FROM TB_USER_ROLE UR
         WHERE UR.ROLE_ID = #{fromRoleId}
+            AND NOT EXISTS (
+                SELECT 1
+                FROM TB_USER_ROLE OT
+                WHERE OT.USER_ID = UR.USER_ID
+                    AND OT.ROLE_ID != #{fromRoleId}
+            )
     </insert>
 
 </mapper>

@@ -18,7 +18,7 @@ public @interface RequirePermission {
     /** 화면 경로 (TB_MENU.SRC_PATH) */
     String menu();
 
-    /** READ = 조회 권한, FUNC = 기능(등록·수정·삭제·엑셀) 권한 */
+    /** READ = 조회 권한(엑셀 다운로드 포함), FUNC = 기능(등록·수정·삭제·엑셀 업로드) 권한 */
     Type type();
 
     enum Type {

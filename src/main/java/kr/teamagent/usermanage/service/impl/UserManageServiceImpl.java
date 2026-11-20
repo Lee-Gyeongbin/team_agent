@@ -56,6 +56,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     private static final int USE_YN_COL_IDX = 5;
     private static final int ORG_LIST_COL_IDX = 7;
     private static final String ORG_LIST_NAME = "UserOrgNmList";
+    private static final String ORG_PATH_SEPARATOR = " > ";
     private static final String FAIL_TYPE_DUPLICATE_USER_ID = "DUPLICATE_USER_ID";
     private static final String FAIL_TYPE_DUPLICATE_EMAIL = "DUPLICATE_EMAIL";
     private static final String FAIL_TYPE_FORMAT = "FORMAT";
@@ -76,7 +77,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
     private static final String USER_EXCEL_GUIDE_TEXT =
             "※ * 표시된 항목은 필수 입력값입니다.\n"
                     + "※ 사용자ID가 기존에 있으면 수정, 없으면 신규 등록됩니다. 신규 등록 시 초기 비밀번호는 12345678 입니다.\n"
-                    + "  소속조직명(선택), 사용여부(Y/N) 만 입력하세요. 계정상태는 참고용입니다.";
+                    + "  소속조직명(중복 시 '상위 > 하위', 목록 선택), 사용여부(Y/N) 만 입력하세요. 계정상태는 참고용입니다.";
 
     @Autowired
     private UserManageDAO userManageDAO;
@@ -458,28 +459,58 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
         return userManageDAO.resetPassword(userManageVO);
     }
 
+    /**
+     * 조직 표시명 맵 생성. 조직명이 중복되면 상위조직을 붙여 "상위 > 하위"로 구분한다.
+     */
     private ActiveOrgMaps buildActiveOrgMaps() throws Exception {
+        List<OrgManageVO> orgList = orgManageDAO.selectOrgList(new OrgManageVO());
+        Map<String, OrgManageVO> orgById = new HashMap<>();
+        Map<String, Integer> nameCount = new HashMap<>();
+        for (OrgManageVO vo : orgList) {
+            if (vo.getOrgId() != null) {
+                orgById.put(vo.getOrgId(), vo);
+            }
+            String orgNm = CommonUtil.nullToBlank(vo.getOrgNm()).trim();
+            if (!orgNm.isEmpty()) {
+                nameCount.merge(orgNm, 1, Integer::sum);
+            }
+        }
+
         List<String> orgNames = new ArrayList<>();
         Map<String, String> orgNameById = new HashMap<>();
         Map<String, String> orgIdByName = new HashMap<>();
         Set<String> seenNames = new HashSet<>();
-        for (OrgManageVO vo : orgManageDAO.selectOrgList(new OrgManageVO())) {
-            if (vo.getOrgId() != null) {
-                orgNameById.put(vo.getOrgId(), CommonUtil.nullToBlank(vo.getOrgNm()));
-            }
-            if (vo.getOrgNm() == null) {
-                continue;
-            }
-            String orgNm = vo.getOrgNm().trim();
+        for (OrgManageVO vo : orgList) {
+            String orgNm = CommonUtil.nullToBlank(vo.getOrgNm()).trim();
             if (orgNm.isEmpty()) {
+                if (vo.getOrgId() != null) {
+                    orgNameById.put(vo.getOrgId(), "");
+                }
                 continue;
             }
-            orgManageService.registerOrgName(orgIdByName, orgNm, vo.getOrgId());
-            if (seenNames.add(orgNm)) {
-                orgNames.add(orgNm);
+            String label = nameCount.get(orgNm) > 1 ? buildOrgPathLabel(vo, orgById) : orgNm;
+            if (vo.getOrgId() != null) {
+                orgNameById.put(vo.getOrgId(), label);
+            }
+            orgManageService.registerOrgName(orgIdByName, label, vo.getOrgId());
+            if (seenNames.add(label)) {
+                orgNames.add(label);
             }
         }
         return new ActiveOrgMaps(orgNames, orgNameById, orgIdByName);
+    }
+
+    /** 최상위부터 해당 조직까지 " > "로 연결한 경로명. 비활성 상위(목록에 없음)에서 멈춘다. */
+    private static String buildOrgPathLabel(OrgManageVO vo, Map<String, OrgManageVO> orgById) {
+        List<String> path = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        OrgManageVO cur = vo;
+        while (cur != null && visited.add(cur.getOrgId())) {
+            path.add(0, CommonUtil.nullToBlank(cur.getOrgNm()).trim());
+            String parentId = CommonUtil.nullToBlank(cur.getParentOrgId()).trim();
+            cur = parentId.isEmpty() ? null : orgById.get(parentId);
+        }
+        return String.join(ORG_PATH_SEPARATOR, path);
     }
 
     private static boolean isEmptyUserExcelRow(String userId, String userNm, String email, String phone,

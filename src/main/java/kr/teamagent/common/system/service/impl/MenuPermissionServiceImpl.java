@@ -50,7 +50,7 @@ public class MenuPermissionServiceImpl extends EgovAbstractServiceImpl {
         return perm != null && "Y".equals(perm.getReadYn());
     }
 
-    /** 화면 경로 기준 기능(등록·수정·삭제·엑셀) 권한 */
+    /** 화면 경로 기준 기능(등록·수정·삭제·엑셀 업로드) 권한 */
     public boolean canFunc(String srcPath) throws Exception {
         CommonVO.MenuPermVO perm = findBySrcPath(srcPath);
         return perm != null && "Y".equals(perm.getFuncYn());
