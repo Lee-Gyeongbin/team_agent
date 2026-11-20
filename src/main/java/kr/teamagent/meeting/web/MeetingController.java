@@ -370,6 +370,24 @@ public class MeetingController extends BaseController {
     }
 
     /**
+     * 녹음 일시정지 (마지막 구간 백업 조각 업로드 후 호출)
+     * POST /api/meeting/{meetingId}/pause
+     */
+    @RequestMapping(value = "/meeting/{meetingId}/pause", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> pauseMeeting(@PathVariable("meetingId") Long meetingId) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.pauseMeeting(meetingId);
+        } catch (Exception e) {
+            log.error("pauseMeeting error - meetingId: {}", meetingId, e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
      * 녹음 중 페이지 이탈 → 비정상종료 표시 (탭 닫기는 pagehide sendBeacon, 화면 내 이동은 fetch)
      * POST /api/meeting/{meetingId}/cancel
      */
