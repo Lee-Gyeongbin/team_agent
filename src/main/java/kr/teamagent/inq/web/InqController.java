@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import kr.teamagent.common.permission.RequirePermission;
 import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.inq.service.InqVO;
@@ -27,6 +28,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의하기 화면 공통 정보 — 구분·처리상태 코드와 정책값 (사용자) */
     @RequestMapping(value = "/codeInfo.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> codeInfo() {
         try {
@@ -41,6 +43,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 목록 조회 (사용자) */
     @RequestMapping(value = "/list.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> list(@RequestBody InqVO searchVO) {
         try {
@@ -55,6 +58,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 상세 조회 (사용자) */
     @RequestMapping(value = "/detail.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> detail(@RequestBody InqVO searchVO) {
         try {
@@ -69,6 +73,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 등록/수정 (사용자) */
     @RequestMapping(value = "/save.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> save(@RequestBody InqVO dataVO) {
         try {
@@ -83,6 +88,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 삭제 (사용자) */
     @RequestMapping(value = "/delete.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> delete(@RequestBody InqVO dataVO) {
         try {
@@ -96,6 +102,7 @@ public class InqController extends BaseController<Object> {
 
     /* 답글·댓글 등록/수정 (사용자) */
     @RequestMapping(value = "/saveAnsr.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> saveAnsr(@RequestBody InqVO.AnsrVO dataVO) {
         try {
@@ -109,6 +116,7 @@ public class InqController extends BaseController<Object> {
 
     /* 답글·댓글 삭제 (사용자) */
     @RequestMapping(value = "/deleteAnsr.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> deleteAnsr(@RequestBody InqVO.AnsrVO dataVO) {
         try {
@@ -122,6 +130,7 @@ public class InqController extends BaseController<Object> {
 
     /* 첨부파일 업로드 URL 발급 (사용자) */
     @RequestMapping(value = "/createFileUploadUrl.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> createFileUploadUrl(@RequestBody InqVO.FileVO dataVO) {
         try {
@@ -136,6 +145,7 @@ public class InqController extends BaseController<Object> {
 
     /* 첨부파일 다운로드 URL 발급 (사용자) */
     @RequestMapping(value = "/downloadFile.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> downloadFile(@RequestBody InqVO.FileVO dataVO) {
         try {
@@ -150,6 +160,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의하기 관리 화면 공통 정보 — 구분·처리상태 코드와 정책값 (관리자) */
     @RequestMapping(value = "/manage/codeInfo.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> manageCodeInfo() {
         try {
@@ -164,6 +175,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 목록 조회 (관리자) */
     @RequestMapping(value = "/manage/list.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> manageList(@RequestBody InqVO searchVO) {
         try {
@@ -178,6 +190,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 상세 조회 (관리자) */
     @RequestMapping(value = "/manage/detail.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> manageDetail(@RequestBody InqVO searchVO) {
         try {
@@ -192,12 +205,14 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 엑셀 다운로드 (관리자, 현재 조회 조건·페이징 없음) */
     @RequestMapping(value = "/manage/downloadExcel.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.READ)
     public void manageDownloadExcel(@RequestBody InqVO searchVO, HttpServletResponse response) throws Exception {
         inqService.downloadInqExcel(searchVO, response);
     }
 
     /* 문의사항 삭제 (관리자) */
     @RequestMapping(value = "/manage/delete.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> manageDelete(@RequestBody InqVO dataVO) {
         try {
@@ -211,6 +226,7 @@ public class InqController extends BaseController<Object> {
 
     /* 문의사항 처리상태 변경 (관리자) */
     @RequestMapping(value = "/manage/saveStatus.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> manageSaveStatus(@RequestBody InqVO dataVO) {
         try {
@@ -224,6 +240,7 @@ public class InqController extends BaseController<Object> {
 
     /* 관리자 답변·답글·댓글 등록/수정 (관리자) */
     @RequestMapping(value = "/manage/saveAnsr.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> manageSaveAnsr(@RequestBody InqVO.AnsrVO dataVO) {
         try {
@@ -237,6 +254,7 @@ public class InqController extends BaseController<Object> {
 
     /* 관리자 답변·답글·댓글 삭제 (관리자) */
     @RequestMapping(value = "/manage/deleteAnsr.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.FUNC)
     @ResponseBody
     public Map<String, Object> manageDeleteAnsr(@RequestBody InqVO.AnsrVO dataVO) {
         try {
@@ -250,6 +268,7 @@ public class InqController extends BaseController<Object> {
 
     /* 첨부파일 다운로드 URL 발급 (관리자) */
     @RequestMapping(value = "/manage/downloadFile.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.READ)
     @ResponseBody
     public Map<String, Object> manageDownloadFile(@RequestBody InqVO.FileVO dataVO) {
         try {
