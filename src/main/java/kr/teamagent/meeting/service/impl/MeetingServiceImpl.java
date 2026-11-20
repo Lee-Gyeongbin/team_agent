@@ -1,25 +1,19 @@
 package kr.teamagent.meeting.service.impl;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.PrintWriter;
 import java.net.URLEncoder;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -45,7 +39,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectListing;
 import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -57,10 +50,7 @@ import kr.teamagent.common.util.CommonUtil;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.service.FileVO;
-import kr.teamagent.library.service.LibraryVO;
-import kr.teamagent.library.service.impl.LibraryDAO;
 import kr.teamagent.meeting.service.MeetingVO;
-import kr.teamagent.tmpl.service.impl.TmplHtmlRenderService;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -69,8 +59,9 @@ import okhttp3.RequestBody;
 public class MeetingServiceImpl extends EgovAbstractServiceImpl {
 
     private static final Logger logger = LoggerFactory.getLogger(MeetingServiceImpl.class);
-    private static final String MINUTES_TMPL_ID = "TM000005";
-    private static final ExecutorService INFOGRAPHIC_EXECUTOR = Executors.newFixedThreadPool(3);
+
+    // [인포그래픽 일시 중지 2026-11-19] 다시 쓰려면 이 블록 주석 해제
+    // private static final ExecutorService INFOGRAPHIC_EXECUTOR = Executors.newFixedThreadPool(3);
     private static final ExecutorService MEETING_EXECUTOR = Executors.newFixedThreadPool(5);
 
     /** AI API 응답에서 토큰 수를 추출한다. Number·String 모두 처리하며 파싱 실패 시 0 반환. */
@@ -87,13 +78,10 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     private MeetingDAO meetingDAO;
 
     @Autowired
-    private LibraryDAO libraryDAO;
+    private MeetingMinutesProcessor minutesProcessor;
 
     @Autowired
     private AmazonS3 amazonS3;
-
-    @Autowired
-    private TmplHtmlRenderService tmplHtmlRenderService;
 
     @Autowired
     private FileServiceImpl fileService;
@@ -128,7 +116,45 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         } else {
             result.put("integrationSources", new ArrayList<>());
         }
+
+        // 녹음 백업 조각 번호 목록 - 비정상 종료 복구 가능 여부 / 중간 누락 구간 안내 / 이어서 녹음할 때 다음 조각 번호
+        // (비정상 종료인데 백업이 없어도 표시를 해제하지 않음 - 회의 종료 때 내려받은 누락 구간 파일을 첨부할 수 있게)
+        List<Integer> backupIndexes = listBackupIndexes(searchVO.getMeetingId());
+        result.put("backupIndexes", backupIndexes);
+        result.put("backupCnt", backupIndexes.size());
+        result.put("backupNextIndex", backupIndexes.isEmpty() ? 0 : backupIndexes.get(backupIndexes.size() - 1) + 1);
         return result;
+    }
+
+    /** 녹음 백업 조각 S3 경로 (meeting-audio/{meetingId}/backup/backup_N.webm) */
+    private String getBackupPrefix(Long meetingId) {
+        return "meeting-audio/" + meetingId + "/backup/";
+    }
+
+    /** 백업 조각 파일명(backup_N.webm)에서 번호 추출 */
+    private static final java.util.regex.Pattern BACKUP_KEY_PATTERN = java.util.regex.Pattern.compile("backup_(\\d+)\\.webm$");
+
+    /**
+     * 녹음 백업 조각 번호 목록 (오름차순, backup_N.webm 의 N)
+     * - S3 조회 실패 시 빈 목록 (상세 조회 자체는 막지 않음)
+     */
+    private List<Integer> listBackupIndexes(Long meetingId) {
+        List<Integer> indexes = new ArrayList<>();
+        if (meetingId == null) return indexes;
+        try {
+            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
+            String prefix = getBackupPrefix(meetingId);
+            for (S3ObjectSummary s : amazonS3.listObjects(bucket, prefix).getObjectSummaries()) {
+                java.util.regex.Matcher m = BACKUP_KEY_PATTERN.matcher(s.getKey());
+                if (m.find()) {
+                    indexes.add(Integer.valueOf(m.group(1)));
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[listBackupIndexes] 백업 오디오 조회 실패 - meetingId: {}", meetingId, e);
+        }
+        java.util.Collections.sort(indexes);
+        return indexes;
     }
 
     /** 회의 시작 - 세션 생성 */
@@ -204,8 +230,16 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     public Map<String, Object> finishMeetingWithAudio(MeetingVO dataVO, MultipartFile audioFile) throws Exception {
         Map<String, Object> result = new HashMap<>();
 
-        // 0. 기존 데이터 정리 (재첨부 시 이전 오디오·회의록·인포그래픽 삭제)
+        // 화자 분리 · 회의록 생성 중에는 오디오를 바꾸지 않음 (다른 탭 · 새로고침 후 중복 실행 방지)
+        if (minutesProcessor.isProcessing(dataVO.getMeetingId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", MeetingMinutesProcessor.PROCESSING_MSG);
+            return result;
+        }
+
+        // 0. 기존 데이터 정리 (재첨부 시 이전 오디오·회의록·인포그래픽 삭제) + 지난 처리 상태 표시 제거
         cleanupPreviousProcessingData(dataVO);
+        minutesProcessor.clearStatus(dataVO.getMeetingId());
 
         // 1. S3 스토리지에 오디오 업로드
         String objectKey;
@@ -231,6 +265,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         dataVO.setFileSize(audioFile.getSize());
         meetingDAO.insertMeetingAudio(dataVO);
         logger.info("[finishMeetingWithAudio] 오디오 레코드 저장 완료 - meetingId: {}, key: {}", dataVO.getMeetingId(), objectKey);
+
+        // 녹음 정상 종료(또는 다른 오디오로 대체) - heartbeat·비정상종료 해제
+        meetingDAO.updateMeetingRecordEnd(dataVO);
 
         // 3. 백업 파일 정리 (정상 종료이므로 backup/ 경로 파일 전체 삭제)
         deleteBackupFiles(dataVO.getMeetingId());
@@ -266,20 +303,29 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 오디오 재첨부 시 이전 처리 데이터 정리
-     * - S3 기존 오디오 파일 삭제
+     * 오디오 재첨부·복구 시 이전 처리 데이터 정리
+     * - S3 기존 오디오 파일 삭제 (TB_MEETING_AUDIO 에 등록된 파일만 - 음성 등록·백업 조각은 건드리지 않음)
      * - TB_MEETING_AUDIO, TB_MEETING_MINUTES, TB_MEETING_INFOGRAPHIC 삭제
      * - TB_MEETING_SPEAKER는 유지 (createMeeting에서 사전등록한 화자 보존)
      */
     private void cleanupPreviousProcessingData(MeetingVO dataVO) {
         try {
-            MeetingVO existingAudio = meetingDAO.selectMeetingAudio(dataVO);
-            if (existingAudio == null) return; // 첫 업로드 — 정리 불필요
+            List<MeetingVO> existingAudios = meetingDAO.selectMeetingAudioList(dataVO);
+            if (existingAudios == null || existingAudios.isEmpty()) return; // 첫 업로드 — 정리 불필요
 
             logger.info("[cleanupPreviousProcessingData] 기존 데이터 정리 시작 - meetingId: {}", dataVO.getMeetingId());
 
-            // 1. S3 기존 오디오 파일 삭제 (메인 + 백업 전체)
-            deleteMeetingAudioFiles(dataVO.getMeetingId());
+            // 1. S3 기존 오디오 파일 삭제
+            //    (예전에는 meeting-audio/{id}/ 전체를 지워 음성 등록 파일까지 사라졌음 → 등록된 오디오 키만 삭제)
+            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
+            for (MeetingVO audio : existingAudios) {
+                if (CommonUtil.isEmpty(audio.getFilePath())) continue;
+                try {
+                    amazonS3.deleteObject(bucket, audio.getFilePath());
+                } catch (Exception e) {
+                    logger.warn("[cleanupPreviousProcessingData] 이전 오디오 S3 삭제 실패 - key: {}", audio.getFilePath(), e);
+                }
+            }
 
             // 2. TB_MEETING_AUDIO 삭제
             int audioDeleted = meetingDAO.deleteAudioByMeetingId(dataVO);
@@ -342,6 +388,14 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         emitter.onError(e -> logger.warn("회의 처리 SSE error - meetingId={}, message={}", meetingId, e.getMessage()));
         emitter.onCompletion(() -> logger.info("회의 처리 SSE complete - meetingId={}", meetingId));
 
+        // 이미 화자 분리 · 회의록 생성 중이면 시작하지 않음 (다른 탭 · 새로고침 후 중복 실행 방지)
+        // 상태는 처리기에 남겨 서버 재기동 시 "화자 분리가 중단되었습니다" 판정에 쓴다 (CMB 와 같음)
+        if (!minutesProcessor.markDiarizeStart(meetingId)) {
+            sendSseEvent(emitter, "error", buildSseErrorData(MeetingMinutesProcessor.PROCESSING_MSG));
+            emitter.complete();
+            return emitter;
+        }
+
         // SSE 응답 헤더가 클라이언트에 flush되기 전에 executor가 write를 시도하는 레이스 컨디션 방지
         // connected 이벤트로 연결을 먼저 확정한 뒤 백그라운드 처리 시작
         sendSseEvent(emitter, "connected", "{}");
@@ -349,6 +403,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         MEETING_EXECUTOR.execute(() -> {
             MeetingVO dataVO = new MeetingVO();
             dataVO.setMeetingId(meetingId);
+            boolean diarized = false;
+            String failMsg = "회의 처리 중 오류가 발생했습니다.";
             try {
                 // step 3: 음성 전사 + 화자 분리 (AI 서버에서 단일 호출로 처리)
                 sendSseEvent(emitter, "progress", buildSseStepData("transcribe"));
@@ -359,6 +415,7 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                     Object errMsg = diarizeResult != null ? diarizeResult.get("returnMsg") : null;
                     dataVO.setErrorMsg(errMsg != null ? errMsg.toString() : "전사 실패");
                     meetingDAO.updateMeetingAudioStatus(dataVO);
+                    failMsg = "음성 처리에 실패했습니다. (" + dataVO.getErrorMsg() + ")";
                     sendSseEvent(emitter, "error", buildSseErrorData(dataVO.getErrorMsg()));
                     return;
                 }
@@ -374,46 +431,37 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 JSONArray diarizedSegments = (JSONArray) diarizeResult.get("segments");
 
                 if (fullText == null || fullText.trim().isEmpty()) {
+                    failMsg = "음성 전사 결과가 비어 있습니다.";
                     sendSseEvent(emitter, "error", buildSseErrorData("음성 전사 결과가 비어있습니다."));
                     return;
                 }
                 logger.info("[streamMeetingProcessing] 전사 완료 - meetingId: {}, {}자", meetingId, fullText.length());
 
-                // DB에서 IS_AUTO_TITLE, SHOW_SPEAKER_YN 조회 후 회의 상태 종료(002)로 변경
-                MeetingVO dbMeeting = meetingDAO.selectMeeting(dataVO);
-                if (dbMeeting != null) {
-                    if (dbMeeting.getIsAutoTitle() != null) dataVO.setIsAutoTitle(dbMeeting.getIsAutoTitle());
-                    if (dbMeeting.getShowSpeakerYn() != null) dataVO.setShowSpeakerYn(dbMeeting.getShowSpeakerYn());
-                    if (dbMeeting.getMeetingTitle() != null) dataVO.setMeetingTitle(dbMeeting.getMeetingTitle());
-                }
+                // 회의 상태 종료(002)
                 dataVO.setStatus("002");
                 meetingDAO.updateMeetingStatus(dataVO);
 
-                // step 4: LLM 회의록 생성
-                sendSseEvent(emitter, "progress", buildSseStepData("minutes"));
-                dataVO.setFullText(fullText);
-                LibraryVO searchVO = new LibraryVO();
-                searchVO.setTmplId(MINUTES_TMPL_ID);
-                List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
-                String labeledFullText = replaceSpeakerLabels(fullText, diarizedSegments);
-                String minutesAnswer = callLlmForMinutes(labeledFullText, dataVO.getIsAutoTitle(), tmplFieldList, dataVO.getShowSpeakerYn());
-
-                // step 5: 저장
+                // step 4: 화자 · 발화 저장 — 회의록은 사용자가 화자 이름을 정리한 뒤
+                // "회의록 생성" 으로 만든다 (MeetingMinutesProcessor, CMB 와 같은 흐름)
                 sendSseEvent(emitter, "progress", buildSseStepData("save"));
-                if (minutesAnswer != null) {
-                    parseAndSaveMinutes(dataVO, minutesAnswer, tmplFieldList);
-                }
                 if (diarizedSegments != null && !diarizedSegments.isEmpty()) {
                     saveAudioDiarizedSpeakers(dataVO, diarizedSegments);
                 }
 
-                logger.info("[streamMeetingProcessing] 처리 완료 - meetingId: {}", meetingId);
+                logger.info("[streamMeetingProcessing] 화자 분리 완료 - meetingId: {}", meetingId);
+                diarized = true;
                 sendSseEvent(emitter, "done", buildSseDoneData(meetingId, 0, 0));
 
             } catch (Exception e) {
                 logger.error("[streamMeetingProcessing] 처리 오류 - meetingId={}", meetingId, e);
                 sendSseEvent(emitter, "error", buildSseErrorData("회의 처리 중 오류가 발생했습니다."));
             } finally {
+                // 화면 연결이 끊겨도 처리 결과는 상태로 남김 (다시 들어오면 상태부터 확인)
+                if (diarized) {
+                    minutesProcessor.markDiarizeDone(meetingId);
+                } else {
+                    minutesProcessor.markDiarizeError(meetingId, failMsg);
+                }
                 emitter.complete();
             }
         });
@@ -685,9 +733,65 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     /** 화자-참석자 매핑 저장 */
     public Map<String, Object> saveSpeakerMapping(MeetingVO dataVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
+        // 화자 분리 · 회의록 생성 중에는 화자를 바꾸지 않음 (생성 중인 전문 · 회의록과 이름이 어긋나지 않게)
+        if (minutesProcessor.isProcessing(dataVO.getMeetingId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", MeetingMinutesProcessor.PROCESSING_MSG);
+            return result;
+        }
+        Map<Long, MeetingVO> beforeById = selectSpeakersById(dataVO.getMeetingId());
         meetingDAO.updateSpeakerMapping(dataVO);
+        applySpeakerRenameToMinutes(dataVO.getMeetingId(), beforeById, java.util.Collections.singletonList(dataVO));
         result.put("successYn", true);
         return result;
+    }
+
+    /** 화자 ID → 현재 저장된 화자 (이름 변경 전 표시 이름을 구하기 위해 저장 전에 조회) */
+    private Map<Long, MeetingVO> selectSpeakersById(Long meetingId) throws Exception {
+        Map<Long, MeetingVO> byId = new HashMap<>();
+        if (meetingId == null) return byId;
+        MeetingVO searchVO = new MeetingVO();
+        searchVO.setMeetingId(meetingId);
+        for (MeetingVO sp : meetingDAO.selectSpeakerList(searchVO)) {
+            byId.put(sp.getSpeakerId(), sp);
+        }
+        return byId;
+    }
+
+    /**
+     * 화자 이름 저장 후 회의록 반영 — 이전 표시 이름 → 새 표시 이름 (CMB addSpeakerRename 규칙)
+     * - 표시 이름은 SPEAKER_NM, 없으면 SPEAKER_LABEL(화자N)
+     * - 같은 이전 이름이 서로 다른 이름으로 바뀌면 본문에서 구분할 수 없어 치환에서 뺀다
+     * - 회의록 반영이 실패해도 화자 저장은 성공으로 둔다 (로그만)
+     */
+    private void applySpeakerRenameToMinutes(Long meetingId, Map<Long, MeetingVO> beforeById, List<MeetingVO> requested) {
+        Map<String, String> renameMap = new LinkedHashMap<>();
+        Set<String> ambiguousNames = new HashSet<>();
+        for (MeetingVO req : requested) {
+            MeetingVO before = req.getSpeakerId() != null ? beforeById.get(req.getSpeakerId()) : null;
+            if (before == null) continue;
+            String oldDisplay = speakerDisplayName(before.getSpeakerNm(), before.getSpeakerLabel());
+            String newDisplay = speakerDisplayName(req.getSpeakerNm(), before.getSpeakerLabel());
+            if (oldDisplay.isEmpty() || newDisplay.isEmpty() || oldDisplay.equals(newDisplay)) continue;
+            if (renameMap.containsKey(oldDisplay) && !renameMap.get(oldDisplay).equals(newDisplay)) {
+                ambiguousNames.add(oldDisplay);
+            }
+            renameMap.put(oldDisplay, newDisplay);
+        }
+        for (String name : ambiguousNames) {
+            renameMap.remove(name);
+            logger.warn("[applySpeakerRenameToMinutes] 같은 이름의 화자가 서로 다른 이름으로 변경되어 회의록 치환 제외 - meetingId: {}, name: {}", meetingId, name);
+        }
+        try {
+            minutesProcessor.applySpeakerRename(meetingId, renameMap);
+        } catch (Exception e) {
+            logger.error("[applySpeakerRenameToMinutes] 회의록 화자 이름 반영 실패 - meetingId: {}", meetingId, e);
+        }
+    }
+
+    private static String speakerDisplayName(String speakerNm, String speakerLabel) {
+        if (!CommonUtil.isEmpty(speakerNm) && !speakerNm.trim().isEmpty()) return speakerNm.trim();
+        return speakerLabel == null ? "" : speakerLabel.trim();
     }
 
     /** 화자 일괄 저장 (동명이인 머지 포함) */
@@ -700,6 +804,12 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             result.put("returnMsg", "화자 목록이 없습니다.");
             return result;
         }
+        if (minutesProcessor.isProcessing(dataVO.getMeetingId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", MeetingMinutesProcessor.PROCESSING_MSG);
+            return result;
+        }
+        Map<Long, MeetingVO> beforeById = selectSpeakersById(dataVO.getMeetingId());
 
         if ("Y".equals(dataVO.getMergeSpeakerYn())) {
             // DB에서 전체 화자 utterances 한 번에 조회
@@ -762,166 +872,16 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             }
         }
 
-        // showSpeakerYn='Y'이면 회의록 결정사항의 화자 레이블을 실명으로 업데이트
-        MeetingVO meetingInfo = meetingDAO.selectMeeting(dataVO);
-        if (meetingInfo != null && "Y".equals(meetingInfo.getShowSpeakerYn())) {
-            updateDecisionsSpeakerLabels(dataVO.getMeetingId(), dataVO.getSpeakerList());
-        }
+        // 회의록이 있으면 바뀐 화자 이름 반영 (전문 · 회의록 JSON · HTML · 편집본)
+        applySpeakerRenameToMinutes(dataVO.getMeetingId(), beforeById, speakerList);
 
         result.put("successYn", true);
         return result;
     }
 
-    /** 화자 편집 후 회의록 FLAT_DATA 업데이트 (decisions 화자명 치환 + attendees 덮어쓰기) */
-    private void updateDecisionsSpeakerLabels(Long meetingId, List<MeetingVO> speakerList) {
-        try {
-            MeetingVO searchVO = new MeetingVO();
-            searchVO.setMeetingId(meetingId);
-            MeetingVO minutes = meetingDAO.selectMeetingMinutes(searchVO);
-            if (minutes == null || CommonUtil.isEmpty(minutes.getFlatData())) return;
 
-            // DB에서 speakerId → speakerLabel 조회 (프론트에서 label을 안 보낼 수 있으므로)
-            List<MeetingVO> dbSpeakers = meetingDAO.selectSpeakerList(searchVO);
-            Map<Long, String> labelById = new HashMap<>();
-            for (MeetingVO dbSpk : dbSpeakers) {
-                if (!CommonUtil.isEmpty(dbSpk.getSpeakerLabel())) {
-                    labelById.put(dbSpk.getSpeakerId(), dbSpk.getSpeakerLabel());
-                }
-            }
 
-            // speakerId → 새 이름 맵 (저장 요청 기준)
-            Map<Long, String> nameById = new HashMap<>();
-            for (MeetingVO spk : speakerList) {
-                if (spk.getSpeakerId() != null && !CommonUtil.isEmpty(spk.getSpeakerNm())) {
-                    nameById.put(spk.getSpeakerId(), spk.getSpeakerNm());
-                }
-            }
 
-            JSONParser parser = new JSONParser();
-            JSONObject flat = (JSONObject) parser.parse(minutes.getFlatData());
-
-            // decisions: (화자N) 또는 (화자1, 화자2) → (실명) 치환
-            // label → name 맵 구성 (단일/복합 패턴 모두 대응)
-            Map<String, String> labelNameMap = new LinkedHashMap<>();
-            for (MeetingVO spk : speakerList) {
-                String label = labelById.get(spk.getSpeakerId());
-                String nm = nameById.get(spk.getSpeakerId());
-                if (!CommonUtil.isEmpty(label) && !CommonUtil.isEmpty(nm)) {
-                    labelNameMap.put(label, nm);
-                }
-            }
-            if (!labelNameMap.isEmpty()) {
-                Object decisionsObj = flat.get("decisions");
-                if (decisionsObj instanceof String) {
-                    String decisionsStr = replaceLabelsInAnnotations((String) decisionsObj, labelNameMap);
-                    flat.put("decisions", decisionsStr);
-                }
-            }
-
-            // attendees: DB 화자 순서대로 이름 목록으로 덮어쓰기
-            // (새 이름이 있으면 사용, 없으면 speakerLabel 유지)
-            JSONArray attendeesArr = new JSONArray();
-            for (MeetingVO dbSpk : dbSpeakers) {
-                String nm = nameById.get(dbSpk.getSpeakerId());
-                if (CommonUtil.isEmpty(nm)) {
-                    nm = dbSpk.getSpeakerLabel();
-                }
-                if (!CommonUtil.isEmpty(nm)) {
-                    attendeesArr.add(nm);
-                }
-            }
-            flat.put("attendees", attendeesArr.toJSONString());
-
-            // 업데이트된 FLAT_DATA로 HTML 재렌더링
-            // flat은 배열을 문자열로 저장하므로, 렌더링 전에 multiline 필드를 JSONArray로 복원
-            LibraryVO searchLibVO = new LibraryVO();
-            searchLibVO.setTmplId(MINUTES_TMPL_ID);
-            List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchLibVO);
-            JSONObject renderJson = inflateJsonForRender(flat, tmplFieldList);
-            MeetingVO meetingInfo = meetingDAO.selectMeeting(searchVO);
-            String showSpeakerYn = meetingInfo != null ? meetingInfo.getShowSpeakerYn() : "Y";
-            String newHtml = renderMinutesTemplateHtml(renderJson, tmplFieldList, showSpeakerYn);
-
-            minutes.setFlatData(flat.toJSONString());
-            minutes.setGeneratedContent(newHtml);
-            meetingDAO.updateMeetingMinutes(minutes);
-
-            logger.info("회의록 화자 정보 업데이트 완료 - meetingId: {}", meetingId);
-        } catch (Exception e) {
-            logger.error("회의록 화자 정보 업데이트 실패 - meetingId: {}", meetingId, e);
-        }
-    }
-
-    /**
-     * decisions 문자열에서 (라벨) 또는 (라벨1, 라벨2) 패턴 내 개별 라벨을 실명으로 치환.
-     * 단순 replace는 복합 패턴 "(화자1, 화자2)"에서 "(화자1)"을 찾지 못하므로,
-     * 정규식으로 모든 (...) 블록을 추출한 뒤 쉼표 분리 → 개별 치환 → 재조합.
-     */
-    private String replaceLabelsInAnnotations(String text, Map<String, String> labelNameMap) {
-        if (text == null || labelNameMap.isEmpty()) return text;
-        java.util.regex.Pattern p = java.util.regex.Pattern.compile("\\(([^)]+)\\)");
-        java.util.regex.Matcher m = p.matcher(text);
-        StringBuffer sb = new StringBuffer();
-        while (m.find()) {
-            String inner = m.group(1);
-            String[] parts = inner.split(",\\s*");
-            // LinkedHashSet: 삽입 순서 유지 + 중복 제거
-            // 머지된 화자(화자1·화자3 → 김충환)가 같은 괄호 안에 있으면 이름 하나로 합산
-            java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
-            for (String part : parts) {
-                names.add(labelNameMap.getOrDefault(part.trim(), part.trim()));
-            }
-            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement("(" + String.join(", ", names) + ")"));
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
-
-    /** diarize 세그먼트 기반으로 fullText의 SPEAKER_XX를 화자N 레이블로 치환 */
-    private String replaceSpeakerLabels(String fullText, JSONArray segments) {
-        if (segments == null || segments.isEmpty() || fullText == null) return fullText;
-
-        // 첫 등장 순서대로 SPEAKER_XX → 화자N 맵 구성
-        Map<String, String> labelMap = new LinkedHashMap<>();
-        for (Object seg : segments) {
-            JSONObject s = (JSONObject) seg;
-            String spk = String.valueOf(s.get("speaker"));
-            if (!labelMap.containsKey(spk)) {
-                labelMap.put(spk, "화자" + (labelMap.size() + 1));
-            }
-        }
-
-        String result = fullText;
-        for (Map.Entry<String, String> e : labelMap.entrySet()) {
-            result = result.replace(e.getKey(), e.getValue());
-        }
-        return result;
-    }
-
-    /**
-     * flat JSON(배열이 문자열로 저장됨)을 렌더링용 JSON으로 변환.
-     * multiline 필드의 문자열 값을 JSONArray로 파싱하여 렌더러가 올바르게 처리하도록 함.
-     */
-    @SuppressWarnings("unchecked")
-    private JSONObject inflateJsonForRender(JSONObject flat, List<LibraryVO.TmplFieldItem> tmplFieldList) {
-        JSONObject renderJson = new JSONObject();
-        JSONParser parser = new JSONParser();
-        for (LibraryVO.TmplFieldItem field : tmplFieldList) {
-            String key = field.getJsonKey();
-            Object val = flat.get(key);
-            if (val == null) continue;
-            if ("Y".equals(field.getMultilineYn()) && val instanceof String) {
-                try {
-                    renderJson.put(key, parser.parse((String) val));
-                } catch (Exception e) {
-                    renderJson.put(key, val);
-                }
-            } else {
-                renderJson.put(key, val);
-            }
-        }
-        return renderJson;
-    }
 
     /** 해당 회의가 원본인 통합 회의록 목록 조회 */
     public Map<String, Object> checkMeetingIntegration(MeetingVO searchVO) throws Exception {
@@ -939,6 +899,13 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      */
     public Map<String, Object> deleteMeeting(MeetingVO dataVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
+
+        // 화자 분리 · 회의록 생성 중이면 삭제하지 않음 (백그라운드 처리가 지운 데이터에 다시 쓰지 않게)
+        if (minutesProcessor.isProcessing(dataVO.getMeetingId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", MeetingMinutesProcessor.PROCESSING_MSG);
+            return result;
+        }
 
         // 1. S3 오디오 파일 삭제 (메인 오디오 + 백업 파일 전체)
         deleteMeetingAudioFiles(dataVO.getMeetingId());
@@ -1094,303 +1061,280 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return null;
     }
 
-    /** IS_AUTO_TITLE 이 Y 인지 (그 외 N·null·빈값은 false) */
-    private boolean isAutoTitleYn(String isAutoTitle) {
-        if (isAutoTitle == null) return false;
-        return "Y".equalsIgnoreCase(isAutoTitle.trim());
-    }
 
-    /**
-     * LLM 호출 - 회의록 생성.
-     * 응답 JSON 키만 사용해 설명한다(마크다운 별도 출력 금지). IS_AUTO_TITLE=Y 이면 meeting_title 포함.
-     */
-    private String callLlmForMinutes(String fullText, String isAutoTitle,
-        List<LibraryVO.TmplFieldItem> tmplFieldList, String showSpeakerYn) throws Exception {
-        boolean wantTitle = isAutoTitleYn(isAutoTitle);
-        boolean showSpeaker = "Y".equals(showSpeakerYn);
 
-        LibraryVO searchVO = new LibraryVO();
-        searchVO.setTmplId(MINUTES_TMPL_ID);
-        LibraryVO.TmplItem tmpl = libraryDAO.selectTmpl(searchVO);
 
-        String promptTemplate = CommonUtil.nullToBlank(tmpl.getLlmPrompt());
-        if (CommonUtil.isEmpty(promptTemplate)) {
-            logger.warn("회의록 프롬프트 템플릿 없음 (tmplId={})", searchVO.getTmplId());
-            return null;
-        }
 
-        UserVO userVO = SessionUtil.getUserVO();
-        String userNm = userVO != null ? CommonUtil.nullToBlank(userVO.getUserNm()) : "";
 
-        StringBuilder fieldList = new StringBuilder();
-        if (tmplFieldList != null) {
-            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
-                if (field == null || CommonUtil.isEmpty(field.getJsonKey())) continue;
-                String key = field.getJsonKey();
-                String nm  = CommonUtil.isEmpty(field.getFieldNm()) ? key : field.getFieldNm();
-                if ("title".equals(key) && !wantTitle) continue;
-                if ("author".equals(key)) {
-                    fieldList.append("- ").append(key).append(": ")
-                            .append(nm).append(" (고정값: \"").append(userNm)
-                            .append("\". LLM이 임의로 변경 금지)\n");
-                    continue;
-                }
-                if ("decisions".equals(key) && showSpeaker) {
-                    fieldList.append("- decisions: 결정사항")
-                            .append(" (JSON 문자열 배열. 각 항목 끝에 핵심 발언자를 '(화자명)' 형식으로 추가.")
-                            .append(" 예: [\"예산 증액 (화자1)\", \"일정 확정 (화자2)\"])\n");
-                } else if ("Y".equals(field.getMultilineYn())) {
-                    fieldList.append("- ").append(key).append(": ")
-                            .append(nm).append(" (JSON 문자열 배열로 응답. 예: [\"항목1\", \"항목2\"])\n");
-                } else {
-                    fieldList.append("- ").append(key).append(": ").append(nm).append("\n");
-                }
-            }
-        }
-
-        String autoTitleRule = wantTitle
-            ? "[제목 규칙]\n- title 필드: 회의를 대표하는 제목 한 줄 (DB 최대 200자, 30자 이내 권장).\n"
-            : "";
-
-        String prompt = promptTemplate
-            .replace("{{FULL_TEXT}}", fullText)
-            .replace("{{FIELD_LIST}}", fieldList.toString())
-            .replace("{{AUTO_TITLE_RULE}}", autoTitleRule);
-
-        logger.info("회의록 LLM 호출 시작 (tmplId={}, isAutoTitle={})", searchVO.getTmplId(), isAutoTitle);
-        String answer = callLlm(prompt);
-        if (answer != null) logger.info("회의록 LLM 호출 완료");
-        return answer;
-    }
 
     // ─────────────────────────────────────────────────────────────────
-    //  파싱 & 저장
+    //  회의록 양식 (TB_MEETING_TMPL) · 문체 · 분량
     // ─────────────────────────────────────────────────────────────────
 
-    /**
-     * 회의록 LLM answer 파싱 후 TB_MEETING_MINUTES 저장.
-     * FULL_TEXT는 diarize 원문을 유지하고, LLM JSON은 flatData/HTML 생성에만 사용한다.
-     */
-    @SuppressWarnings("unchecked")
-    private void parseAndSaveMinutes(MeetingVO dataVO, String answer, List<LibraryVO.TmplFieldItem> tmplFieldList) {
-        try {
-            String jsonStr = answer
-                .replaceAll("```json\\s*", "")
-                .replaceAll("```\\s*", "")
-                .trim();
-    
-            JSONParser parser = new JSONParser();
-            JSONObject json = (JSONObject) parser.parse(jsonStr);
-    
-            // TB_TMPL_FIELD 기반으로 동적 수집
-            JSONObject flat = new JSONObject();
-            for (LibraryVO.TmplFieldItem field : tmplFieldList) {
-                String key = field.getJsonKey();
-                Object val = json.get(key);
-                if (val == null) continue;
-                // MULTILINE_YN=Y + 배열이면 toJSONString, 아니면 String
-                if ("Y".equals(field.getMultilineYn()) && val instanceof JSONArray) {
-                    flat.put(key, ((JSONArray) val).toJSONString());
-                } else {
-                    flat.put(key, String.valueOf(val));
-                }
-            }
-            // 수기 제목인 경우 LLM이 title을 생성하지 않으므로 직접 flat에 추가
-            if (!isAutoTitleYn(dataVO.getIsAutoTitle()) && !CommonUtil.isEmpty(dataVO.getMeetingTitle())) {
-                flat.put("title", dataVO.getMeetingTitle());
-            }
-            dataVO.setFlatData(flat.toJSONString());
 
-            String renderedHtml = renderMinutesTemplateHtml(json, tmplFieldList, dataVO.getShowSpeakerYn());
-            if (!CommonUtil.isEmpty(renderedHtml)) {
-                dataVO.setGeneratedContent(renderedHtml);
-            }
-    
-            // 자동 제목: meeting_title → title로 변경
-            if (isAutoTitleYn(dataVO.getIsAutoTitle())) {
-                Object titleObj = json.get("title"); // ← 변경
-                if (titleObj != null) {
-                    String generatedTitle = String.valueOf(titleObj).trim().replaceAll("[\"']", "");
-                    if (generatedTitle.length() > 200) generatedTitle = generatedTitle.substring(0, 200);
-                    if (!generatedTitle.isEmpty()) {
-                        dataVO.setMeetingTitle(generatedTitle);
-                        meetingDAO.updateMeetingTitle(dataVO);
-                        logger.info("회의 제목 자동 반영 완료 - meetingId: {}", dataVO.getMeetingId());
-                    }
-                }
-            }
-    
-            MeetingVO existing = meetingDAO.selectMeetingMinutes(dataVO);
-            if (existing == null) {
-                meetingDAO.insertMeetingMinutes(dataVO);
-            } else {
-                dataVO.setMinutesId(existing.getMinutesId());
-                meetingDAO.updateMeetingMinutes(dataVO);
-            }
-
-            // 인포그래픽 이미지 API 동기 호출 — 운영에서 필요 시:
-            saveMeetingInfographic(dataVO, (JSONArray) json.get("infographic_topics"));
-    
-            logger.info("회의록 저장 완료 - meetingId: {}", dataVO.getMeetingId());
-        } catch (Exception e) {
-            logger.error("회의록 파싱/저장 실패 - answer: {}", answer, e);
+    /** 회의록 양식 목록 (+ 양식별 구성 필드명) */
+    public List<MeetingVO> selectMeetingTmplList() throws Exception {
+        List<MeetingVO> tmplList = meetingDAO.selectMeetingTmplList();
+        Map<String, List<String>> fieldsByTmpl = new HashMap<>();
+        for (MeetingVO field : meetingDAO.selectMeetingTmplFieldList()) {
+            if ("title".equals(field.getJsonKey()) || CommonUtil.isEmpty(field.getFieldNm())) continue;
+            fieldsByTmpl.computeIfAbsent(field.getTmplId(), k -> new ArrayList<>()).add(field.getFieldNm());
         }
+        for (MeetingVO tmpl : tmplList) {
+            tmpl.setFieldNmList(fieldsByTmpl.getOrDefault(tmpl.getTmplId(), new ArrayList<>()));
+        }
+        return tmplList;
     }
 
     /**
-     * TB_TMPL.TMPL_HTML의 {{jsonKey}} 자리에 LLM JSON 값을 채운다.
-     * showSpeakerYn: Y 또는 null이면 발언자 표시, N이면 (이름) 패턴 제거
+     * 회의록 생성 시작 — 화면 "회의록 생성" / "이 양식으로 다시 생성" (CMB 와 같은 흐름)
+     * - 백그라운드로 처리하고 바로 반환한다. 진행 상태는 selectMeetingMinutesStatus 로 확인
+     * - 양식 · 문체 · 분량을 보냈으면 먼저 회의에 저장 (처리기는 회의에 저장된 값으로 생성)
+     * - 다시 생성이면 기존 회의록은 생성 성공 시점에 교체된다 (실패하면 그대로 남음)
      */
-    private String renderMinutesTemplateHtml(JSONObject json, List<LibraryVO.TmplFieldItem> tmplFieldList, String showSpeakerYn) throws Exception {
-        LibraryVO searchVO = new LibraryVO();
-        searchVO.setTmplId(MINUTES_TMPL_ID);
-        LibraryVO.TmplItem tmpl = libraryDAO.selectTmpl(searchVO);
-        if (tmpl == null || CommonUtil.isEmpty(tmpl.getTmplHtml())) {
-            logger.warn("회의록 HTML 템플릿 없음 (tmplId={})", searchVO.getTmplId());
-            return "";
+    public Map<String, Object> startMeetingMinutes(MeetingVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        result.put("successYn", false);
+
+        if (dataVO.getMeetingId() == null) {
+            result.put("returnMsg", "회의 정보가 올바르지 않습니다.");
+            return result;
         }
-        boolean showSpeaker = !"N".equalsIgnoreCase(showSpeakerYn != null ? showSpeakerYn.trim() : "");
-        return tmplHtmlRenderService.renderTemplateHtml(tmpl.getTmplHtml(), json, tmplFieldList, showSpeaker);
+        MeetingVO meeting = meetingDAO.selectMeeting(dataVO);
+        if (meeting == null) {
+            result.put("returnMsg", "회의를 찾을 수 없습니다.");
+            return result;
+        }
+        if (minutesProcessor.isProcessing(dataVO.getMeetingId())) {
+            result.put("returnMsg", "회의록을 생성하고 있습니다. 잠시 후 다시 확인해 주세요.");
+            return result;
+        }
+
+        // 화면은 null 을 "" 로 받으므로 빈 문자열은 '지정 안 함' 으로 본다
+        String tmplCd = CommonUtil.nullToBlank(dataVO.getMinutesTmplCd()).trim();
+        String toneCd = CommonUtil.nullToBlank(dataVO.getMinutesToneCd()).trim();
+        String lengthCd = CommonUtil.nullToBlank(dataVO.getMinutesLengthCd()).trim();
+        if (!tmplCd.isEmpty() || !toneCd.isEmpty() || !lengthCd.isEmpty()) {
+            if (!tmplCd.isEmpty()) {
+                MeetingVO tmplSearch = new MeetingVO();
+                tmplSearch.setMinutesTmplCd(tmplCd);
+                if (!MeetingMinutesTemplate.TEMPLATES.contains(tmplCd) || meetingDAO.selectMeetingTmpl(tmplSearch) == null) {
+                    result.put("returnMsg", "선택한 회의록 양식을 찾을 수 없습니다.");
+                    return result;
+                }
+            }
+            if ((!toneCd.isEmpty() && !MeetingMinutesTemplate.TONES.contains(toneCd))
+                || (!lengthCd.isEmpty() && !MeetingMinutesTemplate.LENGTHS.contains(lengthCd))) {
+                result.put("returnMsg", "문체 또는 분량 값이 올바르지 않습니다.");
+                return result;
+            }
+            MeetingVO optionVO = new MeetingVO();
+            optionVO.setMeetingId(dataVO.getMeetingId());
+            optionVO.setMinutesTmplCd(tmplCd.isEmpty() ? meeting.getMinutesTmplCd() : tmplCd);
+            optionVO.setMinutesToneCd(toneCd.isEmpty() ? null : toneCd);
+            optionVO.setMinutesLengthCd(lengthCd.isEmpty() ? null : lengthCd);
+            meetingDAO.updateMeetingMinutesOption(optionVO);
+        }
+
+        boolean started = minutesProcessor.startMinutes(dataVO.getMeetingId(), SessionUtil.getUserId());
+        if (!started) {
+            result.put("returnMsg", "회의록을 생성하고 있습니다. 잠시 후 다시 확인해 주세요.");
+            return result;
+        }
+        result.put("successYn", true);
+        result.put("state", "processing");
+        return result;
     }
 
     /**
-     * LLM 회의록의 인포그래픽 주제 목록 저장 (2단계 비동기)
-     * 1단계: 모든 주제 row를 STATUS=002(생성중)로 즉시 저장 → 프론트에 빠른 응답
-     * 2단계: 비동기로 AI 이미지 생성 후 STATUS=003(완료)/004(실패)로 업데이트
+     * 화자 분리 재시도 — 이미 올라간 오디오로 다시 처리 (화자 분리 중 서버 재기동 · STT 오류로 멈춘 경우, CMB updateMeetingAgentRetry)
+     * - 이전 회의록 · 화자 분리 결과를 정리하고 가장 최근 오디오를 대기(001)로 되돌린다
+     * - 화면은 성공 응답을 받으면 streamMeetingProcessing(SSE)으로 화자 분리를 다시 시작한다
      */
-    private void saveMeetingInfographic(MeetingVO dataVO, JSONArray infographicTopics) {
-        try {
-            meetingDAO.deleteMeetingInfographicByMeetingId(dataVO);
+    public Map<String, Object> retryDiarize(MeetingVO dataVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        result.put("successYn", false);
+        Long meetingId = dataVO.getMeetingId();
 
-            if (infographicTopics == null || infographicTopics.isEmpty()) {
-                logger.info("인포그래픽 저장 대상 없음 - meetingId: {}", dataVO.getMeetingId());
-                return;
-            }
-
-            // 1단계: 주제 row를 STATUS=002(생성중)로 선저장
-            List<MeetingVO> pendingList = new ArrayList<>();
-            for (int i = 0; i < infographicTopics.size(); i++) {
-                Object topicObj = infographicTopics.get(i);
-                if (!(topicObj instanceof JSONObject)) continue;
-
-                JSONObject topicJson = (JSONObject) topicObj;
-                String topicNm = trimToLength(stringValue(topicJson.get("topic_nm")), 200);
-                if (topicNm.isEmpty()) {
-                    topicNm = trimToLength(stringValue(topicJson.get("topic_name")), 200);
-                }
-                if (topicNm.isEmpty()) {
-                    logger.warn("인포그래픽 주제명 누락 - meetingId: {}, idx: {}", dataVO.getMeetingId(), i);
-                    continue;
-                }
-
-                MeetingVO infographicVO = new MeetingVO();
-                infographicVO.setMeetingId(dataVO.getMeetingId());
-                infographicVO.setSortOrd(i + 1);
-                infographicVO.setTopicNm(topicNm);
-                infographicVO.setTopicSummary(stringValue(topicJson.get("topic_summary")));
-                infographicVO.setTreeText(stringValue(topicJson.get("tree_text")));
-                infographicVO.setInfographicStatus("002"); // 생성중
-                meetingDAO.insertMeetingInfographic(infographicVO);
-                pendingList.add(infographicVO);
-            }
-
-            if (pendingList.isEmpty()) return;
-            logger.info("인포그래픽 row 선저장 완료 (SSE 스트림 대기) - meetingId: {}, count: {}",
-                dataVO.getMeetingId(), pendingList.size());
-
-        } catch (Exception e) {
-            logger.error("인포그래픽 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+        MeetingVO meeting = meetingId == null ? null : meetingDAO.selectMeeting(dataVO);
+        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+            result.put("returnMsg", "권한이 없습니다.");
+            return result;
         }
+        if (minutesProcessor.isProcessing(meetingId)) {
+            result.put("returnMsg", MeetingMinutesProcessor.PROCESSING_MSG);
+            return result;
+        }
+        if (MeetingMinutesProcessor.latestAudio(meetingDAO.selectMeetingAudioList(dataVO)) == null) {
+            result.put("returnMsg", "다시 처리할 오디오가 없습니다. 오디오를 첨부해 주세요.");
+            return result;
+        }
+
+        meetingDAO.deleteMeetingMinutes(dataVO);
+        meetingDAO.resetSpeakerDiarization(dataVO);
+        meetingDAO.deleteUnregisteredSpeakers(dataVO);
+        meetingDAO.updateMeetingAudioRetry(dataVO);
+        minutesProcessor.clearStatus(meetingId);
+        logger.info("[retryDiarize] 화자 분리 재시도 준비 완료 - meetingId: {}", meetingId);
+
+        result.put("successYn", true);
+        return result;
     }
 
     /**
-     * 인포그래픽 이미지 생성 SSE 스트림
-     * - STATUS=002(생성중) 인 항목을 순차 처리하며 완료 시마다 SSE 이벤트 전송
-     * - 프론트는 finishMeetingWithAudio 응답 후 이 엔드포인트를 구독
+     * 회의록 생성 상태 — state: none / diarized(생성 대기) / processing / done / error
+     * - done 이면 화면 갱신용으로 회의록 · 회의 정보를 함께 내려준다
      */
-    public SseEmitter streamInfographicGeneration(Long meetingId) {
-        SseEmitter emitter = new SseEmitter(0L);
-
-        if (meetingId == null) {
-            sendSseEvent(emitter, "error", buildSseErrorData("meetingId가 없습니다."));
-            emitter.complete();
-            return emitter;
+    public Map<String, Object> selectMeetingMinutesStatus(MeetingVO searchVO) throws Exception {
+        Map<String, Object> result = new HashMap<>(minutesProcessor.getStatus(searchVO.getMeetingId()));
+        if ("done".equals(result.get("state"))) {
+            result.put("minutes", meetingDAO.selectMeetingMinutes(searchVO));
+            result.put("meeting", meetingDAO.selectMeeting(searchVO));
         }
-
-        emitter.onTimeout(() -> {
-            logger.warn("인포그래픽 SSE timeout - meetingId={}", meetingId);
-            emitter.complete();
-        });
-        emitter.onError(e -> logger.warn("인포그래픽 SSE error - meetingId={}, message={}", meetingId, e.getMessage()));
-        emitter.onCompletion(() -> logger.info("인포그래픽 SSE complete - meetingId={}", meetingId));
-
-        INFOGRAPHIC_EXECUTOR.execute(() -> {
-            try {
-                MeetingVO searchVO = new MeetingVO();
-                searchVO.setMeetingId(meetingId);
-                // 인포그래픽 목록 조회
-                List<MeetingVO> pendingList = meetingDAO.selectMeetingInfographicList(searchVO);
-
-                // 인포그래픽 목록이 없으면 완료 이벤트 전송
-                if (pendingList == null || pendingList.isEmpty()) {
-                    sendSseEvent(emitter, "done", buildSseDoneData(meetingId, 0, 0));
-                    return;
-                }
-
-                int successCount = 0;
-                for (MeetingVO vo : pendingList) {
-                    // 인포그래픽 상태가 생성중이 아니면 다음 인포그래픽으로 이동
-                    if (!"002".equals(vo.getInfographicStatus())) continue;
-                    try {
-                        // 인포그래픽 이미지 생성용 query 구성
-                        String imageQuery = buildInfographicImageQuery(vo.getTopicNm(), vo.getTopicSummary(), vo.getTreeText());
-                        // image_query API 동기 호출. 응답 JSON의 image(base64) 반환.
-                        String img = callAiImageApi(imageQuery);
-
-                        // 응답 JSON의 image(base64) 반환.
-                        Map<String, Object> eventData = new HashMap<>();
-                        eventData.put("infographicId", vo.getInfographicId());
-                        eventData.put("sortOrd", vo.getSortOrd());
-
-                        if (img != null && !img.isEmpty()) {
-                            vo.setInfographicImg(img);
-                            vo.setInfographicStatus("003");
-                            eventData.put("infographicStatus", "003");
-                            eventData.put("infographicImg", img);
-                            successCount++;
-                        } else {
-                            logger.warn("인포그래픽 이미지 생성 실패 - meetingId: {}, topic: {}", meetingId, vo.getTopicNm());
-                            vo.setInfographicStatus("004");
-                            eventData.put("infographicStatus", "004");
-                        }
-                        meetingDAO.updateMeetingInfographic(vo);
-                        sendSseEvent(emitter, "progress", new com.google.gson.Gson().toJson(eventData));
-                    } catch (Exception e) {
-                        logger.error("인포그래픽 이미지 생성 오류 - topic: {}", vo.getTopicNm(), e);
-                        try {
-                            vo.setInfographicStatus("004");
-                            meetingDAO.updateMeetingInfographic(vo);
-                        } catch (Exception ex) {
-                            logger.error("인포그래픽 실패 상태 저장 오류 - infographicId: {}", vo.getInfographicId(), ex);
-                        }
-                        Map<String, Object> errorData = new HashMap<>();
-                        errorData.put("infographicId", vo.getInfographicId());
-                        errorData.put("infographicStatus", "004");
-                        sendSseEvent(emitter, "progress", new com.google.gson.Gson().toJson(errorData));
-                    }
-                }
-                logger.info("인포그래픽 SSE 완료 - meetingId: {}, 성공: {}/{}", meetingId, successCount, pendingList.size());
-                sendSseEvent(emitter, "done", buildSseDoneData(meetingId, pendingList.size(), successCount));
-            } catch (Exception e) {
-                logger.error("인포그래픽 SSE 스트림 오류 - meetingId={}", meetingId, e);
-                sendSseEvent(emitter, "error", buildSseErrorData("인포그래픽 생성 중 오류가 발생했습니다."));
-            } finally {
-                emitter.complete();
-            }
-        });
-
-        return emitter;
+        result.put("successYn", true);
+        return result;
     }
+
+    // [인포그래픽 일시 중지 2026-11-19] 다시 쓰려면 이 블록 주석 해제
+    // /**
+    //  * LLM 회의록의 인포그래픽 주제 목록 저장 (2단계 비동기)
+    //  * 1단계: 모든 주제 row를 STATUS=002(생성중)로 즉시 저장 → 프론트에 빠른 응답
+    //  * 2단계: 비동기로 AI 이미지 생성 후 STATUS=003(완료)/004(실패)로 업데이트
+    //  */
+    // private void saveMeetingInfographic(MeetingVO dataVO, JSONArray infographicTopics) {
+    //     try {
+    //         meetingDAO.deleteMeetingInfographicByMeetingId(dataVO);
+
+    //         if (infographicTopics == null || infographicTopics.isEmpty()) {
+    //             logger.info("인포그래픽 저장 대상 없음 - meetingId: {}", dataVO.getMeetingId());
+    //             return;
+    //         }
+
+    //         // 1단계: 주제 row를 STATUS=002(생성중)로 선저장
+    //         List<MeetingVO> pendingList = new ArrayList<>();
+    //         for (int i = 0; i < infographicTopics.size(); i++) {
+    //             Object topicObj = infographicTopics.get(i);
+    //             if (!(topicObj instanceof JSONObject)) continue;
+
+    //             JSONObject topicJson = (JSONObject) topicObj;
+    //             String topicNm = trimToLength(stringValue(topicJson.get("topic_nm")), 200);
+    //             if (topicNm.isEmpty()) {
+    //                 topicNm = trimToLength(stringValue(topicJson.get("topic_name")), 200);
+    //             }
+    //             if (topicNm.isEmpty()) {
+    //                 logger.warn("인포그래픽 주제명 누락 - meetingId: {}, idx: {}", dataVO.getMeetingId(), i);
+    //                 continue;
+    //             }
+
+    //             MeetingVO infographicVO = new MeetingVO();
+    //             infographicVO.setMeetingId(dataVO.getMeetingId());
+    //             infographicVO.setSortOrd(i + 1);
+    //             infographicVO.setTopicNm(topicNm);
+    //             infographicVO.setTopicSummary(stringValue(topicJson.get("topic_summary")));
+    //             infographicVO.setTreeText(stringValue(topicJson.get("tree_text")));
+    //             infographicVO.setInfographicStatus("002"); // 생성중
+    //             meetingDAO.insertMeetingInfographic(infographicVO);
+    //             pendingList.add(infographicVO);
+    //         }
+
+    //         if (pendingList.isEmpty()) return;
+    //         logger.info("인포그래픽 row 선저장 완료 (SSE 스트림 대기) - meetingId: {}, count: {}",
+    //             dataVO.getMeetingId(), pendingList.size());
+
+    //     } catch (Exception e) {
+    //         logger.error("인포그래픽 저장 실패 - meetingId: {}", dataVO.getMeetingId(), e);
+    //     }
+    // }
+
+    // [인포그래픽 일시 중지 2026-11-19] 다시 쓰려면 이 블록 주석 해제
+    // /**
+    //  * 인포그래픽 이미지 생성 SSE 스트림
+    //  * - STATUS=002(생성중) 인 항목을 순차 처리하며 완료 시마다 SSE 이벤트 전송
+    //  * - 프론트는 finishMeetingWithAudio 응답 후 이 엔드포인트를 구독
+    //  */
+    // public SseEmitter streamInfographicGeneration(Long meetingId) {
+    //     SseEmitter emitter = new SseEmitter(0L);
+
+    //     if (meetingId == null) {
+    //         sendSseEvent(emitter, "error", buildSseErrorData("meetingId가 없습니다."));
+    //         emitter.complete();
+    //         return emitter;
+    //     }
+
+    //     emitter.onTimeout(() -> {
+    //         logger.warn("인포그래픽 SSE timeout - meetingId={}", meetingId);
+    //         emitter.complete();
+    //     });
+    //     emitter.onError(e -> logger.warn("인포그래픽 SSE error - meetingId={}, message={}", meetingId, e.getMessage()));
+    //     emitter.onCompletion(() -> logger.info("인포그래픽 SSE complete - meetingId={}", meetingId));
+
+    //     INFOGRAPHIC_EXECUTOR.execute(() -> {
+    //         try {
+    //             MeetingVO searchVO = new MeetingVO();
+    //             searchVO.setMeetingId(meetingId);
+    //             // 인포그래픽 목록 조회
+    //             List<MeetingVO> pendingList = meetingDAO.selectMeetingInfographicList(searchVO);
+
+    //             // 인포그래픽 목록이 없으면 완료 이벤트 전송
+    //             if (pendingList == null || pendingList.isEmpty()) {
+    //                 sendSseEvent(emitter, "done", buildSseDoneData(meetingId, 0, 0));
+    //                 return;
+    //             }
+
+    //             int successCount = 0;
+    //             for (MeetingVO vo : pendingList) {
+    //                 // 인포그래픽 상태가 생성중이 아니면 다음 인포그래픽으로 이동
+    //                 if (!"002".equals(vo.getInfographicStatus())) continue;
+    //                 try {
+    //                     // 인포그래픽 이미지 생성용 query 구성
+    //                     String imageQuery = buildInfographicImageQuery(vo.getTopicNm(), vo.getTopicSummary(), vo.getTreeText());
+    //                     // image_query API 동기 호출. 응답 JSON의 image(base64) 반환.
+    //                     String img = callAiImageApi(imageQuery);
+
+    //                     // 응답 JSON의 image(base64) 반환.
+    //                     Map<String, Object> eventData = new HashMap<>();
+    //                     eventData.put("infographicId", vo.getInfographicId());
+    //                     eventData.put("sortOrd", vo.getSortOrd());
+
+    //                     if (img != null && !img.isEmpty()) {
+    //                         vo.setInfographicImg(img);
+    //                         vo.setInfographicStatus("003");
+    //                         eventData.put("infographicStatus", "003");
+    //                         eventData.put("infographicImg", img);
+    //                         successCount++;
+    //                     } else {
+    //                         logger.warn("인포그래픽 이미지 생성 실패 - meetingId: {}, topic: {}", meetingId, vo.getTopicNm());
+    //                         vo.setInfographicStatus("004");
+    //                         eventData.put("infographicStatus", "004");
+    //                     }
+    //                     meetingDAO.updateMeetingInfographic(vo);
+    //                     sendSseEvent(emitter, "progress", new com.google.gson.Gson().toJson(eventData));
+    //                 } catch (Exception e) {
+    //                     logger.error("인포그래픽 이미지 생성 오류 - topic: {}", vo.getTopicNm(), e);
+    //                     try {
+    //                         vo.setInfographicStatus("004");
+    //                         meetingDAO.updateMeetingInfographic(vo);
+    //                     } catch (Exception ex) {
+    //                         logger.error("인포그래픽 실패 상태 저장 오류 - infographicId: {}", vo.getInfographicId(), ex);
+    //                     }
+    //                     Map<String, Object> errorData = new HashMap<>();
+    //                     errorData.put("infographicId", vo.getInfographicId());
+    //                     errorData.put("infographicStatus", "004");
+    //                     sendSseEvent(emitter, "progress", new com.google.gson.Gson().toJson(errorData));
+    //                 }
+    //             }
+    //             logger.info("인포그래픽 SSE 완료 - meetingId: {}, 성공: {}/{}", meetingId, successCount, pendingList.size());
+    //             sendSseEvent(emitter, "done", buildSseDoneData(meetingId, pendingList.size(), successCount));
+    //         } catch (Exception e) {
+    //             logger.error("인포그래픽 SSE 스트림 오류 - meetingId={}", meetingId, e);
+    //             sendSseEvent(emitter, "error", buildSseErrorData("인포그래픽 생성 중 오류가 발생했습니다."));
+    //         } finally {
+    //             emitter.complete();
+    //         }
+    //     });
+
+    //     return emitter;
+    // }
 
     private boolean sendSseEvent(SseEmitter emitter, String eventName, String data) {
         try {
@@ -1428,126 +1372,128 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         return new com.google.gson.Gson().toJson(data);
     }
 
-    /** 인포그래픽 이미지 생성용 query 구성 */
-    private String buildInfographicImageQuery(String topicNm, String topicSummary, String treeText) {
-        StringBuilder query = new StringBuilder();
-        query.append("다음 회의 주제를 사람이 한눈에 이해할 수 있는 한국어 인포그래픽으로 생성하세요.\n");
-        query.append("스타일: 깔끔한 기업 문서형, 가독성 높은 레이아웃, 텍스트 중심 트리형 구조.\n");
-        query.append("주제명: ").append(topicNm).append("\n");
-        if (topicSummary != null && !topicSummary.trim().isEmpty()) {
-            query.append("핵심요약: ").append(topicSummary.trim()).append("\n");
-        }
-        if (treeText != null && !treeText.trim().isEmpty()) {
-            query.append("트리구조:\n").append(treeText.trim()).append("\n");
-        }
-        return query.toString();
-    }
+    // [인포그래픽 일시 중지 2026-11-19] 다시 쓰려면 이 블록 주석 해제
+    // /** 인포그래픽 이미지 생성용 query 구성 */
+    // private String buildInfographicImageQuery(String topicNm, String topicSummary, String treeText) {
+    //     StringBuilder query = new StringBuilder();
+    //     query.append("다음 회의 주제를 사람이 한눈에 이해할 수 있는 한국어 인포그래픽으로 생성하세요.\n");
+    //     query.append("스타일: 깔끔한 기업 문서형, 가독성 높은 레이아웃, 텍스트 중심 트리형 구조.\n");
+    //     query.append("주제명: ").append(topicNm).append("\n");
+    //     if (topicSummary != null && !topicSummary.trim().isEmpty()) {
+    //         query.append("핵심요약: ").append(topicSummary.trim()).append("\n");
+    //     }
+    //     if (treeText != null && !treeText.trim().isEmpty()) {
+    //         query.append("트리구조:\n").append(treeText.trim()).append("\n");
+    //     }
+    //     return query.toString();
+    // }
 
-    /**
-     * image_query API 동기 호출. 응답 JSON의 image(base64) 반환.
-     * data:image/...;base64, 접두사가 있으면 제거 후 저장한다.
-     */
-    private String callAiImageApi(String query) {
-        String apiUrl = PropertyUtil.getProperty("Globals.chatbot.image.apiUrl");
-        if (apiUrl == null || apiUrl.isEmpty()) {
-            logger.warn("인포그래픽 이미지 생성 실패 - image API URL 미설정");
-            return null;
-        }
-        if (query == null || query.trim().isEmpty()) {
-            return null;
-        }
+    // [인포그래픽 일시 중지 2026-11-19] 다시 쓰려면 이 블록 주석 해제
+    // /**
+    //  * image_query API 동기 호출. 응답 JSON의 image(base64) 반환.
+    //  * data:image/...;base64, 접두사가 있으면 제거 후 저장한다.
+    //  */
+    // private String callAiImageApi(String query) {
+    //     String apiUrl = PropertyUtil.getProperty("Globals.chatbot.image.apiUrl");
+    //     if (apiUrl == null || apiUrl.isEmpty()) {
+    //         logger.warn("인포그래픽 이미지 생성 실패 - image API URL 미설정");
+    //         return null;
+    //     }
+    //     if (query == null || query.trim().isEmpty()) {
+    //         return null;
+    //     }
 
-        Map<String, Object> params = new HashMap<>();
-        params.put("query", query);
-        params.put("quality", "medium");
-        params.put("room_id", "");
+    //     Map<String, Object> params = new HashMap<>();
+    //     params.put("query", query);
+    //     params.put("quality", "medium");
+    //     params.put("room_id", "");
 
-        Gson imgGson = new Gson();
-        String reqParamJson = imgGson.toJson(params);
-        long startMs = System.currentTimeMillis();
+    //     Gson imgGson = new Gson();
+    //     String reqParamJson = imgGson.toJson(params);
+    //     long startMs = System.currentTimeMillis();
 
-        try {
-            OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(120, TimeUnit.SECONDS)
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .build();
+    //     try {
+    //         OkHttpClient client = new OkHttpClient.Builder()
+    //             .readTimeout(120, TimeUnit.SECONDS)
+    //             .connectTimeout(10, TimeUnit.SECONDS)
+    //             .build();
 
-            RequestBody body = RequestBody.create(reqParamJson, okhttp3.MediaType.get("application/json; charset=utf-8"));
+    //         RequestBody body = RequestBody.create(reqParamJson, okhttp3.MediaType.get("application/json; charset=utf-8"));
 
-            Request request = new Request.Builder()
-                .url(apiUrl)
-                .post(body)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .build();
+    //         Request request = new Request.Builder()
+    //             .url(apiUrl)
+    //             .post(body)
+    //             .addHeader("Content-Type", "application/json")
+    //             .addHeader("Accept", "application/json")
+    //             .build();
 
-            try (okhttp3.Response response = client.newCall(request).execute()) {
-                int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
-                if (!response.isSuccessful() || response.body() == null) {
-                    logger.warn("인포그래픽 이미지 API 응답 오류: {}", response.code());
-                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "HTTP " + response.code(), null);
-                    return null;
-                }
+    //         try (okhttp3.Response response = client.newCall(request).execute()) {
+    //             int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+    //             if (!response.isSuccessful() || response.body() == null) {
+    //                 logger.warn("인포그래픽 이미지 API 응답 오류: {}", response.code());
+    //                 apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "HTTP " + response.code(), null);
+    //                 return null;
+    //             }
 
-                try (okhttp3.ResponseBody responseBody = response.body()) {
-                    String raw = responseBody.string();
-                    if (raw == null || raw.trim().isEmpty()) {
-                        apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "빈 응답", null);
-                        return null;
-                    }
+    //             try (okhttp3.ResponseBody responseBody = response.body()) {
+    //                 String raw = responseBody.string();
+    //                 if (raw == null || raw.trim().isEmpty()) {
+    //                     apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "빈 응답", null);
+    //                     return null;
+    //                 }
 
-                    String jsonStr = raw.trim();
-                    if (jsonStr.startsWith("data: ")) {
-                        jsonStr = jsonStr.substring(6).trim();
-                        int nl = jsonStr.indexOf('\n');
-                        if (nl >= 0) jsonStr = jsonStr.substring(0, nl).trim();
-                    }
+    //                 String jsonStr = raw.trim();
+    //                 if (jsonStr.startsWith("data: ")) {
+    //                     jsonStr = jsonStr.substring(6).trim();
+    //                     int nl = jsonStr.indexOf('\n');
+    //                     if (nl >= 0) jsonStr = jsonStr.substring(0, nl).trim();
+    //                 }
 
-                    JSONParser parser = new JSONParser();
-                    JSONObject data = (JSONObject) parser.parse(jsonStr);
+    //                 JSONParser parser = new JSONParser();
+    //                 JSONObject data = (JSONObject) parser.parse(jsonStr);
 
-                    int imgInTokens = parseTokenCount(data.get("input_token"));
-                    int imgOutTokens = parseTokenCount(data.get("output_token"));
+    //                 int imgInTokens = parseTokenCount(data.get("input_token"));
+    //                 int imgOutTokens = parseTokenCount(data.get("output_token"));
 
-                    Object errCode = data.get("errorCode");
-                    if (errCode != null) {
-                        String code = String.valueOf(errCode).trim();
-                        if (!code.isEmpty() && !"None".equalsIgnoreCase(code)) {
-                            logger.warn("인포그래픽 이미지 API 오류: {}", code);
-                            apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "API 오류: " + code, null);
-                            return null;
-                        }
-                    }
+    //                 Object errCode = data.get("errorCode");
+    //                 if (errCode != null) {
+    //                     String code = String.valueOf(errCode).trim();
+    //                     if (!code.isEmpty() && !"None".equalsIgnoreCase(code)) {
+    //                         logger.warn("인포그래픽 이미지 API 오류: {}", code);
+    //                         apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "API 오류: " + code, null);
+    //                         return null;
+    //                     }
+    //                 }
 
-                    Object imageObj = data.get("image");
-                    if (imageObj == null) {
-                        apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "이미지 필드 없음", null);
-                        return null;
-                    }
-                    apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, imgInTokens, imgOutTokens, respMs, "Y", null, null);
-                    return stripDataUrlBase64Prefix(String.valueOf(imageObj));
-                }
-            }
-        } catch (Exception e) {
-            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
-            logger.warn("인포그래픽 이미지 API 호출 실패: {}", e.getMessage());
-            apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", e.getMessage(), null);
-        }
-        return null;
-    }
+    //                 Object imageObj = data.get("image");
+    //                 if (imageObj == null) {
+    //                     apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", "이미지 필드 없음", null);
+    //                     return null;
+    //                 }
+    //                 apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, imgInTokens, imgOutTokens, respMs, "Y", null, null);
+    //                 return stripDataUrlBase64Prefix(String.valueOf(imageObj));
+    //             }
+    //         }
+    //     } catch (Exception e) {
+    //         int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+    //         logger.warn("인포그래픽 이미지 API 호출 실패: {}", e.getMessage());
+    //         apiCallLogService.insertSilently(null, null, apiUrl, "-", "meeting_image", reqParamJson, 0, 0, respMs, "N", e.getMessage(), null);
+    //     }
+    //     return null;
+    // }
 
-    /** data:image/png;base64, 접두사 제거 후 순수 base64 반환 */
-    private static String stripDataUrlBase64Prefix(String image) {
-        if (image == null) {
-            return null;
-        }
-        String s = image.trim();
-        int comma = s.indexOf("base64,");
-        if (comma >= 0) {
-            return s.substring(comma + "base64,".length()).trim();
-        }
-        return s;
-    }
+    // /** data:image/png;base64, 접두사 제거 후 순수 base64 반환 */
+    // private static String stripDataUrlBase64Prefix(String image) {
+    //     if (image == null) {
+    //         return null;
+    //     }
+    //     String s = image.trim();
+    //     int comma = s.indexOf("base64,");
+    //     if (comma >= 0) {
+    //         return s.substring(comma + "base64,".length()).trim();
+    //     }
+    //     return s;
+    // }
 
     /** Object -> String 변환 (null 안전) */
     private static String stringValue(Object obj) {
@@ -1821,8 +1767,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * Cancel Beacon: STATUS='003'(취소), ABNORMAL_YN='Y' 업데이트
-     * 브라우저 beforeunload 시 sendBeacon으로 호출됨
+     * 녹음 중 페이지 이탈: ABNORMAL_YN='Y' 표시 (녹음 중인 회의만, STATUS 는 유지)
+     * 탭 닫기(pagehide sendBeacon) / 화면 내 이동(fetch) 시 호출됨
      */
     public Map<String, Object> cancelBeacon(Long meetingId) throws Exception {
         Map<String, Object> result = new HashMap<>();
@@ -1842,53 +1788,16 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 비정상종료 감지 스케줄러 실행 메서드
-     * STATUS='001' 이고 LAST_HEARTBEAT_DT < NOW()-3분 인 회의를 일괄 처리
-     * @return 처리된 건수
+     * 녹음 백업 조각 S3 업로드 (녹음 중 10분마다 / 페이지 이탈 직전 / 비정상 종료 후 누락 구간 첨부)
+     * - meeting-audio/{meetingId}/backup/backup_{fileIndex}.webm (같은 번호면 덮어씀)
+     * - fileIndex 가 없으면 파일명(backup_N.webm)에서 번호를 읽음 (이전 화면 호환)
+     * - 녹음 중 백업이면 heartbeat 도 갱신
+     * - 누락 구간 첨부(attachYn=Y)는 녹음 중이 아니므로 heartbeat 를 건드리지 않음
+     *   (heartbeat 갱신은 비정상 종료 표시를 해제하므로, 첨부 후 병합 전에 화면을 다시 열어도 비정상 종료로 남도록)
      */
-    public int detectAbnormalMeetings() {
-        try {
-            return meetingDAO.updateExpiredMeetingsAbnormal();
-        } catch (Exception e) {
-            logger.error("[detectAbnormalMeetings] 실행 오류", e);
-            return 0;
-        }
-    }
-
-    /**
-     * 비정상종료 회의 목록 조회 (현재 로그인 사용자의 ABNORMAL_YN='Y' 회의)
-     */
-    public List<MeetingVO> selectAbnormalMeetingList() throws Exception {
-        MeetingVO searchVO = new MeetingVO();
-        searchVO.setCreateUserId(SessionUtil.getUserId());
-        return meetingDAO.selectAbnormalMeetingList(searchVO);
-    }
-
-    /**
-     * 백업 파일 개수 조회
-     * meeting-audio/{meetingId}/backup/ 경로의 파일 수 반환
-     * 이어서 녹음 시 auto-save 인덱스를 이어서 시작하기 위해 사용
-     */
-    public int getBackupFileCount(Long meetingId) {
-        try {
-            String bucket = PropertyUtil.getProperty("aws.s3.bucket");
-            String prefix = "meeting-audio/" + meetingId + "/backup/";
-            ObjectListing listing = amazonS3.listObjects(bucket, prefix);
-            return (int) listing.getObjectSummaries().stream()
-                .filter(s -> !s.getKey().equals(prefix))
-                .count();
-        } catch (Exception e) {
-            logger.warn("[getBackupFileCount] 조회 실패 - meetingId: {}", meetingId, e);
-            return 0;
-        }
-    }
-
-    /**
-     * 백업 오디오 파일 S3 업로드
-     * meeting-audio/{meetingId}/backup/{originalFilename} 경로에 저장
-     */
-    public Map<String, Object> uploadBackupAudio(Long meetingId, MultipartFile file) throws Exception {
+    public Map<String, Object> uploadBackupAudio(Long meetingId, MultipartFile file, Integer fileIndex, String attachYn) throws Exception {
         Map<String, Object> result = new HashMap<>();
+        boolean isAttach = "Y".equals(attachYn);
         MeetingVO searchVO = new MeetingVO();
         searchVO.setMeetingId(meetingId);
         MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
@@ -1897,31 +1806,55 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             result.put("returnMsg", "권한이 없습니다.");
             return result;
         }
-        String filename = Optional.ofNullable(file.getOriginalFilename()).orElse("backup.webm");
-        String objectKey = "meeting-audio/" + meetingId + "/backup/" + filename;
+        // 누락 구간 첨부는 병합 · 화자 분리 · 회의록 생성 중이면 막음 (녹음 중 10분 백업은 해당 없음)
+        if (isAttach && minutesProcessor.isProcessing(meetingId)) {
+            result.put("successYn", false);
+            result.put("returnMsg", MeetingMinutesProcessor.PROCESSING_MSG);
+            return result;
+        }
+
+        Integer index = fileIndex;
+        if (index == null) {
+            java.util.regex.Matcher m = BACKUP_KEY_PATTERN.matcher(CommonUtil.nvl(file.getOriginalFilename(), ""));
+            if (m.find()) {
+                index = Integer.valueOf(m.group(1));
+            }
+        }
+        if (index == null || index < 0) {
+            result.put("successYn", false);
+            result.put("returnMsg", "백업 조각 번호가 없습니다.");
+            return result;
+        }
+
+        String objectKey = getBackupPrefix(meetingId) + "backup_" + index + ".webm";
         String bucket = PropertyUtil.getProperty("aws.s3.bucket");
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(file.getSize());
-        metadata.setContentType(Optional.ofNullable(file.getContentType()).orElse("audio/webm"));
-        amazonS3.putObject(bucket, objectKey, file.getInputStream(), metadata);
-        logger.info("[uploadBackupAudio] 업로드 완료 - meetingId: {}, key: {}", meetingId, objectKey);
+        metadata.setContentType("audio/webm");
+        try (InputStream is = file.getInputStream()) {
+            amazonS3.putObject(bucket, objectKey, is, metadata);
+        }
+        if (!isAttach) {
+            meetingDAO.updateMeetingHeartbeat(searchVO);
+        }
+        logger.info("[uploadBackupAudio] 업로드 완료 - meetingId: {}, key: {}, attachYn: {}", meetingId, objectKey, isAttach ? "Y" : "N");
         result.put("successYn", true);
+        result.put("fileIndex", index);
         return result;
     }
 
     /**
-     * 백업 파일 병합 복구
-     * 1. S3 backup/ 경로 파일 목록 조회 및 정렬
-     * 2. 파일 다운로드 → ffmpeg -f concat merge
-     * 3. 병합 파일 S3 업로드
-     * 4. TB_MEETING_AUDIO insert (STATUS='001')
-     * 5. TB_MEETING: ABNORMAL_YN='N', STATUS='002'
+     * 백업 조각 병합 복구 (비정상 종료 복구 / 10분 넘는 녹음의 정상 종료)
+     * 1. STT 서버 /audio/merge 가 backup/ 조각을 번호순으로 합쳐 S3 에 올림 (조각마다 webm 헤더가 있어 재인코딩)
+     * 2. 이전 처리 데이터(오디오·회의록·인포그래픽·화자분리 결과) 정리
+     * 3. TB_MEETING_AUDIO insert (STATUS='001') → 이후 streamMeetingProcessing SSE 가 화자분리·회의록 생성
+     * 4. TB_MEETING: ABNORMAL_YN='N', LAST_HEARTBEAT_DT=NULL, STATUS='002'
+     * 5. 백업 조각 삭제
+     * - 병합에 실패하면 백업 조각은 그대로 두어 다시 복구할 수 있게 함
      * @return audioId (이후 SSE 흐름에 전달)
      */
     public Map<String, Object> recoverMeeting(Long meetingId) throws Exception {
         Map<String, Object> result = new HashMap<>();
-        String bucket = PropertyUtil.getProperty("aws.s3.bucket");
-        String prefix = "meeting-audio/" + meetingId + "/backup/";
 
         // 소유권 검증
         MeetingVO searchVO = new MeetingVO();
@@ -1932,138 +1865,119 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             result.put("returnMsg", "권한이 없습니다.");
             return result;
         }
-
-        // 백업 파일 목록 조회 및 파일명 오름차순 정렬 (backup_0.webm, backup_1.webm ...)
-        ObjectListing listing = amazonS3.listObjects(bucket, prefix);
-        List<S3ObjectSummary> summaries = listing.getObjectSummaries().stream()
-            .filter(s -> !s.getKey().equals(prefix))
-            .sorted(Comparator.comparing(s -> {
-                String name = s.getKey().substring(s.getKey().lastIndexOf('/') + 1);
-                try { return Integer.parseInt(name.replaceAll("[^0-9]", "")); }
-                catch (NumberFormatException e) { return Integer.MAX_VALUE; }
-            }))
-            .collect(Collectors.toList());
-
-        if (summaries.isEmpty()) {
+        if (listBackupIndexes(meetingId).isEmpty()) {
             result.put("successYn", false);
-            result.put("returnMsg", "복구할 백업 파일이 없습니다.");
+            result.put("returnMsg", "복구할 백업 음성이 없습니다. 다른 오디오로 대체해 회의록을 생성해 주세요.");
+            return result;
+        }
+        // 병합하는 동안 처리 중으로 표시 — 다른 탭 · 새로고침으로 복구 · 첨부를 동시에 하지 않게 (CMB processRecover 와 같음)
+        // 끝나면(성공 · 실패) 표시를 지우고, 성공이면 화면이 이어서 화자 분리(SSE)를 시작한다
+        if (!minutesProcessor.markDiarizeStart(meetingId)) {
+            result.put("successYn", false);
+            result.put("returnMsg", MeetingMinutesProcessor.PROCESSING_MSG);
+            return result;
+        }
+        try {
+            return recoverMeetingMerge(meetingId, searchVO);
+        } finally {
+            minutesProcessor.clearStatus(meetingId);
+        }
+    }
+
+    /** recoverMeeting 본문 — 병합 · 오디오 등록 · 복구 처리 · 백업 정리 */
+    private Map<String, Object> recoverMeetingMerge(Long meetingId, MeetingVO searchVO) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+
+        // 1. 병합 (실패 시 백업 조각 유지)
+        JSONObject merged;
+        try {
+            merged = callMergeAudio(meetingId);
+        } catch (Exception e) {
+            logger.error("[recoverMeeting] 백업 병합 실패 - meetingId: {}", meetingId, e);
+            result.put("successYn", false);
+            result.put("returnMsg", "백업 음성 병합에 실패했습니다. 잠시 후 다시 시도해 주세요. (" + e.getMessage() + ")");
+            return result;
+        }
+        String mergedKey = stringValue(merged.get("filePath"));
+        if (mergedKey.isEmpty()) {
+            result.put("successYn", false);
+            result.put("returnMsg", "백업 음성 병합 결과가 없습니다.");
             return result;
         }
 
-        // 임시 디렉토리 생성
-        Path tmpDir = Files.createTempDirectory("meeting_recover_" + meetingId + "_");
-        String mergedKey = null;
+        // 2. 이전 처리 데이터 정리 (병합 파일은 아직 DB 에 없으므로 지워지지 않음)
+        cleanupPreviousProcessingData(searchVO);
+
+        // 3. 병합 오디오 등록 (STATUS 001: 대기)
         MeetingVO audioVO = new MeetingVO();
+        audioVO.setMeetingId(meetingId);
+        audioVO.setFilePath(mergedKey);
+        audioVO.setOriginalFilename(mergedKey.substring(mergedKey.lastIndexOf('/') + 1));
+        audioVO.setFileExt("webm");
+        audioVO.setFileSize(toLong(merged.get("fileSize")));
+        meetingDAO.insertMeetingAudio(audioVO);
+        logger.info("[recoverMeeting] 병합 완료 - meetingId: {}, 조각 {}개, key: {}, audioId: {}",
+            meetingId, merged.get("fileCount"), mergedKey, audioVO.getAudioId());
 
-        try {
-            // 백업 파일 개별 다운로드
-            List<File> localFiles = new ArrayList<>();
-            for (S3ObjectSummary s : summaries) {
-                String filename = s.getKey().substring(s.getKey().lastIndexOf('/') + 1);
-                File localFile = tmpDir.resolve(filename).toFile();
-                S3Object s3Object = amazonS3.getObject(bucket, s.getKey());
-                try (InputStream is = s3Object.getObjectContent();
-                     FileOutputStream fos = new FileOutputStream(localFile)) {
-                    byte[] buf = new byte[8192];
-                    int read;
-                    while ((read = is.read(buf)) != -1) fos.write(buf, 0, read);
-                }
-                localFiles.add(localFile);
-                logger.info("[recoverMeeting] 다운로드 완료 - {}", s.getKey());
+        // 4. TB_MEETING 복구 처리
+        meetingDAO.updateMeetingRecover(searchVO);
+
+        // 5. 백업 조각 정리 (실패해도 진행) — 처리 상태 표시는 recoverMeeting 이 지움
+        deleteBackupFiles(meetingId);
+
+        result.put("successYn", true);
+        result.put("audioId", audioVO.getAudioId());
+        return result;
+    }
+
+    /**
+     * STT 서버 /audio/merge 호출 - 백업 조각 병합 (조각 수·길이에 따라 수십 초~수 분)
+     * - 주소는 Globals.chatbot.merge.pythonUrl, 없으면 Globals.chatbot.diarize.pythonUrl 의 /diarize 를 /audio/merge 로 바꿔 사용
+     * @return {successYn, filePath, fileSize, fileCount, skippedCount}
+     */
+    @SuppressWarnings("unchecked")
+    private JSONObject callMergeAudio(Long meetingId) throws Exception {
+        String url = PropertyUtil.getProperty("Globals.chatbot.merge.pythonUrl");
+        if (CommonUtil.isEmpty(url)) {
+            String diarizeUrl = PropertyUtil.getProperty("Globals.chatbot.diarize.pythonUrl");
+            if (CommonUtil.isEmpty(diarizeUrl)) {
+                throw new IllegalStateException("STT 서버 주소(Globals.chatbot.diarize.pythonUrl)가 설정되지 않았습니다.");
             }
-
-            // ffmpeg concat 리스트 파일 작성
-            File listFile = tmpDir.resolve("filelist.txt").toFile();
-            try (PrintWriter pw = new PrintWriter(listFile, "UTF-8")) {
-                for (File f : localFiles) {
-                    pw.println("file '" + f.getAbsolutePath().replace("'", "\\'") + "'");
-                }
-            }
-
-            // ffmpeg 실행: 파일 병합
-            File outputFile = tmpDir.resolve("merged.webm").toFile();
-            ProcessBuilder pb = new ProcessBuilder(
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                "-i", listFile.getAbsolutePath(),
-                "-c", "copy", outputFile.getAbsolutePath()
-            );
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            // ffmpeg stdout/stderr 소비 (블로킹 방지)
-            try (InputStream is = process.getInputStream()) {
-                byte[] buf = new byte[4096];
-                while (is.read(buf) != -1) {}
-            }
-            int exitCode = process.waitFor();
-            if (exitCode != 0 || !outputFile.exists() || outputFile.length() == 0) {
-                throw new RuntimeException("ffmpeg 병합 실패 (exit=" + exitCode + ")");
-            }
-            logger.info("[recoverMeeting] ffmpeg 병합 완료 - meetingId: {}, size: {}bytes", meetingId, outputFile.length());
-
-            // 병합 파일 S3 업로드
-            String uuid = UUID.randomUUID().toString();
-            mergedKey = "meeting-audio/" + meetingId + "/" + uuid + ".webm";
-            ObjectMetadata metadata = new ObjectMetadata();
-            metadata.setContentLength(outputFile.length());
-            metadata.setContentType("audio/webm");
-            amazonS3.putObject(bucket, mergedKey, new FileInputStream(outputFile), metadata);
-            logger.info("[recoverMeeting] 업로드 완료 - meetingId: {}, key: {}", meetingId, mergedKey);
-
-            // 기존 오디오 레코드 정리 후 신규 삽입
-            meetingDAO.deleteAudioByMeetingId(searchVO);
-            audioVO.setMeetingId(meetingId);
-            audioVO.setFilePath(mergedKey);
-            audioVO.setOriginalFilename(uuid + ".webm");
-            audioVO.setFileExt("webm");
-            audioVO.setFileSize(outputFile.length());
-            meetingDAO.insertMeetingAudio(audioVO);
-            logger.info("[recoverMeeting] 오디오 레코드 저장 - audioId: {}", audioVO.getAudioId());
-
-            // TB_MEETING 복구 처리
-            MeetingVO updateVO = new MeetingVO();
-            updateVO.setMeetingId(meetingId);
-            meetingDAO.updateMeetingRecover(updateVO);
-
-            // 백업 파일 정리 (병합 성공 후)
-            deleteBackupFiles(meetingId);
-
-            result.put("successYn", true);
-            result.put("audioId", audioVO.getAudioId());
-
-        } catch (Exception e) {
-            logger.error("[recoverMeeting] 복구 실패 - meetingId: {}", meetingId, e);
-            // 실패 시 오디오 레코드에 에러 저장
-            try {
-                meetingDAO.deleteAudioByMeetingId(searchVO);
-                audioVO.setMeetingId(meetingId);
-                audioVO.setFilePath(mergedKey != null ? mergedKey : "");
-                audioVO.setOriginalFilename("recovery_failed.webm");
-                audioVO.setFileExt("webm");
-                audioVO.setFileSize(0L);
-                meetingDAO.insertMeetingAudio(audioVO);
-                MeetingVO errVO = new MeetingVO();
-                errVO.setMeetingId(meetingId);
-                errVO.setAudioStatus("004");
-                String errMsg = e.getMessage() != null ? e.getMessage() : "복구 처리 실패";
-                errVO.setErrorMsg(errMsg.length() > 1000 ? errMsg.substring(0, 1000) : errMsg);
-                meetingDAO.updateMeetingAudioStatus(errVO);
-            } catch (Exception ignore) {
-                logger.warn("[recoverMeeting] 에러 저장 실패", ignore);
-            }
-            result.put("successYn", false);
-            result.put("returnMsg", "복구 처리 중 오류가 발생했습니다. (" + e.getMessage() + ")");
-
-        } finally {
-            // 임시 파일 정리
-            try {
-                Files.walk(tmpDir)
-                    .sorted(Comparator.reverseOrder())
-                    .map(Path::toFile)
-                    .forEach(File::delete);
-            } catch (Exception ignore) {}
+            url = diarizeUrl.trim().replaceAll("/diarize/?$", "") + "/audio/merge";
         }
 
-        return result;
+        JSONObject requestJson = new JSONObject();
+        requestJson.put("meeting_id", meetingId);
+        String reqParamJson = requestJson.toJSONString();
+        long startMs = System.currentTimeMillis();
+
+        OkHttpClient client = new OkHttpClient.Builder()
+            .readTimeout(15, TimeUnit.MINUTES)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .build();
+        Request request = new Request.Builder()
+            .url(url)
+            .post(RequestBody.create(reqParamJson, okhttp3.MediaType.get("application/json; charset=utf-8")))
+            .build();
+
+        logger.info("[callMergeAudio] 백업 병합 호출 - meetingId: {}, url: {}", meetingId, url);
+        try (okhttp3.Response response = client.newCall(request).execute()) {
+            int respMs = (int) Math.min(System.currentTimeMillis() - startMs, Integer.MAX_VALUE);
+            String raw = response.body() != null ? response.body().string() : "";
+            if (!response.isSuccessful()) {
+                String errMsg = "STT 서버 오류 (" + response.code() + "): " + raw;
+                apiCallLogService.insertSilently(null, null, url, "-", "meeting_merge", reqParamJson, 0, 0, respMs, "N", errMsg, null);
+                throw new IllegalStateException(errMsg);
+            }
+            JSONObject data = (JSONObject) new JSONParser().parse(raw);
+            if (!Boolean.TRUE.equals(data.get("successYn"))) {
+                String errMsg = stringValue(data.get("returnMsg"));
+                apiCallLogService.insertSilently(null, null, url, "-", "meeting_merge", reqParamJson, 0, 0, respMs, "N", errMsg, null);
+                throw new IllegalStateException(errMsg.isEmpty() ? "병합 실패" : errMsg);
+            }
+            apiCallLogService.insertSilently(null, null, url, "-", "meeting_merge", reqParamJson, 0, 0, respMs, "Y", null, null);
+            return data;
+        }
     }
 
     private void downloadAsTxt(String htmlContent, String fileName, HttpServletResponse response) throws Exception {
@@ -2103,69 +2017,56 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 회의록 통합 등록
-     * @param dataVO
-     * @return
-     * @throws Exception
+     * 회의록 통합 등록 — 통합 회의를 만들고 회의록 생성을 시작한다 (백그라운드)
+     * - 전문은 원본 회의들의 화자 발화를 회의 순서대로 이어 붙여 만든다 (MeetingMinutesProcessor)
+     * - 생성이 끝나면 처리기가 회의를 종료(002) 상태로 바꾼다. 진행은 selectMeetingMinutesStatus 로 확인
      */
     public Map<String, Object> integrateMeetingMinutes(MeetingVO dataVO) throws Exception {
         Map<String, Object> result = new HashMap<>();
-        String fullText = "";
         try {
             if (dataVO.getMeetingIds() == null || dataVO.getMeetingIds().isEmpty()) {
                 result.put("successYn", false);
                 result.put("returnMsg", "회의 ID가 없습니다.");
                 return result;
-            }else{
-                // 회의 등록
-                dataVO.setIsAutoTitle("Y");
-                dataVO.setCreateUserId(SessionUtil.getUserId());
-                dataVO.setIntegrateYn("Y");
-                // SHOW_SPEAKER_YN: 프론트에서 전달받은 값 정규화 (미입력 시 기본 Y)
-                String integrateShowSpeaker = dataVO.getShowSpeakerYn();
-                dataVO.setShowSpeakerYn((integrateShowSpeaker != null && "N".equalsIgnoreCase(integrateShowSpeaker.trim())) ? "N" : "Y");
-                // 선택한 회의록의 참석자 조회(중복제거)
-                String attendees = meetingDAO.selectMeetingAttendees(dataVO);
-                if (attendees != null) {
-                    dataVO.setAttendees(attendees);
-                }
-                meetingDAO.insertMeeting(dataVO);
-
-                // 회의록 통합 등록
-                MeetingVO integrationVO = new MeetingVO();
-                // 통합된 결과 회의 ID (MEETING_ID) - 회의 등록 후 반환된 값
-                integrationVO.setMeetingId(dataVO.getMeetingId());
-                integrationVO.setParentMeetingId(dataVO.getMeetingId());
-                // 통합 대상이 된 원본 회의록 ID - MEETING_ID
-                integrationVO.setChildMeetingIds(dataVO.getMeetingIds());
-                meetingDAO.insertMeetingIntegration(integrationVO);
-                
-                // 회의록 조회
-                List<MeetingVO> meetingMinutesList = meetingDAO.selectMeetingMinutesByMeetingId(dataVO);
-                for (MeetingVO meetingMinutes : meetingMinutesList) {
-                    fullText += meetingMinutes.getFullText() + "\n";
-                }
-                // 회의록 등록
-                integrationVO.setFullText(fullText);
-                integrationVO.setIsAutoTitle("Y");
-                integrationVO.setShowSpeakerYn(dataVO.getShowSpeakerYn());
-                LibraryVO searchVO = new LibraryVO();
-                searchVO.setTmplId(MINUTES_TMPL_ID);
-                List<LibraryVO.TmplFieldItem> tmplFieldList = libraryDAO.selectTmplFieldList(searchVO);
-                String minutesAnswer = callLlmForMinutes(fullText, "Y", tmplFieldList, integrationVO.getShowSpeakerYn());
-                if (minutesAnswer != null) {
-                    parseAndSaveMinutes(integrationVO, minutesAnswer, tmplFieldList);
-                }
-
-                // 통합 완료 후 회의 상태 종료(002)로 업데이트
-                MeetingVO statusVO = new MeetingVO();
-                statusVO.setMeetingId(dataVO.getMeetingId());
-                statusVO.setStatus("002");
-                meetingDAO.updateMeetingStatus(statusVO);
-
-                result.put("successYn", true);
-                result.put("meetingId", dataVO.getMeetingId());
             }
+            // 원본 회의가 화자 분리 · 회의록 생성 중이면 통합하지 않음 (발화가 다 저장되기 전 전문이 만들어지지 않게)
+            for (Long sourceId : dataVO.getMeetingIds()) {
+                if (minutesProcessor.isProcessing(sourceId)) {
+                    MeetingVO sourceSearch = new MeetingVO();
+                    sourceSearch.setMeetingId(sourceId);
+                    MeetingVO source = meetingDAO.selectMeeting(sourceSearch);
+                    String title = source != null && !CommonUtil.isEmpty(source.getMeetingTitle()) ? "[" + source.getMeetingTitle() + "] " : "";
+                    result.put("successYn", false);
+                    result.put("returnMsg", title + MeetingMinutesProcessor.PROCESSING_MSG);
+                    return result;
+                }
+            }
+            // 회의 등록
+            dataVO.setIsAutoTitle("Y");
+            dataVO.setCreateUserId(SessionUtil.getUserId());
+            dataVO.setIntegrateYn("Y");
+            // SHOW_SPEAKER_YN: 프론트에서 전달받은 값 정규화 (미입력 시 기본 Y)
+            String integrateShowSpeaker = dataVO.getShowSpeakerYn();
+            dataVO.setShowSpeakerYn((integrateShowSpeaker != null && "N".equalsIgnoreCase(integrateShowSpeaker.trim())) ? "N" : "Y");
+            // 선택한 회의록의 참석자 조회(중복제거)
+            String attendees = meetingDAO.selectMeetingAttendees(dataVO);
+            if (attendees != null) {
+                dataVO.setAttendees(attendees);
+            }
+            meetingDAO.insertMeeting(dataVO);
+
+            // 통합 대상 원본 회의 등록
+            MeetingVO integrationVO = new MeetingVO();
+            integrationVO.setMeetingId(dataVO.getMeetingId());
+            integrationVO.setParentMeetingId(dataVO.getMeetingId());
+            integrationVO.setChildMeetingIds(dataVO.getMeetingIds());
+            meetingDAO.insertMeetingIntegration(integrationVO);
+
+            // 회의록 생성 시작 (기본 양식)
+            minutesProcessor.startMinutes(dataVO.getMeetingId(), SessionUtil.getUserId());
+
+            result.put("successYn", true);
+            result.put("meetingId", dataVO.getMeetingId());
             return result;
         } catch (Exception e) {
             result.put("successYn", false);

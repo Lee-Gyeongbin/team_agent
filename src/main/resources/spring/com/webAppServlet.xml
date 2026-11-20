@@ -37,6 +37,10 @@
 
 	<mvc:interceptors>
 		<mvc:interceptor>
+			<mvc:mapping path="/**"/>
+			<bean class="kr.teamagent.common.interceptor.PermissionInterceptor"/>
+		</mvc:interceptor>
+		<mvc:interceptor>
 			<mvc:mapping path="/api/**"/>
 			<bean class="kr.teamagent.common.interceptor.ApiSessionInterceptor">
 				<property name="excludePatterns">

@@ -31,6 +31,11 @@
 	</repositories>
 
 	<dependencies>
+		<dependency>
+			<groupId>org.jsoup</groupId>
+			<artifactId>jsoup</artifactId>
+			<version>1.24.1</version>
+		</dependency>
 		<!-- eGov Framework -->
 		<dependency>
 			<groupId>org.egovframe.rte</groupId>

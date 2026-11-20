@@ -32,6 +32,9 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	private CommonDAO commonDAO;
 
 	@Autowired
+	private MenuPermissionServiceImpl menuPermissionService;
+
+	@Autowired
 	private KeyGenerate keyGenerate;
 
 	@Autowired
@@ -61,6 +64,16 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	public List<EgovMap> selectMenuTreeList() throws Exception {
 		List<EgovMap> flatList = commonDAO.selectMenuTreeList();
 		return buildMenuTree(flatList);
+	}
+
+	/**
+	 * 로그인 사용자 메뉴 트리 조회 — 조회 권한(READ_YN='Y')이 있는 메뉴만 반환한다.
+	 * 권한 행이 없으면 보이지 않고, 하위 메뉴가 모두 빠진 상위 메뉴도 함께 제외한다.
+	 * @return 루트 메뉴 목록, 각 메뉴의 children에 하위 메뉴 포함
+	 * @throws Exception
+	 */
+	public List<EgovMap> selectUserMenuTreeList() throws Exception {
+		return pruneMenuTree(selectMenuTreeList(), menuPermissionService.getPermissionMap());
 	}
 
 	/**
@@ -267,6 +280,25 @@ public class CommonServiceImpl extends EgovAbstractServiceImpl {
 	 * @param flatList DB 조회 결과 (SORT_PATH 순)
 	 * @return 루트 메뉴 목록, 하위 메뉴는 children 리스트에 포함
 	 */
+	/** 최하위 메뉴는 조회 권한이 있을 때만, 상위 메뉴는 남은 하위 메뉴가 있을 때만 남긴다 */
+	@SuppressWarnings("unchecked")
+	private List<EgovMap> pruneMenuTree(List<EgovMap> nodes, Map<String, CommonVO.MenuPermVO> permMap) {
+		List<EgovMap> kept = new ArrayList<>();
+		for (EgovMap node : nodes) {
+			List<EgovMap> children = pruneMenuTree((List<EgovMap>) node.get("children"), permMap);
+			boolean leaf = "Y".equals(node.get("isLeaf"));
+			CommonVO.MenuPermVO perm = permMap.get((String) node.get("menuId"));
+			boolean readable = perm != null && "Y".equals(perm.getReadYn());
+			if (leaf ? readable : !children.isEmpty()) {
+				node.put("children", children);
+				node.put("readYn", readable ? "Y" : "N");
+				node.put("funcYn", perm != null && "Y".equals(perm.getFuncYn()) ? "Y" : "N");
+				kept.add(node);
+			}
+		}
+		return kept;
+	}
+
 	private List<EgovMap> buildMenuTree(List<EgovMap> flatList) {
 		Map<String, EgovMap> mapById = new LinkedHashMap<>();
 		List<EgovMap> rootList = new ArrayList<>();

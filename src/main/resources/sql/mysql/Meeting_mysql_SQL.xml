@@ -15,6 +15,10 @@
             , A.START_DT        AS START_DT
             , A.END_DT          AS END_DT
             , A.INTEGRATE_YN    AS INTEGRATE_YN
+            /* 비정상종료: 이탈 표시(Y) 또는 녹음 중 heartbeat 가 3분 넘게 끊김 (정상 종료 시 LAST_HEARTBEAT_DT 는 NULL) */
+            , CASE WHEN A.ABNORMAL_YN = 'Y' THEN 'Y'
+                   WHEN A.LAST_HEARTBEAT_DT &lt; NOW() - INTERVAL 3 MINUTE THEN 'Y'
+                   ELSE 'N' END     AS ABNORMAL_YN
             , A.CREATE_USER_ID  AS CREATE_USER_ID
             , A.CREATE_DT       AS CREATE_DT
         FROM TB_MEETING A
@@ -63,6 +67,13 @@
             , A.IS_AUTO_TITLE    AS IS_AUTO_TITLE
             , A.INTEGRATE_YN     AS INTEGRATE_YN
             , A.SHOW_SPEAKER_YN  AS SHOW_SPEAKER_YN
+            , A.MINUTES_TMPL_CD   AS MINUTES_TMPL_CD
+            , A.MINUTES_TONE_CD   AS MINUTES_TONE_CD
+            , A.MINUTES_LENGTH_CD AS MINUTES_LENGTH_CD
+            /* 비정상종료: 이탈 표시(Y) 또는 녹음 중 heartbeat 가 3분 넘게 끊김 (정상 종료 시 LAST_HEARTBEAT_DT 는 NULL) */
+            , CASE WHEN A.ABNORMAL_YN = 'Y' THEN 'Y'
+                   WHEN A.LAST_HEARTBEAT_DT &lt; NOW() - INTERVAL 3 MINUTE THEN 'Y'
+                   ELSE 'N' END     AS ABNORMAL_YN
             , A.CREATE_USER_ID   AS CREATE_USER_ID
             , A.CREATE_DT        AS CREATE_DT
         FROM TB_MEETING A
@@ -189,11 +200,82 @@
             <if test="fullText != null">FULL_TEXT = #{fullText},</if>
             <if test="flatData != null">FLAT_DATA = #{flatData},</if>
             <if test="generatedContent != null">GENERATED_CONTENT = #{generatedContent},</if>
-            <if test="editedContent != null">EDITED_CONTENT = #{editedContent},</if>
+            <choose>
+                <when test='clearEditedYn == "Y"'>EDITED_CONTENT = NULL,</when>
+                <when test="editedContent != null">EDITED_CONTENT = #{editedContent},</when>
+            </choose>
             MODIFY_DT = NOW()
         </set>
         WHERE MINUTES_ID = #{minutesId}
     </update>
+
+    <update id="updateMeetingMinutesOption" parameterType="meetingVO">
+        /* 회의록 양식·문체·분량 저장 ai.meeting.updateMeetingMinutesOption */
+        UPDATE TB_MEETING SET
+            MINUTES_TMPL_CD     = #{minutesTmplCd}
+            , MINUTES_TONE_CD   = #{minutesToneCd}
+            , MINUTES_LENGTH_CD = #{minutesLengthCd}
+            , MODIFY_DT         = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <!-- ===================== TB_MEETING_TMPL (회의록 양식 매핑) ===================== -->
+
+    <select id="selectMeetingTmplList" resultType="meetingVO">
+        /* 회의록 양식 목록 ai.meeting.selectMeetingTmplList */
+        SELECT
+            A.MINUTES_TMPL_CD   AS MINUTES_TMPL_CD
+            , A.TMPL_ID         AS TMPL_ID
+            , T.TMPL_NM         AS TMPL_NM
+            , T.DESCRIPTION     AS TMPL_DESCRIPTION
+            , A.RECOMMEND_TXT   AS RECOMMEND_TXT
+            , A.DEFAULT_TONE_CD AS DEFAULT_TONE_CD
+            , A.DEFAULT_YN      AS DEFAULT_YN
+            , A.SORT_ORD        AS SORT_ORD
+        FROM TB_MEETING_TMPL A
+        INNER JOIN TB_TMPL T
+            ON T.TMPL_ID = A.TMPL_ID
+            AND T.USE_YN = 'Y'
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+        ORDER BY A.SORT_ORD, A.MINUTES_TMPL_CD
+    </select>
+
+    <select id="selectMeetingTmplFieldList" resultType="meetingVO">
+        /* 회의록 양식 구성 필드 (양식 목록 표시용) ai.meeting.selectMeetingTmplFieldList */
+        SELECT
+            F.TMPL_ID     AS TMPL_ID
+            , F.JSON_KEY  AS JSON_KEY
+            , F.FIELD_NM  AS FIELD_NM
+        FROM TB_TMPL_FIELD F
+        INNER JOIN TB_MEETING_TMPL A
+            ON A.TMPL_ID = F.TMPL_ID
+            AND A.USE_YN = 'Y'
+        WHERE 1=1
+            AND F.USE_YN = 'Y'
+        ORDER BY F.TMPL_ID, F.SORT_ORD
+    </select>
+
+    <select id="selectMeetingTmpl" parameterType="meetingVO" resultType="meetingVO">
+        /* 회의록 양식 단건 — minutesTmplCd 없으면 기본 양식 ai.meeting.selectMeetingTmpl */
+        SELECT
+            A.MINUTES_TMPL_CD   AS MINUTES_TMPL_CD
+            , A.TMPL_ID         AS TMPL_ID
+            , A.DEFAULT_TONE_CD AS DEFAULT_TONE_CD
+        FROM TB_MEETING_TMPL A
+        WHERE 1=1
+            AND A.USE_YN = 'Y'
+            <choose>
+                <when test="minutesTmplCd != null and minutesTmplCd != ''">
+                    AND A.MINUTES_TMPL_CD = #{minutesTmplCd}
+                </when>
+                <otherwise>
+                    AND A.DEFAULT_YN = 'Y'
+                </otherwise>
+            </choose>
+        ORDER BY A.SORT_ORD
+        LIMIT 1
+    </select>
 
     <!-- ===================== TB_MEETING_INFOGRAPHIC ===================== -->
 
@@ -311,6 +393,33 @@
         WHERE MEETING_ID = #{meetingId}
     </delete>
 
+    <update id="resetSpeakerDiarization" parameterType="meetingVO">
+        /* 화자 분리 재시도 — 화자 분리 결과(레이블 · 발화)만 비움, 이름 · 참석자 매핑 유지 ai.meeting.resetSpeakerDiarization */
+        UPDATE TB_MEETING_SPEAKER SET
+            SPEAKER_LABEL = NULL
+            , UTTERANCES  = NULL
+            , MODIFY_DT   = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <delete id="deleteUnregisteredSpeakers" parameterType="meetingVO">
+        /* 화자 분리 재시도 — 참석자로 지정되지 않은(화자 분리로 생긴) 화자 행 삭제 ai.meeting.deleteUnregisteredSpeakers */
+        DELETE FROM TB_MEETING_SPEAKER
+        WHERE MEETING_ID = #{meetingId}
+          AND (USER_ID IS NULL OR USER_ID = '')
+    </delete>
+
+    <update id="updateMeetingAudioRetry" parameterType="meetingVO">
+        /* 화자 분리 재시도 — 가장 최근 오디오를 대기(001)로 되돌림 (STT 서버는 001 만 처리) ai.meeting.updateMeetingAudioRetry */
+        UPDATE TB_MEETING_AUDIO SET
+            STATUS      = '001'
+            , ERROR_MSG = NULL
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+        ORDER BY AUDIO_ID DESC
+        LIMIT 1
+    </update>
+
     <!-- ===================== TB_MEETING_AUDIO ===================== -->
 
     <insert id="insertMeetingAudio" parameterType="meetingVO"
@@ -366,59 +475,42 @@
     <!-- ===================== Heartbeat / 비정상종료 ===================== -->
 
     <update id="updateMeetingHeartbeat" parameterType="meetingVO">
-        /* Heartbeat 수신 시 최종 일시 갱신 ai.meeting.updateMeetingHeartbeat */
+        /* Heartbeat 수신(녹음 중 30초 주기 / 백업 조각 업로드) - 최종 일시 갱신, 비정상종료 해제 ai.meeting.updateMeetingHeartbeat */
         UPDATE TB_MEETING SET
             LAST_HEARTBEAT_DT = NOW()
+            , ABNORMAL_YN = 'N'
             , MODIFY_DT = NOW()
         WHERE MEETING_ID = #{meetingId}
     </update>
 
     <update id="updateMeetingCancelAbnormal" parameterType="meetingVO">
-        /* Cancel Beacon: 비정상종료(취소) 처리 ai.meeting.updateMeetingCancelAbnormal */
+        /* 녹음 중 페이지 이탈 → 비정상종료 표시 (녹음 중인 회의만, 상태는 바꾸지 않음) ai.meeting.updateMeetingCancelAbnormal */
         UPDATE TB_MEETING SET
-            STATUS          = '003'
-            , ABNORMAL_YN   = 'Y'
-            , END_DT        = NOW()
+            ABNORMAL_YN     = 'Y'
             , MODIFY_DT     = NOW()
         WHERE MEETING_ID = #{meetingId}
-    </update>
-
-    <update id="updateExpiredMeetingsAbnormal">
-        /* 스케줄러: Heartbeat 미수신 진행중 회의 비정상종료 처리 ai.meeting.updateExpiredMeetingsAbnormal */
-        UPDATE TB_MEETING SET
-            ABNORMAL_YN = 'Y'
-            , STATUS    = '003'
-            , END_DT    = NOW()
-            , MODIFY_DT = NOW()
-        WHERE STATUS = '001'
-            AND USE_YN = 'Y'
             AND LAST_HEARTBEAT_DT IS NOT NULL
-            AND LAST_HEARTBEAT_DT &lt; NOW() - INTERVAL 3 MINUTE
     </update>
 
     <update id="updateMeetingRecover" parameterType="meetingVO">
-        /* 복구 완료: 비정상종료 플래그 해제 및 종료 처리 ai.meeting.updateMeetingRecover */
+        /* 녹음 정상 종료 / 복구 완료: heartbeat·비정상종료 해제 및 종료 처리 ai.meeting.updateMeetingRecover */
         UPDATE TB_MEETING SET
             ABNORMAL_YN = 'N'
+            , LAST_HEARTBEAT_DT = NULL
             , STATUS    = '002'
             , END_DT    = NOW()
             , MODIFY_DT = NOW()
         WHERE MEETING_ID = #{meetingId}
     </update>
 
-    <select id="selectAbnormalMeetingList" resultType="meetingVO">
-        /* 비정상종료 회의 목록 조회 ai.meeting.selectAbnormalMeetingList */
-        SELECT
-            MEETING_ID      AS MEETING_ID
-            , MEETING_TITLE AS MEETING_TITLE
-            , START_DT      AS START_DT
-            , END_DT        AS END_DT
-        FROM TB_MEETING
-        WHERE USE_YN = 'Y'
-            AND ABNORMAL_YN = 'Y'
-            AND CREATE_USER_ID = #{createUserId}
-        ORDER BY CREATE_DT DESC
-    </select>
+    <update id="updateMeetingRecordEnd" parameterType="meetingVO">
+        /* 녹음 정상 종료(오디오 업로드) - heartbeat·비정상종료 해제 (상태는 화자분리 단계에서 변경) ai.meeting.updateMeetingRecordEnd */
+        UPDATE TB_MEETING SET
+            LAST_HEARTBEAT_DT = NULL
+            , ABNORMAL_YN = 'N'
+            , MODIFY_DT = NOW()
+        WHERE MEETING_ID = #{meetingId}
+    </update>
 
     <delete id="deleteAudioByMeetingId" parameterType="meetingVO">
         /* 회의 오디오 레코드 전체 삭제 (복구 전 정리) ai.meeting.deleteAudioByMeetingId */
@@ -460,7 +552,8 @@
         JOIN TB_MEETING m ON m.MEETING_ID = i.CHILD_MEETING_ID
         WHERE i.PARENT_MEETING_ID = #{meetingId}
           AND m.USE_YN = 'Y'
-        ORDER BY i.CREATE_DT ASC
+        /* 회의 순서 — 통합 회의록 전문을 원본 회의 진행 순으로 이어 붙임 (CMB 와 같음) */
+        ORDER BY IFNULL(m.START_DT, m.CREATE_DT) ASC, m.MEETING_ID ASC
     </select>
 
     <insert id="insertMeetingIntegration" parameterType="meetingVO">

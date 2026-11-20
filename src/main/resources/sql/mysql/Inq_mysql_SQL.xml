@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="inq">
+
+    <!-- ===== TB_INQ ===== -->
+
+    <select id="selectInqList" parameterType="kr.teamagent.inq.service.InqVO" resultType="kr.teamagent.inq.service.InqVO">
+        /* 문의사항 목록 조회 inq.selectInqList */
+        SELECT
+            A.INQ_ID
+            , A.TITLE
+            , A.CAT_CD
+            , C.CODE_NM AS CAT_NM
+            , A.AGENT_ID
+            , G.AGENT_NM
+            , A.STATUS_CD
+            , S.CODE_NM AS STATUS_NM
+            , A.SECRET_YN
+            , A.CRTR_ID
+            , U.USER_NM AS CRTR_NM
+            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            , IF(EXISTS (SELECT 1 FROM TB_INQ_ANSR R WHERE R.INQ_ID = A.INQ_ID AND R.DEPTH = 1 AND R.USE_YN = 'Y'), 'Y', 'N') AS ANSWER_YN
+        FROM TB_INQ A
+            LEFT JOIN TB_CODE C ON C.CODE_GRP_ID = 'IS000002' AND C.CODE_ID = A.CAT_CD
+            LEFT JOIN TB_CODE S ON S.CODE_GRP_ID = 'IS000001' AND S.CODE_ID = A.STATUS_CD
+            LEFT JOIN TB_AGT G ON G.AGENT_ID = A.AGENT_ID
+            LEFT JOIN TB_USER U ON U.USER_ID = A.CRTR_ID
+        WHERE A.USE_YN = 'Y'
+            <if test="catCd != null and catCd != ''">
+                AND A.CAT_CD = #{catCd}
+            </if>
+            <if test="statusCd != null and statusCd != ''">
+                AND A.STATUS_CD = #{statusCd}
+            </if>
+            <if test="searchKeyword != null and searchKeyword != ''">
+                AND (#{manageYn} = 'Y' OR A.SECRET_YN = 'N' OR A.CRTR_ID = #{userId})
+                AND (
+                    A.TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR A.CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR U.USER_NM LIKE CONCAT('%', #{searchKeyword}, '%')
+                )
+            </if>
+        ORDER BY A.CREATE_DT DESC, A.INQ_ID DESC
+        LIMIT #{firstIndex}, #{recordCountPerPage}
+    </select>
+
+    <select id="selectInqListCnt" parameterType="kr.teamagent.inq.service.InqVO" resultType="int">
+        /* 문의사항 목록 건수 조회 inq.selectInqListCnt */
+        SELECT
+            COUNT(1)
+        FROM TB_INQ A
+            LEFT JOIN TB_USER U ON U.USER_ID = A.CRTR_ID
+        WHERE A.USE_YN = 'Y'
+            <if test="catCd != null and catCd != ''">
+                AND A.CAT_CD = #{catCd}
+            </if>
+            <if test="statusCd != null and statusCd != ''">
+                AND A.STATUS_CD = #{statusCd}
+            </if>
+            <if test="searchKeyword != null and searchKeyword != ''">
+                AND (#{manageYn} = 'Y' OR A.SECRET_YN = 'N' OR A.CRTR_ID = #{userId})
+                AND (
+                    A.TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR A.CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR U.USER_NM LIKE CONCAT('%', #{searchKeyword}, '%')
+                )
+            </if>
+    </select>
+
+    <sql id="whereInqExcel">
+            <if test="catCd != null and catCd != ''">
+                AND A.CAT_CD = #{catCd}
+            </if>
+            <if test="statusCd != null and statusCd != ''">
+                AND A.STATUS_CD = #{statusCd}
+            </if>
+            <if test="searchKeyword != null and searchKeyword != ''">
+                AND (
+                    A.TITLE LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR A.CONTENT LIKE CONCAT('%', #{searchKeyword}, '%')
+                    OR U.USER_NM LIKE CONCAT('%', #{searchKeyword}, '%')
+                )
+            </if>
+    </sql>
+
+    <select id="selectInqExcelList" parameterType="kr.teamagent.inq.service.InqVO" resultType="kr.teamagent.inq.service.InqVO">
+        /* 문의사항 엑셀용 전체 목록 조회 (페이징 없음) inq.selectInqExcelList */
+        SELECT
+            A.INQ_ID
+            , A.TITLE
+            , A.CONTENT
+            , C.CODE_NM AS CAT_NM
+            , G.AGENT_NM
+            , S.CODE_NM AS STATUS_NM
+            , U.USER_NM AS CRTR_NM
+            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d') AS CREATE_DT
+        FROM TB_INQ A
+            LEFT JOIN TB_CODE C ON C.CODE_GRP_ID = 'IS000002' AND C.CODE_ID = A.CAT_CD
+            LEFT JOIN TB_CODE S ON S.CODE_GRP_ID = 'IS000001' AND S.CODE_ID = A.STATUS_CD
+            LEFT JOIN TB_AGT G ON G.AGENT_ID = A.AGENT_ID
+            LEFT JOIN TB_USER U ON U.USER_ID = A.CRTR_ID
+        WHERE A.USE_YN = 'Y'
+            <include refid="whereInqExcel"/>
+        ORDER BY A.CREATE_DT DESC, A.INQ_ID DESC
+    </select>
+
+    <select id="selectInqExcelAnsrList" parameterType="kr.teamagent.inq.service.InqVO" resultType="kr.teamagent.inq.service.InqVO$AnsrVO">
+        /* 문의사항 엑셀용 답변·댓글 전체 조회 (엑셀 목록과 같은 조회 조건) inq.selectInqExcelAnsrList */
+        SELECT
+            R.INQ_ID
+            , R.ANSR_ID
+            , R.DEPTH
+            , R.CONTENT
+            , AU.USER_NM AS ANSR_USER_NM
+            , DATE_FORMAT(R.CREATE_DT, '%Y-%m-%d') AS CREATE_DT
+        FROM TB_INQ_ANSR R
+            JOIN TB_INQ A ON A.INQ_ID = R.INQ_ID
+            LEFT JOIN TB_USER U ON U.USER_ID = A.CRTR_ID
+            LEFT JOIN TB_USER AU ON AU.USER_ID = R.ANSR_USER_ID
+        WHERE A.USE_YN = 'Y'
+            AND R.USE_YN = 'Y'
+            <include refid="whereInqExcel"/>
+        ORDER BY R.INQ_ID, R.CREATE_DT ASC, R.ANSR_ID ASC
+    </select>
+
+    <select id="selectInqManagerUserIdList" parameterType="string" resultType="string">
+        /* 문의하기 관리 기능 권한 보유 사용자 목록 조회 (알림 수신자) inq.selectInqManagerUserIdList */
+        SELECT DISTINCT
+            UR.USER_ID
+        FROM TB_USER_ROLE UR
+            INNER JOIN TB_ROLE_GRP G
+                ON G.ROLE_ID = UR.ROLE_ID
+                AND G.USE_YN = 'Y'
+            INNER JOIN TB_ROLE_MENU RM
+                ON RM.ROLE_ID = UR.ROLE_ID
+                AND RM.FUNC_YN = 'Y'
+            INNER JOIN TB_MENU M
+                ON M.MENU_ID = RM.MENU_ID
+                AND M.USE_YN = 'Y'
+                AND M.SRC_PATH = #{menuPath}
+            INNER JOIN TB_USER U
+                ON U.USER_ID = UR.USER_ID
+                AND U.USE_YN = 'Y'
+    </select>
+
+    <select id="selectInq" parameterType="kr.teamagent.inq.service.InqVO" resultType="kr.teamagent.inq.service.InqVO">
+        /* 문의사항 단건 조회 inq.selectInq */
+        SELECT
+            A.INQ_ID
+            , A.TITLE
+            , A.CONTENT
+            , A.CAT_CD
+            , C.CODE_NM AS CAT_NM
+            , A.AGENT_ID
+            , G.AGENT_NM
+            , A.STATUS_CD
+            , S.CODE_NM AS STATUS_NM
+            , A.SECRET_YN
+            , A.PIN_YN
+            , A.USE_YN
+            , A.CRTR_ID
+            , U.USER_NM AS CRTR_NM
+            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            , DATE_FORMAT(A.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
+            , IF(EXISTS (SELECT 1 FROM TB_INQ_ANSR R WHERE R.INQ_ID = A.INQ_ID AND R.DEPTH = 1 AND R.USE_YN = 'Y'), 'Y', 'N') AS ANSWER_YN
+        FROM TB_INQ A
+            LEFT JOIN TB_CODE C ON C.CODE_GRP_ID = 'IS000002' AND C.CODE_ID = A.CAT_CD
+            LEFT JOIN TB_CODE S ON S.CODE_GRP_ID = 'IS000001' AND S.CODE_ID = A.STATUS_CD
+            LEFT JOIN TB_AGT G ON G.AGENT_ID = A.AGENT_ID
+            LEFT JOIN TB_USER U ON U.USER_ID = A.CRTR_ID
+        WHERE A.INQ_ID = #{inqId}
+            AND A.USE_YN = 'Y'
+    </select>
+
+    <insert id="insertInq" parameterType="kr.teamagent.inq.service.InqVO">
+        /* 문의사항 등록 inq.insertInq */
+        INSERT INTO TB_INQ (
+            INQ_ID
+            , TITLE
+            , CONTENT
+            , CAT_CD
+            , AGENT_ID
+            , STATUS_CD
+            , SECRET_YN
+            , USE_YN
+            , CRTR_ID
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{inqId}
+            , #{title}
+            , #{content}
+            , #{catCd}
+            , #{agentId, jdbcType=VARCHAR}
+            , #{statusCd}
+            , #{secretYn}
+            , 'Y'
+            , #{crtrId}
+            , NOW()
+            , NOW()
+        )
+    </insert>
+
+    <update id="updateInq" parameterType="kr.teamagent.inq.service.InqVO">
+        /* 문의사항 수정 inq.updateInq */
+        UPDATE TB_INQ
+        SET
+            TITLE = #{title}
+            , CONTENT = #{content}
+            , CAT_CD = #{catCd}
+            , AGENT_ID = #{agentId, jdbcType=VARCHAR}
+            , SECRET_YN = #{secretYn}
+            , MODIFY_DT = NOW()
+        WHERE INQ_ID = #{inqId}
+            AND USE_YN = 'Y'
+    </update>
+
+    <update id="updateInqStatus" parameterType="kr.teamagent.inq.service.InqVO">
+        /* 문의사항 처리상태 변경 inq.updateInqStatus */
+        UPDATE TB_INQ
+        SET
+            STATUS_CD = #{statusCd}
+            , MODIFY_DT = NOW()
+        WHERE INQ_ID = #{inqId}
+            AND USE_YN = 'Y'
+    </update>
+
+    <update id="deleteInq" parameterType="kr.teamagent.inq.service.InqVO">
+        /* 문의사항 삭제(논리) inq.deleteInq */
+        UPDATE TB_INQ
+        SET
+            USE_YN = 'N'
+            , MODIFY_DT = NOW()
+        WHERE INQ_ID = #{inqId}
+            AND USE_YN = 'Y'
+    </update>
+
+    <!-- ===== TB_INQ_ANSR ===== -->
+
+    <select id="selectInqAnsrList" parameterType="kr.teamagent.inq.service.InqVO$AnsrVO" resultType="kr.teamagent.inq.service.InqVO$AnsrVO">
+        /* 문의 답변·댓글 목록 조회 inq.selectInqAnsrList */
+        SELECT
+            A.ANSR_ID
+            , A.INQ_ID
+            , A.UP_ANSR_ID
+            , A.CONTENT
+            , A.ANSR_USER_ID
+            , U.USER_NM AS ANSR_USER_NM
+            , A.DEPTH
+            , A.SORT_ORD
+            , DATE_FORMAT(A.CREATE_DT, '%Y-%m-%d %H:%i:%s') AS CREATE_DT
+            , DATE_FORMAT(A.MODIFY_DT, '%Y-%m-%d %H:%i:%s') AS MODIFY_DT
+        FROM TB_INQ_ANSR A
+            LEFT JOIN TB_USER U ON U.USER_ID = A.ANSR_USER_ID
+        WHERE A.INQ_ID = #{inqId}
+            AND A.USE_YN = 'Y'
+        ORDER BY A.CREATE_DT ASC, A.ANSR_ID ASC
+    </select>
+
+    <select id="selectInqAnsr" parameterType="kr.teamagent.inq.service.InqVO$AnsrVO" resultType="kr.teamagent.inq.service.InqVO$AnsrVO">
+        /* 문의 답변·댓글 단건 조회 inq.selectInqAnsr */
+        SELECT
+            A.ANSR_ID
+            , A.INQ_ID
+            , A.UP_ANSR_ID
+            , A.CONTENT
+            , A.ANSR_USER_ID
+            , A.DEPTH
+            , A.SORT_ORD
+        FROM TB_INQ_ANSR A
+        WHERE A.ANSR_ID = #{ansrId}
+            AND A.USE_YN = 'Y'
+    </select>
+
+    <insert id="insertInqAnsr" parameterType="kr.teamagent.inq.service.InqVO$AnsrVO">
+        /* 문의 답변·댓글 등록 inq.insertInqAnsr */
+        INSERT INTO TB_INQ_ANSR (
+            ANSR_ID
+            , INQ_ID
+            , UP_ANSR_ID
+            , CONTENT
+            , ANSR_USER_ID
+            , DEPTH
+            , SORT_ORD
+            , USE_YN
+            , CREATE_DT
+            , MODIFY_DT
+        ) VALUES (
+            #{ansrId}
+            , #{inqId}
+            , #{upAnsrId, jdbcType=VARCHAR}
+            , #{content}
+            , #{ansrUserId}
+            , #{depth}
+            , #{sortOrd}
+            , 'Y'
+            , NOW()
+            , NOW()
+        )
+    </insert>
+
+    <update id="updateInqAnsr" parameterType="kr.teamagent.inq.service.InqVO$AnsrVO">
+        /* 문의 답변·댓글 수정 inq.updateInqAnsr */
+        UPDATE TB_INQ_ANSR
+        SET
+            CONTENT = #{content}
+            , MODIFY_DT = NOW()
+        WHERE ANSR_ID = #{ansrId}
+            AND USE_YN = 'Y'
+    </update>
+
+    <update id="deleteInqAnsr" parameterType="kr.teamagent.inq.service.InqVO$AnsrVO">
+        /* 문의 답변·댓글 삭제(논리) inq.deleteInqAnsr */
+        UPDATE TB_INQ_ANSR
+        SET
+            USE_YN = 'N'
+            , MODIFY_DT = NOW()
+        WHERE ANSR_ID = #{ansrId}
+            AND USE_YN = 'Y'
+    </update>
+
+    <!-- ===== TB_INQ_FILE ===== -->
+
+    <select id="selectInqFileList" parameterType="kr.teamagent.inq.service.InqVO$FileVO" resultType="kr.teamagent.inq.service.InqVO$FileVO">
+        /* 문의 첨부파일 목록 조회 inq.selectInqFileList */
+        SELECT
+            INQ_FILE_ID
+            , INQ_ID
+            , FILE_PATH
+            , FILE_NM
+            , FILE_SIZE
+            , FILE_TYPE
+        FROM TB_INQ_FILE
+        WHERE INQ_ID = #{inqId}
+        ORDER BY CREATE_DT ASC, INQ_FILE_ID ASC
+    </select>
+
+    <select id="selectInqFile" parameterType="kr.teamagent.inq.service.InqVO$FileVO" resultType="kr.teamagent.inq.service.InqVO$FileVO">
+        /* 문의 첨부파일 단건 조회 inq.selectInqFile */
+        SELECT
+            INQ_FILE_ID
+            , INQ_ID
+            , FILE_PATH
+            , FILE_NM
+            , FILE_SIZE
+            , FILE_TYPE
+        FROM TB_INQ_FILE
+        WHERE INQ_FILE_ID = #{inqFileId}
+    </select>
+
+    <insert id="insertInqFile" parameterType="kr.teamagent.inq.service.InqVO$FileVO">
+        /* 문의 첨부파일 등록 inq.insertInqFile */
+        INSERT INTO TB_INQ_FILE (
+            INQ_FILE_ID
+            , INQ_ID
+            , FILE_PATH
+            , FILE_NM
+            , FILE_SIZE
+            , FILE_TYPE
+            , CREATE_DT
+            , MODIFY_DT
+            , CREATE_ID
+            , MODIFY_ID
+        ) VALUES (
+            #{inqFileId}
+            , #{inqId}
+            , #{filePath}
+            , #{fileNm}
+            , #{fileSize}
+            , #{fileType, jdbcType=VARCHAR}
+            , NOW()
+            , NOW()
+            , #{createId}
+            , #{createId}
+        )
+    </insert>
+
+    <delete id="deleteInqFile" parameterType="kr.teamagent.inq.service.InqVO$FileVO">
+        /* 문의 첨부파일 삭제 inq.deleteInqFile */
+        DELETE FROM TB_INQ_FILE
+        WHERE INQ_FILE_ID = #{inqFileId}
+    </delete>
+
+    <!-- ===== 공통코드·에이전트 확인 ===== -->
+
+    <select id="selectInqCodeList" parameterType="string" resultType="kr.teamagent.inq.service.InqVO$CodeVO">
+        /* 공통코드 목록 조회 inq.selectInqCodeList */
+        SELECT
+            CODE_ID
+            , CODE_NM
+        FROM TB_CODE
+        WHERE CODE_GRP_ID = #{codeGrpId}
+            AND USE_YN = 'Y'
+        ORDER BY SORT_ORD, CODE_ID
+    </select>
+
+    <select id="selectInqCodeNm" parameterType="java.util.Map" resultType="string">
+        /* 공통코드명 조회 inq.selectInqCodeNm */
+        SELECT
+            CODE_NM
+        FROM TB_CODE
+        WHERE CODE_GRP_ID = #{codeGrpId}
+            AND CODE_ID = #{codeId}
+            AND USE_YN = 'Y'
+    </select>
+
+    <select id="selectInqAgentCnt" parameterType="string" resultType="int">
+        /* 사용 중인 에이전트 건수 조회 inq.selectInqAgentCnt */
+        SELECT
+            COUNT(1)
+        FROM TB_AGT
+        WHERE AGENT_ID = #{agentId}
+            AND USE_YN = 'Y'
+    </select>
+
+</mapper>

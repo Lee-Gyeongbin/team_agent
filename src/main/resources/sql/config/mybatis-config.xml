@@ -26,6 +26,7 @@
         <typeAlias alias="promptVO"                          type="kr.teamagent.prompt.service.PromptVO"/>
         <typeAlias alias="userManageVO"                      type="kr.teamagent.usermanage.service.UserManageVO"/>
         <typeAlias alias="menuManageVO"                      type="kr.teamagent.menumanage.service.MenuManageVO"/>
+        <typeAlias alias="roleManageVO"                      type="kr.teamagent.rolemanage.service.RoleManageVO"/>
         <typeAlias alias="chatGuideVO"                       type="kr.teamagent.chatguide.service.ChatGuideVO"/>
         <typeAlias alias="orgManageVO"                       type="kr.teamagent.orgmanage.service.OrgManageVO"/>
         <typeAlias alias="fileVO"                            type="kr.teamagent.common.util.service.FileVO"/>
@@ -42,7 +43,9 @@
         <typeAlias alias="dataDashboardVO"                   type="kr.teamagent.datadashboard.service.DataDashboardVO"/>
         <typeAlias alias="myDocumentsVO"                     type="kr.teamagent.mydocuments.service.MyDocumentsVO"/>
         <typeAlias alias="apiCallLogVO"                      type="kr.teamagent.common.apilog.service.ApiCallLogVO"/>
-    </typeAliases>
+        <typeAlias alias="ideaVO"                            type="kr.teamagent.idea.service.IdeaVO"/>
+        <typeAlias alias="ideaFileVO"                        type="kr.teamagent.idea.service.IdeaVO$IdeaFileVO"/>
+        <typeAlias alias="ideaCodeVO"                        type="kr.teamagent.idea.service.IdeaVO$IdeaCodeVO"/>    </typeAliases>
 
     <typeHandlers>
         <typeHandler handler="kr.teamagent.common.secure.service.CommonCipherTypeHandler"/>

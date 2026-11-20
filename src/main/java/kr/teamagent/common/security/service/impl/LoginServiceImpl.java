@@ -12,6 +12,7 @@ import javax.annotation.Resource;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.egovframe.rte.psl.dataaccess.util.EgovMap;
@@ -20,6 +21,7 @@ import kr.teamagent.common.security.service.AccessLoginVO;
 import kr.teamagent.common.security.service.UserVO;
 import kr.teamagent.common.system.service.impl.CommonServiceImpl;
 import kr.teamagent.common.util.SessionUtil;
+import kr.teamagent.rolemanage.service.impl.RoleManageServiceImpl;
 
 @Service
 public class LoginServiceImpl extends EgovAbstractServiceImpl {
@@ -28,6 +30,9 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
 
 	@Autowired
 	CommonServiceImpl commonServiceImpl;
+
+	@Autowired
+	RoleManageServiceImpl roleManageService;
 
 	// 사용자 조회
 	public UserVO selectUser(UserVO vo) throws Exception {
@@ -121,6 +126,7 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
 	 * @throws DuplicateUserIdException 이미 존재하는 userId인 경우
 	 * @throws Exception
 	 */
+	@Transactional(rollbackFor = Exception.class)
 	public void signupUser(UserVO user) throws Exception {
 		UserVO existing = loginDAO.selectUser(user);
 		if (existing != null) {
@@ -130,6 +136,7 @@ public class LoginServiceImpl extends EgovAbstractServiceImpl {
 		if (rows != 1) {
 			throw new Exception("회원가입 처리에 실패했습니다.");
 		}
+		roleManageService.assignDefaultRole(user.getUserId(), user.getUserId());
 	}
 
 

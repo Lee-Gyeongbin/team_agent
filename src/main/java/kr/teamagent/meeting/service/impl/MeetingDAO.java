@@ -40,6 +40,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return selectOne("ai.meeting.selectMeetingAudio", searchVO);
     }
 
+    /** 회의 오디오 전체 목록 (재첨부·복구 시 이전 오디오 정리용 - 한 회의에 여러 행이 있을 수 있음) */
+    public List<MeetingVO> selectMeetingAudioList(MeetingVO searchVO) throws Exception {
+        return selectList("ai.meeting.selectMeetingAudio", searchVO);
+    }
+
     /** 회의 등록 */
     public int insertMeeting(MeetingVO dataVO) throws Exception {
         return insert("ai.meeting.insertMeeting", dataVO);
@@ -68,6 +73,26 @@ public class MeetingDAO extends EgovComAbstractDAO {
     /** 회의록 수정 */
     public int updateMeetingMinutes(MeetingVO dataVO) throws Exception {
         return update("ai.meeting.updateMeetingMinutes", dataVO);
+    }
+
+    /** 회의록 양식·문체·분량 저장 */
+    public int updateMeetingMinutesOption(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingMinutesOption", dataVO);
+    }
+
+    /** 회의록 양식 목록 (TB_MEETING_TMPL + TB_TMPL) */
+    public List<MeetingVO> selectMeetingTmplList() throws Exception {
+        return selectList("ai.meeting.selectMeetingTmplList");
+    }
+
+    /** 회의록 양식 구성 필드 목록 */
+    public List<MeetingVO> selectMeetingTmplFieldList() throws Exception {
+        return selectList("ai.meeting.selectMeetingTmplFieldList");
+    }
+
+    /** 회의록 양식 단건 (minutesTmplCd 없으면 기본 양식) */
+    public MeetingVO selectMeetingTmpl(MeetingVO searchVO) throws Exception {
+        return selectOne("ai.meeting.selectMeetingTmpl", searchVO);
     }
 
     /** 회의별 인포그래픽 목록 조회 */
@@ -123,6 +148,21 @@ public class MeetingDAO extends EgovComAbstractDAO {
     }
 
     /** 회의 화자 전체 삭제 */
+    /** 화자 분리 재시도 — 화자 레이블 · 발화 비움 (이름 · 참석자 매핑 유지) */
+    public int resetSpeakerDiarization(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.resetSpeakerDiarization", dataVO);
+    }
+
+    /** 화자 분리 재시도 — 참석자로 지정되지 않은 화자 행 삭제 */
+    public int deleteUnregisteredSpeakers(MeetingVO dataVO) throws Exception {
+        return delete("ai.meeting.deleteUnregisteredSpeakers", dataVO);
+    }
+
+    /** 화자 분리 재시도 — 가장 최근 오디오를 대기(001)로 */
+    public int updateMeetingAudioRetry(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingAudioRetry", dataVO);
+    }
+
     public int deleteSpeakersByMeetingId(MeetingVO dataVO) throws Exception {
         return delete("ai.meeting.deleteSpeakersByMeetingId", dataVO);
     }
@@ -153,24 +193,19 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return update("ai.meeting.updateMeetingHeartbeat", dataVO);
     }
 
-    /** Cancel Beacon: STATUS=003, ABNORMAL_YN=Y */
+    /** 녹음 중 페이지 이탈: ABNORMAL_YN=Y (녹음 중인 회의만, 상태는 유지) */
     public int updateMeetingCancelAbnormal(MeetingVO dataVO) throws Exception {
         return update("ai.meeting.updateMeetingCancelAbnormal", dataVO);
     }
 
-    /** 스케줄러: Heartbeat 미수신 회의 일괄 비정상종료 처리 */
-    public int updateExpiredMeetingsAbnormal() throws Exception {
-        return update("ai.meeting.updateExpiredMeetingsAbnormal");
-    }
-
-    /** 복구 완료: ABNORMAL_YN=N, STATUS=002 */
+    /** 복구 완료: ABNORMAL_YN=N, LAST_HEARTBEAT_DT=NULL, STATUS=002 */
     public int updateMeetingRecover(MeetingVO dataVO) throws Exception {
         return update("ai.meeting.updateMeetingRecover", dataVO);
     }
 
-    /** 비정상종료 회의 목록 조회 (현재 로그인 사용자) */
-    public List<MeetingVO> selectAbnormalMeetingList(MeetingVO searchVO) throws Exception {
-        return selectList("ai.meeting.selectAbnormalMeetingList", searchVO);
+    /** 녹음 정상 종료: LAST_HEARTBEAT_DT=NULL, ABNORMAL_YN=N (상태는 유지) */
+    public int updateMeetingRecordEnd(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingRecordEnd", dataVO);
     }
 
     /** 오디오 레코드 전체 삭제 (복구 전 정리용) */

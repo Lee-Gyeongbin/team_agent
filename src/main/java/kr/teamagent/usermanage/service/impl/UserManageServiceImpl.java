@@ -22,6 +22,7 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.StandardPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import kr.teamagent.common.exception.DuplicateEmailException;
@@ -32,6 +33,7 @@ import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.orgmanage.service.OrgManageVO;
 import kr.teamagent.orgmanage.service.impl.OrgManageDAO;
 import kr.teamagent.orgmanage.service.impl.OrgManageServiceImpl;
+import kr.teamagent.rolemanage.service.impl.RoleManageServiceImpl;
 import kr.teamagent.usermanage.service.UserManageVO;
 
 @Service
@@ -84,6 +86,9 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
 
     @Autowired
     private OrgManageServiceImpl orgManageService;
+
+    @Autowired
+    private RoleManageServiceImpl roleManageService;
 
     @SuppressWarnings("deprecation")
     private final StandardPasswordEncoder passwordEncoder = new StandardPasswordEncoder();
@@ -284,6 +289,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
             userManageDAO.updateUser(userManageVO);
         } else {
             userManageDAO.insertUser(userManageVO);
+            roleManageService.assignDefaultRole(userManageVO.getUserId(), SessionUtil.getUserId());
         }
     }
 
@@ -382,6 +388,7 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
      * @return 생성된 행 수
      * @throws Exception
      */
+    @Transactional(rollbackFor = Exception.class)
     public int insertUser(UserManageVO userManageVO) throws Exception {
         String userId = userManageVO.getUserId();
         if (isDuplicateUserIdForInsert(userId)) {
@@ -400,7 +407,9 @@ public class UserManageServiceImpl extends EgovAbstractServiceImpl {
         if (CommonUtil.nullToBlank(userManageVO.getPwdChgReqYn()).isEmpty()) {
             userManageVO.setPwdChgReqYn("Y");
         }
-        return userManageDAO.insertUser(userManageVO);
+        int rows = userManageDAO.insertUser(userManageVO);
+        roleManageService.assignDefaultRole(userId, SessionUtil.getUserId());
+        return rows;
     }
 
     /**

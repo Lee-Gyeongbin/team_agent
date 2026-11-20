@@ -41,6 +41,11 @@ public class CommonDAO extends EgovComAbstractDAO {
 	}
 
 	@SuppressWarnings("unchecked")
+	public List<CommonVO.MenuPermVO> selectUserMenuPermList(String userId) throws Exception {
+		return (List<CommonVO.MenuPermVO>) list("common.selectUserMenuPermList", userId);
+	}
+
+	@SuppressWarnings("unchecked")
 	public List<CommonVO.ColorVO> comSelectColorList() throws Exception {
 		return (List<CommonVO.ColorVO>) list("common.comSelectColorList", null);
 	}

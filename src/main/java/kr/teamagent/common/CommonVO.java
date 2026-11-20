@@ -64,6 +64,16 @@ public class CommonVO extends ComDefaultVO {
         private String modifyDt;
     }
 
+    /** 사용자 메뉴 권한 [TB_ROLE_MENU] */
+    @Getter
+    @Setter
+    public static class MenuPermVO {
+        private String menuId;
+        private String srcPath;
+        private String readYn;
+        private String funcYn;
+    }
+
     /** 알림 [TB_NOTIFY] */
     @Getter
     @Setter
