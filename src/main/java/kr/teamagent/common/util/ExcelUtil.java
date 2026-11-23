@@ -48,6 +48,8 @@ public class ExcelUtil {
     public static final int GUIDE_ROW_IDX = 0;
     public static final int COLUMN_MIN_WIDTH = 4000;
     public static final int COLUMN_WIDTH_PADDING = 2048;
+    /** POI 컬럼 너비 최대값(255자) — 넘기면 setColumnWidth가 예외를 던진다 */
+    public static final int COLUMN_MAX_WIDTH = 255 * 256;
     public static final float GUIDE_ROW_HEIGHT = 54f;
     public static final float HEADER_ROW_HEIGHT = 22f;
     public static final int UPLOAD_FAIL_MSG_SHOW_MAX = 3;
@@ -183,11 +185,11 @@ public class ExcelUtil {
         sheet.createFreezePane(0, DATA_START_ROW);
     }
 
-    /** 컬럼 너비를 자동 조정하고 최소 너비·패딩을 적용한다. */
+    /** 컬럼 너비를 자동 조정하고 최소 너비·패딩을 적용한다(최대 너비는 POI 한도). */
     private static void adjustColumnWidths(Sheet sheet, int columnCount) {
         for (int i = 0; i < columnCount; i++) {
             sheet.autoSizeColumn(i);
-            int width = Math.max(sheet.getColumnWidth(i) + COLUMN_WIDTH_PADDING, COLUMN_MIN_WIDTH);
+            int width = Math.min(Math.max(sheet.getColumnWidth(i) + COLUMN_WIDTH_PADDING, COLUMN_MIN_WIDTH), COLUMN_MAX_WIDTH);
             sheet.setColumnWidth(i, width);
         }
     }
