@@ -85,6 +85,11 @@ public class RoleManageDAO extends EgovComAbstractDAO {
         return selectList("roleManage.selectUserRoleList");
     }
 
+    /* 사용자의 권한 그룹 지정 건수 조회 — roleManage.selectUserRoleCount */
+    public int selectUserRoleCount(String userId) throws Exception {
+        return (Integer) selectOne("roleManage.selectUserRoleCount", userId);
+    }
+
     /* 사용자의 권한 지정 전체 삭제 — roleManage.deleteUserRoleByUserId */
     public int deleteUserRoleByUserId(String userId) throws Exception {
         return delete("roleManage.deleteUserRoleByUserId", userId);
@@ -110,7 +115,7 @@ public class RoleManageDAO extends EgovComAbstractDAO {
         return insert("roleManage.insertDefaultUserRole", roleUserVO);
     }
 
-    /* 한 권한 그룹의 사용자를 다른 그룹으로 복사 지정 — roleManage.insertUserRoleFromRole */
+    /* 한 권한 그룹의 사용자를 다른 그룹으로 복사 지정 (다른 그룹이 없는 사용자만) — roleManage.insertUserRoleFromRole */
     public int insertUserRoleFromRole(RoleManageVO.RoleUserVO roleUserVO) throws Exception {
         return insert("roleManage.insertUserRoleFromRole", roleUserVO);
     }

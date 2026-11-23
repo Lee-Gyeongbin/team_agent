@@ -165,6 +165,15 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
+    /** 엑셀 출력용 — 문단·줄바꿈·목록 경계는 줄바꿈으로 바꾸고 나머지 태그는 지운다 (한 줄이 길면 POI 컬럼 너비 한도를 넘는다) */
+    private String stripHtml(String html) {
+        return CommonUtil.nullToBlank(html)
+                .replaceAll("(?i)</(p|h[1-6]|li|tr|blockquote)>|<br\\s*/?>", "\n")
+                .replaceAll("<[^>]+>", "")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
+    }
+
     /** 문의 한 건을 엑셀 한 행으로 만든다 — 관리자 답변(1단계)과 댓글(2단계 이상)을 나눠 담는다 */
     private void writeInqExcelRow(Row row, InqVO vo, List<InqVO.AnsrVO> answers, XSSFCellStyle rowStyle, XSSFCellStyle textStyle) {
         InqVO.AnsrVO answer = answers.stream().filter(a -> a.getDepth() != null && a.getDepth() == 1).findFirst().orElse(null);
@@ -178,7 +187,7 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
             }
         }
         String[] values = {
-                vo.getInqId(), vo.getCatNm(), vo.getAgentNm(), vo.getTitle(), vo.getContent(), vo.getCrtrNm(), vo.getCreateDt(), vo.getStatusNm(),
+                vo.getInqId(), vo.getCatNm(), vo.getAgentNm(), vo.getTitle(), stripHtml(vo.getContent()), vo.getCrtrNm(), vo.getCreateDt(), vo.getStatusNm(),
                 answer == null ? null : answer.getContent(), answer == null ? null : answer.getAnsrUserNm(), answer == null ? null : answer.getCreateDt(),
                 comments.toString()
         };
@@ -344,15 +353,21 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
 
     /** 첨부파일 다운로드 URL — 문의사항 열람 권한이 있을 때만 발급 */
     public Map<String, Object> selectInqFileDownloadUrl(String inqFileId, boolean manage) throws Exception {
-        InqVO.FileVO file = requireFile(inqFileId);
-        InqVO inq = requireInq(file.getInqId());
-        if (isMasked(inq, manage, SessionUtil.getUserId())) {
-            throw new RuntimeException("열람 권한이 없습니다.");
-        }
+        InqVO.FileVO file = requireViewableFile(inqFileId, manage);
         FileVO req = new FileVO();
         req.setFilePath(file.getFilePath());
         req.setFileName(file.getFileNm());
         return fileService.createDownloadPresignedUrlForStorageObject(req);
+    }
+
+    /** 첨부파일 미리보기 — 문의사항 열람 권한이 있을 때만 발급 (이미지·PDF·텍스트·문서 변환) */
+    public Map<String, Object> selectInqFilePreview(String inqFileId, boolean manage) throws Exception {
+        InqVO.FileVO file = requireViewableFile(inqFileId, manage);
+        FileVO req = new FileVO();
+        req.setFilePath(file.getFilePath());
+        req.setFileName(file.getFileNm());
+        req.setFileType(file.getFileType());
+        return fileService.createViewPresignedUrlForStorageObject(req);
     }
 
     // ── 내부 ──────────────────────────────────────────────────────────────
@@ -368,6 +383,15 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("문의사항을 찾을 수 없습니다.");
         }
         return row;
+    }
+
+    /** 첨부파일을 조회하고, 비밀글이면 열람 권한(작성자·관리자 화면)을 확인한다 */
+    private InqVO.FileVO requireViewableFile(String inqFileId, boolean manage) throws Exception {
+        InqVO.FileVO file = requireFile(inqFileId);
+        if (isMasked(requireInq(file.getInqId()), manage, SessionUtil.getUserId())) {
+            throw new RuntimeException("열람 권한이 없습니다.");
+        }
+        return file;
     }
 
     private InqVO.FileVO requireFile(String inqFileId) throws Exception {

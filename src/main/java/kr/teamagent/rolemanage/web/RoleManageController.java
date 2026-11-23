@@ -135,7 +135,7 @@ public class RoleManageController extends BaseController {
 
     /* 권한 그룹 엑셀 다운로드 */
     @RequestMapping(value = "/downloadRoleExcel.do", method = RequestMethod.GET)
-    @RequirePermission(menu = "/role-manage", type = RequirePermission.Type.FUNC)
+    @RequirePermission(menu = "/role-manage", type = RequirePermission.Type.READ)
     public void downloadRoleExcel(HttpServletResponse response) throws Exception {
         roleManageService.downloadRoleExcel(response);
     }
@@ -155,7 +155,7 @@ public class RoleManageController extends BaseController {
 
     /* 사용자별 권한 그룹 엑셀 다운로드 */
     @RequestMapping(value = "/downloadRoleUserExcel.do", method = RequestMethod.GET)
-    @RequirePermission(menu = "/role-manage", type = RequirePermission.Type.FUNC)
+    @RequirePermission(menu = "/role-manage", type = RequirePermission.Type.READ)
     public void downloadRoleUserExcel(HttpServletResponse response) throws Exception {
         roleManageService.downloadRoleUserExcel(response);
     }

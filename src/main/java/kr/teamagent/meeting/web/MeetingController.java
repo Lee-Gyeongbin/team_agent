@@ -220,10 +220,12 @@ public class MeetingController extends BaseController {
      */
     @RequestMapping("/meeting/realtime-token")
     @ResponseBody
-    public Map<String, Object> getRealtimeToken() throws Exception {
+    public Map<String, Object> getRealtimeToken(
+            @RequestParam(value = "meetingId", required = false) Long meetingId) throws Exception {
         Map<String, Object> resultMap = new HashMap<>();
         try {
-            resultMap = meetingService.getRealtimeToken();
+            // meetingId 가 있으면 회의 제목 · 참석자를 전사 문맥 힌트로 사용
+            resultMap = meetingService.getRealtimeToken(meetingId);
         } catch (Exception e) {
             log.error("getRealtimeToken error", e);
             resultMap.put("successYn", false);
@@ -363,6 +365,24 @@ public class MeetingController extends BaseController {
             resultMap = meetingService.heartbeat(meetingId);
         } catch (Exception e) {
             log.error("heartbeat error - meetingId: {}", meetingId, e);
+            resultMap.put("successYn", false);
+            resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
+        }
+        return resultMap;
+    }
+
+    /**
+     * 녹음 일시정지 (마지막 구간 백업 조각 업로드 후 호출)
+     * POST /api/meeting/{meetingId}/pause
+     */
+    @RequestMapping(value = "/meeting/{meetingId}/pause", method = RequestMethod.POST)
+    @ResponseBody
+    public Map<String, Object> pauseMeeting(@PathVariable("meetingId") Long meetingId) throws Exception {
+        Map<String, Object> resultMap = new HashMap<>();
+        try {
+            resultMap = meetingService.pauseMeeting(meetingId);
+        } catch (Exception e) {
+            log.error("pauseMeeting error - meetingId: {}", meetingId, e);
             resultMap.put("successYn", false);
             resultMap.put("returnMsg", "요청사항을 실패하였습니다. (" + e.getMessage() + ")");
         }

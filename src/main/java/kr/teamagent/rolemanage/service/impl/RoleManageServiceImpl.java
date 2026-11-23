@@ -2,6 +2,7 @@ package kr.teamagent.rolemanage.service.impl;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -68,8 +69,8 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
     /** 사용자명·이메일·소속조직은 참고용 회색 헤더 */
     private static final int[] USER_ROLE_AUTO_GEN_HEADER_COLS = { 1, 2, 3 };
     private static final String USER_ROLE_EXCEL_GUIDE_TEXT =
-            "※ 업로드하면 사용자ID가 일치하는 사용자의 권한그룹이 권한그룹명 기준으로 변경됩니다. 회색 헤더(사용자명·이메일·소속조직)는 참고용입니다.\n"
-                    + "  사용 중인 권한그룹명만 입력할 수 있습니다.";
+            "※ 업로드하면 파일에 있는 사용자의 권한그룹이 권한그룹명 기준으로 변경됩니다. 회색 헤더(사용자명·이메일·소속조직)는 참고용입니다.\n"
+                    + "  한 사용자에게 여러 권한그룹을 주려면 사용자ID를 같게 하고 행을 나누어 입력하세요. 사용 중인 권한그룹명만 입력할 수 있습니다.";
 
     @Autowired
     private RoleManageDAO roleManageDAO;
@@ -166,7 +167,7 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 권한 그룹 삭제 — 소속 사용자는 기본 권한 그룹으로 이동 후 메뉴 권한 → 그룹 순서로 삭제
+     * 권한 그룹 삭제 — 다른 그룹이 없는 소속 사용자는 기본 권한 그룹으로 이동 후 메뉴 권한 → 그룹 순서로 삭제
      * @param roleId 권한 그룹 ID
      * @throws Exception
      */
@@ -191,7 +192,7 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
-     * 권한 그룹 사용자 저장 — 선택한 사용자는 이 그룹 하나로 지정, 제외한 사용자는 기본 권한 그룹으로 이동
+     * 권한 그룹 사용자 저장 — 선택한 사용자는 이 그룹을 추가 지정, 제외한 사용자는 이 그룹만 해제(다른 그룹이 없으면 기본 권한 그룹으로 이동)
      * @param saveVO 권한 그룹 ID와 선택 사용자 ID 목록
      * @throws Exception
      */
@@ -228,9 +229,18 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
         if (removedIds.isEmpty()) {
             return;
         }
-        String fallbackRoleId = selectFallbackRoleId(roleId, "이동할 기본 권한 그룹이 없어 해제할 수 없습니다.");
+        String fallbackRoleId = null;
         for (String userId : removedIds) {
-            assignUserRole(userId, fallbackRoleId, loginUserId);
+            RoleManageVO.RoleUserVO removeVO = new RoleManageVO.RoleUserVO();
+            removeVO.setUserId(userId);
+            removeVO.setRoleId(roleId);
+            roleManageDAO.deleteUserRole(removeVO);
+            if (roleManageDAO.selectUserRoleCount(userId) == 0) {
+                if (fallbackRoleId == null) {
+                    fallbackRoleId = selectFallbackRoleId(roleId, "이동할 기본 권한 그룹이 없어 해제할 수 없습니다.");
+                }
+                assignUserRole(userId, fallbackRoleId, loginUserId);
+            }
         }
     }
 
@@ -378,7 +388,7 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> uploadRoleUserExcel(MultipartFile file) throws Exception {
         List<Map<String, Object>> failDetails = new ArrayList<>();
-        Map<String, String> roleIdByUserId = new HashMap<>();
+        Map<String, Set<String>> roleIdSetByUserId = new LinkedHashMap<>();
         DataFormatter formatter = new DataFormatter();
 
         Set<String> userIdSet = new LinkedHashSet<>();
@@ -415,8 +425,10 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
                 } else if (!activeRoleIdByName.containsKey(roleName)) {
                     failDetails.add(ExcelUtil.buildFailDetail(rowNum,
                             "사용 중인 권한그룹명이 아닙니다(" + (roleName.isEmpty() ? "빈 값" : roleName) + ")."));
-                } else if (roleIdByUserId.put(userId, activeRoleIdByName.get(roleName)) != null) {
-                    failDetails.add(ExcelUtil.buildFailDetail(rowNum, "파일에 중복된 사용자ID(" + userId + ")입니다."));
+                } else if (!roleIdSetByUserId.computeIfAbsent(userId, key -> new LinkedHashSet<>())
+                        .add(activeRoleIdByName.get(roleName))) {
+                    failDetails.add(ExcelUtil.buildFailDetail(rowNum,
+                            "파일에 중복된 사용자ID·권한그룹(" + userId + ", " + roleName + ")입니다."));
                 }
             }
         }
@@ -424,8 +436,11 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
         int updateCount = 0;
         if (failDetails.isEmpty()) {
             String loginUserId = SessionUtil.getUserId();
-            for (Map.Entry<String, String> entry : roleIdByUserId.entrySet()) {
-                assignUserRole(entry.getKey(), entry.getValue(), loginUserId);
+            for (Map.Entry<String, Set<String>> entry : roleIdSetByUserId.entrySet()) {
+                roleManageDAO.deleteUserRoleByUserId(entry.getKey());
+                for (String roleId : entry.getValue()) {
+                    assignUserRole(entry.getKey(), roleId, loginUserId);
+                }
                 updateCount++;
             }
         }
@@ -505,13 +520,12 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
         return fallbackRoleId;
     }
 
-    /** 사용자의 기존 권한 지정을 지우고 지정한 그룹 하나로 등록한다 (사용자 1명 = 권한 그룹 1개) */
+    /** 사용자에게 권한 그룹을 추가 지정한다 (기존 지정은 유지) */
     private void assignUserRole(String userId, String roleId, String loginUserId) throws Exception {
         RoleManageVO.RoleUserVO userRoleVO = new RoleManageVO.RoleUserVO();
         userRoleVO.setUserId(userId);
         userRoleVO.setRoleId(roleId);
         userRoleVO.setCreateId(loginUserId);
-        roleManageDAO.deleteUserRoleByUserId(userId);
         if (roleManageDAO.insertUserRole(userRoleVO) != 1) {
             throw new IllegalArgumentException("등록되지 않은 사용자ID(" + userId + ")입니다.");
         }
