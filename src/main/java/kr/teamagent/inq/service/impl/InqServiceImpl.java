@@ -165,6 +165,14 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
+    /** 엑셀 출력용 — 문단·줄바꿈·목록 경계는 공백으로 바꾸고 나머지 태그는 지운다 */
+    private String stripHtml(String html) {
+        return CommonUtil.nullToBlank(html)
+                .replaceAll("(?i)</(p|h[1-6]|li|tr|blockquote)>|<br\\s*/?>", " ")
+                .replaceAll("<[^>]+>", "")
+                .trim();
+    }
+
     /** 문의 한 건을 엑셀 한 행으로 만든다 — 관리자 답변(1단계)과 댓글(2단계 이상)을 나눠 담는다 */
     private void writeInqExcelRow(Row row, InqVO vo, List<InqVO.AnsrVO> answers, XSSFCellStyle rowStyle, XSSFCellStyle textStyle) {
         InqVO.AnsrVO answer = answers.stream().filter(a -> a.getDepth() != null && a.getDepth() == 1).findFirst().orElse(null);
@@ -178,7 +186,7 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
             }
         }
         String[] values = {
-                vo.getInqId(), vo.getCatNm(), vo.getAgentNm(), vo.getTitle(), vo.getContent(), vo.getCrtrNm(), vo.getCreateDt(), vo.getStatusNm(),
+                vo.getInqId(), vo.getCatNm(), vo.getAgentNm(), vo.getTitle(), stripHtml(vo.getContent()), vo.getCrtrNm(), vo.getCreateDt(), vo.getStatusNm(),
                 answer == null ? null : answer.getContent(), answer == null ? null : answer.getAnsrUserNm(), answer == null ? null : answer.getCreateDt(),
                 comments.toString()
         };
