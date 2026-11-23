@@ -19,6 +19,8 @@
             , CASE WHEN A.ABNORMAL_YN = 'Y' THEN 'Y'
                    WHEN A.LAST_HEARTBEAT_DT &lt; NOW() - INTERVAL 3 MINUTE THEN 'Y'
                    ELSE 'N' END     AS ABNORMAL_YN
+            /* 녹음 일시정지 여부 (일시정지 시 LAST_HEARTBEAT_DT 는 NULL 이라 비정상종료로 잡히지 않음) */
+            , IFNULL(A.PAUSE_YN, 'N') AS PAUSE_YN
             , A.CREATE_USER_ID  AS CREATE_USER_ID
             , A.CREATE_DT       AS CREATE_DT
         FROM TB_MEETING A
@@ -74,6 +76,8 @@
             , CASE WHEN A.ABNORMAL_YN = 'Y' THEN 'Y'
                    WHEN A.LAST_HEARTBEAT_DT &lt; NOW() - INTERVAL 3 MINUTE THEN 'Y'
                    ELSE 'N' END     AS ABNORMAL_YN
+            /* 녹음 일시정지 여부 (일시정지 시 LAST_HEARTBEAT_DT 는 NULL 이라 비정상종료로 잡히지 않음) */
+            , IFNULL(A.PAUSE_YN, 'N') AS PAUSE_YN
             , A.CREATE_USER_ID   AS CREATE_USER_ID
             , A.CREATE_DT        AS CREATE_DT
         FROM TB_MEETING A
@@ -475,12 +479,24 @@
     <!-- ===================== Heartbeat / 비정상종료 ===================== -->
 
     <update id="updateMeetingHeartbeat" parameterType="meetingVO">
-        /* Heartbeat 수신(녹음 중 30초 주기 / 백업 조각 업로드) - 최종 일시 갱신, 비정상종료 해제 ai.meeting.updateMeetingHeartbeat */
+        /* Heartbeat 수신(녹음 중 30초 주기 / 백업 조각 업로드) - 최종 일시 갱신, 비정상종료·일시정지 해제 ai.meeting.updateMeetingHeartbeat */
         UPDATE TB_MEETING SET
             LAST_HEARTBEAT_DT = NOW()
             , ABNORMAL_YN = 'N'
+            , PAUSE_YN    = 'N'
             , MODIFY_DT = NOW()
         WHERE MEETING_ID = #{meetingId}
+    </update>
+
+    <update id="updateMeetingPause" parameterType="meetingVO">
+        /* 녹음 일시정지 - heartbeat 해제(비정상종료로 잡히지 않게) + PAUSE_YN=Y (녹음 중인 회의만) ai.meeting.updateMeetingPause */
+        UPDATE TB_MEETING SET
+            PAUSE_YN            = 'Y'
+            , LAST_HEARTBEAT_DT = NULL
+            , ABNORMAL_YN       = 'N'
+            , MODIFY_DT         = NOW()
+        WHERE MEETING_ID = #{meetingId}
+            AND STATUS = '001'
     </update>
 
     <update id="updateMeetingCancelAbnormal" parameterType="meetingVO">
@@ -496,6 +512,7 @@
         /* 녹음 정상 종료 / 복구 완료: heartbeat·비정상종료 해제 및 종료 처리 ai.meeting.updateMeetingRecover */
         UPDATE TB_MEETING SET
             ABNORMAL_YN = 'N'
+            , PAUSE_YN  = 'N'
             , LAST_HEARTBEAT_DT = NULL
             , STATUS    = '002'
             , END_DT    = NOW()
@@ -508,6 +525,7 @@
         UPDATE TB_MEETING SET
             LAST_HEARTBEAT_DT = NULL
             , ABNORMAL_YN = 'N'
+            , PAUSE_YN    = 'N'
             , MODIFY_DT = NOW()
         WHERE MEETING_ID = #{meetingId}
     </update>

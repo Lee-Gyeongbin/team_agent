@@ -86,6 +86,7 @@ public class MeetingVO extends CommonVO {
     // TB_MEETING - Heartbeat / 비정상종료
     private String lastHeartbeatDt;  // 마지막 heartbeat 수신일시
     private String abnormalYn;       // 비정상종료 여부 (Y/N)
+    private String pauseYn;          // 녹음 일시정지 여부 (Y/N)
 
     // TB_USER - 참석자 선택
     private String userNm;

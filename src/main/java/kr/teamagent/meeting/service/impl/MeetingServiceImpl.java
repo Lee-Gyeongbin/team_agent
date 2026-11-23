@@ -1767,6 +1767,34 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
     }
 
     /**
+     * 녹음 일시정지: PAUSE_YN='Y', heartbeat 해제 (녹음 중인 회의만, STATUS 는 001 유지)
+     * - 화면에서 마지막 구간을 백업 조각으로 올린 뒤 호출 → 이어서 녹음은 다음 조각 번호부터, 종료 시 recoverMeeting 이 병합
+     * - 이어서 녹음하면 heartbeat 가 PAUSE_YN='N' 으로 되돌림
+     */
+    public Map<String, Object> pauseMeeting(Long meetingId) throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        MeetingVO searchVO = new MeetingVO();
+        searchVO.setMeetingId(meetingId);
+        MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
+        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+            result.put("successYn", false);
+            result.put("returnMsg", "권한이 없습니다.");
+            return result;
+        }
+        if (!"001".equals(meeting.getStatus())) {
+            result.put("successYn", false);
+            result.put("returnMsg", "녹음 중인 회의만 일시정지할 수 있습니다.");
+            return result;
+        }
+        MeetingVO dataVO = new MeetingVO();
+        dataVO.setMeetingId(meetingId);
+        meetingDAO.updateMeetingPause(dataVO);
+        logger.info("[pauseMeeting] 일시정지 - meetingId: {}", meetingId);
+        result.put("successYn", true);
+        return result;
+    }
+
+    /**
      * 녹음 중 페이지 이탈: ABNORMAL_YN='Y' 표시 (녹음 중인 회의만, STATUS 는 유지)
      * 탭 닫기(pagehide sendBeacon) / 화면 내 이동(fetch) 시 호출됨
      */

@@ -193,6 +193,11 @@ public class MeetingDAO extends EgovComAbstractDAO {
         return update("ai.meeting.updateMeetingHeartbeat", dataVO);
     }
 
+    /** 녹음 일시정지: PAUSE_YN=Y, LAST_HEARTBEAT_DT=NULL, ABNORMAL_YN=N (STATUS=001 인 회의만) */
+    public int updateMeetingPause(MeetingVO dataVO) throws Exception {
+        return update("ai.meeting.updateMeetingPause", dataVO);
+    }
+
     /** 녹음 중 페이지 이탈: ABNORMAL_YN=Y (녹음 중인 회의만, 상태는 유지) */
     public int updateMeetingCancelAbnormal(MeetingVO dataVO) throws Exception {
         return update("ai.meeting.updateMeetingCancelAbnormal", dataVO);
