@@ -158,6 +158,21 @@ public class InqController extends BaseController<Object> {
         }
     }
 
+    /* 첨부파일 미리보기 URL 발급 (사용자) */
+    @RequestMapping(value = "/filePreview.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq", type = RequirePermission.Type.READ)
+    @ResponseBody
+    public Map<String, Object> filePreview(@RequestBody InqVO.FileVO dataVO) {
+        try {
+            Map<String, Object> resultMap = okResult();
+            resultMap.putAll(inqService.selectInqFilePreview(dataVO.getInqFileId(), false));
+            return resultMap;
+        } catch (Exception e) {
+            log.error("[INQ] filePreview 실패: {}", e.getMessage(), e);
+            return failResult(e);
+        }
+    }
+
     /* 문의하기 관리 화면 공통 정보 — 구분·처리상태 코드와 정책값 (관리자) */
     @RequestMapping(value = "/manage/codeInfo.do", method = RequestMethod.POST)
     @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.READ)
@@ -262,6 +277,21 @@ public class InqController extends BaseController<Object> {
             return okResult();
         } catch (Exception e) {
             log.error("[INQ] manageDeleteAnsr 실패: {}", e.getMessage(), e);
+            return failResult(e);
+        }
+    }
+
+    /* 첨부파일 미리보기 URL 발급 (관리자) */
+    @RequestMapping(value = "/manage/filePreview.do", method = RequestMethod.POST)
+    @RequirePermission(menu = "/inq-manage", type = RequirePermission.Type.READ)
+    @ResponseBody
+    public Map<String, Object> manageFilePreview(@RequestBody InqVO.FileVO dataVO) {
+        try {
+            Map<String, Object> resultMap = okResult();
+            resultMap.putAll(inqService.selectInqFilePreview(dataVO.getInqFileId(), true));
+            return resultMap;
+        } catch (Exception e) {
+            log.error("[INQ] manageFilePreview 실패: {}", e.getMessage(), e);
             return failResult(e);
         }
     }

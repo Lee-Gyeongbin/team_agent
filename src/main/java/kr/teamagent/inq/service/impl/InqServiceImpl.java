@@ -352,15 +352,21 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
 
     /** 첨부파일 다운로드 URL — 문의사항 열람 권한이 있을 때만 발급 */
     public Map<String, Object> selectInqFileDownloadUrl(String inqFileId, boolean manage) throws Exception {
-        InqVO.FileVO file = requireFile(inqFileId);
-        InqVO inq = requireInq(file.getInqId());
-        if (isMasked(inq, manage, SessionUtil.getUserId())) {
-            throw new RuntimeException("열람 권한이 없습니다.");
-        }
+        InqVO.FileVO file = requireViewableFile(inqFileId, manage);
         FileVO req = new FileVO();
         req.setFilePath(file.getFilePath());
         req.setFileName(file.getFileNm());
         return fileService.createDownloadPresignedUrlForStorageObject(req);
+    }
+
+    /** 첨부파일 미리보기 — 문의사항 열람 권한이 있을 때만 발급 (이미지·PDF·텍스트·문서 변환) */
+    public Map<String, Object> selectInqFilePreview(String inqFileId, boolean manage) throws Exception {
+        InqVO.FileVO file = requireViewableFile(inqFileId, manage);
+        FileVO req = new FileVO();
+        req.setFilePath(file.getFilePath());
+        req.setFileName(file.getFileNm());
+        req.setFileType(file.getFileType());
+        return fileService.createViewPresignedUrlForStorageObject(req);
     }
 
     // ── 내부 ──────────────────────────────────────────────────────────────
@@ -376,6 +382,15 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
             throw new RuntimeException("문의사항을 찾을 수 없습니다.");
         }
         return row;
+    }
+
+    /** 첨부파일을 조회하고, 비밀글이면 열람 권한(작성자·관리자 화면)을 확인한다 */
+    private InqVO.FileVO requireViewableFile(String inqFileId, boolean manage) throws Exception {
+        InqVO.FileVO file = requireFile(inqFileId);
+        if (isMasked(requireInq(file.getInqId()), manage, SessionUtil.getUserId())) {
+            throw new RuntimeException("열람 권한이 없습니다.");
+        }
+        return file;
     }
 
     private InqVO.FileVO requireFile(String inqFileId) throws Exception {
