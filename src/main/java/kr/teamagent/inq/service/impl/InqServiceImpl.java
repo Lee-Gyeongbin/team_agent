@@ -165,11 +165,12 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** 엑셀 출력용 — 문단·줄바꿈·목록 경계는 공백으로 바꾸고 나머지 태그는 지운다 */
+    /** 엑셀 출력용 — 문단·줄바꿈·목록 경계는 줄바꿈으로 바꾸고 나머지 태그는 지운다 (한 줄이 길면 POI 컬럼 너비 한도를 넘는다) */
     private String stripHtml(String html) {
         return CommonUtil.nullToBlank(html)
-                .replaceAll("(?i)</(p|h[1-6]|li|tr|blockquote)>|<br\\s*/?>", " ")
+                .replaceAll("(?i)</(p|h[1-6]|li|tr|blockquote)>|<br\\s*/?>", "\n")
                 .replaceAll("<[^>]+>", "")
+                .replaceAll("\\n{3,}", "\n\n")
                 .trim();
     }
 

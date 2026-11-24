@@ -75,6 +75,20 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
     /** WebSocket 세션별 진행 중인 AI API 스트리밍 호출 — 정지 버튼 클릭 시 cancel() 처리용 */
     private static final ConcurrentHashMap<String, okhttp3.Call> activeStreamCalls = new ConcurrentHashMap<>();
 
+    /** answer_file 로 안내된 생성 파일 — download_url 기준, 서버가 안내한 파일만 다운로드를 허용하기 위해 메모리에 유지 */
+    private static final ConcurrentHashMap<String, GeneratedFile> generatedFiles = new ConcurrentHashMap<>();
+
+    /** 등록된 생성 파일 정보를 메모리에 남겨두는 시간(1시간) — AI 서버 링크 유효시간(15분)보다 길게 두고, 만료 여부는 AI 서버 응답(410)으로 판단한다 */
+    private static final long GENERATED_FILE_RETAIN_MS = 60 * 60 * 1000L;
+
+    /** answer_file 로 안내된 생성 파일 1건 */
+    private static class GeneratedFile {
+        String url;
+        String fileName;
+        String mimeType;
+        long registeredAtMillis;
+    }
+
     /** 다음 추천 질문 생성을 위한 스레드 풀 — 메인 응답 전송과 분리된 별도 비동기 LLM 호출 처리 */
     private static final java.util.concurrent.ExecutorService recommendQuestionExecutor =
             java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
@@ -987,6 +1001,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         List<ChatRefItem> chatRefItems = new ArrayList<>();
         /** answer_source 스트림에서 누적 — done.data.items 가 있으면 그쪽이 최종 우선 */
         String webGroundingJson = "";
+        /** answer_file 스트림에서 누적한 생성 파일 목록 */
+        JSONArray answerFiles = new JSONArray();
 
         try {
             while ((line = reader.readLine()) != null) {
@@ -1068,6 +1084,26 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                     accumulatedContent.toString(),
                                     "answer_image");
                         }
+                        continue;
+                    }
+
+                    // 생성 파일 안내 — files(또는 items) 배열이면 그대로, 아니면 payload 자체를 1건으로 취급
+                    if ("answer_file".equals(currentEvent)) {
+                        Object filesObj = data.get("files");
+                        if (!(filesObj instanceof JSONArray)) {
+                            filesObj = data.get("items");
+                        }
+                        JSONArray newFiles = new JSONArray();
+                        if (filesObj instanceof JSONArray) {
+                            newFiles.addAll((JSONArray) filesObj);
+                        } else {
+                            newFiles.add(data);
+                        }
+                        registerGeneratedFiles(newFiles, apiUrl);
+                        answerFiles.addAll(newFiles);
+                        JSONObject accPayload = new JSONObject();
+                        accPayload.put("files", answerFiles);
+                        callback.onChunk(newFiles.toJSONString(), accPayload.toJSONString(), "answer_file");
                         continue;
                     }
 
@@ -1168,7 +1204,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                                 webGroundingJson,
                                 chartOption,
                                 retrieverQuery,
-                                chunk
+                                chunk,
+                                buildGeneratedFileJson(answerFiles)
                             );
 
                         this.updateChatRoomLastChatDt(responseThreadId);
@@ -1259,6 +1296,134 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
                 responseBody.close();
             }
         }
+    }
+
+    /**
+     * 생성 파일 목록에서 이력 저장용 항목(filename, mime_type, download_url, expires_at)만 추려 JSON 문자열로 만든다.
+     * 파일이 없으면 빈 문자열을 반환한다.
+     */
+    private String buildGeneratedFileJson(JSONArray files) {
+        JSONArray metas = new JSONArray();
+        for (Object item : files) {
+            if (!(item instanceof JSONObject)) {
+                continue;
+            }
+            JSONObject file = (JSONObject) item;
+            JSONObject meta = new JSONObject();
+            meta.put("filename", file.get("filename"));
+            meta.put("mime_type", file.get("mime_type"));
+            meta.put("download_url", file.get("download_url"));
+            meta.put("expires_at", file.get("expires_at"));
+            metas.add(meta);
+        }
+        if (metas.isEmpty()) {
+            return "";
+        }
+        JSONObject payload = new JSONObject();
+        payload.put("files", metas);
+        return payload.toJSONString();
+    }
+
+    /**
+     * 생성 파일 JSON에서 download_url만 제거한다 (파일명·형식·만료시각은 유지). 비어 있거나 해석할 수 없으면 null.
+     */
+    private String removeGeneratedFileDownloadUrl(String generatedFileJson) {
+        if (CommonUtil.isEmpty(generatedFileJson)) {
+            return null;
+        }
+        try {
+            JSONObject payload = (JSONObject) new JSONParser().parse(generatedFileJson);
+            Object files = payload.get("files");
+            if (files instanceof JSONArray) {
+                for (Object item : (JSONArray) files) {
+                    if (item instanceof JSONObject) {
+                        ((JSONObject) item).remove("download_url");
+                    }
+                }
+            }
+            return payload.toJSONString();
+        } catch (org.json.simple.parser.ParseException e) {
+            logger.warn("생성 파일 JSON 파싱 실패: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * answer_file 로 안내된 파일을 다운로드 대상으로 등록 (download_url 키, 오래된 항목 정리)
+     */
+    private void registerGeneratedFiles(JSONArray files, String apiUrl) {
+        long now = System.currentTimeMillis();
+        generatedFiles.values().removeIf(f -> now > f.registeredAtMillis + GENERATED_FILE_RETAIN_MS);
+
+        HttpUrl baseUrl = HttpUrl.parse(apiUrl);
+        if (baseUrl == null) {
+            return;
+        }
+        for (Object item : files) {
+            if (!(item instanceof JSONObject)) {
+                continue;
+            }
+            JSONObject file = (JSONObject) item;
+            String downloadUrl = getString(file.get("download_url"));
+            // download_url 은 AI 서버 기준 상대경로 — 스트림을 받은 AI 서버 주소로 절대 URL 구성
+            HttpUrl fullUrl = CommonUtil.isEmpty(downloadUrl) ? null : baseUrl.resolve(downloadUrl);
+            if (fullUrl == null) {
+                continue;
+            }
+
+            GeneratedFile generatedFile = new GeneratedFile();
+            generatedFile.url = fullUrl.toString();
+            generatedFile.fileName = getString(file.get("filename"));
+            generatedFile.mimeType = getString(file.get("mime_type"));
+            generatedFile.registeredAtMillis = now;
+            generatedFiles.put(downloadUrl, generatedFile);
+        }
+    }
+
+    /**
+     * 생성 파일 다운로드 — 로그인 사용자가 answer_file 로 안내된 파일만 AI 서버에서 받아 전달한다.
+     * 성공: successYn=true + fileBytes/fileName/mimeType, 실패(만료 포함): successYn=false + returnMsg
+     */
+    public Map<String, Object> downloadGeneratedFile(String downloadUrl, String userId) {
+        GeneratedFile file = CommonUtil.isEmpty(downloadUrl) ? null : generatedFiles.get(downloadUrl);
+        if (file == null || CommonUtil.isEmpty(userId)) {
+            return generatedFileFail("다운로드할 수 없는 파일입니다.");
+        }
+
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+        Request request = new Request.Builder().url(file.url).get().build();
+        try (okhttp3.Response response = client.newCall(request).execute()) {
+            // AI 서버가 410(GENERATED_FILE_EXPIRED)을 주면 만료 안내로 변환
+            if (response.code() == 410) {
+                generatedFiles.remove(downloadUrl, file);
+                return generatedFileFail("시간이 만료되어 다운로드할 수 없습니다");
+            }
+            if (!response.isSuccessful() || response.body() == null) {
+                logger.warn("생성 파일 다운로드 응답 오류: {} - url: {}", response.code(), file.url);
+                return generatedFileFail("파일을 다운로드할 수 없습니다.");
+            }
+
+            String mimeType = CommonUtil.isNotEmpty(file.mimeType) ? file.mimeType : response.header("Content-Type");
+            Map<String, Object> resultMap = new HashMap<>();
+            resultMap.put("successYn", true);
+            resultMap.put("fileBytes", response.body().bytes());
+            resultMap.put("fileName", CommonUtil.isNotEmpty(file.fileName) ? file.fileName : "download");
+            resultMap.put("mimeType", CommonUtil.isNotEmpty(mimeType) ? mimeType : "application/octet-stream");
+            return resultMap;
+        } catch (IOException e) {
+            logger.warn("생성 파일 다운로드 실패: {} - url: {}", e.getMessage(), file.url);
+            return generatedFileFail("파일을 다운로드할 수 없습니다.");
+        }
+    }
+
+    private Map<String, Object> generatedFileFail(String returnMsg) {
+        Map<String, Object> resultMap = new HashMap<>();
+        resultMap.put("successYn", false);
+        resultMap.put("returnMsg", returnMsg);
+        return resultMap;
     }
 
     /**
@@ -1461,7 +1626,8 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             String webGroundingJson,
             String chartOption,
             String retrieverQuery,
-            String chunk) throws Exception {
+            String chunk,
+            String generatedFileJson) throws Exception {
 
         ChatbotVO chatbotVO = new ChatbotVO();
         chatbotVO.setRoomId(Long.parseLong(responseThreadId));
@@ -1484,6 +1650,7 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
         chatbotVO.setMainPage(CommonUtil.isNotEmpty(mainPage) ? mainPage : null);
         chatbotVO.setRetrieverQuery(CommonUtil.isNotEmpty(retrieverQuery) ? retrieverQuery : null);
         chatbotVO.setChunk(CommonUtil.isNotEmpty(chunk) ? chunk : null);
+        chatbotVO.setGeneratedFileJson(CommonUtil.isNotEmpty(generatedFileJson) ? generatedFileJson : null);
 
         chatbotDAO.insertChatLog(chatbotVO);
 
@@ -2620,7 +2787,12 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             resultMap.put("successYn", true);
             resultMap.put("returnMsg", "요청사항을 성공하였습니다.");
             resultMap.put("fileShareYn", validRoom.getIncludeAttachment());
-            resultMap.put("list", selectChatLogList(logParam));
+            List<ChatbotVO> logList = selectChatLogList(logParam);
+            // 공유 화면의 생성 파일은 공유 옵션과 무관하게 목록(파일명·만료시각)만 보여주고 다운로드 경로는 제외한다
+            for (ChatbotVO log : logList) {
+                log.setGeneratedFileJson(removeGeneratedFileDownloadUrl(log.getGeneratedFileJson()));
+            }
+            resultMap.put("list", logList);
             return resultMap;
         }
 
@@ -2735,6 +2907,9 @@ public class ChatbotServiceImpl extends EgovAbstractServiceImpl{
             ins.setTableData(CommonUtil.isNotEmpty(src.getTableData()) ? src.getTableData() : null);
             ins.setChartOption(CommonUtil.isNotEmpty(src.getChartOption()) ? src.getChartOption() : null);
             ins.setWebGroundingJson(CommonUtil.isNotEmpty(src.getWebGroundingJson()) ? src.getWebGroundingJson() : null);
+            // 공유로 받은 생성 파일은 공유 옵션과 무관하게 목록만 복사하고 다운로드 경로는 제외한다
+            String copiedGeneratedFileJson = removeGeneratedFileDownloadUrl(src.getGeneratedFileJson());
+            ins.setGeneratedFileJson(CommonUtil.isNotEmpty(copiedGeneratedFileJson) ? copiedGeneratedFileJson : null);
             ins.setReportHtml(CommonUtil.isNotEmpty(src.getReportHtml()) ? src.getReportHtml() : null);
             ins.setRetrieverQuery(CommonUtil.isNotEmpty(src.getRetrieverQuery()) ? src.getRetrieverQuery() : null);
             ins.setChunk(CommonUtil.isNotEmpty(src.getChunk()) ? src.getChunk() : null);

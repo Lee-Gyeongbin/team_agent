@@ -572,8 +572,67 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
      * type: "transcription" — 순수 전사 전용 세션 (대화 응답·TTS 없음)
      * 응답에서 value (ephemeral token) 와 expires_at 추출 후 반환
      */
+    /** 실시간 STT 설정값 — globals.properties (Globals.meeting.realtime.*), 없으면 기본값 */
+    private static String realtimeProp(String key, String defaultValue) {
+        String value = PropertyUtil.getProperty("Globals.meeting.realtime." + key);
+        return CommonUtil.isEmpty(value) ? defaultValue : value.trim();
+    }
+
+    private static double realtimePropDouble(String key, double defaultValue) {
+        try {
+            return Double.parseDouble(realtimeProp(key, String.valueOf(defaultValue)));
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    private static int realtimePropInt(String key, int defaultValue) {
+        try {
+            return Integer.parseInt(realtimeProp(key, String.valueOf(defaultValue)));
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    /**
+     * 실시간 전사 문맥 힌트 — 회의 제목 · 참석자 이름 (지시문이 아니라 고유명사 인식용 단서)
+     * 본인 회의가 아니거나 조회 실패 시 빈 문자열 (힌트 없이 전사)
+     */
+    private String buildRealtimeContext(Long meetingId) {
+        if (meetingId == null) return "";
+        try {
+            MeetingVO searchVO = new MeetingVO();
+            searchVO.setMeetingId(meetingId);
+            MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
+            if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) return "";
+
+            List<String> names = new ArrayList<>();
+            if (!CommonUtil.isEmpty(meeting.getAttendees())) {
+                Object parsed = new JSONParser().parse(meeting.getAttendees());
+                if (parsed instanceof JSONArray) {
+                    for (Object obj : (JSONArray) parsed) {
+                        if (obj instanceof JSONObject) {
+                            String nm = CommonUtil.nvl((String) ((JSONObject) obj).get("userNm"), "").trim();
+                            if (!nm.isEmpty()) names.add(nm);
+                        }
+                    }
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            if (!CommonUtil.isEmpty(meeting.getMeetingTitle())) sb.append("회의: ").append(meeting.getMeetingTitle().trim());
+            if (!names.isEmpty()) {
+                if (sb.length() > 0) sb.append("\n");
+                sb.append("참석자: ").append(String.join(", ", names));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            logger.warn("[Realtime] 문맥 힌트 구성 실패 - meetingId: {}", meetingId, e);
+            return "";
+        }
+    }
+
     @SuppressWarnings("unchecked")
-    public Map<String, Object> getRealtimeToken() {
+    public Map<String, Object> getRealtimeToken(Long meetingId) {
         Map<String, Object> result = new HashMap<>();
         String apiKey = PropertyUtil.getProperty("Globals.chatbot.transcribe.apiKey");
         String apiKeyFingerprint = getApiKeyFingerprint(apiKey);
@@ -592,20 +651,26 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
                 .build();
 
             // --- audio.input.transcription (전사 모델 지정) ---
+            // 기본 gpt-4o-transcribe (mini 보다 정확) · 회의 제목/참석자 문맥 힌트로 고유명사 인식 보강
             JSONObject transcription = new JSONObject();
-            transcription.put("model", "gpt-4o-mini-transcribe");
+            transcription.put("model", realtimeProp("model", "gpt-4o-transcribe"));
             transcription.put("language", "ko");
+            String context = buildRealtimeContext(meetingId);
+            if (!context.isEmpty()) {
+                transcription.put("prompt", context);
+            }
 
-            // --- audio.input.noise_reduction ---
+            // --- audio.input.noise_reduction (far_field: 회의실 원거리 마이크 / near_field: 헤드셋·가까운 마이크) ---
             JSONObject noiseReduction = new JSONObject();
-            noiseReduction.put("type", "far_field");
+            noiseReduction.put("type", realtimeProp("noiseReduction", "far_field"));
 
             // --- audio.input.turn_detection (server_vad) ---
+            // 무음 기준이 짧으면(0.5초) 말을 1~2초 조각으로 잘라 문맥 없이 전사 → 오인식이 잦아 기본 0.9초로 늘림
             JSONObject turnDetection = new JSONObject();
             turnDetection.put("type", "server_vad");
-            turnDetection.put("threshold", 0.5);
-            turnDetection.put("prefix_padding_ms", 300);
-            turnDetection.put("silence_duration_ms", 500);
+            turnDetection.put("threshold", realtimePropDouble("vadThreshold", 0.5));
+            turnDetection.put("prefix_padding_ms", realtimePropInt("prefixPaddingMs", 300));
+            turnDetection.put("silence_duration_ms", realtimePropInt("silenceMs", 900));
 
             // --- audio.input (PCM 24kHz mono) ---
             JSONObject inputFormat = new JSONObject();
