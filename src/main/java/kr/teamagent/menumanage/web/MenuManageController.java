@@ -31,7 +31,11 @@ public class MenuManageController extends BaseController {
         if (saveVO == null) {
             return makeFailJsonData("요청 본문이 없습니다.");
         }
-        menuManageService.saveMenu(saveVO);
+        try {
+            menuManageService.saveMenu(saveVO);
+        } catch (IllegalArgumentException e) {
+            return makeFailJsonData(e.getMessage());
+        }
         return makeSuccessJsonData();
     }
 

@@ -64,6 +64,7 @@
           , NOW()
           , NOW()
         )
+        <if test="!newMenu">
         ON DUPLICATE KEY UPDATE
             MENU_NAME   = #{menuName}
           , PARN_MENU_ID  = #{parnMenuId, jdbcType=VARCHAR}
@@ -76,6 +77,7 @@
           , USE_YN        = #{useYn}
           , DESCRIPTION   = #{description, jdbcType=VARCHAR}
           , MODIFY_DT     = NOW()
+        </if>
     </insert>
 
     <update id="updateMenuOrder" parameterType="kr.teamagent.menumanage.service.MenuManageVO$UpdateMenuOrderVO">
