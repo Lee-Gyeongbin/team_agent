@@ -6,11 +6,32 @@ import org.springframework.stereotype.Repository;
 
 import egovframework.com.cmm.service.impl.EgovComAbstractDAO;
 import kr.teamagent.idea.service.IdeaVO;
+import kr.teamagent.idea.service.IdeaCommentVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaCodeVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaFileVO;
 
 @Repository
 public class IdeaDAO extends EgovComAbstractDAO {
+
+    public String lockActiveIdea(String ideaId) throws Exception {
+        return selectOne("idea.lockActiveIdea", ideaId);
+    }
+
+    public List<IdeaCommentVO> selectComments(String ideaId) throws Exception {
+        return selectList("idea.selectComments", ideaId);
+    }
+
+    public int insertComment(IdeaCommentVO comment) throws Exception {
+        return insert("idea.insertComment", comment);
+    }
+
+    public int updateComment(IdeaCommentVO comment) throws Exception {
+        return update("idea.updateComment", comment);
+    }
+
+    public int deleteComment(IdeaCommentVO comment) throws Exception {
+        return update("idea.deleteComment", comment);
+    }
 
     public List<IdeaVO> selectIdeaList(IdeaVO searchVO) throws Exception {
         return selectList("idea.selectIdeaList", searchVO);
@@ -18,10 +39,6 @@ public class IdeaDAO extends EgovComAbstractDAO {
 
     public Integer selectIdeaListCnt(IdeaVO searchVO) throws Exception {
         return selectOne("idea.selectIdeaListCnt", searchVO);
-    }
-
-    public List<IdeaVO> selectIdeaExcelList(IdeaVO searchVO) throws Exception {
-        return selectList("idea.selectIdeaExcelList", searchVO);
     }
 
     public IdeaVO selectIdeaDetail(IdeaVO searchVO) throws Exception {
@@ -46,10 +63,6 @@ public class IdeaDAO extends EgovComAbstractDAO {
 
     public int updateIdea(IdeaVO ideaVO) throws Exception {
         return update("idea.updateIdea", ideaVO);
-    }
-
-    public int updateIdeaManage(IdeaVO ideaVO) throws Exception {
-        return update("idea.updateIdeaManage", ideaVO);
     }
 
     /** 논리 삭제 (USE_YN = 'N') */

@@ -4,9 +4,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.jsoup.Jsoup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +27,7 @@ import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.idea.service.IdeaVO;
+import kr.teamagent.idea.service.IdeaCommentVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaCodeVO;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaFileVO;
@@ -46,12 +49,13 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
     /** 목록 페이지 크기 (화면과 동일) */
     public static final int PAGE_SIZE = 15;
     private static final int MAX_TEXT_LENGTH = 8_000;
+    private static final int COMMENT_MAX_DEPTH = 3;
+    private static final String COMMENT_HTML_PREFIX = "<!-- idea-comment:html -->";
     private static final Pattern HTML_TAG = Pattern.compile("<[/?]?[A-Za-z](?:[^<>\"']|\"[^\"]*\"|'[^']*')*+>");
 
     /** 첨부파일 1개당 최대 크기 20MB */
     private static final long MAX_FILE_SIZE = 20L * 1024 * 1024;
 
-    public static final String CODE_GRP_STATUS = "ID000001";
     public static final String CODE_GRP_TYPE = "ID000002";
     private static final String TYPE_CD_AGENT = "001";
     private static final String STATUS_CD_DEFAULT = "001";
@@ -84,12 +88,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
-    public List<IdeaVO> selectIdeaExcelList(IdeaVO searchVO) throws Exception {
-        List<IdeaVO> rows = ideaDAO.selectIdeaExcelList(searchVO);
-        rows.forEach(this::sanitizeStoredContent);
-        return rows;
-    }
-
     public IdeaVO selectIdeaDetail(IdeaVO searchVO) throws Exception {
         searchVO.setUserId(SessionUtil.getUserId());
         IdeaVO detail = ideaDAO.selectIdeaDetail(searchVO);
@@ -102,6 +100,101 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         detail.setFileList(fileList);
         sanitizeStoredContent(detail);
         return detail;
+    }
+
+    public List<IdeaCommentVO> selectComments(String ideaId) throws Exception {
+        List<IdeaCommentVO> comments = ideaDAO.selectComments(ideaId);
+        for (IdeaCommentVO comment : comments) {
+            String content = comment.getContent();
+            if (content.startsWith(COMMENT_HTML_PREFIX)) {
+                comment.setContent(IdeaRichTextSanitizer.clean(content.substring(COMMENT_HTML_PREFIX.length())));
+            } else {
+                comment.setContent(plainCommentHtml(content));
+            }
+        }
+        return comments;
+    }
+
+    public void saveComment(IdeaCommentVO comment) {
+        String content = CommonUtil.nullToBlank(comment.getContent()).trim();
+        // Older clients submit plain text. Store it as escaped HTML without reinterpreting tags.
+        String html = comment.isRichText()
+                ? IdeaRichTextSanitizer.clean(content)
+                : plainCommentHtml(content);
+        if (Jsoup.parseBodyFragment(html).text().isBlank()) {
+            throw new IllegalArgumentException("댓글 내용을 입력해 주세요.");
+        }
+        validateTextLength(html, "댓글");
+        comment.setContent(COMMENT_HTML_PREFIX + html);
+        comment.setCreateId(SessionUtil.getUserId());
+
+        inTransaction(() -> {
+            lockCommentIdea(comment);
+            if (!CommonUtil.isEmpty(comment.getCommentId())) {
+                if (ideaDAO.updateComment(comment) == 0) {
+                    throw new IllegalArgumentException("본인이 작성한 댓글만 수정할 수 있습니다.");
+                }
+                return;
+            }
+            List<IdeaCommentVO> comments = ideaDAO.selectComments(comment.getIdeaId());
+            if (CommonUtil.isEmpty(comment.getParentId())) {
+                comment.setParentId(null);
+                comment.setDepth(1);
+            } else {
+                IdeaCommentVO parent = comments.stream()
+                        .filter(row -> row.getCommentId().equals(comment.getParentId()))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("답글을 달 댓글을 찾을 수 없습니다."));
+                comment.setDepth(Math.min(parent.getDepth() + 1, COMMENT_MAX_DEPTH));
+            }
+            int lastSortOrder = comments.stream()
+                    .filter(row -> java.util.Objects.equals(row.getParentId(), comment.getParentId()))
+                    .mapToInt(IdeaCommentVO::getSortOrd)
+                    .max().orElse(0);
+            comment.setSortOrd(lastSortOrder + 1);
+            comment.setCommentId(UUID.randomUUID().toString());
+            ideaDAO.insertComment(comment);
+        });
+    }
+
+    private String plainCommentHtml(String content) {
+        return "<p>" + HtmlUtils.htmlEscape(content).replaceAll("\\r\\n?|\\n", "<br>") + "</p>";
+    }
+
+    public void deleteComment(IdeaCommentVO comment) {
+        inTransaction(() -> {
+            lockCommentIdea(comment);
+            List<IdeaCommentVO> comments = ideaDAO.selectComments(comment.getIdeaId());
+            String userId = SessionUtil.getUserId();
+            IdeaCommentVO target = comments.stream()
+                    .filter(row -> row.getCommentId().equals(comment.getCommentId())
+                            && userId.equals(row.getCreateId()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("본인이 작성한 댓글만 삭제할 수 있습니다."));
+
+            Map<String, List<IdeaCommentVO>> childrenByParent = new HashMap<>();
+            for (IdeaCommentVO row : comments) {
+                childrenByParent.computeIfAbsent(row.getParentId(), ignored -> new ArrayList<>()).add(row);
+            }
+            List<IdeaCommentVO> branch = new ArrayList<>();
+            branch.add(target);
+            for (int i = 0; i < branch.size(); i++) {
+                branch.addAll(childrenByParent.getOrDefault(branch.get(i).getCommentId(), List.of()));
+            }
+            for (int i = branch.size() - 1; i >= 0; i--) {
+                IdeaCommentVO row = branch.get(i);
+                row.setModifyId(userId);
+                ideaDAO.deleteComment(row);
+            }
+        });
+    }
+
+    private void lockCommentIdea(IdeaCommentVO comment) throws Exception {
+        String ideaId = ideaDAO.lockActiveIdea(comment.getIdeaId());
+        if (ideaId == null) {
+            throw new IllegalArgumentException("아이디어를 찾을 수 없습니다.");
+        }
+        comment.setIdeaId(ideaId);
     }
 
     /* ===================== 사용자: 등록·수정·삭제·추천 ===================== */
@@ -169,33 +262,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         return result;
     }
 
-    /* ===================== 관리자: 진행상태·코멘트·삭제 ===================== */
-
-    public void saveIdeaManage(IdeaVO ideaVO) throws Exception {
-        if (CommonUtil.isEmpty(ideaVO.getIdeaId()) || ideaDAO.selectIdeaDetail(ideaVO) == null) {
-            throw new IllegalArgumentException("아이디어를 찾을 수 없습니다.");
-        }
-        boolean isValidStatus = ideaDAO.selectIdeaCodeList(CODE_GRP_STATUS).stream()
-                .anyMatch((code) -> code.getCodeId().equals(ideaVO.getStatusCd()));
-        if (!isValidStatus) {
-            throw new IllegalArgumentException("진행상태를 선택해주세요.");
-        }
-        String userId = SessionUtil.getUserId();
-        String comment = CommonUtil.nullToBlank(ideaVO.getCmtContent()).trim();
-        validateTextLength(comment, "관리자 코멘트");
-        ideaVO.setCmtContent(IdeaRichTextSanitizer.clean(comment));
-        ideaVO.setCmtUserId(userId);
-        ideaVO.setModifyId(userId);
-        ideaDAO.updateIdeaManage(ideaVO);
-    }
-
-    public void deleteIdeaManage(IdeaVO ideaVO) throws Exception {
-        if (CommonUtil.isEmpty(ideaVO.getIdeaId()) || ideaDAO.selectIdeaDetail(ideaVO) == null) {
-            throw new IllegalArgumentException("아이디어를 찾을 수 없습니다.");
-        }
-        deleteIdeaAll(ideaVO.getIdeaId());
-    }
-
     /* ===================== 첨부파일 ===================== */
 
     public Map<String, Object> selectIdeaFilePreview(String ideaFileId) throws Exception {
@@ -217,7 +283,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
 
     /* ===================== 내부 ===================== */
 
-    /** 사용자 수정·삭제 가능 여부 — 본인 글 + 관리자 코멘트 전 */
     private IdeaVO selectIdeaForWrite(String ideaId, String userId) throws Exception {
         IdeaVO param = new IdeaVO();
         param.setIdeaId(ideaId);
@@ -227,9 +292,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         }
         if (!saved.getCreateId().equals(userId)) {
             throw new IllegalArgumentException("본인이 작성한 글만 수정·삭제할 수 있습니다.");
-        }
-        if ("Y".equals(saved.getCmtYn())) {
-            throw new IllegalArgumentException("답변이 등록된 글은 수정·삭제할 수 없습니다.");
         }
         return saved;
     }
@@ -263,7 +325,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
 
     private void sanitizeStoredContent(IdeaVO idea) {
         idea.setContent(IdeaRichTextSanitizer.cleanStored(idea.getContent()));
-        idea.setCmtContent(IdeaRichTextSanitizer.cleanStored(idea.getCmtContent()));
     }
 
     private void validateTextLength(String html, String fieldName) {
