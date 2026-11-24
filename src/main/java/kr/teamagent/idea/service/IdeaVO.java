@@ -23,6 +23,7 @@ public class IdeaVO extends CommonVO {
     private String content;
     private String statusCd;
     private Integer likeCnt;
+    private Integer commentCnt;
     /** 로그인 사용자의 추천 여부 (Y/N) */
     private String likedYn;
     private String createDt;
