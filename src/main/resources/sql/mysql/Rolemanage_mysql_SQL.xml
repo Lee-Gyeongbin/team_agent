@@ -211,7 +211,10 @@
                 ON O.ORG_ID = U.ORG_ID
         WHERE U.USE_YN = 'Y'
         <if test="nameKeyword != null and nameKeyword != ''">
-            AND LOCATE(LOWER(#{nameKeyword}), LOWER(U.USER_NM)) > 0
+            AND (
+                LOCATE(LOWER(#{nameKeyword}), LOWER(U.USER_NM)) > 0
+                OR LOCATE(LOWER(#{nameKeyword}), LOWER(U.USER_ID)) > 0
+            )
         </if>
         ORDER BY U.USER_NM ASC, U.USER_ID ASC
     </select>
