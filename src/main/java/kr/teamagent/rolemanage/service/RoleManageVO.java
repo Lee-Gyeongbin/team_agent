@@ -63,6 +63,7 @@ public class RoleManageVO extends CommonVO {
         private String email;
         private String orgId;
         private String orgNm;
+        private String nameKeyword;
         private String createId;
         private String modifyId;
     }
