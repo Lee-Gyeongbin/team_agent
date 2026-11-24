@@ -251,6 +251,7 @@
             , A.TABLE_DATA
             , A.CHART_OPTION
             , A.WEB_GROUNDING_JSON
+            , A.GENERATED_FILE_JSON
             , A.REPORT_HTML
             , A.MAIN_DOC_FILE_ID
             , A.MAIN_PAGE
@@ -311,6 +312,7 @@
             TABLE_DATA,
             CHART_OPTION,
             WEB_GROUNDING_JSON,
+            GENERATED_FILE_JSON,
             REPORT_HTML,
             MAIN_DOC_FILE_ID,
             MAIN_PAGE,
@@ -338,6 +340,7 @@
             #{tableData},
             #{chartOption},
             #{webGroundingJson},
+            #{generatedFileJson},
             #{reportHtml},
             #{mainDocFileId},
             #{mainPage},
@@ -395,6 +398,7 @@
             , A.TABLE_DATA 
             , A.CHART_OPTION
             , A.WEB_GROUNDING_JSON
+            , A.GENERATED_FILE_JSON
             , A.REPORT_HTML
             , A.TTSQ
             , A.REASK_CNT

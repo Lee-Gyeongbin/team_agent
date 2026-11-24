@@ -118,6 +118,8 @@ public class ChatbotVO extends CommonVO {
     private String chartOption;
     /** Web 검색·그라운딩 출처 JSON — {"items":[{"url","title"},...]} */
     private String webGroundingJson;
+    /** 생성 파일 JSON — {"files":[{"filename","mime_type","download_url","expires_at"},...]} */
+    private String generatedFileJson;
     /** 리서치 리포트 HTML */
     private String reportHtml;
     // SQL

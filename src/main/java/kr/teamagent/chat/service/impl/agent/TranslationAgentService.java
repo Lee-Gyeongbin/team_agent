@@ -123,7 +123,7 @@ public class TranslationAgentService {
                         threadId, agentId, query, translatedText,
                         0, 0, svcTy, modelId, refId, userId,
                         "", "", "", "", "", "",
-                        new ArrayList<>(), "", "", "", "");
+                        new ArrayList<>(), "", "", "", "", "");
                 chatbotService.updateChatRoomLastChatDt(threadId);
                 if (CommonUtil.isNotEmpty(savedLogId)) {
                     try {

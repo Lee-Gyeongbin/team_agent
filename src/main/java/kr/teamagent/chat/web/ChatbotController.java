@@ -458,6 +458,28 @@ public class ChatbotController extends BaseController {
     }
 
     /**
+     * 생성 파일(answer_file) 다운로드 — 로그인 사용자가 서버가 안내한 파일만 전달한다.
+     * 실패(만료 포함) 시에는 파일 대신 successYn/returnMsg JSON을 반환한다.
+     */
+    @RequestMapping(value = "/ai/chatbot/downloadGeneratedFile.do", method = RequestMethod.POST)
+    public ModelAndView downloadGeneratedFile(@RequestBody Map<String, String> body, HttpServletResponse response) throws Exception {
+        String downloadUrl = body != null ? body.get("downloadUrl") : null;
+        Map<String, Object> resultMap = chatbotService.downloadGeneratedFile(downloadUrl, SessionUtil.getUserId());
+        if (!Boolean.TRUE.equals(resultMap.get("successYn"))) {
+            return new ModelAndView("jsonView", resultMap);
+        }
+
+        byte[] bytes = (byte[]) resultMap.get("fileBytes");
+        String encodedFileName = URLEncoder.encode((String) resultMap.get("fileName"), StandardCharsets.UTF_8.toString()).replaceAll("\\+", "%20");
+        response.setContentType((String) resultMap.get("mimeType"));
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
+        response.setContentLength(bytes.length);
+        response.getOutputStream().write(bytes);
+        response.getOutputStream().flush();
+        return null;
+    }
+
+    /**
      * 즉시번역(드래그 선택 번역) — 채팅 로그를 남기지 않는 동기 번역 호출.
      */
     @RequestMapping("/ai/chatbot/instantTranslate.do")
