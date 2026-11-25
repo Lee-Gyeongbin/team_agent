@@ -8,7 +8,6 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
-import org.jsoup.Jsoup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -107,7 +106,7 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         for (IdeaCommentVO comment : comments) {
             String content = comment.getContent();
             if (content.startsWith(COMMENT_HTML_PREFIX)) {
-                comment.setContent(IdeaRichTextSanitizer.clean(content.substring(COMMENT_HTML_PREFIX.length())));
+                comment.setContent(IdeaRichTextSanitizer.cleanComment(content.substring(COMMENT_HTML_PREFIX.length())));
             } else {
                 comment.setContent(plainCommentHtml(content));
             }
@@ -119,9 +118,9 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         String content = CommonUtil.nullToBlank(comment.getContent()).trim();
         // Older clients submit plain text. Store it as escaped HTML without reinterpreting tags.
         String html = comment.isRichText()
-                ? IdeaRichTextSanitizer.clean(content)
+                ? IdeaRichTextSanitizer.cleanComment(content)
                 : plainCommentHtml(content);
-        if (Jsoup.parseBodyFragment(html).text().isBlank()) {
+        if (!IdeaRichTextSanitizer.hasCommentContent(html)) {
             throw new IllegalArgumentException("댓글 내용을 입력해 주세요.");
         }
         validateTextLength(html, "댓글");

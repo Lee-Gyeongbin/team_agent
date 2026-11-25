@@ -28,6 +28,7 @@ import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.service.FileVO;
+import kr.teamagent.idea.service.impl.IdeaRichTextSanitizer;
 import kr.teamagent.inq.service.InqVO;
 
 @Service
@@ -48,6 +49,7 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
     private static final int PAGE_SIZE = 15;
     /** 답변·댓글 최대 단계 (1 = 관리자 답변, 2 = 답글, 3 = 답글의 답글) */
     private static final int ANSR_MAX_DEPTH = 3;
+    private static final String ANSR_HTML_PREFIX = "<!-- inq-answer:html -->";
     private static final String MASKED_TITLE = "비밀글입니다.";
 
     /** 문의하기 관리 메뉴 경로 — 알림을 받을 관리자(기능 권한 보유자) 조회 기준 */
@@ -174,6 +176,13 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
                 .trim();
     }
 
+    private String answerExcelText(String content) {
+        if (content != null && content.startsWith(ANSR_HTML_PREFIX)) {
+            return stripHtml(content.substring(ANSR_HTML_PREFIX.length()));
+        }
+        return content;
+    }
+
     /** 문의 한 건을 엑셀 한 행으로 만든다 — 관리자 답변(1단계)과 댓글(2단계 이상)을 나눠 담는다 */
     private void writeInqExcelRow(Row row, InqVO vo, List<InqVO.AnsrVO> answers, XSSFCellStyle rowStyle, XSSFCellStyle textStyle) {
         InqVO.AnsrVO answer = answers.stream().filter(a -> a.getDepth() != null && a.getDepth() == 1).findFirst().orElse(null);
@@ -183,12 +192,12 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
                 if (comments.length() > 0) {
                     comments.append('\n');
                 }
-                comments.append('[').append(CommonUtil.nullToBlank(a.getAnsrUserNm())).append(' ').append(a.getCreateDt()).append("] ").append(a.getContent());
+                comments.append('[').append(CommonUtil.nullToBlank(a.getAnsrUserNm())).append(' ').append(a.getCreateDt()).append("] ").append(answerExcelText(a.getContent()));
             }
         }
         String[] values = {
                 vo.getInqId(), vo.getCatNm(), vo.getAgentNm(), vo.getTitle(), stripHtml(vo.getContent()), vo.getCrtrNm(), vo.getCreateDt(), vo.getStatusNm(),
-                answer == null ? null : answer.getContent(), answer == null ? null : answer.getAnsrUserNm(), answer == null ? null : answer.getCreateDt(),
+                answer == null ? null : answerExcelText(answer.getContent()), answer == null ? null : answer.getAnsrUserNm(), answer == null ? null : answer.getCreateDt(),
                 comments.toString()
         };
         for (int col = 0; col < values.length; col++) {
@@ -273,10 +282,14 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
         String userId = SessionUtil.getUserId();
         InqVO inq = requireInq(vo.getInqId());
         String content = CommonUtil.nullToBlank(vo.getContent()).trim();
-        if (content.isEmpty()) {
+        boolean richText = content.startsWith(ANSR_HTML_PREFIX);
+        if (richText) {
+            content = IdeaRichTextSanitizer.cleanComment(content.substring(ANSR_HTML_PREFIX.length()));
+        }
+        if (content.isEmpty() || (richText && !IdeaRichTextSanitizer.hasCommentContent(content))) {
             throw new RuntimeException("내용은 필수입니다.");
         }
-        vo.setContent(content);
+        vo.setContent(richText ? ANSR_HTML_PREFIX + content : content);
 
         if (CommonUtil.isNotEmpty(vo.getAnsrId())) {
             InqVO.AnsrVO row = requireAnsr(vo.getAnsrId(), vo.getInqId());
