@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import egovframework.com.cmm.service.impl.EgovComAbstractDAO;
 import kr.teamagent.idea.service.IdeaVO;
-import kr.teamagent.idea.service.IdeaCommentVO;
+import kr.teamagent.idea.service.IdeaVO.IdeaCommentVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaCodeVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaFileVO;
 

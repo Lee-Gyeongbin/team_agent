@@ -61,4 +61,20 @@ public class IdeaVO extends CommonVO {
         private String codeId;
         private String codeNm;
     }
+
+    @Getter
+    @Setter
+    public static class IdeaCommentVO {
+        private String commentId;
+        private String ideaId;
+        private String parentId;
+        private String content;
+        private String createId;
+        private String createNm;
+        private String createDt;
+        private String modifyId;
+        private int depth;
+        private int sortOrd;
+        private boolean richText;
+    }
 }

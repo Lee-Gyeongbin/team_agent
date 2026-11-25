@@ -26,7 +26,7 @@ import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.PropertyUtil;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.idea.service.IdeaVO;
-import kr.teamagent.idea.service.IdeaCommentVO;
+import kr.teamagent.idea.service.IdeaVO.IdeaCommentVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaCodeVO;
 import kr.teamagent.common.util.service.FileVO;
 import kr.teamagent.idea.service.IdeaVO.IdeaFileVO;

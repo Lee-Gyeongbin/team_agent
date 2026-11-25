@@ -6,7 +6,7 @@
         SELECT IDEA_ID FROM TB_IDEA WHERE IDEA_ID = #{ideaId} AND USE_YN = 'Y' FOR UPDATE
     </select>
 
-    <select id="selectComments" parameterType="string" resultType="kr.teamagent.idea.service.IdeaCommentVO">
+    <select id="selectComments" parameterType="string" resultType="kr.teamagent.idea.service.IdeaVO$IdeaCommentVO">
         SELECT C.ANSR_ID AS COMMENT_ID, C.IDEA_ID, NULLIF(C.UP_ANSR_ID, '') AS PARENT_ID,
                C.CONTENT, C.ANSR_USER_ID AS CREATE_ID, C.DEPTH, C.SORT_ORD,
                U.USER_NM AS CREATE_NM, DATE_FORMAT(C.CREATE_DT, '%Y-%m-%d %H:%i') AS CREATE_DT
@@ -108,7 +108,7 @@
             AND I.USE_YN = 'Y'
     </select>
 
-    <select id="selectIdeaFileList" parameterType="string" resultType="ideaFileVO">
+    <select id="selectIdeaFileList" parameterType="string" resultType="kr.teamagent.idea.service.IdeaVO$IdeaFileVO">
         /* 아이디어 첨부파일 목록 idea.selectIdeaFileList */
         SELECT
             IDEA_FILE_ID
@@ -122,7 +122,7 @@
         ORDER BY CREATE_DT ASC, IDEA_FILE_ID ASC
     </select>
 
-    <select id="selectIdeaFile" parameterType="string" resultType="ideaFileVO">
+    <select id="selectIdeaFile" parameterType="string" resultType="kr.teamagent.idea.service.IdeaVO$IdeaFileVO">
         /* 아이디어 첨부파일 단건 (삭제된 글의 파일은 제외) idea.selectIdeaFile */
         SELECT
             F.IDEA_FILE_ID
@@ -136,7 +136,7 @@
         WHERE F.IDEA_FILE_ID = #{ideaFileId}
     </select>
 
-    <select id="selectIdeaCodeList" parameterType="string" resultType="ideaCodeVO">
+    <select id="selectIdeaCodeList" parameterType="string" resultType="kr.teamagent.idea.service.IdeaVO$IdeaCodeVO">
         /* 아이디어 공통코드 목록 (ID000001 진행상태 / ID000002 구분) idea.selectIdeaCodeList */
         SELECT
             CODE_ID
@@ -199,7 +199,7 @@
             AND USE_YN = 'Y'
     </update>
 
-    <insert id="insertIdeaFile" parameterType="ideaFileVO">
+    <insert id="insertIdeaFile" parameterType="kr.teamagent.idea.service.IdeaVO$IdeaFileVO">
         /* 아이디어 첨부파일 등록 idea.insertIdeaFile */
         INSERT INTO TB_IDEA_FILE (
             IDEA_FILE_ID

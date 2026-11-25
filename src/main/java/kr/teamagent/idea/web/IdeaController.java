@@ -17,7 +17,7 @@ import org.springframework.web.servlet.ModelAndView;
 
 import kr.teamagent.common.web.BaseController;
 import kr.teamagent.common.permission.RequirePermission;
-import kr.teamagent.idea.service.IdeaCommentVO;
+import kr.teamagent.idea.service.IdeaVO.IdeaCommentVO;
 import kr.teamagent.idea.service.IdeaVO;
 import kr.teamagent.idea.service.impl.IdeaServiceImpl;
 
