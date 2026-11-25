@@ -1,6 +1,7 @@
 package kr.teamagent.menumanage.service.impl;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,18 @@ public class MenuManageServiceImpl extends EgovAbstractServiceImpl {
     @Autowired
     private MenuPermissionServiceImpl menuPermissionService;
 
+    public List<RoleManageVO.RoleMenuVO> selectMenuRolePermissions(String menuId) throws Exception {
+        requireRoleAssignmentPermission();
+        return menuManageDAO.selectMenuRolePermissions(menuId);
+    }
+
+    private void requireRoleAssignmentPermission() throws Exception {
+        if (!menuPermissionService.canFunc("/menu-manage") || !menuPermissionService.canRead("/role-manage")
+                || !menuPermissionService.canFunc("/role-manage")) {
+            throw new IllegalArgumentException("메뉴 편집과 권한그룹 편집 권한이 필요합니다.");
+        }
+    }
+
     /**
      * 메뉴 등록/수정
      * @param saveVO
@@ -40,17 +53,19 @@ public class MenuManageServiceImpl extends EgovAbstractServiceImpl {
      */
     public int saveMenu(MenuManageVO.SaveMenuVO saveVO) throws Exception {
         boolean isNew = saveVO.getMenuId() == null || saveVO.getMenuId().trim().isEmpty();
-        boolean assignRoles = saveVO.getRolePermissions() != null && !saveVO.getRolePermissions().isEmpty();
+        boolean assignRoles = saveVO.getRolePermissions() != null
+                && (!isNew || !saveVO.getRolePermissions().isEmpty());
         if (assignRoles) {
-            if (!isNew || !"Y".equals(saveVO.getIsLeaf()) || !"Y".equals(saveVO.getUseYn())) {
-                throw new IllegalArgumentException("사용 중인 신규 최하위 메뉴에 권한을 지정할 수 있습니다.");
+            if (!"Y".equals(saveVO.getIsLeaf()) || !"Y".equals(saveVO.getUseYn())) {
+                throw new IllegalArgumentException("사용 중인 최하위 메뉴에만 권한을 지정할 수 있습니다.");
             }
-            if (!menuPermissionService.canFunc("/menu-manage") || !menuPermissionService.canFunc("/role-manage")) {
-                throw new IllegalArgumentException("메뉴 관리와 권한 관리의 편집 권한이 필요합니다.");
-            }
+            requireRoleAssignmentPermission();
             return transactionTemplate.execute(status -> {
                 try {
-                    int result = saveMenuData(saveVO, true);
+                    int result = saveMenuData(saveVO, isNew);
+                    if (!isNew) {
+                        menuManageDAO.deleteActiveMenuRolePermissions(saveVO.getMenuId());
+                    }
                     saveRolePermissions(saveVO);
                     return result;
                 } catch (RuntimeException e) {
