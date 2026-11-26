@@ -8,6 +8,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -97,7 +99,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         // 스토리지 경로는 화면에 내려주지 않음 (미리보기는 filePreview.do로)
         fileList.forEach((file) -> file.setFilePath(null));
         detail.setFileList(fileList);
-        sanitizeStoredContent(detail);
         return detail;
     }
 
@@ -106,7 +107,7 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         for (IdeaCommentVO comment : comments) {
             String content = comment.getContent();
             if (content.startsWith(COMMENT_HTML_PREFIX)) {
-                comment.setContent(IdeaRichTextSanitizer.cleanComment(content.substring(COMMENT_HTML_PREFIX.length())));
+                comment.setContent(content.substring(COMMENT_HTML_PREFIX.length()));
             } else {
                 comment.setContent(plainCommentHtml(content));
             }
@@ -117,10 +118,8 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
     public void saveComment(IdeaCommentVO comment) {
         String content = CommonUtil.nullToBlank(comment.getContent()).trim();
         // Older clients submit plain text. Store it as escaped HTML without reinterpreting tags.
-        String html = comment.isRichText()
-                ? IdeaRichTextSanitizer.cleanComment(content)
-                : plainCommentHtml(content);
-        if (!IdeaRichTextSanitizer.hasCommentContent(html)) {
+        String html = comment.isRichText() ? content : plainCommentHtml(content);
+        if (!hasRichTextContent(html)) {
             throw new IllegalArgumentException("댓글 내용을 입력해 주세요.");
         }
         validateTextLength(html, "댓글");
@@ -158,6 +157,12 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
 
     private String plainCommentHtml(String content) {
         return "<p>" + HtmlUtils.htmlEscape(content).replaceAll("\\r\\n?|\\n", "<br>") + "</p>";
+    }
+
+    /** 에디터 빈 값(&lt;p&gt;&lt;/p&gt; 등) 검사 — 텍스트·이미지·표 셀 중 하나라도 있으면 내용 있음 */
+    public static boolean hasRichTextContent(String html) {
+        Document document = Jsoup.parseBodyFragment(html);
+        return !document.text().isBlank() || !document.select("img[src], table tr > th, table tr > td").isEmpty();
     }
 
     public void deleteComment(IdeaCommentVO comment) {
@@ -200,7 +205,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
 
     public String saveIdea(IdeaVO ideaVO, List<MultipartFile> files) throws Exception {
         String userId = SessionUtil.getUserId();
-        ideaVO.setContent(IdeaRichTextSanitizer.clean(ideaVO.getContent()));
         validateIdeaForm(ideaVO);
         validateFiles(files);
         if (CommonUtil.isNotEmpty(ideaVO.getIdeaId())) {
@@ -320,10 +324,6 @@ public class IdeaServiceImpl extends EgovAbstractServiceImpl {
         }
         validateTextLength(ideaVO.getContent(), "아이디어 내용");
         ideaVO.setTitle(ideaVO.getTitle().trim());
-    }
-
-    private void sanitizeStoredContent(IdeaVO idea) {
-        idea.setContent(IdeaRichTextSanitizer.cleanStored(idea.getContent()));
     }
 
     private void validateTextLength(String html, String fieldName) {
