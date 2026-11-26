@@ -111,7 +111,7 @@ public class RoleManageController extends BaseController {
     public Map<String, Object> selectOrgUserList(@RequestBody RoleManageVO.RoleUserVO searchVO) {
         try {
             Map<String, Object> resultMap = okResult();
-            resultMap.put("list", roleManageService.selectOrgUserList(searchVO.getOrgId()));
+            resultMap.put("list", roleManageService.selectOrgUserList(searchVO.getOrgId(), searchVO.getNameKeyword()));
             return resultMap;
         } catch (Exception e) {
             log.error("[ROLE] selectOrgUserList 실패: {}", e.getMessage(), e);

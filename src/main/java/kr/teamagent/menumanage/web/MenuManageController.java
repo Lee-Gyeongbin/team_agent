@@ -1,11 +1,14 @@
 package kr.teamagent.menumanage.web;
 
+import java.util.HashMap;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.ModelAndView;
 
 import kr.teamagent.common.web.BaseController;
@@ -19,6 +22,18 @@ public class MenuManageController extends BaseController {
     @Autowired
     private MenuManageServiceImpl menuManageService;
 
+    @RequestMapping(value = "/rolePermissions.do", method = RequestMethod.GET)
+    @ResponseBody
+    public ModelAndView selectMenuRolePermissions(@RequestParam("menuId") String menuId) throws Exception {
+        try {
+            HashMap<String, Object> result = new HashMap<>();
+            result.put("list", menuManageService.selectMenuRolePermissions(menuId));
+            return makeSuccessJsonData(result);
+        } catch (IllegalArgumentException e) {
+            return makeFailJsonData(e.getMessage());
+        }
+    }
+
     /**
      * 메뉴 등록/수정
      * @param saveVO
@@ -31,7 +46,11 @@ public class MenuManageController extends BaseController {
         if (saveVO == null) {
             return makeFailJsonData("요청 본문이 없습니다.");
         }
-        menuManageService.saveMenu(saveVO);
+        try {
+            menuManageService.saveMenu(saveVO);
+        } catch (IllegalArgumentException e) {
+            return makeFailJsonData(e.getMessage());
+        }
         return makeSuccessJsonData();
     }
 

@@ -127,9 +127,11 @@ public class RoleManageServiceImpl extends EgovAbstractServiceImpl {
      * @return 사용자 목록
      * @throws Exception
      */
-    public List<RoleManageVO.RoleUserVO> selectOrgUserList(String orgId) throws Exception {
+    public List<RoleManageVO.RoleUserVO> selectOrgUserList(String orgId, String nameKeyword) throws Exception {
         RoleManageVO.RoleUserVO searchVO = new RoleManageVO.RoleUserVO();
-        searchVO.setOrgId(orgId);
+        String keyword = CommonUtil.nullToBlank(nameKeyword).trim();
+        searchVO.setNameKeyword(keyword);
+        searchVO.setOrgId(keyword.isEmpty() ? orgId : null);
         return roleManageDAO.selectOrgUserList(searchVO);
     }
 

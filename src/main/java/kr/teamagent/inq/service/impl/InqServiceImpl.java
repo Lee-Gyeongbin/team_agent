@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -14,6 +15,10 @@ import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +33,7 @@ import kr.teamagent.common.util.ExcelUtil;
 import kr.teamagent.common.util.KeyGenerate;
 import kr.teamagent.common.util.SessionUtil;
 import kr.teamagent.common.util.service.FileVO;
+import kr.teamagent.idea.service.impl.IdeaServiceImpl;
 import kr.teamagent.inq.service.InqVO;
 
 @Service
@@ -48,7 +54,10 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
     private static final int PAGE_SIZE = 15;
     /** 답변·댓글 최대 단계 (1 = 관리자 답변, 2 = 답글, 3 = 답글의 답글) */
     private static final int ANSR_MAX_DEPTH = 3;
+    private static final String ANSR_HTML_PREFIX = "<!-- inq-answer:html -->";
     private static final String MASKED_TITLE = "비밀글입니다.";
+    /** 엑셀 변환 시 HTML 여부 판단 — 태그가 하나라도 있으면 HTML로 본다 */
+    private static final Pattern HTML_TAG = Pattern.compile("<(?:[a-zA-Z][\\w-]*|/[a-zA-Z][\\w-]*|!--)[^<>]*>");
 
     /** 문의하기 관리 메뉴 경로 — 알림을 받을 관리자(기능 권한 보유자) 조회 기준 */
     private static final String MENU_PATH_MANAGE = "/inq-manage";
@@ -165,13 +174,134 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
-    /** 엑셀 출력용 — 문단·줄바꿈·목록 경계는 줄바꿈으로 바꾸고 나머지 태그는 지운다 (한 줄이 길면 POI 컬럼 너비 한도를 넘는다) */
+    /**
+     * 엑셀 출력용 — 에디터 HTML을 읽기 쉬운 텍스트로 바꾼다 (한 줄이 길면 POI 컬럼 너비 한도를 넘으므로 블록마다 줄바꿈)
+     * - 엔티티(&amp;lt; &amp;amp; 등)는 원래 문자로, 목록은 "• 항목" / "1. 항목", 표는 행마다 "칸 | 칸", 링크는 "글자 (URL)"
+     * - 태그가 없는 예전 평문은 그대로 둔다 (평문에 글자로 쓴 엔티티까지 바꾸지 않도록)
+     */
     private String stripHtml(String html) {
-        return CommonUtil.nullToBlank(html)
-                .replaceAll("(?i)</(p|h[1-6]|li|tr|blockquote)>|<br\\s*/?>", "\n")
-                .replaceAll("<[^>]+>", "")
+        String value = CommonUtil.nullToBlank(html);
+        if (!HTML_TAG.matcher(value).find()) {
+            return value.trim();
+        }
+        StringBuilder sb = new StringBuilder();
+        appendExcelText(Jsoup.parseBodyFragment(value).body(), sb, "");
+        return sb.toString()
+                .replaceAll("[ \\t]+\\n", "\n")
                 .replaceAll("\\n{3,}", "\n\n")
                 .trim();
+    }
+
+    private void appendExcelText(Node parent, StringBuilder sb, String indent) {
+        for (Node node : parent.childNodes()) {
+            if (node instanceof TextNode) {
+                TextNode text = (TextNode) node;
+                // 블록 사이의 공백뿐인 텍스트가 줄 앞에 붙지 않도록
+                if (!text.isBlank() || !endsWithLineBreak(sb)) {
+                    sb.append(text.text().replace(' ', ' '));
+                }
+                continue;
+            }
+            if (!(node instanceof Element)) {
+                continue;
+            }
+            Element el = (Element) node;
+            switch (el.normalName()) {
+                case "br":
+                    sb.append('\n');
+                    break;
+                case "ul":
+                case "ol":
+                    appendExcelList(el, sb, indent);
+                    break;
+                case "table":
+                    appendExcelTable(el, sb);
+                    break;
+                case "pre":
+                    breakLine(sb);
+                    sb.append(el.wholeText());
+                    breakLine(sb);
+                    break;
+                case "a":
+                    appendExcelText(el, sb, indent);
+                    String href = el.attr("href");
+                    if (!href.isEmpty() && !href.equals(el.text())) {
+                        sb.append(" (").append(href).append(')');
+                    }
+                    break;
+                case "img":
+                    sb.append("[이미지]");
+                    break;
+                case "hr":
+                    breakLine(sb);
+                    sb.append("----");
+                    breakLine(sb);
+                    break;
+                default:
+                    boolean block = el.isBlock();
+                    if (block) {
+                        breakLine(sb);
+                    }
+                    appendExcelText(el, sb, indent);
+                    if (block) {
+                        breakLine(sb);
+                    }
+            }
+        }
+    }
+
+    /** 목록 — 항목마다 한 줄, 하위 목록은 두 칸 들여쓰기 */
+    private void appendExcelList(Element list, StringBuilder sb, String indent) {
+        boolean ordered = "ol".equals(list.normalName());
+        int no = 1;
+        if (ordered && list.attr("start").matches("\\d{1,6}")) {
+            no = Integer.parseInt(list.attr("start"));
+        }
+        for (Element li : list.children()) {
+            if (!"li".equals(li.normalName())) {
+                continue;
+            }
+            breakLine(sb);
+            sb.append(indent).append(ordered ? (no++) + ". " : "• ");
+            StringBuilder item = new StringBuilder();
+            appendExcelText(li, item, indent + "  ");
+            sb.append(item.toString().trim());
+        }
+        breakLine(sb);
+    }
+
+    /** 표 — 행마다 한 줄, 칸은 " | "로 구분 (칸 안의 줄바꿈은 공백으로) */
+    private void appendExcelTable(Element table, StringBuilder sb) {
+        breakLine(sb);
+        for (Element tr : table.select("tr")) {
+            List<String> cells = new ArrayList<>();
+            for (Element cell : tr.children()) {
+                if (!"td".equals(cell.normalName()) && !"th".equals(cell.normalName())) {
+                    continue;
+                }
+                StringBuilder text = new StringBuilder();
+                appendExcelText(cell, text, "");
+                cells.add(text.toString().trim().replaceAll("\\s*\\n\\s*", " "));
+            }
+            sb.append(String.join(" | ", cells)).append('\n');
+        }
+    }
+
+    private static boolean endsWithLineBreak(StringBuilder sb) {
+        return sb.length() == 0 || sb.charAt(sb.length() - 1) == '\n';
+    }
+
+    private static void breakLine(StringBuilder sb) {
+        if (!endsWithLineBreak(sb)) {
+            sb.append('\n');
+        }
+    }
+
+    private String answerExcelText(String content) {
+        if (content != null && content.startsWith(ANSR_HTML_PREFIX)) {
+            return stripHtml(content.substring(ANSR_HTML_PREFIX.length()));
+        }
+        return content;
     }
 
     /** 문의 한 건을 엑셀 한 행으로 만든다 — 관리자 답변(1단계)과 댓글(2단계 이상)을 나눠 담는다 */
@@ -183,12 +313,12 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
                 if (comments.length() > 0) {
                     comments.append('\n');
                 }
-                comments.append('[').append(CommonUtil.nullToBlank(a.getAnsrUserNm())).append(' ').append(a.getCreateDt()).append("] ").append(a.getContent());
+                comments.append('[').append(CommonUtil.nullToBlank(a.getAnsrUserNm())).append(' ').append(a.getCreateDt()).append("] ").append(answerExcelText(a.getContent()));
             }
         }
         String[] values = {
                 vo.getInqId(), vo.getCatNm(), vo.getAgentNm(), vo.getTitle(), stripHtml(vo.getContent()), vo.getCrtrNm(), vo.getCreateDt(), vo.getStatusNm(),
-                answer == null ? null : answer.getContent(), answer == null ? null : answer.getAnsrUserNm(), answer == null ? null : answer.getCreateDt(),
+                answer == null ? null : answerExcelText(answer.getContent()), answer == null ? null : answer.getAnsrUserNm(), answer == null ? null : answer.getCreateDt(),
                 comments.toString()
         };
         for (int col = 0; col < values.length; col++) {
@@ -273,10 +403,14 @@ public class InqServiceImpl extends EgovAbstractServiceImpl {
         String userId = SessionUtil.getUserId();
         InqVO inq = requireInq(vo.getInqId());
         String content = CommonUtil.nullToBlank(vo.getContent()).trim();
-        if (content.isEmpty()) {
+        boolean richText = content.startsWith(ANSR_HTML_PREFIX);
+        if (richText) {
+            content = content.substring(ANSR_HTML_PREFIX.length());
+        }
+        if (content.isEmpty() || (richText && !IdeaServiceImpl.hasRichTextContent(content))) {
             throw new RuntimeException("내용은 필수입니다.");
         }
-        vo.setContent(content);
+        vo.setContent(richText ? ANSR_HTML_PREFIX + content : content);
 
         if (CommonUtil.isNotEmpty(vo.getAnsrId())) {
             InqVO.AnsrVO row = requireAnsr(vo.getAnsrId(), vo.getInqId());

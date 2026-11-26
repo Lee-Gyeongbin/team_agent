@@ -180,6 +180,7 @@
 
     <select id="selectOrgUserList" parameterType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO" resultType="kr.teamagent.rolemanage.service.RoleManageVO$RoleUserVO">
         /* 조직(하위 조직 포함) 사용자 목록 조회 roleManage.selectOrgUserList */
+        <if test="nameKeyword == null or nameKeyword == ''">
         WITH RECURSIVE ORG_TREE AS (
             SELECT
                 ORG_ID
@@ -194,6 +195,7 @@
                     ON C.PARENT_ORG_ID = P.ORG_ID
             WHERE C.USE_YN = 'Y'
         )
+        </if>
         SELECT
             U.USER_ID
             , U.USER_NM
@@ -201,11 +203,19 @@
             , U.ORG_ID
             , O.ORG_NM
         FROM TB_USER U
+            <if test="nameKeyword == null or nameKeyword == ''">
             INNER JOIN ORG_TREE T
                 ON T.ORG_ID = U.ORG_ID
+            </if>
             LEFT JOIN TB_ORG O
                 ON O.ORG_ID = U.ORG_ID
         WHERE U.USE_YN = 'Y'
+        <if test="nameKeyword != null and nameKeyword != ''">
+            AND (
+                LOCATE(LOWER(#{nameKeyword}), LOWER(U.USER_NM)) > 0
+                OR LOCATE(LOWER(#{nameKeyword}), LOWER(U.USER_ID)) > 0
+            )
+        </if>
         ORDER BY U.USER_NM ASC, U.USER_ID ASC
     </select>
 

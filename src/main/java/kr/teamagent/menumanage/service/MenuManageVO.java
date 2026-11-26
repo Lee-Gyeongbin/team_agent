@@ -3,6 +3,7 @@ package kr.teamagent.menumanage.service;
 import java.util.List;
 
 import kr.teamagent.common.CommonVO;
+import kr.teamagent.rolemanage.service.RoleManageVO;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -29,6 +30,8 @@ public class MenuManageVO extends CommonVO {
     @Getter
     @Setter
     public static class SaveMenuVO extends MenuManageVO {
+        private List<RoleManageVO.RoleMenuVO> rolePermissions;
+        private boolean newMenu;
     }
 
     @Getter

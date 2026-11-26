@@ -64,6 +64,7 @@
           , NOW()
           , NOW()
         )
+        <if test="!newMenu">
         ON DUPLICATE KEY UPDATE
             MENU_NAME   = #{menuName}
           , PARN_MENU_ID  = #{parnMenuId, jdbcType=VARCHAR}
@@ -76,7 +77,21 @@
           , USE_YN        = #{useYn}
           , DESCRIPTION   = #{description, jdbcType=VARCHAR}
           , MODIFY_DT     = NOW()
+        </if>
     </insert>
+
+    <select id="selectMenuRolePermissions" parameterType="String" resultType="kr.teamagent.rolemanage.service.RoleManageVO$RoleMenuVO">
+        SELECT RM.ROLE_ID AS roleId, RM.READ_YN AS readYn, RM.FUNC_YN AS funcYn
+        FROM TB_ROLE_MENU RM
+        INNER JOIN TB_ROLE_GRP RG ON RG.ROLE_ID = RM.ROLE_ID AND RG.USE_YN = 'Y'
+        WHERE RM.MENU_ID = #{menuId} AND RM.READ_YN = 'Y'
+    </select>
+
+    <delete id="deleteActiveMenuRolePermissions" parameterType="String">
+        DELETE RM FROM TB_ROLE_MENU RM
+        INNER JOIN TB_ROLE_GRP RG ON RG.ROLE_ID = RM.ROLE_ID AND RG.USE_YN = 'Y'
+        WHERE RM.MENU_ID = #{menuId}
+    </delete>
 
     <update id="updateMenuOrder" parameterType="kr.teamagent.menumanage.service.MenuManageVO$UpdateMenuOrderVO">
         /* 같은 상위 메뉴 하위 형제 간 정렬 순서 저장 menuManage.updateMenuOrder */

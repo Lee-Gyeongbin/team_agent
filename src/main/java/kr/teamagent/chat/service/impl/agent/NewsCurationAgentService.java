@@ -124,7 +124,7 @@ public class NewsCurationAgentService {
                         threadId, agentId, qContentForDb, curatorAiJson,
                         0, 0, svcTy, modelId, refId, userId,
                         "", "", "", "", "", "",
-                        new ArrayList<>(), "", "", "", "");
+                        new ArrayList<>(), "", "", "", "", "");
                 chatbotService.updateChatRoomLastChatDt(threadId);
                 if (CommonUtil.isNotEmpty(savedLogId)
                         && attachmentFileIds != null && !attachmentFileIds.isEmpty()) {

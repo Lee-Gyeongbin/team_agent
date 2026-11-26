@@ -16,12 +16,14 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.ModelAndView;
 
 import kr.teamagent.common.web.BaseController;
+import kr.teamagent.common.permission.RequirePermission;
+import kr.teamagent.idea.service.IdeaVO.IdeaCommentVO;
 import kr.teamagent.idea.service.IdeaVO;
 import kr.teamagent.idea.service.impl.IdeaServiceImpl;
 
 /**
- * 아이디어(/idea) · 아이디어 관리(/idea/manage)
- * 업무 규칙 위반(본인 글 아님, 코멘트 등록됨, 필수값 누락 등)은 IllegalArgumentException → result FAIL + msg
+ * 아이디어(/idea)
+ * 업무 규칙 위반(본인 글 아님, 필수값 누락 등)은 IllegalArgumentException → result FAIL + msg
  */
 @Controller
 @RequestMapping("/idea")
@@ -99,45 +101,43 @@ public class IdeaController extends BaseController<Object> {
         }
     }
 
+    @RequirePermission(menu = "/idea", type = RequirePermission.Type.READ)
+    @RequestMapping(value = "/comment/list.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView comments(@RequestBody IdeaCommentVO comment) throws Exception {
+        HashMap<String, Object> resultMap = new HashMap<>();
+        resultMap.put("data", ideaService.selectComments(comment.getIdeaId()));
+        return makeSuccessJsonData(resultMap);
+    }
+
+    @RequirePermission(menu = "/idea", type = RequirePermission.Type.FUNC)
+    @RequestMapping(value = "/comment/save.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView saveComment(@RequestBody IdeaCommentVO comment) {
+        try {
+            ideaService.saveComment(comment);
+            return makeSuccessJsonData();
+        } catch (IllegalArgumentException e) {
+            return makeFailJsonData(e.getMessage());
+        }
+    }
+
+    @RequirePermission(menu = "/idea", type = RequirePermission.Type.FUNC)
+    @RequestMapping(value = "/comment/delete.do", method = RequestMethod.POST)
+    @ResponseBody
+    public ModelAndView deleteComment(@RequestBody IdeaCommentVO comment) {
+        try {
+            ideaService.deleteComment(comment);
+            return makeSuccessJsonData();
+        } catch (IllegalArgumentException e) {
+            return makeFailJsonData(e.getMessage());
+        }
+    }
+
     /** 첨부파일 미리보기 (화면 안 모달) */
     @RequestMapping(value = "/filePreview.do", method = RequestMethod.POST)
     @ResponseBody
     public Map<String, Object> filePreview(@RequestBody IdeaVO.IdeaFileVO file) throws Exception {
         return ideaService.selectIdeaFilePreview(file.getIdeaFileId());
-    }
-
-    /* ===================== 아이디어 관리 (관리자) ===================== */
-
-    /** 엑셀용 전체 목록 (현재 조회 조건, 페이징 없음) */
-    @RequestMapping(value = "/manage/excelList.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView excelList(@RequestBody IdeaVO searchVO) throws Exception {
-        HashMap<String, Object> resultMap = new HashMap<>();
-        resultMap.put("dataList", ideaService.selectIdeaExcelList(searchVO));
-        return new ModelAndView("jsonView", resultMap);
-    }
-
-    /** 진행상태·관리자 코멘트 저장 */
-    @RequestMapping(value = "/manage/save.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView manageSave(@RequestBody IdeaVO ideaVO) throws Exception {
-        try {
-            ideaService.saveIdeaManage(ideaVO);
-            return makeSuccessJsonData();
-        } catch (IllegalArgumentException e) {
-            return makeFailJsonData(e.getMessage());
-        }
-    }
-
-    /** 삭제 (다른 사람 글 포함) */
-    @RequestMapping(value = "/manage/delete.do", method = RequestMethod.POST)
-    @ResponseBody
-    public ModelAndView manageDelete(@RequestBody IdeaVO ideaVO) throws Exception {
-        try {
-            ideaService.deleteIdeaManage(ideaVO);
-            return makeSuccessJsonData();
-        } catch (IllegalArgumentException e) {
-            return makeFailJsonData(e.getMessage());
-        }
     }
 }
