@@ -604,7 +604,8 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
             MeetingVO searchVO = new MeetingVO();
             searchVO.setMeetingId(meetingId);
             MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
-            if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) return "";
+            String userId = SessionUtil.getUserId();
+            if (userId == null || meeting == null || !userId.equals(meeting.getCreateUserId())) return "";
 
             List<String> names = new ArrayList<>();
             if (!CommonUtil.isEmpty(meeting.getAttendees())) {
@@ -1222,7 +1223,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         Long meetingId = dataVO.getMeetingId();
 
         MeetingVO meeting = meetingId == null ? null : meetingDAO.selectMeeting(dataVO);
-        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+        String userId = SessionUtil.getUserId();
+        if (userId == null) return putSessionExpired(result);
+        if (meeting == null || !userId.equals(meeting.getCreateUserId())) {
             result.put("returnMsg", "권한이 없습니다.");
             return result;
         }
@@ -1808,6 +1811,17 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         }
     }
 
+    /**
+     * 로그인 세션 없음 응답 — 화면(useMeetingRecordGuard.backgroundRequest)이 errorType=sessionExpired 를 로그인 끊김으로 처리
+     * (세션이 없으면 SessionUtil.getUserId() 가 null 이라 소유권 검사에서 NPE 가 나던 문제 방지)
+     */
+    private static Map<String, Object> putSessionExpired(Map<String, Object> result) {
+        result.put("successYn", false);
+        result.put("errorType", "sessionExpired");
+        result.put("returnMsg", "로그인이 끊겼습니다. 다시 로그인해주세요.");
+        return result;
+    }
+
     // ── Heartbeat / 비정상종료 / 복구 ────────────────────────────────────────────
 
     /**
@@ -1819,7 +1833,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         MeetingVO searchVO = new MeetingVO();
         searchVO.setMeetingId(meetingId);
         MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
-        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+        String userId = SessionUtil.getUserId();
+        if (userId == null) return putSessionExpired(result);
+        if (meeting == null || !userId.equals(meeting.getCreateUserId())) {
             result.put("successYn", false);
             result.put("returnMsg", "권한이 없습니다.");
             return result;
@@ -1841,7 +1857,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         MeetingVO searchVO = new MeetingVO();
         searchVO.setMeetingId(meetingId);
         MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
-        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+        String userId = SessionUtil.getUserId();
+        if (userId == null) return putSessionExpired(result);
+        if (meeting == null || !userId.equals(meeting.getCreateUserId())) {
             result.put("successYn", false);
             result.put("returnMsg", "권한이 없습니다.");
             return result;
@@ -1868,7 +1886,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         MeetingVO searchVO = new MeetingVO();
         searchVO.setMeetingId(meetingId);
         MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
-        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+        String userId = SessionUtil.getUserId();
+        if (userId == null) return putSessionExpired(result);
+        if (meeting == null || !userId.equals(meeting.getCreateUserId())) {
             result.put("successYn", false);
             result.put("returnMsg", "권한이 없습니다.");
             return result;
@@ -1894,7 +1914,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         MeetingVO searchVO = new MeetingVO();
         searchVO.setMeetingId(meetingId);
         MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
-        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+        String userId = SessionUtil.getUserId();
+        if (userId == null) return putSessionExpired(result);
+        if (meeting == null || !userId.equals(meeting.getCreateUserId())) {
             result.put("successYn", false);
             result.put("returnMsg", "권한이 없습니다.");
             return result;
@@ -1953,7 +1975,9 @@ public class MeetingServiceImpl extends EgovAbstractServiceImpl {
         MeetingVO searchVO = new MeetingVO();
         searchVO.setMeetingId(meetingId);
         MeetingVO meeting = meetingDAO.selectMeeting(searchVO);
-        if (meeting == null || !SessionUtil.getUserId().equals(meeting.getCreateUserId())) {
+        String userId = SessionUtil.getUserId();
+        if (userId == null) return putSessionExpired(result);
+        if (meeting == null || !userId.equals(meeting.getCreateUserId())) {
             result.put("successYn", false);
             result.put("returnMsg", "권한이 없습니다.");
             return result;
